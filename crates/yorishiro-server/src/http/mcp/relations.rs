@@ -12,7 +12,7 @@ use uuid::Uuid;
 use yorishiro_core::repositories::relations;
 use yorishiro_core::services::auth::ApiKeyScope;
 
-use super::{YorishiroMcpServer, authorized, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateRelationArgs {
@@ -66,10 +66,8 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        match relations::create(authorized.conn(), workspace_id, input).await {
-            Ok(record) => ok_json(record),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record = mcp_try!(relations::create(authorized.conn(), workspace_id, input).await);
+        ok_json(record)
     }
 
     #[tool(description = "Get a single relation by ID (requires read scope)")]
@@ -81,10 +79,8 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match relations::get(authorized.conn(), workspace_id, args.id).await {
-            Ok(record) => ok_json(record),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record = mcp_try!(relations::get(authorized.conn(), workspace_id, args.id).await);
+        ok_json(record)
     }
 
     #[tool(description = "Delete a relation (requires write scope)")]
@@ -96,10 +92,8 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Write);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match relations::delete(authorized.conn(), workspace_id, args.id).await {
-            Ok(()) => ok_json(serde_json::json!({ "deleted": true })),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        mcp_try!(relations::delete(authorized.conn(), workspace_id, args.id).await);
+        ok_json(serde_json::json!({ "deleted": true }))
     }
 
     #[tool(description = "List relations (requires read scope)")]
@@ -120,9 +114,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        match relations::list(authorized.conn(), workspace_id, query).await {
-            Ok(records) => ok_json(records),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let records = mcp_try!(relations::list(authorized.conn(), workspace_id, query).await);
+        ok_json(records)
     }
 }

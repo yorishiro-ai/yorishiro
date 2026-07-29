@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use serde::Deserialize;
 use utoipa::IntoParams;
-use yorishiro_core::YorishiroError;
+use yorishiro_core::ResultExt;
 use yorishiro_core::repositories::search::{self, SearchHit};
 
 use crate::error::ApiError;
@@ -54,7 +54,7 @@ pub async fn search_entities(
         .tenant_db
         .acquire_for_workspace(verified.ctx.tenant_id, workspace_id)
         .await
-        .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?;
+        .internal()?;
     let hits = search::search_by_vector(&mut conn, workspace_id, vector, &params.query_text, query)
         .await?;
     Ok(Json(hits))

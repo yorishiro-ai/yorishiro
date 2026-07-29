@@ -12,7 +12,7 @@ use yorishiro_core::YorishiroError;
 use yorishiro_core::repositories::search;
 use yorishiro_core::services::auth::ApiKeyScope;
 
-use super::{YorishiroMcpServer, err_to_tool_result, ok_json, verified};
+use super::{YorishiroMcpServer, err_to_tool_result, mcp_try, ok_json, verified};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {
@@ -49,13 +49,9 @@ impl YorishiroMcpServer {
         // Embedding generation happens before acquiring a DB connection, for the
         // same reason as the REST adapter: don't hold a pool connection while
         // waiting on the LocalOnnx provider's serialized inference.
-        let vector =
-            match search::embed_query(self.state.embedding_provider.as_ref(), &args.query_text)
-                .await
-            {
-                Ok(vector) => vector,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let vector = mcp_try!(
+            search::embed_query(self.state.embedding_provider.as_ref(), &args.query_text).await
+        );
 
         let workspace_id = ctx.workspace_id;
         let mut conn = match self
@@ -70,11 +66,10 @@ impl YorishiroMcpServer {
             }
         };
 
-        match search::search_by_vector(&mut conn, workspace_id, vector, &args.query_text, query)
-            .await
-        {
-            Ok(hits) => ok_json(hits),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let hits = mcp_try!(
+            search::search_by_vector(&mut conn, workspace_id, vector, &args.query_text, query)
+                .await
+        );
+        ok_json(hits)
     }
 }
