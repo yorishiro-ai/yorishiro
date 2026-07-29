@@ -130,9 +130,9 @@ pub async fn get_active_schema(
 
     match row {
         Some(row) => row.into_record(),
-        None => Err(YorishiroError::NotFound {
-            message: format!("no active schema named '{name}'"),
-        }),
+        None => Err(YorishiroError::not_found(format!(
+            "no active schema named '{name}'"
+        ))),
     }
 }
 
@@ -156,9 +156,9 @@ pub async fn get_by_id(
 
     match row {
         Some(row) => row.into_record(),
-        None => Err(YorishiroError::NotFound {
-            message: format!("schema '{schema_id}' was not found"),
-        }),
+        None => Err(YorishiroError::not_found(format!(
+            "schema '{schema_id}' was not found"
+        ))),
     }
 }
 

@@ -138,8 +138,8 @@ pub async fn get_workspace(
         .fetch_optional(pool)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("workspace '{workspace_id}' was not found"),
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
         })
 }
 
@@ -159,9 +159,9 @@ pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), Y
         .internal()?;
 
     if result.rows_affected() == 0 {
-        Err(YorishiroError::NotFound {
-            message: format!("workspace '{workspace_id}' was not found"),
-        })
+        Err(YorishiroError::not_found(format!(
+            "workspace '{workspace_id}' was not found"
+        )))
     } else {
         Ok(())
     }

@@ -102,9 +102,9 @@ pub async fn setup(
     Json(body): Json<SetupRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     if !wizard_enabled() {
-        return Err(YorishiroError::NotFound {
-            message: "the setup wizard is not enabled on this deployment".into(),
-        }
+        return Err(YorishiroError::not_found(
+            "the setup wizard is not enabled on this deployment",
+        )
         .into());
     }
     if tenant_count(&state.identity_pool).await? > 0 {

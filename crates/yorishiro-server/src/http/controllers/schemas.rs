@@ -163,8 +163,10 @@ pub async fn get_entity_type_json_schema(
         .definition
         .entity_types
         .get(&entity_type)
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("entity_type '{entity_type}' not found in schema '{name}'"),
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!(
+                "entity_type '{entity_type}' not found in schema '{name}'"
+            ))
         })?;
 
     Ok(Json(metaschema::entity_type_to_json_schema(

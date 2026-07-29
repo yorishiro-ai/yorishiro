@@ -101,15 +101,12 @@ fn resolve_entity_type<'a>(
     definition: &'a metaschema::MetaSchemaDefinition,
     entity_type: &str,
 ) -> Result<&'a metaschema::EntityTypeDef, YorishiroError> {
-    definition
-        .entity_types
-        .get(entity_type)
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!(
-                "entity_type '{entity_type}' is not defined in schema '{}'",
-                definition.name
-            ),
-        })
+    definition.entity_types.get(entity_type).ok_or_else(|| {
+        YorishiroError::not_found(format!(
+            "entity_type '{entity_type}' is not defined in schema '{}'",
+            definition.name
+        ))
+    })
 }
 
 /// Checks the workspace's `max_entities` cap (billing/quota enforcement) before an insert.
@@ -223,9 +220,7 @@ pub async fn get(
         .fetch_optional(&mut *conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("entity '{id}' was not found"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }
 
 /// Fully replaces an existing entity's `data`. Validation is done against the schema
@@ -260,9 +255,7 @@ pub async fn update(
         .fetch_optional(&mut *conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("entity '{id}' was not found"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }
 
 pub async fn delete(
@@ -282,9 +275,9 @@ pub async fn delete(
         .internal()?;
 
     if result.rows_affected() == 0 {
-        Err(YorishiroError::NotFound {
-            message: format!("entity '{id}' was not found"),
-        })
+        Err(YorishiroError::not_found(format!(
+            "entity '{id}' was not found"
+        )))
     } else {
         Ok(())
     }

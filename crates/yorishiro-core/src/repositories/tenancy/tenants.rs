@@ -126,9 +126,7 @@ pub async fn get_tenant(pool: &PgPool, tenant_id: Uuid) -> Result<TenantRecord, 
         .fetch_optional(pool)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("tenant '{tenant_id}' was not found"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))
 }
 
 pub async fn list_tenants(pool: &PgPool) -> Result<Vec<TenantRecord>, YorishiroError> {
@@ -168,9 +166,7 @@ pub async fn set_tenant_plan(
         .fetch_optional(pool)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("tenant '{tenant_id}' was not found"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))
 }
 
 /// Records the Stripe customer id created for a tenant at checkout time, so later webhook
@@ -192,9 +188,7 @@ pub async fn link_stripe_customer(
         .fetch_optional(pool)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("tenant '{tenant_id}' was not found"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))
 }
 
 pub async fn get_tenant_by_stripe_customer(
