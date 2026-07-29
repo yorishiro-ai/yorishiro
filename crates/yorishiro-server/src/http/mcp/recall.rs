@@ -11,7 +11,7 @@ use uuid::Uuid;
 use yorishiro_core::repositories::recall::{self, DEFAULT_RECALL_LIMIT};
 use yorishiro_core::services::auth::ApiKeyScope;
 
-use super::{YorishiroMcpServer, authorized, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RecallContextArgs {
@@ -38,11 +38,10 @@ impl YorishiroMcpServer {
         let workspace_id = authorized.ctx.workspace_id;
         let limit = args.limit.unwrap_or(DEFAULT_RECALL_LIMIT);
         let full = args.full.unwrap_or(false);
-        match recall::recall_context(authorized.conn(), workspace_id, args.entity_id, limit, full)
-            .await
-        {
-            Ok(context) => ok_json(context),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let context = mcp_try!(
+            recall::recall_context(authorized.conn(), workspace_id, args.entity_id, limit, full)
+                .await
+        );
+        ok_json(context)
     }
 }

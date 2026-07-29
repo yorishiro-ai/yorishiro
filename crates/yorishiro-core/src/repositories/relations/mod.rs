@@ -23,6 +23,18 @@ enum Relations {
     CreatedAt,
 }
 
+fn relation_columns() -> [Relations; 7] {
+    [
+        Relations::Id,
+        Relations::WorkspaceId,
+        Relations::SourceId,
+        Relations::TargetId,
+        Relations::RelationType,
+        Relations::Properties,
+        Relations::CreatedAt,
+    ]
+}
+
 /// Validates that relation_type doesn't conflict with the source/target entity_types.
 /// The metaschema definition is resolved against the schema the source entity was actually
 /// created with (the row `entities.schema_id` points to) — as with `entities::update`, so
@@ -94,15 +106,7 @@ pub async fn create(
             input.relation_type.clone().into(),
             properties.into(),
         ])
-        .returning(Query::returning().columns([
-            Relations::Id,
-            Relations::WorkspaceId,
-            Relations::SourceId,
-            Relations::TargetId,
-            Relations::RelationType,
-            Relations::Properties,
-            Relations::CreatedAt,
-        ]))
+        .returning(Query::returning().columns(relation_columns()))
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
@@ -134,15 +138,7 @@ pub async fn get(
     id: Uuid,
 ) -> Result<RelationRecord, YorishiroError> {
     let (sql, values) = Query::select()
-        .columns([
-            Relations::Id,
-            Relations::WorkspaceId,
-            Relations::SourceId,
-            Relations::TargetId,
-            Relations::RelationType,
-            Relations::Properties,
-            Relations::CreatedAt,
-        ])
+        .columns(relation_columns())
         .from((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
@@ -192,15 +188,7 @@ pub async fn list(
 
     let mut builder = Query::select();
     builder
-        .columns([
-            Relations::Id,
-            Relations::WorkspaceId,
-            Relations::SourceId,
-            Relations::TargetId,
-            Relations::RelationType,
-            Relations::Properties,
-            Relations::CreatedAt,
-        ])
+        .columns(relation_columns())
         .from((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id));
     if let Some(source_id) = query.source_id {
@@ -230,15 +218,7 @@ pub async fn export_all(
     workspace_id: Uuid,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
     let (sql, values) = Query::select()
-        .columns([
-            Relations::Id,
-            Relations::WorkspaceId,
-            Relations::SourceId,
-            Relations::TargetId,
-            Relations::RelationType,
-            Relations::Properties,
-            Relations::CreatedAt,
-        ])
+        .columns(relation_columns())
         .from((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .order_by(Relations::CreatedAt, Order::Asc)

@@ -12,7 +12,7 @@ use uuid::Uuid;
 use yorishiro_core::repositories::entities;
 use yorishiro_core::services::auth::ApiKeyScope;
 
-use super::{YorishiroMcpServer, authorized, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateEntityArgs {
@@ -70,17 +70,11 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.ctx.workspace_id;
         let created_by = authorized.ctx.user_id;
-        match entities::create(authorized.conn(), workspace_id, input, created_by).await {
-            Ok(record) => {
-                self.state.spawn_embedding_sync(
-                    authorized.ctx.tenant_id,
-                    workspace_id,
-                    record.clone(),
-                );
-                ok_json(record)
-            }
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record =
+            mcp_try!(entities::create(authorized.conn(), workspace_id, input, created_by).await);
+        self.state
+            .spawn_embedding_sync(authorized.ctx.tenant_id, workspace_id, record.clone());
+        ok_json(record)
     }
 
     #[tool(description = "Get a single entity by ID (requires read scope)")]
@@ -92,10 +86,8 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match entities::get(authorized.conn(), workspace_id, args.id).await {
-            Ok(record) => ok_json(record),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record = mcp_try!(entities::get(authorized.conn(), workspace_id, args.id).await);
+        ok_json(record)
     }
 
     #[tool(description = "Replace the data of an existing entity (requires write scope)")]
@@ -108,25 +100,19 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.ctx.workspace_id;
         let updated_by = authorized.ctx.user_id;
-        match entities::update(
-            authorized.conn(),
-            workspace_id,
-            args.id,
-            args.data,
-            updated_by,
-        )
-        .await
-        {
-            Ok(record) => {
-                self.state.spawn_embedding_sync(
-                    authorized.ctx.tenant_id,
-                    workspace_id,
-                    record.clone(),
-                );
-                ok_json(record)
-            }
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record = mcp_try!(
+            entities::update(
+                authorized.conn(),
+                workspace_id,
+                args.id,
+                args.data,
+                updated_by,
+            )
+            .await
+        );
+        self.state
+            .spawn_embedding_sync(authorized.ctx.tenant_id, workspace_id, record.clone());
+        ok_json(record)
     }
 
     #[tool(description = "Delete an entity (requires write scope)")]
@@ -138,10 +124,8 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Write);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match entities::delete(authorized.conn(), workspace_id, args.id).await {
-            Ok(()) => ok_json(serde_json::json!({ "deleted": true })),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        mcp_try!(entities::delete(authorized.conn(), workspace_id, args.id).await);
+        ok_json(serde_json::json!({ "deleted": true }))
     }
 
     #[tool(description = "List entities (requires read scope)")]
@@ -161,9 +145,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        match entities::list(authorized.conn(), workspace_id, query).await {
-            Ok(records) => ok_json(records),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let records = mcp_try!(entities::list(authorized.conn(), workspace_id, query).await);
+        ok_json(records)
     }
 }

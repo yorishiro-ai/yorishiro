@@ -33,6 +33,21 @@ enum Workspaces {
     MaxEntities,
 }
 
+fn entity_columns() -> [Entities; 10] {
+    [
+        Entities::Id,
+        Entities::WorkspaceId,
+        Entities::SchemaId,
+        Entities::SchemaVersion,
+        Entities::EntityType,
+        Entities::Data,
+        Entities::CreatedAt,
+        Entities::UpdatedAt,
+        Entities::CreatedBy,
+        Entities::UpdatedBy,
+    ]
+}
+
 /// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
 fn escape_pointer_segment(segment: &str) -> String {
     segment.replace('~', "~0").replace('/', "~1")
@@ -183,18 +198,7 @@ pub async fn create(
             input.data.into(),
             created_by.into(),
         ])
-        .returning(Query::returning().columns([
-            Entities::Id,
-            Entities::WorkspaceId,
-            Entities::SchemaId,
-            Entities::SchemaVersion,
-            Entities::EntityType,
-            Entities::Data,
-            Entities::CreatedAt,
-            Entities::UpdatedAt,
-            Entities::CreatedBy,
-            Entities::UpdatedBy,
-        ]))
+        .returning(Query::returning().columns(entity_columns()))
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
@@ -209,18 +213,7 @@ pub async fn get(
     id: Uuid,
 ) -> Result<EntityRecord, YorishiroError> {
     let (sql, values) = Query::select()
-        .columns([
-            Entities::Id,
-            Entities::WorkspaceId,
-            Entities::SchemaId,
-            Entities::SchemaVersion,
-            Entities::EntityType,
-            Entities::Data,
-            Entities::CreatedAt,
-            Entities::UpdatedAt,
-            Entities::CreatedBy,
-            Entities::UpdatedBy,
-        ])
+        .columns(entity_columns())
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
@@ -260,18 +253,7 @@ pub async fn update(
         .value(Entities::UpdatedBy, updated_by)
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
-        .returning(Query::returning().columns([
-            Entities::Id,
-            Entities::WorkspaceId,
-            Entities::SchemaId,
-            Entities::SchemaVersion,
-            Entities::EntityType,
-            Entities::Data,
-            Entities::CreatedAt,
-            Entities::UpdatedAt,
-            Entities::CreatedBy,
-            Entities::UpdatedBy,
-        ]))
+        .returning(Query::returning().columns(entity_columns()))
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
@@ -318,18 +300,7 @@ pub async fn list(
 
     let mut builder = Query::select();
     builder
-        .columns([
-            Entities::Id,
-            Entities::WorkspaceId,
-            Entities::SchemaId,
-            Entities::SchemaVersion,
-            Entities::EntityType,
-            Entities::Data,
-            Entities::CreatedAt,
-            Entities::UpdatedAt,
-            Entities::CreatedBy,
-            Entities::UpdatedBy,
-        ])
+        .columns(entity_columns())
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id));
     if let Some(entity_type) = query.entity_type {
@@ -356,18 +327,7 @@ pub async fn export_all(
     workspace_id: Uuid,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
     let (sql, values) = Query::select()
-        .columns([
-            Entities::Id,
-            Entities::WorkspaceId,
-            Entities::SchemaId,
-            Entities::SchemaVersion,
-            Entities::EntityType,
-            Entities::Data,
-            Entities::CreatedAt,
-            Entities::UpdatedAt,
-            Entities::CreatedBy,
-            Entities::UpdatedBy,
-        ])
+        .columns(entity_columns())
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .order_by(Entities::CreatedAt, Order::Asc)

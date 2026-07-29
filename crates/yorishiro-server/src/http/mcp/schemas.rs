@@ -15,7 +15,7 @@ use yorishiro_core::repositories::schemas;
 use yorishiro_core::services::auth::ApiKeyScope;
 use yorishiro_core::templates;
 
-use super::{AuthzOutcome, YorishiroMcpServer, authorize, authorized, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, authorized, err_to_tool_result, mcp_try, ok_json};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetActiveSchemaArgs {
@@ -61,10 +61,8 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match schemas::list(authorized.conn(), workspace_id).await {
-            Ok(summaries) => ok_json(summaries),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let summaries = mcp_try!(schemas::list(authorized.conn(), workspace_id).await);
+        ok_json(summaries)
     }
 
     #[tool(
@@ -78,10 +76,9 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match schemas::get_active_schema(authorized.conn(), workspace_id, &args.name).await {
-            Ok(record) => ok_json(record),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record =
+            mcp_try!(schemas::get_active_schema(authorized.conn(), workspace_id, &args.name).await);
+        ok_json(record)
     }
 
     #[tool(
@@ -95,10 +92,9 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        match schemas::get_by_id(authorized.conn(), workspace_id, args.schema_id).await {
-            Ok(record) => ok_json(record),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let record =
+            mcp_try!(schemas::get_by_id(authorized.conn(), workspace_id, args.schema_id).await);
+        ok_json(record)
     }
 
     #[tool(
@@ -139,20 +135,16 @@ impl YorishiroMcpServer {
                     }));
                 }
             },
-            (None, Some(template_id)) => match templates::get_template(&template_id) {
-                Ok(definition) => definition,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            },
+            (None, Some(template_id)) => mcp_try!(templates::get_template(&template_id)),
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        match schemas::create_schema(authorized.conn(), workspace_id, definition).await {
-            Ok((record, diff)) => ok_json(serde_json::json!({
-                "schema": record,
-                "diff": diff,
-            })),
-            Err(err) => Ok(err_to_tool_result(err)),
-        }
+        let (record, diff) =
+            mcp_try!(schemas::create_schema(authorized.conn(), workspace_id, definition).await);
+        ok_json(serde_json::json!({
+            "schema": record,
+            "diff": diff,
+        }))
     }
 
     #[tool(
@@ -164,10 +156,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        match authorize(&self.state, &parts, ApiKeyScope::Read).await? {
-            AuthzOutcome::Authorized(_) => {}
-            AuthzOutcome::ScopeDenied(result) => return Ok(result),
-        };
+        let _authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         ok_json(templates::list_templates())
     }
@@ -185,13 +174,9 @@ impl YorishiroMcpServer {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record =
-            match schemas::get_active_schema(authorized.conn(), workspace_id, &args.schema_name)
-                .await
-            {
-                Ok(record) => record,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let record = mcp_try!(
+            schemas::get_active_schema(authorized.conn(), workspace_id, &args.schema_name).await
+        );
 
         match record.definition.entity_types.get(&args.entity_type) {
             Some(entity_type_def) => {

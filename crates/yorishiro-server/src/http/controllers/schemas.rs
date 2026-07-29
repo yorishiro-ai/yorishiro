@@ -1,5 +1,6 @@
 use axum::Json;
 use axum::extract::Path;
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -105,7 +106,7 @@ pub enum CreateSchemaRequest {
 pub async fn create_schema(
     mut authorized: Authorized<SchemaScope>,
     Json(body): Json<CreateSchemaRequest>,
-) -> Result<(axum::http::StatusCode, Json<CreateSchemaResponse>), ApiError> {
+) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => templates::get_template(&template_id)?,
@@ -115,7 +116,7 @@ pub async fn create_schema(
     let (schema, diff) =
         schemas::create_schema(authorized.conn(), workspace_id, definition).await?;
     Ok((
-        axum::http::StatusCode::CREATED,
+        StatusCode::CREATED,
         Json(CreateSchemaResponse { schema, diff }),
     ))
 }

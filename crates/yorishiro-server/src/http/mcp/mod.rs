@@ -184,3 +184,20 @@ macro_rules! verified {
     };
 }
 pub(crate) use verified;
+
+/// Unwraps a repository/service call's `Ok` value, or early-returns the
+/// tool-level error result for its `Err` value. A macro rather than a function
+/// because it early-returns from the enclosing handler (which must return
+/// `Result<CallToolResult, ErrorData>`). Only fits call sites whose `Err` arm
+/// is exactly `Ok(err_to_tool_result(err))`.
+macro_rules! mcp_try {
+    ($expr:expr) => {
+        match $expr {
+            ::core::result::Result::Ok(val) => val,
+            ::core::result::Result::Err(err) => {
+                return ::core::result::Result::Ok($crate::http::mcp::err_to_tool_result(err));
+            }
+        }
+    };
+}
+pub(crate) use mcp_try;
