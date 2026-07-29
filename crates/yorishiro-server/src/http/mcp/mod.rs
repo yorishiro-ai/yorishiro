@@ -139,13 +139,32 @@ pub(super) async fn authorize_scope_only(
 /// `Internal` errors are logged with detail but only a generic message reaches
 /// the client, matching the REST adapter's `ApiError` policy.
 pub(super) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
-    match err {
+    let message = match err {
         YorishiroError::Internal(err) => {
             tracing::error!(error = %err, "internal error in mcp tool handler");
-            CallToolResult::error(vec![ContentBlock::text("internal server error")])
+            "internal server error".to_string()
         }
-        other => CallToolResult::error(vec![ContentBlock::text(other.to_string())]),
-    }
+        YorishiroError::ValidationFailed {
+            message,
+            details,
+            hint,
+        } => {
+            let mut msg = message;
+            if !details.is_empty() {
+                let detail_lines: Vec<String> = details
+                    .iter()
+                    .map(|d| format!("{}: {}", d.field, d.problem))
+                    .collect();
+                msg = format!("{msg}\n  {}", detail_lines.join("\n  "));
+            }
+            if !hint.is_empty() {
+                msg = format!("{msg}\nhint: {hint}");
+            }
+            msg
+        }
+        other => other.to_string(),
+    };
+    CallToolResult::error(vec![ContentBlock::text(message)])
 }
 
 pub(super) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {

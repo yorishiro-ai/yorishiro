@@ -48,6 +48,15 @@ impl RateLimiter {
     fn allow(&self, key: &str) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
+
+        // Lazy GC: evict expired entries every 128 calls to bound memory growth.
+        // Without this, an attacker rotating source IPs would grow the map without
+        // limit (the rate limiter itself becoming a DoS vector).
+        if buckets.len() > 128 {
+            let window = self.window;
+            buckets.retain(|_, (start, _)| now.duration_since(*start) < window);
+        }
+
         let entry = buckets.entry(key.to_string()).or_insert((now, 0));
         if now.duration_since(entry.0) >= self.window {
             *entry = (now, 0);
