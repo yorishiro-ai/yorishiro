@@ -1,7 +1,8 @@
+use axum::extract::DefaultBodyLimit;
 use axum::{Router, routing::get};
 use rmcp::transport::streamable_http_server::StreamableHttpService;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
+use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use utoipa::OpenApi;
@@ -42,6 +43,7 @@ pub fn build_app(state: AppState, web_dir: Option<String>) -> Router {
         .merge(
             SwaggerUi::new("/docs").url("/api-docs/openapi.json", controllers::ApiDoc::openapi()),
         )
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .with_state(state);
 
     apply_observability_layers(router).fallback_service(yorishiro_web::fallback_service(web_dir))
@@ -107,7 +109,13 @@ fn build_cors_layer() -> CorsLayer {
     };
 
     layer
-        .allow_methods(AllowMethods::any())
+        .allow_methods([
+            http::Method::GET,
+            http::Method::POST,
+            http::Method::PUT,
+            http::Method::DELETE,
+            http::Method::OPTIONS,
+        ])
         .allow_headers(AllowHeaders::list([
             "authorization".parse().unwrap(),
             "content-type".parse().unwrap(),

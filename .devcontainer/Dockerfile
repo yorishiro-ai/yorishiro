@@ -16,4 +16,10 @@ RUN cd /tmp && rustup show
 
 RUN cargo install sqlx-cli --no-default-features --features postgres
 
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g $GID dev && useradd -u $UID -g $GID -m dev \
+    && mkdir -p /usr/local/cargo/registry && chown -R dev:dev /usr/local/cargo
+
+USER dev
 WORKDIR /workspace
