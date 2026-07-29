@@ -191,6 +191,93 @@ fn removing_enum_constraint_entirely_is_non_breaking() {
 }
 
 #[test]
+fn removing_nested_object_field_is_breaking() {
+    let old = parse(json!({
+        "name": "n",
+        "entity_types": { "task": { "fields": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": { "type": "string" },
+                    "city": { "type": "string" }
+                }
+            }
+        } } }
+    }));
+    let new = parse(json!({
+        "name": "n",
+        "entity_types": { "task": { "fields": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": { "type": "string" }
+                }
+            }
+        } } }
+    }));
+    let d = diff(&old, &new);
+    assert!(d.is_breaking, "reasons: {:?}", d.reasons);
+}
+
+#[test]
+fn adding_required_nested_object_field_is_breaking() {
+    let old = parse(json!({
+        "name": "n",
+        "entity_types": { "task": { "fields": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": { "type": "string" }
+                }
+            }
+        } } }
+    }));
+    let new = parse(json!({
+        "name": "n",
+        "entity_types": { "task": { "fields": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": { "type": "string" },
+                    "postal_code": { "type": "string", "required": true }
+                }
+            }
+        } } }
+    }));
+    let d = diff(&old, &new);
+    assert!(d.is_breaking, "reasons: {:?}", d.reasons);
+}
+
+#[test]
+fn adding_optional_nested_object_field_is_non_breaking() {
+    let old = parse(json!({
+        "name": "n",
+        "entity_types": { "task": { "fields": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": { "type": "string" }
+                }
+            }
+        } } }
+    }));
+    let new = parse(json!({
+        "name": "n",
+        "entity_types": { "task": { "fields": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "street": { "type": "string" },
+                    "postal_code": { "type": "string" }
+                }
+            }
+        } } }
+    }));
+    let d = diff(&old, &new);
+    assert!(!d.is_breaking, "reasons: {:?}", d.reasons);
+}
+
+#[test]
 fn description_only_change_is_non_breaking() {
     let old = parse(json!({
         "name": "n",
