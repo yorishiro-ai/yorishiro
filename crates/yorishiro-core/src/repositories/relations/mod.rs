@@ -53,11 +53,11 @@ async fn validate_relation_type(
         .definition
         .relation_types
         .get(relation_type)
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!(
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!(
                 "relation_type '{relation_type}' is not defined in schema '{}'",
                 schema.definition.name
-            ),
+            ))
         })?;
 
     if relation_def.source != source.entity_type || relation_def.target != target.entity_type {
@@ -122,12 +122,12 @@ pub async fn create(
             // There's a TOCTOU window between checking source/target existence and the INSERT,
             // during which another transaction could delete the entity. An FK violation is that
             // race surfacing, so it's treated as NotFound just like the upfront check.
-            Some(db_err) if db_err.is_foreign_key_violation() => YorishiroError::NotFound {
-                message: format!(
+            Some(db_err) if db_err.is_foreign_key_violation() => {
+                YorishiroError::not_found(format!(
                     "source '{}' or target '{}' no longer exists",
                     input.source_id, input.target_id
-                ),
-            },
+                ))
+            }
             _ => YorishiroError::Internal(err.into()),
         })
 }
@@ -148,9 +148,7 @@ pub async fn get(
         .fetch_optional(&mut *conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("relation '{id}' was not found"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
 }
 
 pub async fn delete(
@@ -170,9 +168,9 @@ pub async fn delete(
         .internal()?;
 
     if result.rows_affected() == 0 {
-        Err(YorishiroError::NotFound {
-            message: format!("relation '{id}' was not found"),
-        })
+        Err(YorishiroError::not_found(format!(
+            "relation '{id}' was not found"
+        )))
     } else {
         Ok(())
     }

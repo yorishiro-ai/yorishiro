@@ -182,12 +182,10 @@ impl YorishiroMcpServer {
             Some(entity_type_def) => {
                 ok_json(metaschema::entity_type_to_json_schema(entity_type_def))
             }
-            None => Ok(err_to_tool_result(YorishiroError::NotFound {
-                message: format!(
-                    "entity_type '{}' not found in schema '{}'",
-                    args.entity_type, args.schema_name
-                ),
-            })),
+            None => Ok(err_to_tool_result(YorishiroError::not_found(format!(
+                "entity_type '{}' not found in schema '{}'",
+                args.entity_type, args.schema_name
+            )))),
         }
     }
 }

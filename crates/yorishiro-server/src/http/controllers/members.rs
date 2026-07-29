@@ -61,8 +61,11 @@ pub async fn add_member(
 
     let user = tenancy::get_user_by_email(&state.identity_pool, &body.email)
         .await?
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("no user with email '{}' has an account", body.email),
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!(
+                "no user with email '{}' has an account",
+                body.email
+            ))
         })?;
 
     tenancy::add_member(&state.identity_pool, ctx.tenant_id, user.id, body.role).await?;

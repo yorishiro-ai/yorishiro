@@ -26,10 +26,9 @@ async fn get_workspace_in_tenant(
 ) -> Result<WorkspaceRecord, ApiError> {
     let workspace = tenancy::get_workspace(&state.identity_pool, workspace_id).await?;
     if workspace.tenant_id != tenant_id {
-        return Err(YorishiroError::NotFound {
-            message: format!("workspace '{workspace_id}' was not found"),
-        }
-        .into());
+        return Err(
+            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found")).into(),
+        );
     }
     Ok(workspace)
 }

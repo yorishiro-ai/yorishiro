@@ -1,8 +1,6 @@
-use chrono::{DateTime, Utc};
 use sea_query::extension::postgres::{PgBinOper, PgExpr};
 use sea_query::{Alias, BinOper, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -30,34 +28,15 @@ enum Entities {
 
 #[derive(sqlx::FromRow)]
 struct SearchRow {
-    id: Uuid,
-    workspace_id: Uuid,
-    schema_id: Uuid,
-    schema_version: i32,
-    entity_type: String,
-    data: Value,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    created_by: Option<Uuid>,
-    updated_by: Option<Uuid>,
+    #[sqlx(flatten)]
+    entity: EntityRecord,
     distance: Option<f64>,
 }
 
 impl SearchRow {
     fn into_hit(self) -> SearchHit {
         SearchHit {
-            entity: EntityRecord {
-                id: self.id,
-                workspace_id: self.workspace_id,
-                schema_id: self.schema_id,
-                schema_version: self.schema_version,
-                entity_type: self.entity_type,
-                data: self.data,
-                created_at: self.created_at,
-                updated_at: self.updated_at,
-                created_by: self.created_by,
-                updated_by: self.updated_by,
-            },
+            entity: self.entity,
             distance: self.distance,
         }
     }

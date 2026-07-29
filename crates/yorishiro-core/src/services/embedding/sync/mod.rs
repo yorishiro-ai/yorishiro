@@ -119,11 +119,11 @@ pub async fn sync_embedding_for_record(
         .definition
         .entity_types
         .get(&record.entity_type)
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!(
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!(
                 "entity_type '{}' is not defined in schema '{}'",
                 record.entity_type, schema.definition.name
-            ),
+            ))
         })?;
 
     sync_embedding(

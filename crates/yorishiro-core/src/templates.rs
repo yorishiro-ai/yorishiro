@@ -47,9 +47,7 @@ pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
         .iter()
         .find(|template| template.id == id)
         .map(parse)
-        .ok_or_else(|| YorishiroError::NotFound {
-            message: format!("no template named '{id}'"),
-        })
+        .ok_or_else(|| YorishiroError::not_found(format!("no template named '{id}'")))
 }
 
 #[cfg(test)]
