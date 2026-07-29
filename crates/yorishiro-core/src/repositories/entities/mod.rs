@@ -2,7 +2,7 @@ use sea_query::extension::postgres::PgExpr;
 use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use serde_json::Value;
-use sqlx::PgConnection;
+use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, ValidationDetail, YorishiroError};
@@ -166,14 +166,26 @@ pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, Y
 /// that the entity_type exists in that version, validates `data`, and persists the result.
 /// `created_by` is the acting user's ID (from `AuthContext::user_id`), or `None` for an
 /// unattributed service/automation API key.
+///
+/// The quota check and insert are serialized with a workspace-scoped advisory lock: without
+/// it, concurrent creates could each read a count under `max_entities` and both insert,
+/// overshooting the cap (the same TOCTOU that `create_schema` guards against for schemas).
 pub async fn create(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: CreateEntityInput,
     created_by: Option<Uuid>,
 ) -> Result<EntityRecord, YorishiroError> {
-    check_entity_quota(conn, workspace_id).await?;
-    let schema = schemas::get_active_schema(conn, workspace_id, &input.schema_name).await?;
+    let mut tx = conn.begin().await.internal()?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(workspace_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .internal()?;
+
+    check_entity_quota(&mut tx, workspace_id).await?;
+    let schema = schemas::get_active_schema(&mut tx, workspace_id, &input.schema_name).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 
@@ -198,10 +210,14 @@ pub async fn create(
         .returning(Query::returning().columns(entity_columns()))
         .build_sqlx(PostgresQueryBuilder);
 
-    sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
-        .fetch_one(&mut *conn)
+    let row: EntityRecord = sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
+        .fetch_one(&mut *tx)
         .await
-        .internal()
+        .internal()?;
+
+    tx.commit().await.internal()?;
+
+    Ok(row)
 }
 
 pub async fn get(

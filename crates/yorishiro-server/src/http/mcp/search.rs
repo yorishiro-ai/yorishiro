@@ -12,7 +12,7 @@ use yorishiro_core::YorishiroError;
 use yorishiro_core::repositories::search;
 use yorishiro_core::services::auth::ApiKeyScope;
 
-use super::{YorishiroMcpServer, err_to_tool_result, mcp_try, ok_json, verified};
+use super::{YorishiroMcpServer, mcp_try, ok_json, verified};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {
@@ -54,17 +54,13 @@ impl YorishiroMcpServer {
         );
 
         let workspace_id = ctx.workspace_id;
-        let mut conn = match self
-            .state
-            .tenant_db
-            .acquire_for_workspace(ctx.tenant_id, workspace_id)
-            .await
-        {
-            Ok(conn) => conn,
-            Err(err) => {
-                return Ok(err_to_tool_result(YorishiroError::Internal(err.into())));
-            }
-        };
+        let mut conn = mcp_try!(
+            self.state
+                .tenant_db
+                .acquire_for_workspace(ctx.tenant_id, workspace_id)
+                .await
+                .map_err(|err| YorishiroError::Internal(err.into()))
+        );
 
         let hits = mcp_try!(
             search::search_by_vector(&mut conn, workspace_id, vector, &args.query_text, query)

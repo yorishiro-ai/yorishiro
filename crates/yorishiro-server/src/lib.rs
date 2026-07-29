@@ -75,10 +75,16 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let kind = std::env::var("YSR_EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".into());
     match kind.as_str() {
         "openai" => {
-            let base_url = std::env::var("YSR_EMBEDDING_BASE_URL")
-                .expect("YSR_EMBEDDING_BASE_URL must be set");
-            let model =
-                std::env::var("YSR_EMBEDDING_MODEL").expect("YSR_EMBEDDING_MODEL must be set");
+            let base_url = std::env::var("YSR_EMBEDDING_BASE_URL").map_err(|_| {
+                anyhow::anyhow!(
+                    "YSR_EMBEDDING_BASE_URL must be set when YSR_EMBEDDING_PROVIDER=openai"
+                )
+            })?;
+            let model = std::env::var("YSR_EMBEDDING_MODEL").map_err(|_| {
+                anyhow::anyhow!(
+                    "YSR_EMBEDDING_MODEL must be set when YSR_EMBEDDING_PROVIDER=openai"
+                )
+            })?;
             let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
                 base_url: base_url.clone(),
                 api_key: std::env::var("YSR_EMBEDDING_API_KEY").unwrap_or_default(),
