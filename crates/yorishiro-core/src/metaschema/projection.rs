@@ -1,15 +1,21 @@
+use std::collections::BTreeMap;
+
 use serde_json::{Map, Value, json};
 
-use super::types::{EntityTypeDef, FieldTypeName};
+use super::types::{EntityTypeDef, FieldDef, FieldTypeName};
 
 /// Builds a JSON Schema from an EntityTypeDef that's used both for validating
 /// entity `data` and generating the MCP inputSchema.
 /// The metaschema is the sole source for this schema; adapters only consume the result.
 pub fn entity_type_to_json_schema(entity_type: &EntityTypeDef) -> Value {
+    properties_to_json_schema(&entity_type.fields)
+}
+
+fn properties_to_json_schema(fields: &BTreeMap<String, FieldDef>) -> Value {
     let mut properties = Map::new();
     let mut required = Vec::new();
 
-    for (field_name, field) in &entity_type.fields {
+    for (field_name, field) in fields {
         properties.insert(field_name.clone(), field_to_json_schema(field));
         if field.required {
             required.push(Value::String(field_name.clone()));
@@ -28,7 +34,7 @@ pub fn entity_type_to_json_schema(entity_type: &EntityTypeDef) -> Value {
     schema
 }
 
-fn field_to_json_schema(field: &super::types::FieldDef) -> Value {
+fn field_to_json_schema(field: &FieldDef) -> Value {
     let mut schema = Map::new();
 
     let type_str = match field.r#type {
@@ -37,6 +43,7 @@ fn field_to_json_schema(field: &super::types::FieldDef) -> Value {
         FieldTypeName::Integer => "integer",
         FieldTypeName::Boolean => "boolean",
         FieldTypeName::Array => "array",
+        FieldTypeName::Object => "object",
     };
     schema.insert("type".into(), Value::String(type_str.into()));
 
@@ -82,7 +89,25 @@ fn field_to_json_schema(field: &super::types::FieldDef) -> Value {
     if matches!(field.r#type, FieldTypeName::Array)
         && let Some(items) = &field.items
     {
-        schema.insert("items".into(), json!({ "type": items.r#type }));
+        let items_schema = if items.r#type == "object" {
+            let mut items_schema =
+                properties_to_json_schema(items.properties.as_ref().unwrap_or(&BTreeMap::new()));
+            items_schema["type"] = Value::String("object".into());
+            items_schema
+        } else {
+            json!({ "type": items.r#type })
+        };
+        schema.insert("items".into(), items_schema);
+    }
+
+    if matches!(field.r#type, FieldTypeName::Object)
+        && let Some(properties) = &field.properties
+    {
+        let nested = properties_to_json_schema(properties);
+        schema.insert("properties".into(), nested["properties"].clone());
+        if let Some(required) = nested.get("required") {
+            schema.insert("required".into(), required.clone());
+        }
     }
 
     Value::Object(schema)
@@ -136,5 +161,62 @@ mod tests {
         let schema = entity_type_to_json_schema(&def.entity_types["task"]);
         assert_eq!(schema["properties"]["tags"]["type"], "array");
         assert_eq!(schema["properties"]["tags"]["items"]["type"], "string");
+    }
+
+    #[test]
+    fn projects_object_field_with_nested_properties_and_required() {
+        let def: MetaSchemaDefinition = serde_json::from_value(json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "address": {
+                            "type": "object",
+                            "properties": {
+                                "street": { "type": "string", "required": true },
+                                "city": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let schema = entity_type_to_json_schema(&def.entity_types["task"]);
+        let address = &schema["properties"]["address"];
+        assert_eq!(address["type"], "object");
+        assert_eq!(address["properties"]["street"]["type"], "string");
+        assert_eq!(address["properties"]["city"]["type"], "string");
+        assert_eq!(address["required"].as_array().unwrap(), &[json!("street")]);
+    }
+
+    #[test]
+    fn projects_array_field_with_object_items() {
+        let def: MetaSchemaDefinition = serde_json::from_value(json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "contacts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "required": true }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let schema = entity_type_to_json_schema(&def.entity_types["task"]);
+        let items = &schema["properties"]["contacts"]["items"];
+        assert_eq!(items["type"], "object");
+        assert_eq!(items["properties"]["name"]["type"], "string");
+        assert_eq!(items["required"].as_array().unwrap(), &[json!("name")]);
     }
 }

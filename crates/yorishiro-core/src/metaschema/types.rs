@@ -37,11 +37,15 @@ pub enum FieldTypeName {
     Integer,
     Boolean,
     Array,
+    Object,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ArrayItems {
     pub r#type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub properties: Option<BTreeMap<String, FieldDef>>,
 }
 
 /// Field definition using standard JSON Schema keywords. Unknown `x-` attributes are
@@ -83,6 +87,9 @@ pub struct FieldDef {
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub items: Option<ArrayItems>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub properties: Option<BTreeMap<String, FieldDef>>,
     #[serde(
         default,
         rename = "x-embed",
@@ -127,5 +134,26 @@ mod tests {
             roundtripped["x-custom-client-hint"],
             json!({ "anything": 1 })
         );
+    }
+
+    #[test]
+    fn object_field_with_nested_properties_roundtrips() {
+        let field: FieldDef = serde_json::from_value(json!({
+            "type": "object",
+            "properties": {
+                "street": { "type": "string", "required": true },
+                "city": { "type": "string" }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(field.r#type, FieldTypeName::Object);
+        let properties = field.properties.as_ref().unwrap();
+        assert!(properties["street"].required);
+        assert!(!properties["city"].required);
+
+        let roundtripped = serde_json::to_value(&field).unwrap();
+        assert_eq!(roundtripped["properties"]["street"]["type"], "string");
+        assert_eq!(roundtripped["properties"]["city"]["type"], "string");
     }
 }
