@@ -65,6 +65,54 @@ pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> Versionin
                     }
                 }
             }
+
+            // Narrowing a constraint (adding a new one, or making an existing
+            // one stricter) can invalidate data that was valid under the old
+            // schema → breaking.
+            let fp = |attr: &str| format!("field '{type_name}.{field_name}' {attr}");
+
+            if old_field.format.is_none() && new_field.format.is_some() {
+                reasons.push(fp("added a format constraint"));
+            } else if old_field.format != new_field.format
+                && old_field.format.is_some()
+                && new_field.format.is_some()
+            {
+                reasons.push(fp("changed its format constraint"));
+            }
+
+            if new_field.minimum > old_field.minimum {
+                reasons.push(fp("raised its minimum"));
+            }
+            if new_field.maximum < old_field.maximum {
+                reasons.push(fp("lowered its maximum"));
+            }
+
+            if new_field.min_length > old_field.min_length {
+                reasons.push(fp("raised its minLength"));
+            }
+            if new_field.max_length < old_field.max_length {
+                reasons.push(fp("lowered its maxLength"));
+            }
+
+            if old_field.pattern.is_none() && new_field.pattern.is_some() {
+                reasons.push(fp("added a pattern constraint"));
+            } else if old_field.pattern != new_field.pattern
+                && old_field.pattern.is_some()
+                && new_field.pattern.is_some()
+            {
+                reasons.push(fp("changed its pattern constraint"));
+            }
+
+            if new_field.min_items > old_field.min_items {
+                reasons.push(fp("raised its minItems"));
+            }
+            if new_field.max_items < old_field.max_items {
+                reasons.push(fp("lowered its maxItems"));
+            }
+
+            if !old_field.unique_items && new_field.unique_items {
+                reasons.push(fp("added uniqueItems constraint"));
+            }
         }
 
         for (field_name, new_field) in &new_entity_type.fields {

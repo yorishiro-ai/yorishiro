@@ -44,14 +44,16 @@ pub struct ArrayItems {
     pub r#type: String,
 }
 
-/// Field definition, restricted to the MVP types (string/number/integer/boolean/array).
-/// Unknown `x-` attributes are preserved via `extra` (flattened) so that older clients
-/// don't drop fields they don't recognize yet.
+/// Field definition using standard JSON Schema keywords. Unknown `x-` attributes are
+/// preserved via `extra` (flattened) so that older clients don't drop fields they don't
+/// recognize yet.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct FieldDef {
     pub r#type: FieldTypeName,
     #[serde(default)]
     pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default, rename = "enum", skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,6 +62,22 @@ pub struct FieldDef {
     pub minimum: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maximum: Option<f64>,
+    #[serde(default, rename = "minLength", skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<u64>,
+    #[serde(default, rename = "maxLength", skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    #[serde(default, rename = "minItems", skip_serializing_if = "Option::is_none")]
+    pub min_items: Option<u64>,
+    #[serde(default, rename = "maxItems", skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<u64>,
+    #[serde(
+        default,
+        rename = "uniqueItems",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub unique_items: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<Object>)]
     pub default: Option<Value>,

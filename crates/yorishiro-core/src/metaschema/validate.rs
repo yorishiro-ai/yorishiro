@@ -65,11 +65,14 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
                             field.r#type
                         ),
                     });
-                } else if !matches!(format.as_str(), "date" | "date-time" | "uri") {
+                } else if !matches!(
+                    format.as_str(),
+                    "date" | "date-time" | "uri" | "email" | "uuid"
+                ) {
                     details.push(ValidationDetail {
                         field: format!("{field_path}/format"),
                         problem: format!(
-                            "unsupported string format '{format}' (expected date / date-time / uri)"
+                            "unsupported string format '{format}' (expected date / date-time / uri / email / uuid)"
                         ),
                     });
                 }
@@ -92,6 +95,58 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
                 details.push(ValidationDetail {
                     field: field_path.clone(),
                     problem: format!("minimum ({minimum}) must not exceed maximum ({maximum})"),
+                });
+            }
+
+            let string_type = field.r#type == FieldTypeName::String;
+            if !string_type
+                && (field.min_length.is_some()
+                    || field.max_length.is_some()
+                    || field.pattern.is_some())
+            {
+                details.push(ValidationDetail {
+                    field: field_path.clone(),
+                    problem: format!(
+                        "minLength/maxLength/pattern are only valid for string fields, but field type is {:?}",
+                        field.r#type
+                    ),
+                });
+            }
+            if let (Some(min), Some(max)) = (field.min_length, field.max_length)
+                && min > max
+            {
+                details.push(ValidationDetail {
+                    field: field_path.clone(),
+                    problem: format!("minLength ({min}) must not exceed maxLength ({max})"),
+                });
+            }
+            if let Some(pattern) = &field.pattern
+                && regex::Regex::new(pattern).is_err()
+            {
+                details.push(ValidationDetail {
+                    field: format!("{field_path}/pattern"),
+                    problem: format!("invalid regular expression: '{pattern}'"),
+                });
+            }
+
+            let array_type = field.r#type == FieldTypeName::Array;
+            if !array_type
+                && (field.min_items.is_some() || field.max_items.is_some() || field.unique_items)
+            {
+                details.push(ValidationDetail {
+                    field: field_path.clone(),
+                    problem: format!(
+                        "minItems/maxItems/uniqueItems are only valid for array fields, but field type is {:?}",
+                        field.r#type
+                    ),
+                });
+            }
+            if let (Some(min), Some(max)) = (field.min_items, field.max_items)
+                && min > max
+            {
+                details.push(ValidationDetail {
+                    field: field_path.clone(),
+                    problem: format!("minItems ({min}) must not exceed maxItems ({max})"),
                 });
             }
         }
