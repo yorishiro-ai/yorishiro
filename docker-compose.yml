@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: yorishiro
       POSTGRES_DB: yorishiro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -53,6 +53,9 @@ services:
     build:
       context: .
       dockerfile: .devcontainer/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
     volumes:
       - .:/workspace:cached
       # `docker compose run --rm` throws away the container's filesystem after each command,
