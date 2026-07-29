@@ -40,6 +40,9 @@ fn field_to_json_schema(field: &super::types::FieldDef) -> Value {
     };
     schema.insert("type".into(), Value::String(type_str.into()));
 
+    if let Some(description) = &field.description {
+        schema.insert("description".into(), Value::String(description.clone()));
+    }
     if let Some(enum_values) = &field.enum_values {
         schema.insert(
             "enum".into(),
@@ -54,6 +57,24 @@ fn field_to_json_schema(field: &super::types::FieldDef) -> Value {
     }
     if let Some(maximum) = field.maximum {
         schema.insert("maximum".into(), json!(maximum));
+    }
+    if let Some(min_length) = field.min_length {
+        schema.insert("minLength".into(), json!(min_length));
+    }
+    if let Some(max_length) = field.max_length {
+        schema.insert("maxLength".into(), json!(max_length));
+    }
+    if let Some(pattern) = &field.pattern {
+        schema.insert("pattern".into(), Value::String(pattern.clone()));
+    }
+    if let Some(min_items) = field.min_items {
+        schema.insert("minItems".into(), json!(min_items));
+    }
+    if let Some(max_items) = field.max_items {
+        schema.insert("maxItems".into(), json!(max_items));
+    }
+    if field.unique_items {
+        schema.insert("uniqueItems".into(), json!(true));
     }
     if let Some(default) = &field.default {
         schema.insert("default".into(), default.clone());
