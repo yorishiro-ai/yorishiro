@@ -48,7 +48,7 @@ tracing-test = "0.2"
 uuid = { version = "1", features = ["serde"] }
 # Pinned exactly: even a minor bump of this rc can break the API. Upgrade explicitly via
 # `cargo update -p ort` when needed.
-ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
+ort = { version = "=2.0.0-rc.13", features = ["ndarray"] }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
