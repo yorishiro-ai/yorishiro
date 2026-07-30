@@ -3,6 +3,9 @@ name = "yorishiro-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "HTTP server (REST + MCP) for Yorishiro, an MCP-native knowledge store"
+repository.workspace = true
+readme = "README.md"
 
 [[bin]]
 name = "yorishiro-server"
