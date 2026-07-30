@@ -87,6 +87,22 @@ async function checkSetupStatus() {
   }
 }
 
+// `GET /auth/oauth/status` only exists on yorishiro-hosted-server (enterprise edition) -- a
+// plain yorishiro-server (community edition) has no route registered at this path at all, so a
+// 404 here is expected and just means "no SSO button", the same way a network error does. Never
+// throws: every caller treats OAuth as simply unavailable rather than needing its own error path.
+async function checkOAuthStatus() {
+  try {
+    const response = await fetch(`${apiBase()}/auth/oauth/status`);
+    if (!response.ok) {
+      return { enabled: false };
+    }
+    return response.json();
+  } catch {
+    return { enabled: false };
+  }
+}
+
 async function setup({ email, password, displayName }) {
   const response = await fetch(`${apiBase()}/setup`, {
     method: "POST",
@@ -804,11 +820,24 @@ function renderSetupComplete(result) {
 // the server reports that with a 422, which is when `needsWorkspaceId` flips to true. Every
 // community-edition deployment has exactly one workspace by default, so the common case never
 // shows this field at all.
-function renderLogin(errorMessage, needsWorkspaceId = false) {
+//
+// The "Sign in with SSO" button only appears when `GET /auth/oauth/status` reports
+// `enabled: true` -- on the community edition (no such route at all) or an enterprise
+// deployment that hasn't configured OAuth, `checkOAuthStatus` resolves to `enabled: false` and
+// the form looks exactly as it always has.
+async function renderLogin(errorMessage, needsWorkspaceId = false) {
+  const oauthStatus = await checkOAuthStatus();
+
   const view = el(`
     <div>
       <h1>Yorishiro</h1>
       <p class="hint">Sign in with the account created via setup or an invite (see /auth/signup).</p>
+      ${
+        oauthStatus.enabled
+          ? `<button type="button" id="oauth-sso-button">Sign in with SSO</button>
+             <p class="hint">or sign in with email and password:</p>`
+          : ""
+      }
       <form id="login-form">
         <label>Email
           <input type="email" name="email" required autocomplete="username">
@@ -830,6 +859,14 @@ function renderLogin(errorMessage, needsWorkspaceId = false) {
     </div>
   `);
 
+  if (oauthStatus.enabled) {
+    view.querySelector("#oauth-sso-button").addEventListener("click", () => {
+      // A real full-page navigation (not fetch/XHR) -- this has to leave the SPA entirely so
+      // the browser follows the server's redirect chain to the identity provider and back.
+      location.href = `${apiBase()}/auth/oauth/authorize`;
+    });
+  }
+
   view.querySelector("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -842,7 +879,7 @@ function renderLogin(errorMessage, needsWorkspaceId = false) {
       setSession({ apiKey: result.api_key, email: result.email ?? form.get("email") });
       location.hash = "#/dashboard";
     } catch (err) {
-      mount(renderLogin(err.message, needsWorkspaceId || err.status === 422));
+      mount(await renderLogin(err.message, needsWorkspaceId || err.status === 422));
     }
   });
 
@@ -2004,12 +2041,26 @@ async function renderDashboard() {
       return;
     }
     clearSession();
-    mount(renderLogin(`session expired: ${err.message}`));
+    mount(await renderLogin(`session expired: ${err.message}`));
   }
 }
 
 async function router() {
   const hash = location.hash || "#/login";
+
+  // `GET /auth/oauth/callback` (enterprise edition only) redirects here with the freshly issued
+  // API key in the fragment rather than `#/dashboard` or any other named route, since it has no
+  // way to know which named route this SPA uses for "logged in" -- putting the key in a
+  // recognizable fragment shape and having the router special-case it keeps that decision here,
+  // in one place, rather than needing the server to know about client-side routing at all. A
+  // fragment (never sent to any server) is what keeps the key out of access logs and `Referer`
+  // headers -- see the server-side redirect in yorishiro-hosted's `http::controllers::oauth`.
+  const oauthMatch = hash.match(/^#api_key=(.+)$/);
+  if (oauthMatch) {
+    setSession({ apiKey: decodeURIComponent(oauthMatch[1]) });
+    location.hash = "#/dashboard";
+    return;
+  }
 
   const workspaceMatch = hash.match(/^#\/workspaces\/([0-9a-f-]+)$/i);
   if (workspaceMatch) {
@@ -2064,7 +2115,20 @@ async function router() {
     return;
   }
 
-  mount(hash === "#/setup" ? await renderSetup() : renderLogin());
+  if (hash === "#/setup") {
+    mount(await renderSetup());
+    return;
+  }
+
+  // The only failure path `GET /auth/oauth/callback` redirects back to (a rejected/expired
+  // state, a provider error, a token exchange failure -- see yorishiro-hosted's
+  // `http::controllers::oauth::login_failure_redirect`) -- surfaced as the same inline error
+  // message the password form itself uses, rather than a separate error page.
+  const loginError =
+    hash === "#/login?error=oauth_failed"
+      ? "SSO sign-in failed or was cancelled. Please try again."
+      : undefined;
+  mount(await renderLogin(loginError));
 }
 
 window.addEventListener("hashchange", router);
