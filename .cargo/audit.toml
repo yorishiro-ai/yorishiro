@@ -1,0 +1,14 @@
+# Advisories to ignore in cargo-audit. These are transitive dependencies
+# that we cannot update directly.
+
+[advisories]
+# paste (unmaintained) — transitive dep of tokenizers. tokenizers hasn't
+# migrated to pastey yet. No security vulnerability, just maintenance status.
+# paste (unmaintained) — transitive dep of tokenizers
+# rsa (Marvin Attack) — transitive dep of rmcp, no patched version exists
+ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2023-0071"]
+
+[yanked]
+# spin 0.9.8 is yanked but pulled by a transitive dependency. No replacement
+# version is available in our dependency graph.
+enabled = false
