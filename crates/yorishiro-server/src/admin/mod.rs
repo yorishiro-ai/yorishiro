@@ -124,13 +124,16 @@ pub async fn run(command: AdminCommand) -> Result<()> {
     let pool = PgPool::connect(&database_url)
         .await
         .context("failed to connect to database")?;
-    // Apply the same migrations the server runs on startup so this also works against a
-    // fresh database that has never been started (a no-op if already applied).
     sqlx::migrate!("../../migrations")
         .set_ignore_missing(true)
         .run(&pool)
         .await?;
 
+    run_with_pool(&pool, command).await
+}
+
+/// Execute an admin command against a pool whose migrations have already been applied.
+pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
     match command {
         AdminCommand::CreateTenant {
             name,
