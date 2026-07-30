@@ -9,10 +9,20 @@ struct BuiltinTemplate {
     source: &'static str,
 }
 
-const TEMPLATES: &[BuiltinTemplate] = &[BuiltinTemplate {
-    id: "task-management",
-    source: include_str!("../templates/task-management.json"),
-}];
+const TEMPLATES: &[BuiltinTemplate] = &[
+    BuiltinTemplate {
+        id: "general-notes",
+        source: include_str!("../../../templates/general-notes.json"),
+    },
+    BuiltinTemplate {
+        id: "task-management",
+        source: include_str!("../../../templates/task-management.json"),
+    },
+    BuiltinTemplate {
+        id: "worldbuilding",
+        source: include_str!("../../../templates/worldbuilding.json"),
+    },
+];
 
 /// Summary of a built-in schema template, returned by `list_templates` so a caller can
 /// pick a `template_id` without first fetching every template's full definition.
