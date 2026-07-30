@@ -26,6 +26,12 @@ function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+function esc(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 function el(html) {
   const template = document.createElement("template");
   template.innerHTML = html.trim();
@@ -287,8 +293,8 @@ function renderSetupComplete(result) {
       <h1>Setup complete</h1>
       <p class="hint">The tenant, workspace, and owner account have been created.</p>
       <dl>
-        <dt>Email</dt><dd>${result.email}</dd>
-        <dt>Workspace ID</dt><dd><code>${result.workspace_id}</code></dd>
+        <dt>Email</dt><dd>${esc(result.email)}</dd>
+        <dt>Workspace ID</dt><dd><code>${esc(result.workspace_id)}</code></dd>
       </dl>
       <p class="error"><strong>Save this API key now -- it is only ever shown once:</strong></p>
       <pre>${result.api_key}</pre>
@@ -355,7 +361,7 @@ function renderWorkspacesTable(workspaces) {
     .map(
       (ws) => `
         <tr>
-          <td><a href="#/workspaces/${ws.id}">${ws.name}</a></td>
+          <td><a href="#/workspaces/${ws.id}">${esc(ws.name)}</a></td>
           <td>${ws.max_entities ?? "unlimited"}</td>
           <td>${new Date(ws.created_at).toLocaleString()}</td>
         </tr>`,
@@ -377,8 +383,8 @@ function renderTemplateLibraryTable(templates) {
     .map(
       (tpl) => `
         <tr>
-          <td>${tpl.name}</td>
-          <td>${tpl.description ?? ""}</td>
+          <td>${esc(tpl.name)}</td>
+          <td>${esc(tpl.description ?? "")}</td>
           <td>${tpl.tags.join(", ")}</td>
           <td><button class="danger" data-delete-template="${tpl.id}">Delete</button></td>
         </tr>`,
@@ -422,7 +428,7 @@ async function renderLoginComplete(session, createError, templateError) {
       <p class="hint">Use the API key below as a Bearer token against the REST API (see
       <a href="/docs">/docs</a>) or your MCP client's configuration.</p>
       <dl>
-        <dt>Email</dt><dd>${session.email}</dd>
+        <dt>Email</dt><dd>${esc(session.email)}</dd>
       </dl>
       <pre>${session.apiKey}</pre>
 
@@ -538,7 +544,7 @@ function renderWorkspaceDetail(detail) {
   const view = el(`
     <div>
       <div class="top-bar">
-        <h1>${detail.name}</h1>
+        <h1>${esc(detail.name)}</h1>
         <button class="secondary" id="logout-button">Sign out</button>
       </div>
       <p><a href="#/dashboard">&larr; Back to workspaces</a></p>
@@ -607,9 +613,9 @@ function renderMembersTable(members) {
     .map(
       (member) => `
         <tr>
-          <td>${member.email}</td>
-          <td>${member.display_name ?? ""}</td>
-          <td>${member.role}</td>
+          <td>${esc(member.email)}</td>
+          <td>${esc(member.display_name ?? "")}</td>
+          <td>${esc(member.role)}</td>
         </tr>`,
     )
     .join("");
@@ -628,7 +634,7 @@ function renderDashboardShell(overview, addMemberError) {
         <h1>Tenant Dashboard</h1>
         <button class="secondary" id="logout-button">Sign out</button>
       </div>
-      <p class="hint">Tenant ${overview.tenant_id} &middot; plan: ${overview.plan ?? "self-hosted / unmetered"}</p>
+      <p class="hint">Tenant ${esc(overview.tenant_id)} &middot; plan: ${esc(overview.plan ?? "self-hosted / unmetered")}</p>
 
       <div class="stat-grid">
         <div class="stat"><div class="value">${overview.usage.workspace_count}</div><div class="label">workspaces${overview.max_workspaces != null ? ` / ${overview.max_workspaces}` : ""}</div></div>
