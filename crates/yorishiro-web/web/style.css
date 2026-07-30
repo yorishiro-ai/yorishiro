@@ -1,9 +1,24 @@
 :root {
   color-scheme: light dark;
+  --bg: #fff;
+  --fg: #1a1a1a;
   --border: #d0d0d5;
   --muted: #666;
   --accent: #2a5cdb;
   --danger: #b3261e;
+  --code-bg: #f5f5f5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a1a;
+    --fg: #e0e0e0;
+    --border: #444;
+    --muted: #999;
+    --accent: #5b8def;
+    --danger: #f2615a;
+    --code-bg: #2a2a2a;
+  }
 }
 
 * {
@@ -14,6 +29,19 @@ body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   line-height: 1.5;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+pre {
+  background: var(--code-bg);
+  padding: 0.75rem;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+a {
+  color: var(--accent);
 }
 
 #app {
@@ -46,11 +74,17 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   padding: 0.5rem;
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 1rem;
+  font-family: inherit;
+}
+
+textarea {
+  resize: vertical;
 }
 
 button {
