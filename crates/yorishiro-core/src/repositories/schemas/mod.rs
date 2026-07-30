@@ -78,10 +78,7 @@ pub async fn list(
 /// `create_schema` archives the previous version before activating a new one. For
 /// tenant-detail summaries, this is a more meaningful "how many schemas does this tenant
 /// define" figure than counting every archived version too.
-pub async fn count_active(
-    conn: &mut PgConnection,
-    tenant_id: Uuid,
-) -> Result<i64, YorishiroError> {
+pub async fn count_active(conn: &mut PgConnection, tenant_id: Uuid) -> Result<i64, YorishiroError> {
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
         .from((Alias::new("content"), Schemas::Table))
