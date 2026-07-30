@@ -9,6 +9,7 @@ use crate::models::entities::EntityRecord;
 use crate::repositories::entities;
 use crate::repositories::relations;
 use crate::repositories::schemas;
+use crate::repositories::tenancy::resolve_tenant_id;
 
 pub use crate::models::recall::*;
 
@@ -20,7 +21,8 @@ async fn shallow_copy(
     workspace_id: Uuid,
     mut entity: EntityRecord,
 ) -> Result<EntityRecord, YorishiroError> {
-    let schema = schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
+    let tenant_id = resolve_tenant_id(conn, workspace_id).await?;
+    let schema = schemas::get_by_id(conn, tenant_id, entity.schema_id).await?;
     let fields = schema
         .definition
         .entity_types

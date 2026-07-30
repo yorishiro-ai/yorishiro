@@ -31,6 +31,9 @@ pub enum AdminCommand {
         /// Cap on the number of entities this workspace may hold. Omit for unlimited.
         #[arg(long)]
         max_entities: Option<i32>,
+        /// Schema to associate with this workspace. Omit to leave it unset.
+        #[arg(long)]
+        schema_id: Option<Uuid>,
     },
     /// List workspaces under a tenant.
     ListWorkspaces { tenant_id: Uuid },
@@ -140,7 +143,8 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             max_workspaces,
         } => {
             let tenant = tenancy::create_tenant(pool, &name, max_workspaces).await?;
-            let workspace = tenancy::create_workspace(pool, tenant.id, "default", None).await?;
+            let workspace =
+                tenancy::create_workspace(pool, tenant.id, "default", None, None).await?;
             println!("tenant created");
             println!("  id:            {}", tenant.id);
             println!("  name:          {}", tenant.name);
@@ -167,15 +171,20 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             tenant_id,
             name,
             max_entities,
+            schema_id,
         } => {
-            let workspace = tenancy::create_workspace(pool, tenant_id, &name, max_entities)
-                .await
-                .map_err(anyhow::Error::from)?;
+            let workspace =
+                tenancy::create_workspace(pool, tenant_id, &name, max_entities, schema_id)
+                    .await
+                    .map_err(anyhow::Error::from)?;
             println!("workspace created");
             println!("  id:           {}", workspace.id);
             println!("  tenant id:    {}", workspace.tenant_id);
             println!("  name:         {}", workspace.name);
             println!("  max_entities: {}", format_limit(workspace.max_entities));
+            if let Some(schema_id) = workspace.schema_id {
+                println!("  schema id:    {schema_id}");
+            }
         }
         AdminCommand::ListWorkspaces { tenant_id } => {
             let workspaces = tenancy::list_workspaces(pool, tenant_id)

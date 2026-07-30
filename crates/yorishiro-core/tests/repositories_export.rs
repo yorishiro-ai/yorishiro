@@ -28,14 +28,14 @@ async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn exports_schemas_entities_and_relations_for_the_tenant(pool: PgPool) {
-    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
     let db = TenantDb::new(pool);
     let mut conn = db
-        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
 
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, tenant_id, task_schema())
         .await
         .unwrap();
     let a = entities::create(
@@ -75,7 +75,9 @@ async fn exports_schemas_entities_and_relations_for_the_tenant(pool: PgPool) {
     .await
     .unwrap();
 
-    let records = export_all(&mut conn, workspace_id).await.unwrap();
+    let records = export_all(&mut conn, tenant_id, workspace_id)
+        .await
+        .unwrap();
 
     let schema_count = records
         .iter()
@@ -100,13 +102,15 @@ async fn exports_schemas_entities_and_relations_for_the_tenant(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn export_is_empty_for_a_tenant_with_no_data(pool: PgPool) {
-    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
     let db = TenantDb::new(pool);
     let mut conn = db
-        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
 
-    let records = export_all(&mut conn, workspace_id).await.unwrap();
+    let records = export_all(&mut conn, tenant_id, workspace_id)
+        .await
+        .unwrap();
     assert!(records.is_empty());
 }

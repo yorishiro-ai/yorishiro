@@ -33,9 +33,10 @@ async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
 
 async fn seed_task_and_project(
     conn: &mut PgConnection,
+    tenant_id: Uuid,
     workspace_id: Uuid,
 ) -> (entities::EntityRecord, entities::EntityRecord) {
-    schemas::create_schema(conn, workspace_id, project_task_schema())
+    schemas::create_schema(conn, tenant_id, project_task_schema())
         .await
         .unwrap();
 
@@ -76,7 +77,7 @@ async fn creates_and_fetches_relation(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let created = create(
         &mut conn,
@@ -107,7 +108,7 @@ async fn rejects_relation_type_with_mismatched_source_target(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     // reversed: belongs_to expects source=task target=project, not the other way around.
     let err = create(
@@ -134,7 +135,7 @@ async fn rejects_relation_with_nonexistent_source(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (_, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (_, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let err = create(
         &mut conn,
@@ -160,7 +161,7 @@ async fn rejects_unknown_relation_type(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let err = create(
         &mut conn,
@@ -186,7 +187,7 @@ async fn rejects_duplicate_relation(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
         &mut conn,
@@ -225,7 +226,7 @@ async fn deleting_entity_cascades_relation_deletion(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let relation = create(
         &mut conn,
@@ -256,7 +257,7 @@ async fn deletes_relation(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let relation = create(
         &mut conn,
@@ -302,7 +303,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_a_tenant, tenant_a)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn_a, tenant_a).await;
+    let (task, project) = seed_task_and_project(&mut conn_a, tenant_a_tenant, tenant_a).await;
     let relation = create(
         &mut conn_a,
         tenant_a,
@@ -347,7 +348,7 @@ async fn lists_relations_filtered_by_source(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
         &mut conn,
@@ -385,7 +386,7 @@ async fn neighbors_returns_both_directions_with_relation_type(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
         &mut conn,
@@ -425,7 +426,8 @@ async fn neighbors_is_empty_when_no_relations_exist(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    let (task, _project) = seed_task_and_project(&mut conn, workspace_id).await;
+    let (task, _project) =
+        seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let result = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
         .await

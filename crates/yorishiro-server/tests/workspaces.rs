@@ -7,7 +7,7 @@ use yorishiro_server::test_support::*;
 #[sqlx::test(migrations = "../../migrations")]
 async fn owner_can_create_list_and_delete_workspaces(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let main = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let main = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let owner = tenancy::create_user(&pool, "owner@example.com", "hunter2-hunter2", None)
@@ -98,7 +98,7 @@ async fn owner_can_create_list_and_delete_workspaces(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn cannot_delete_a_tenants_only_workspace(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let main = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let main = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let owner = tenancy::create_user(&pool, "owner@example.com", "hunter2-hunter2", None)
@@ -132,7 +132,7 @@ async fn cannot_delete_a_tenants_only_workspace(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn member_role_cannot_create_or_delete_workspaces(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let main = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let main = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let member = tenancy::create_user(&pool, "member@example.com", "hunter2-hunter2", None)
@@ -201,7 +201,7 @@ async fn workspace_endpoints_enforce_tenant_isolation(pool: PgPool) {
     yorishiro_server::max_tenants_env_lock::set(Some("0"));
 
     let tenant_a = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace_a = tenancy::create_workspace(&pool, tenant_a.id, "main", None)
+    let workspace_a = tenancy::create_workspace(&pool, tenant_a.id, "main", None, None)
         .await
         .unwrap();
     let owner_a = tenancy::create_user(&pool, "owner-a@example.com", "hunter2-hunter2", None)
@@ -225,7 +225,7 @@ async fn workspace_endpoints_enforce_tenant_isolation(pool: PgPool) {
     .await;
 
     let tenant_b = tenancy::create_tenant(&pool, "beta", None).await.unwrap();
-    let workspace_b = tenancy::create_workspace(&pool, tenant_b.id, "main", None)
+    let workspace_b = tenancy::create_workspace(&pool, tenant_b.id, "main", None, None)
         .await
         .unwrap();
     yorishiro_server::max_tenants_env_lock::set(None);

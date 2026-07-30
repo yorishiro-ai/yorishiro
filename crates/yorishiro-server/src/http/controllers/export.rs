@@ -21,8 +21,9 @@ use crate::http::middleware::auth::{Authorized, ReadScope};
 pub async fn export_jsonl(
     mut authorized: Authorized<ReadScope>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let tenant_id = authorized.ctx.tenant_id;
     let workspace_id = authorized.ctx.workspace_id;
-    let records = export::export_all(authorized.conn(), workspace_id).await?;
+    let records = export::export_all(authorized.conn(), tenant_id, workspace_id).await?;
 
     let mut body = Vec::new();
     for record in &records {

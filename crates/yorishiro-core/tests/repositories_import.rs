@@ -47,7 +47,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
         .await
         .unwrap();
 
-    schemas::create_schema(&mut source_conn, source_workspace, task_schema())
+    schemas::create_schema(&mut source_conn, source_tenant, task_schema())
         .await
         .unwrap();
     let a = entities::create(
@@ -87,7 +87,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
     .await
     .unwrap();
 
-    let records = export_all(&mut source_conn, source_workspace)
+    let records = export_all(&mut source_conn, source_tenant, source_workspace)
         .await
         .unwrap();
     let jsonl = to_jsonl(&records);
@@ -99,16 +99,23 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
         .await
         .unwrap();
 
-    let result = import_jsonl(&mut dest_conn, dest_workspace, jsonl.as_bytes())
-        .await
-        .unwrap();
+    let result = import_jsonl(
+        &mut dest_conn,
+        dest_tenant,
+        dest_workspace,
+        jsonl.as_bytes(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.schemas, 1);
     assert_eq!(result.entities, 2);
     assert_eq!(result.relations, 1);
     assert!(result.errors.is_empty());
 
-    let dest_records = export_all(&mut dest_conn, dest_workspace).await.unwrap();
+    let dest_records = export_all(&mut dest_conn, dest_tenant, dest_workspace)
+        .await
+        .unwrap();
     assert_eq!(dest_records.len(), 4);
 
     // Relation endpoints were remapped to the newly generated entity IDs, not the
@@ -152,7 +159,7 @@ async fn import_is_all_or_nothing_on_a_bad_relation_reference(pool: PgPool) {
             "kind": "schema",
             "record": {
                 "id": Uuid::from_u128(1),
-                "workspace_id": workspace_id,
+                "tenant_id": tenant_id,
                 "name": "task-management",
                 "version": 1,
                 "definition": schema_json,
@@ -174,13 +181,15 @@ async fn import_is_all_or_nothing_on_a_bad_relation_reference(pool: PgPool) {
         }),
     );
 
-    let err = import_jsonl(&mut conn, workspace_id, jsonl.as_bytes())
+    let err = import_jsonl(&mut conn, tenant_id, workspace_id, jsonl.as_bytes())
         .await
         .unwrap_err();
     let message = err.to_string();
     assert!(message.contains("line 2"), "message was: {message}");
 
-    let records = export_all(&mut conn, workspace_id).await.unwrap();
+    let records = export_all(&mut conn, tenant_id, workspace_id)
+        .await
+        .unwrap();
     assert!(
         records.is_empty(),
         "schema insert from line 1 should have been rolled back too, got: {records:?}"
@@ -196,9 +205,14 @@ async fn import_rejects_malformed_lines(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = import_jsonl(&mut conn, workspace_id, b"not json at all".as_slice())
-        .await
-        .unwrap_err();
+    let err = import_jsonl(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        b"not json at all".as_slice(),
+    )
+    .await
+    .unwrap_err();
     assert!(err.to_string().contains("line 1"));
 }
 
@@ -216,7 +230,7 @@ async fn import_skips_blank_lines(pool: PgPool) {
         "kind": "schema",
         "record": {
             "id": Uuid::from_u128(1),
-            "workspace_id": workspace_id,
+            "tenant_id": tenant_id,
             "name": "task-management",
             "version": 1,
             "definition": schema_json,
@@ -226,7 +240,7 @@ async fn import_skips_blank_lines(pool: PgPool) {
     });
     let jsonl = format!("\n{line}\n\n");
 
-    let result = import_jsonl(&mut conn, workspace_id, jsonl.as_bytes())
+    let result = import_jsonl(&mut conn, tenant_id, workspace_id, jsonl.as_bytes())
         .await
         .unwrap();
     assert_eq!(result.schemas, 1);
