@@ -43,4 +43,4 @@ utoipa-swagger-ui.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tracing-test.workspace = true
+tracing-test = { workspace = true, features = ["no-env-filter"] }
