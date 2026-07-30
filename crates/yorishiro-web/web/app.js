@@ -251,6 +251,7 @@ async function renderSetup(errorMessage) {
             <option value="general-notes">general-notes — A general-purpose note-taking schema with tags and links</option>
             <option value="task-management">task-management — Personal tasks and projects with deadlines and dependencies</option>
             <option value="worldbuilding">worldbuilding — Characters, locations, factions, and items for creative writing and TRPG</option>
+            <option value="software-adr">software-adr — Architecture Decision Records, service catalog, and incident post-mortems</option>
           </select>
         </label>
         ${errorMessage ? `<p class="error">${errorMessage}</p>` : ""}

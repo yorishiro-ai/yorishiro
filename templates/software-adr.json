@@ -1,0 +1,159 @@
+{
+  "id": "software-adr",
+  "name": "software-adr",
+  "description": "Architecture Decision Records, service catalog, and tech stack documentation for software projects",
+  "entity_types": {
+    "decision": {
+      "description": "An architecture or design decision with context, rationale, and consequences",
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Short title of the decision (e.g. 'Use PostgreSQL RLS for tenant isolation')",
+          "x-embed": true,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "enum": ["proposed", "accepted", "deprecated", "superseded"],
+          "required": true,
+          "description": "Current status of this decision"
+        },
+        "context": {
+          "type": "string",
+          "required": true,
+          "description": "What is the issue that we're seeing that is motivating this decision?",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "decision": {
+          "type": "string",
+          "required": true,
+          "description": "What is the change that we're proposing and/or doing?",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "consequences": {
+          "type": "string",
+          "description": "What becomes easier or more difficult to do because of this change?",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date when the decision was made"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Categories (e.g. 'database', 'security', 'api')",
+          "uniqueItems": true
+        }
+      }
+    },
+    "service": {
+      "description": "A service, component, or crate in the system",
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Service or crate name",
+          "x-embed": true,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "What this service does",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "tech_stack": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Technologies used (e.g. 'Rust', 'axum', 'sqlx')",
+          "uniqueItems": true
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "deprecated", "planned"],
+          "default": "active",
+          "description": "Current lifecycle status"
+        },
+        "repo_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Repository URL"
+        }
+      }
+    },
+    "incident": {
+      "description": "A post-mortem record for a production incident or significant bug",
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Brief description of what happened",
+          "x-embed": true,
+          "maxLength": 200
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"],
+          "required": true,
+          "description": "Impact severity"
+        },
+        "root_cause": {
+          "type": "string",
+          "description": "What caused the incident",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "resolution": {
+          "type": "string",
+          "description": "How it was fixed",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date of the incident"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Categories (e.g. 'security', 'performance', 'data-loss')",
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "relation_types": {
+    "supersedes": {
+      "source": "decision",
+      "target": "decision",
+      "description": "This decision supersedes an earlier one"
+    },
+    "affects": {
+      "source": "decision",
+      "target": "service",
+      "description": "This decision affects this service's design or behavior"
+    },
+    "depends_on": {
+      "source": "service",
+      "target": "service",
+      "description": "This service depends on another service"
+    },
+    "caused_by": {
+      "source": "incident",
+      "target": "decision",
+      "description": "This incident was caused by (or related to) a decision"
+    },
+    "resolved_by": {
+      "source": "incident",
+      "target": "decision",
+      "description": "This incident led to a new decision"
+    }
+  }
+}
