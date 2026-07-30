@@ -42,17 +42,32 @@ fn respond(path: &str, bytes: Vec<u8>) -> Response {
         .expect("building a static-asset response is infallible")
 }
 
+fn has_file_extension(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some()
+}
+
 fn serve_embedded(path: &str) -> Response {
     match Assets::get(path) {
         Some(file) => respond(path, file.data.into_owned()),
-        None => StatusCode::NOT_FOUND.into_response(),
+        None if has_file_extension(path) => StatusCode::NOT_FOUND.into_response(),
+        None => match Assets::get("index.html") {
+            Some(file) => respond("index.html", file.data.into_owned()),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
     }
 }
 
 async fn serve_from_disk(dir: &Path, path: &str) -> Response {
     match tokio::fs::read(dir.join(path)).await {
         Ok(bytes) => respond(path, bytes),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) if has_file_extension(path) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => match tokio::fs::read(dir.join("index.html")).await {
+            Ok(bytes) => respond("index.html", bytes),
+            Err(_) => StatusCode::NOT_FOUND.into_response(),
+        },
     }
 }
 
