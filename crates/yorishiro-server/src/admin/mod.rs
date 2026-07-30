@@ -126,7 +126,10 @@ pub async fn run(command: AdminCommand) -> Result<()> {
         .context("failed to connect to database")?;
     // Apply the same migrations the server runs on startup so this also works against a
     // fresh database that has never been started (a no-op if already applied).
-    sqlx::migrate!("../../migrations").run(&pool).await?;
+    sqlx::migrate!("../../migrations")
+        .set_ignore_missing(true)
+        .run(&pool)
+        .await?;
 
     match command {
         AdminCommand::CreateTenant {
