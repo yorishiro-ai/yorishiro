@@ -17,7 +17,7 @@ UPDATE content.schemas s
 
 ALTER TABLE content.schemas ALTER COLUMN tenant_id SET NOT NULL;
 
--- Step 2: Add schema_id to identity.workspaces (nullable for now, made NOT NULL after backfill).
+-- Step 2: Add schema_id to identity.workspaces (nullable for now).
 ALTER TABLE identity.workspaces ADD COLUMN schema_id UUID REFERENCES content.schemas(id);
 
 -- Backfill: link each workspace to its first active schema (by created_at).
@@ -31,18 +31,17 @@ UPDATE identity.workspaces w
   ) sub
  WHERE w.id = sub.workspace_id;
 
--- Step 3: Drop old workspace_id from schemas, replace unique constraint.
--- The UNIQUE constraint owns its backing index, so dropping the constraint removes both.
+-- Step 3: Drop RLS policy that references the old workspace_id column BEFORE
+-- dropping the column itself (Postgres won't drop a column that a policy depends on).
+DROP POLICY IF EXISTS workspace_isolation ON content.schemas;
+
+-- Step 4: Drop old workspace_id from schemas, replace unique constraint.
 ALTER TABLE content.schemas DROP CONSTRAINT IF EXISTS schemas_workspace_id_name_version_key;
 ALTER TABLE content.schemas DROP COLUMN workspace_id;
 ALTER TABLE content.schemas ADD CONSTRAINT schemas_tenant_name_version_key UNIQUE (tenant_id, name, version);
 
--- Step 4: Create index on tenant_id for schema lookups.
+-- Step 5: Create index and new RLS policy scoped to tenant_id.
 CREATE INDEX schemas_tenant_id_idx ON content.schemas (tenant_id);
 
--- Step 5: content.schemas' RLS policy (20260712000002_rls.sql) filtered on the
--- now-dropped workspace_id column. Replace it with a tenant_id-scoped policy so
--- schemas are isolated per app.current_tenant, consistent with the new ownership.
-DROP POLICY IF EXISTS workspace_isolation ON content.schemas;
 CREATE POLICY tenant_isolation ON content.schemas
   USING (tenant_id = current_setting('app.current_tenant')::uuid);
