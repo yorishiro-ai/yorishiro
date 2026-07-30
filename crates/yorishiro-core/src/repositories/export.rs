@@ -13,11 +13,12 @@ pub use crate::models::export::*;
 /// entity_types/relation_types that the entities and relations after them reference.
 pub async fn export_all(
     conn: &mut PgConnection,
+    tenant_id: Uuid,
     workspace_id: Uuid,
 ) -> Result<Vec<ExportRecord>, YorishiroError> {
     let mut records = Vec::new();
     records.extend(
-        schemas::export_all(conn, workspace_id)
+        schemas::export_all(conn, tenant_id)
             .await?
             .into_iter()
             .map(ExportRecord::Schema),

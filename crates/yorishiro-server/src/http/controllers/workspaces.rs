@@ -55,6 +55,9 @@ pub struct CreateWorkspaceRequest {
     pub name: String,
     /// Cap on the number of entities this workspace may hold. Omit for unlimited.
     pub max_entities: Option<i32>,
+    /// Schema to associate with this workspace. Omit to leave it unset.
+    #[serde(default)]
+    pub schema_id: Option<Uuid>,
 }
 
 #[utoipa::path(
@@ -81,6 +84,7 @@ pub async fn create_workspace(
         ctx.tenant_id,
         &body.name,
         body.max_entities,
+        body.schema_id,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(workspace)))
@@ -125,7 +129,7 @@ pub async fn get_workspace(
         .internal()?;
     let entity_count = entities::count(&mut conn, workspace.id).await?;
     let relation_count = relations::count(&mut conn, workspace.id).await?;
-    let schema_count = schemas::count_active(&mut conn, workspace.id).await?;
+    let schema_count = schemas::count_active(&mut conn, workspace.tenant_id).await?;
 
     Ok(Json(WorkspaceDetail {
         id: workspace.id,

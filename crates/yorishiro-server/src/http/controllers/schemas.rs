@@ -32,8 +32,8 @@ pub struct CreateSchemaResponse {
 pub async fn list_schemas(
     mut authorized: Authorized<ReadScope>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let summaries = schemas::list(authorized.conn(), workspace_id).await?;
+    let tenant_id = authorized.ctx.tenant_id;
+    let summaries = schemas::list(authorized.conn(), tenant_id).await?;
     Ok(Json(summaries))
 }
 
@@ -53,8 +53,8 @@ pub async fn get_active_schema(
     mut authorized: Authorized<ReadScope>,
     Path(name): Path<String>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let record = schemas::get_active_schema(authorized.conn(), workspace_id, &name).await?;
+    let tenant_id = authorized.ctx.tenant_id;
+    let record = schemas::get_active_schema(authorized.conn(), tenant_id, &name).await?;
     Ok(Json(record))
 }
 
@@ -74,8 +74,8 @@ pub async fn get_schema_by_id(
     mut authorized: Authorized<ReadScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let record = schemas::get_by_id(authorized.conn(), workspace_id, schema_id).await?;
+    let tenant_id = authorized.ctx.tenant_id;
+    let record = schemas::get_by_id(authorized.conn(), tenant_id, schema_id).await?;
     Ok(Json(record))
 }
 
@@ -112,9 +112,8 @@ pub async fn create_schema(
         CreateSchemaRequest::Template { template_id } => templates::get_template(&template_id)?,
     };
 
-    let workspace_id = authorized.ctx.workspace_id;
-    let (schema, diff) =
-        schemas::create_schema(authorized.conn(), workspace_id, definition).await?;
+    let tenant_id = authorized.ctx.tenant_id;
+    let (schema, diff) = schemas::create_schema(authorized.conn(), tenant_id, definition).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateSchemaResponse { schema, diff }),
@@ -156,8 +155,8 @@ pub async fn get_entity_type_json_schema(
     mut authorized: Authorized<ReadScope>,
     Path((name, entity_type)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    let record = schemas::get_active_schema(authorized.conn(), workspace_id, &name).await?;
+    let tenant_id = authorized.ctx.tenant_id;
+    let record = schemas::get_active_schema(authorized.conn(), tenant_id, &name).await?;
 
     let entity_type_def = record
         .definition

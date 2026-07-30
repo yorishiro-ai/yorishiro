@@ -16,19 +16,19 @@ enum Entities {
     Embedding,
 }
 
-async fn seed_workspace(pool: &PgPool) -> Uuid {
+async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
     let tenant = tenancy::create_tenant(pool, "bootstrap-tenant", None)
         .await
         .unwrap();
-    let workspace = tenancy::create_workspace(pool, tenant.id, "default", None)
+    let workspace = tenancy::create_workspace(pool, tenant.id, "default", None, None)
         .await
         .unwrap();
-    workspace.id
+    (tenant.id, workspace.id)
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn creates_workspace_and_issues_a_usable_key(pool: PgPool) {
-    let workspace_id = seed_workspace(&pool).await;
+    let (_workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
 
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Write, None)
         .await
@@ -55,7 +55,7 @@ async fn rejects_key_creation_for_unknown_workspace(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn create_api_key_for_user_is_capped_by_their_role(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None, None)
         .await
         .unwrap();
     let user = tenancy::create_user(&pool, "viewer@example.com", "pw", None)
@@ -82,7 +82,7 @@ async fn create_api_key_for_user_is_capped_by_their_role(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn create_api_key_rejects_a_user_who_is_not_a_member(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None, None)
         .await
         .unwrap();
     let user = tenancy::create_user(&pool, "outsider@example.com", "pw", None)
@@ -98,7 +98,7 @@ async fn create_api_key_rejects_a_user_who_is_not_a_member(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn revoked_key_no_longer_authenticates(pool: PgPool) {
-    let workspace_id = seed_workspace(&pool).await;
+    let (_workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
@@ -137,7 +137,7 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
         }
     }
 
-    let workspace_id = seed_workspace(&pool).await;
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
     let mut conn = pool.acquire().await.unwrap();
     let definition = serde_json::from_value(serde_json::json!({
         "name": "task-management",
@@ -148,9 +148,13 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
         }
     }))
     .unwrap();
-    yorishiro_core::repositories::schemas::create_schema(&mut conn, workspace_id, definition)
-        .await
-        .unwrap();
+    yorishiro_core::repositories::schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        definition,
+    )
+    .await
+    .unwrap();
     // core's create doesn't write the embedding (that's the adapter's background sync
     // job), so this entity reproduces one left behind by a failed sync.
     let entity = yorishiro_core::repositories::entities::create(
@@ -210,11 +214,11 @@ async fn enforces_workspace_limit_on_create_workspace(pool: PgPool) {
     // create_tenant alone doesn't create a workspace here (unlike the CLI's CreateTenant
     // handler, which additionally creates a "default" one); this test drives
     // tenancy::create_workspace directly to check the cap.
-    tenancy::create_workspace(&pool, tenant.id, "first", None)
+    tenancy::create_workspace(&pool, tenant.id, "first", None, None)
         .await
         .unwrap();
 
-    let err = tenancy::create_workspace(&pool, tenant.id, "second", None)
+    let err = tenancy::create_workspace(&pool, tenant.id, "second", None, None)
         .await
         .unwrap_err();
     assert!(matches!(

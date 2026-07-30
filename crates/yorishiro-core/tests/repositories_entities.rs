@@ -63,7 +63,7 @@ async fn creates_and_fetches_entity(pool: PgPool) {
         .await
         .unwrap();
 
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
         .await
         .unwrap();
 
@@ -97,7 +97,7 @@ async fn rejects_invalid_data(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
         .await
         .unwrap();
 
@@ -125,7 +125,7 @@ async fn rejects_unknown_entity_type(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
         .await
         .unwrap();
 
@@ -155,7 +155,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_a_tenant, tenant_a)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn_a, tenant_a, task_schema())
+    schemas::create_schema(&mut conn_a, tenant_a_tenant, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -188,7 +188,7 @@ async fn update_validates_against_creation_time_schema_version(pool: PgPool) {
         .await
         .unwrap();
 
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -216,7 +216,7 @@ async fn update_validates_against_creation_time_schema_version(pool: PgPool) {
         }
     }))
     .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, v2)
+    schemas::create_schema(&mut conn, workspace_id_tenant, v2)
         .await
         .unwrap();
 
@@ -241,7 +241,7 @@ async fn delete_removes_entity(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -276,7 +276,7 @@ async fn list_filters_by_entity_type(pool: PgPool) {
         .unwrap();
     schemas::create_schema(
         &mut conn,
-        workspace_id,
+        workspace_id_tenant,
         serde_json::from_value(json!({
             "name": "task-management",
             "entity_types": {
@@ -332,7 +332,7 @@ async fn list_filters_by_data_field_value(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
         .await
         .unwrap();
 
