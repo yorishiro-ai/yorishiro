@@ -60,17 +60,12 @@ pub async fn shutdown_signal() {
 /// switches between `local` (a local ONNX model, the default -- needs no external service or
 /// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
 /// operators already running something like Ollama/LM Studio). The `entities.embedding`
-/// column is fixed at `vector(768)`, so a mismatched dimension count is rejected at startup
-/// (for `local`, a probe inference further verifies the model's actual output dimension).
+/// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
+/// share the same dimension count (set via `YSR_EMBEDDING_DIMENSIONS`, default 768).
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YSR_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "768".into())
         .parse()?;
-    if dimensions != 768 {
-        anyhow::bail!(
-            "YSR_EMBEDDING_DIMENSIONS must be 768 (entities.embedding is vector(768)), got {dimensions}"
-        );
-    }
 
     let kind = std::env::var("YSR_EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".into());
     match kind.as_str() {

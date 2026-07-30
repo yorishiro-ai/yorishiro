@@ -27,9 +27,9 @@ const EMBED_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct LocalOnnxConfig {
     pub model_path: PathBuf,
     pub tokenizer_path: PathBuf,
-    /// Expected output dimensionality. Normally 768 since `entities.embedding`
-    /// is fixed at `vector(768)`. `load` runs a probe inference and fails
-    /// startup if the model's actual output dimension doesn't match.
+    /// Expected output dimensionality (e.g. 768 for all-mpnet-base-v2).
+    /// `load` runs a probe inference and fails startup if the model's actual
+    /// output dimension doesn't match.
     pub dimensions: usize,
     /// Maximum sequence length for tokenization. Text longer than this is truncated.
     pub max_sequence_length: usize,

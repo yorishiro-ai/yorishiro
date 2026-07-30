@@ -23,8 +23,8 @@
 
 # embedding:
 #   provider: local                                                     # YSR_EMBEDDING_PROVIDER
-#   dimensions: 768                                                     # YSR_EMBEDDING_DIMENSIONS
-#   # --- when provider: local (768-dimensional BERT-family ONNX export, the default) ---
+#   dimensions: 768                                                     # YSR_EMBEDDING_DIMENSIONS (must match model output)
+#   # --- when provider: local (ONNX export, the default) ---
 #   onnx_model_path: models/model.onnx                                  # YSR_ONNX_MODEL_PATH
 #   onnx_tokenizer_path: models/tokenizer.json                          # YSR_ONNX_TOKENIZER_PATH
 #   onnx_max_sequence_length: 512                                       # YSR_ONNX_MAX_SEQUENCE_LENGTH

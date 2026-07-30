@@ -55,9 +55,9 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | Variable | Description |
 |---|---|
 | `YSR_EMBEDDING_PROVIDER` | `local` (default) or `openai` |
-| `YSR_EMBEDDING_DIMENSIONS` | Since `entities.embedding` is fixed at `vector(768)`, any value other than 768 causes a startup error |
+| `YSR_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `768`). Must match the model's output dimension. All vectors in a deployment share this value — changing it after data exists requires re-embedding |
 
-### When `YSR_EMBEDDING_PROVIDER=local` (768-dimensional BERT-family ONNX export, the default)
+### When `YSR_EMBEDDING_PROVIDER=local` (ONNX export, the default)
 
 | Variable | Description |
 |---|---|

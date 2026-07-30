@@ -8,10 +8,9 @@ pub mod sync;
 
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
-/// Provider that generates embedding vectors.
-/// The `entities.embedding` column is fixed at `vector(768)`, so an implementation
-/// actually wired to a tenant must have its caller verify (at config load time)
-/// that `dimensions()` returns 768.
+/// Provider that generates embedding vectors. The `entities.embedding` column
+/// is dimensionless (`vector`), so any model works. All vectors in a deployment
+/// must share the same dimension count (`YSR_EMBEDDING_DIMENSIONS`).
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;
