@@ -76,6 +76,3 @@ pub async fn recall_context(
         truncated,
     })
 }
-
-#[cfg(test)]
-mod tests;

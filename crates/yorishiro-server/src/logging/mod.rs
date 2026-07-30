@@ -9,7 +9,7 @@
 //!
 //! `single`/`daily` write under `YSR_LOG_DIR` (default `.`) as `yorishiro.log`. `syslog`
 //! connects to the socket at `YSR_SYSLOG_SOCKET` (default `/dev/log`).
-mod syslog;
+pub mod syslog;
 
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;

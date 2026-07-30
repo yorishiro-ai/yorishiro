@@ -5,4 +5,4 @@
 
 pub(crate) mod controllers;
 pub(crate) mod mcp;
-pub(crate) mod middleware;
+pub mod middleware;

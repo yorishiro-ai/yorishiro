@@ -1,4 +1,4 @@
-mod commands;
+pub mod commands;
 
 use anyhow::{Context, Result};
 use clap::{Subcommand, ValueEnum};

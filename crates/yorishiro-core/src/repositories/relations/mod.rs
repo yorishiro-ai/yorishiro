@@ -333,6 +333,3 @@ pub async fn neighbors(
 
     Ok(rows.into_iter().map(NeighborRow::into_neighbor).collect())
 }
-
-#[cfg(test)]
-mod tests;

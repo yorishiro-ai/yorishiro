@@ -295,6 +295,3 @@ pub async fn create_schema(
 
     Ok((row.into_record()?, diff))
 }
-
-#[cfg(test)]
-mod tests;

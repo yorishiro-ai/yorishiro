@@ -4,7 +4,11 @@ use super::types::{FieldDef, FieldTypeName, MetaSchemaDefinition};
 
 /// Maximum nesting depth for object-type fields, to prevent unbounded
 /// recursion from malformed or adversarial schema definitions.
-const MAX_OBJECT_DEPTH: usize = 5;
+///
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can
+/// reference it directly; `#[doc(hidden)]` keeps it out of the public API docs.
+#[doc(hidden)]
+pub const MAX_OBJECT_DEPTH: usize = 5;
 
 /// Escapes `~`/`/` per RFC6901 before embedding a value as a JSON Pointer segment.
 fn escape_pointer_segment(segment: &str) -> String {
@@ -246,6 +250,3 @@ fn validate_field(
         });
     }
 }
-
-#[cfg(test)]
-mod tests;

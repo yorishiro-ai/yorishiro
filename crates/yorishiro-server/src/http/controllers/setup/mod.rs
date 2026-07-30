@@ -152,6 +152,3 @@ pub async fn setup(
         }),
     ))
 }
-
-#[cfg(test)]
-mod tests;

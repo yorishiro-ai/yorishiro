@@ -103,6 +103,3 @@ pub struct FieldDef {
     #[schema(value_type = Object)]
     pub extra: serde_json::Map<String, Value>,
 }
-
-#[cfg(test)]
-mod tests;

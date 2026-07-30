@@ -14,8 +14,13 @@ pub use error::{ResultExt, YorishiroError};
 /// `identity.tenants`/`identity.workspaces`, safe for any test module to call without pulling
 /// in tenancy's cap-checking logic. Consolidates what used to be a near-identical raw-SQL
 /// helper copy-pasted across a dozen test modules.
-#[cfg(test)]
-pub(crate) mod test_support {
+///
+/// `pub` (rather than `pub(crate)`) and not `#[cfg(test)]`-gated so the crate-root integration
+/// tests in `tests/` (which compile this crate as an ordinary dependency, without `cfg(test)`)
+/// can call it too. `#[doc(hidden)]` keeps it out of the public API docs since it isn't meant
+/// for external callers.
+#[doc(hidden)]
+pub mod test_support {
     use sea_query::{Alias, Iden, PostgresQueryBuilder, Query};
     use sea_query_binder::SqlxBinder;
     use sqlx::PgPool;

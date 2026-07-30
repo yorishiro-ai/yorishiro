@@ -332,6 +332,3 @@ pub async fn fork_template(
 
     row.into_record()
 }
-
-#[cfg(test)]
-mod tests;

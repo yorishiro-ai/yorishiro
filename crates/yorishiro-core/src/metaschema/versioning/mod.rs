@@ -181,6 +181,3 @@ fn diff_fields(
         }
     }
 }
-
-#[cfg(test)]
-mod tests;
