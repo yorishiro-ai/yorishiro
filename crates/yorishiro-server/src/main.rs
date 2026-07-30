@@ -2,9 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use yorishiro_core::db::TenantDb;
 use yorishiro_server::admin::{self, AdminCommand};
+use yorishiro_server::config;
 use yorishiro_server::{AppState, build_app, build_embedding_provider, logging, shutdown_signal};
-
-mod config;
 
 /// A plain start (`yorishiro-server`, no subcommand) runs the HTTP server; `yorishiro-server
 /// admin ...` runs one-off administrative commands instead.

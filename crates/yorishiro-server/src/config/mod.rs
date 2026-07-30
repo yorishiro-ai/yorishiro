@@ -8,9 +8,11 @@
 //! `yorishiro-core` is untouched: environment variables still win when both are set, and a
 //! deployment with no `config.yml` behaves exactly as before.
 //!
-//! This module is private to the `yorishiro-server` binary (not re-exported from `lib.rs`), so
-//! it has no effect on `yorishiro-hosted-server`, which embeds this crate's library API
-//! directly rather than going through this binary's `main`.
+//! This is only ever invoked from this crate's `main` (in its synchronous prologue, before the
+//! tokio runtime starts -- see `load_and_apply_env_overrides`'s safety contract). It lives here
+//! rather than in `main.rs` so `tests/config.rs` can reach it as an ordinary public item;
+//! `yorishiro-hosted-server`, which embeds this crate's library API directly rather than going
+//! through this binary's `main`, simply never calls it.
 
 use std::path::Path;
 
@@ -155,6 +157,3 @@ pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

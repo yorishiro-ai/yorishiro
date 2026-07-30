@@ -7,6 +7,7 @@ use yorishiro_core::services::embedding::{
 };
 
 pub mod admin;
+pub mod config;
 mod error;
 pub mod http;
 pub mod logging;
