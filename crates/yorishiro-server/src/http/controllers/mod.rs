@@ -2,6 +2,7 @@ mod entities;
 mod export;
 pub(crate) mod health;
 mod identity;
+mod import;
 mod members;
 mod relations;
 mod schemas;
@@ -104,6 +105,7 @@ impl Modify for SecurityAddon {
         schemas::list_templates,
         search::search_entities,
         export::export_jsonl,
+        import::import_jsonl,
         workspaces::list_workspaces,
         workspaces::create_workspace,
         workspaces::get_workspace,
@@ -134,6 +136,7 @@ impl Modify for SecurityAddon {
         relations::CreateRelationRequest,
         schemas::CreateSchemaResponse,
         schemas::CreateSchemaRequest,
+        yorishiro_core::repositories::import::ImportResult,
         workspaces::CreateWorkspaceRequest,
         workspaces::WorkspaceDetail,
         yorishiro_core::repositories::tenancy::TemplateRecord,
@@ -151,7 +154,7 @@ impl Modify for SecurityAddon {
         (name = "relations", description = "Relation operations"),
         (name = "schemas", description = "Meta-schema operations"),
         (name = "search", description = "Vector similarity search"),
-        (name = "export", description = "Bulk data export"),
+        (name = "export", description = "Bulk data export/import"),
         (name = "template-library", description = "Tenant-scoped, DB-backed schema template library (create/delete are owner/admin only)"),
     ),
     info(
@@ -246,4 +249,5 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/search", get(search::search_entities))
         .route("/api/export.jsonl", get(export::export_jsonl))
+        .route("/api/import.jsonl", post(import::import_jsonl))
 }

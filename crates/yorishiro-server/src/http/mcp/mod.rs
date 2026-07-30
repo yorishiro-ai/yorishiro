@@ -1,4 +1,5 @@
 mod entities;
+mod import;
 mod recall;
 mod relations;
 mod schemas;
@@ -29,6 +30,7 @@ impl YorishiroMcpServer {
         Self {
             state,
             tool_router: Self::tool_router_entities()
+                + Self::tool_router_import()
                 + Self::tool_router_recall()
                 + Self::tool_router_relations()
                 + Self::tool_router_search()
