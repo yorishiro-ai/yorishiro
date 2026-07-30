@@ -9,3 +9,9 @@
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] `cargo test --all`
+
+## Breaking changes
+
+<!-- Does this change any public API, config, or database schema? -->
+
+None / Yes: ...
