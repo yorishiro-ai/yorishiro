@@ -6,6 +6,7 @@ license.workspace = true
 description = "HTTP server (REST + MCP) for Yorishiro, an MCP-native knowledge store"
 repository.workspace = true
 readme = "README.md"
+include = ["src/**/*", "README.md", "../../migrations/**/*"]
 
 [[bin]]
 name = "yorishiro-server"
