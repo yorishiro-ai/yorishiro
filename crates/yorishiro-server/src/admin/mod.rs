@@ -139,8 +139,8 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             name,
             max_workspaces,
         } => {
-            let tenant = tenancy::create_tenant(&pool, &name, max_workspaces).await?;
-            let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None).await?;
+            let tenant = tenancy::create_tenant(pool, &name, max_workspaces).await?;
+            let workspace = tenancy::create_workspace(pool, tenant.id, "default", None).await?;
             println!("tenant created");
             println!("  id:            {}", tenant.id);
             println!("  name:          {}", tenant.name);
@@ -150,7 +150,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             println!("  name: {}", workspace.name);
         }
         AdminCommand::ListTenants => {
-            let tenants = tenancy::list_tenants(&pool).await?;
+            let tenants = tenancy::list_tenants(pool).await?;
             if tenants.is_empty() {
                 println!("no tenants (create one with `admin create-tenant <name>`)");
             }
@@ -168,7 +168,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             name,
             max_entities,
         } => {
-            let workspace = tenancy::create_workspace(&pool, tenant_id, &name, max_entities)
+            let workspace = tenancy::create_workspace(pool, tenant_id, &name, max_entities)
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("workspace created");
@@ -178,7 +178,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             println!("  max_entities: {}", format_limit(workspace.max_entities));
         }
         AdminCommand::ListWorkspaces { tenant_id } => {
-            let workspaces = tenancy::list_workspaces(&pool, tenant_id)
+            let workspaces = tenancy::list_workspaces(pool, tenant_id)
                 .await
                 .map_err(anyhow::Error::from)?;
             if workspaces.is_empty() {
@@ -198,7 +198,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             password,
             display_name,
         } => {
-            let user = tenancy::create_user(&pool, &email, &password, display_name.as_deref())
+            let user = tenancy::create_user(pool, &email, &password, display_name.as_deref())
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("user created");
@@ -210,13 +210,13 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             user_id,
             role,
         } => {
-            tenancy::add_member(&pool, tenant_id, user_id, role.into())
+            tenancy::add_member(pool, tenant_id, user_id, role.into())
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("membership added: user {user_id} is now {role:?} of tenant {tenant_id}");
         }
         AdminCommand::ListMembers { tenant_id } => {
-            let members = tenancy::list_members(&pool, tenant_id)
+            let members = tenancy::list_members(pool, tenant_id)
                 .await
                 .map_err(anyhow::Error::from)?;
             if members.is_empty() {
@@ -233,7 +233,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             ttl_hours,
         } => {
             let (invite, token) = tenancy::create_invite(
-                &pool,
+                pool,
                 tenant_id,
                 &email,
                 role.into(),
@@ -258,7 +258,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             user,
         } => {
             let scope = ApiKeyScope::from(scope);
-            let created = create_api_key(&pool, workspace_id, scope, user).await?;
+            let created = create_api_key(pool, workspace_id, scope, user).await?;
             println!("api key created (the plaintext key is shown ONLY once — store it now)");
             println!("  key:          {}", created.plaintext);
             println!("  key id:       {}", created.id);
@@ -269,7 +269,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             }
         }
         AdminCommand::ListApiKeys { workspace_id } => {
-            let keys = list_api_keys(&pool, workspace_id).await?;
+            let keys = list_api_keys(pool, workspace_id).await?;
             if keys.is_empty() {
                 println!("no api keys for workspace {workspace_id}");
             }
@@ -290,13 +290,13 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             }
         }
         AdminCommand::RevokeApiKey { key_id } => {
-            revoke_api_key(&pool, key_id).await?;
+            revoke_api_key(pool, key_id).await?;
             println!("api key {key_id} revoked (takes effect on the next request)");
         }
         AdminCommand::ResyncEmbeddings { workspace_id } => {
             let provider = crate::build_embedding_provider()
                 .context("embedding provider must be configured (see .env.example)")?;
-            let report = resync_embeddings(&pool, workspace_id, provider.as_ref()).await?;
+            let report = resync_embeddings(pool, workspace_id, provider.as_ref()).await?;
             println!(
                 "resync finished: {} entities had no embedding, {} synced, {} failed \
                  (entities whose entity_type has no x-embed field stay without embedding)",
