@@ -320,6 +320,19 @@ async function listEntities(apiKey, { entityType, limit = 50, offset = 0 } = {})
   return response.json();
 }
 
+async function listRelations(apiKey, { limit = 200, offset = 0 } = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  const response = await fetch(`${apiBase()}/api/relations?${params.toString()}`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+  return response.json();
+}
+
 async function getEntity(apiKey, id) {
   const response = await fetch(`${apiBase()}/api/entities/${id}`, {
     headers: { authorization: `Bearer ${apiKey}` },
@@ -919,6 +932,10 @@ async function renderLoginComplete(session, createError, templateError) {
         <a href="#/schemas">Browse schemas</a>
         &middot;
         <a href="#/entities">Browse entities</a>
+        &middot;
+        <a href="#/graph">Knowledge Graph</a>
+        &middot;
+        <a href="#/schema-graph">Schema Graph</a>
       </p>
 
       <div id="ai-schema-generator-slot"></div>
@@ -1381,6 +1398,434 @@ async function renderEntityDetailRoute(id, { editing = false, editError } = {}) 
   }
 }
 
+// -- Graph visualization (Cytoscape.js) --
+//
+// Two routes share the graph plumbing below: #/graph (the live knowledge graph -- entities as
+// nodes, relations as directed edges) and #/schema-graph (the active schema's entity_types as
+// nodes, relation_types as directed edges -- a read-only visual schema overview). Both render
+// into a fixed-height `.graph-container` via a shared `renderCytoscape` helper, and both reuse
+// `colorForType`/`renderGraphLegend` for consistent per-type coloring.
+
+// A fixed, cycling palette (rather than randomized colors) keeps a given entity_type's color
+// stable across re-renders and matches the AI schema generator's existing "plain, deterministic
+// over clever" style in this file.
+const GRAPH_PALETTE = [
+  "#2a5cdb",
+  "#d1495b",
+  "#1a7f37",
+  "#e6a417",
+  "#8e44ad",
+  "#0e8388",
+  "#c2410c",
+  "#3f6212",
+  "#be185d",
+  "#0369a1",
+];
+
+function colorForType(typeName, typeOrder) {
+  const idx = typeOrder.indexOf(typeName);
+  return GRAPH_PALETTE[(idx < 0 ? 0 : idx) % GRAPH_PALETTE.length];
+}
+
+function renderGraphLegend(typeNames) {
+  if (typeNames.length === 0) {
+    return `<p class="hint">No types to show.</p>`;
+  }
+  return `
+    <div class="graph-legend">
+      ${typeNames
+        .map(
+          (name) => `
+            <span class="legend-item">
+              <span class="swatch" style="background:${colorForType(name, typeNames)}"></span>
+              ${esc(name)}
+            </span>`,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+// Picks the first `x-embed` field (falling back to any field) from an entity's data, for use as
+// a short node label alongside its entity_type -- mirrors how the server picks x-embed fields
+// for embeddings (see `services/embedding/sync`), but client-side and best-effort only.
+function firstEmbedFieldValue(entityType, data, schemaFieldsByType) {
+  const fields = schemaFieldsByType?.[entityType];
+  if (fields) {
+    const embedField = Object.keys(fields).find((f) => fields[f]["x-embed"]);
+    if (embedField && data && data[embedField] != null) {
+      return String(data[embedField]);
+    }
+  }
+  if (data && typeof data === "object") {
+    const firstKey = Object.keys(data)[0];
+    if (firstKey != null && data[firstKey] != null) {
+      return String(data[firstKey]);
+    }
+  }
+  return "";
+}
+
+// Builds a `field_name -> field_def` map for every entity_type across a set of active schemas,
+// used by `firstEmbedFieldValue` to find each type's x-embed field without re-fetching schemas
+// per node.
+function collectSchemaFields(activeSchemas) {
+  const byType = {};
+  for (const schema of activeSchemas) {
+    if (!schema) continue;
+    for (const [typeName, def] of Object.entries(schema.definition.entity_types || {})) {
+      byType[typeName] = def.fields || {};
+    }
+  }
+  return byType;
+}
+
+const GRAPH_LAYOUTS = [
+  { id: "cose", label: "Force-directed" },
+  { id: "breadthfirst", label: "Breadthfirst" },
+  { id: "circle", label: "Circle" },
+];
+
+function cytoscapeStylesheet() {
+  return [
+    {
+      selector: "node",
+      style: {
+        "background-color": "data(color)",
+        label: "data(label)",
+        color: "#fff",
+        "text-outline-width": 2,
+        "text-outline-color": "data(color)",
+        "font-size": "10px",
+        width: 32,
+        height: 32,
+      },
+    },
+    {
+      selector: "edge",
+      style: {
+        width: 2,
+        "line-color": "#999",
+        "target-arrow-color": "#999",
+        "target-arrow-shape": "triangle",
+        "curve-style": "bezier",
+        label: "data(label)",
+        "font-size": "9px",
+        color: "var(--fg)",
+        "text-background-color": "var(--bg)",
+        "text-background-opacity": 0.8,
+        "text-background-padding": "2px",
+      },
+    },
+    {
+      selector: "node:selected",
+      style: {
+        "border-width": 3,
+        "border-color": "#000",
+      },
+    },
+    {
+      selector: "edge:selected",
+      style: {
+        "line-color": "#000",
+        "target-arrow-color": "#000",
+        width: 3,
+      },
+    },
+  ];
+}
+
+// Shared mount/wire-up for both graph routes. `elements` is a Cytoscape elements array (nodes +
+// edges already shaped with `data.color`/`data.label`); `handlers` supplies the route-specific
+// click behavior (`onNodeTap`, `onEdgeTap`) since #/graph navigates to an entity detail page and
+// #/schema-graph has no detail page to navigate to.
+function mountCytoscape(container, elements, { onNodeTap, onEdgeTap, layoutId = "cose" } = {}) {
+  const cy = cytoscape({
+    container,
+    elements,
+    style: cytoscapeStylesheet(),
+    layout: { name: layoutId, animate: false },
+    wheelSensitivity: 0.2,
+  });
+
+  if (onNodeTap) {
+    cy.on("tap", "node", (event) => onNodeTap(event.target.data()));
+  }
+  if (onEdgeTap) {
+    cy.on("tap", "edge", (event) => onEdgeTap(event.target.data()));
+  }
+
+  return cy;
+}
+
+function renderLayoutToolbar(activeLayoutId, onSelect) {
+  const toolbar = el(`
+    <div class="graph-toolbar">
+      <span class="hint">Layout:</span>
+      ${GRAPH_LAYOUTS.map(
+        (layout) =>
+          `<button type="button" class="secondary${layout.id === activeLayoutId ? " active" : ""}" data-layout="${layout.id}">${esc(layout.label)}</button>`,
+      ).join("")}
+    </div>
+  `);
+  toolbar.querySelectorAll("[data-layout]").forEach((button) => {
+    button.addEventListener("click", () => onSelect(button.getAttribute("data-layout")));
+  });
+  return toolbar;
+}
+
+// -- #/graph: the live knowledge graph (entities + relations) --
+
+async function renderGraphRoute(layoutId = "cose") {
+  const session = getSession();
+  if (!session) {
+    location.hash = "#/login";
+    return;
+  }
+
+  mount(el(`<p>Loading…</p>`));
+  try {
+    const [entities, relations, schemas] = await Promise.all([
+      listEntities(session.apiKey, { limit: 200 }),
+      listRelations(session.apiKey, { limit: 200 }),
+      listSchemas(session.apiKey).catch(() => []),
+    ]);
+
+    const activeSchemaNames = [...new Set(schemas.filter((s) => s.status === "active").map((s) => s.name))];
+    const activeSchemas = await Promise.all(
+      activeSchemaNames.map((n) => getActiveSchema(session.apiKey, n).catch(() => null)),
+    );
+    const schemaFieldsByType = collectSchemaFields(activeSchemas);
+
+    const typeNames = [...new Set(entities.map((e) => e.entity_type))].sort();
+
+    const entityById = new Map(entities.map((e) => [e.id, e]));
+    const relationById = new Map(relations.map((r) => [r.id, r]));
+
+    const nodes = entities.map((entity) => {
+      const embedValue = firstEmbedFieldValue(entity.entity_type, entity.data, schemaFieldsByType);
+      const label = embedValue ? `${entity.entity_type}: ${truncate(embedValue, 24)}` : entity.entity_type;
+      return {
+        data: {
+          id: entity.id,
+          label,
+          color: colorForType(entity.entity_type, typeNames),
+          kind: "entity",
+        },
+      };
+    });
+
+    // Relations whose source or target isn't in the fetched (limit=200) entity set are dropped
+    // rather than rendered as dangling edges -- both ends must be visible nodes.
+    const edges = relations
+      .filter((rel) => entityById.has(rel.source_id) && entityById.has(rel.target_id))
+      .map((rel) => ({
+        data: {
+          id: rel.id,
+          source: rel.source_id,
+          target: rel.target_id,
+          label: rel.relation_type,
+          kind: "relation",
+        },
+      }));
+
+    const view = el(`
+      <div>
+        <div class="top-bar">
+          <h1>Knowledge Graph</h1>
+          <button class="secondary" id="logout-button">Sign out</button>
+        </div>
+        <p><a href="#/dashboard">&larr; Back</a></p>
+        <p class="hint">${entities.length} entities &middot; ${edges.length} relations shown (fetched up to 200 of each). Drag to reposition, scroll to zoom, click a node or edge for details.</p>
+
+        <div id="layout-toolbar-slot"></div>
+        <div id="graph-legend-slot"></div>
+        <div class="graph-container" id="graph-canvas"></div>
+        <div class="graph-sidebar" id="graph-details" hidden></div>
+      </div>
+    `);
+
+    view.querySelector("#logout-button").addEventListener("click", () => {
+      clearSession();
+      location.hash = "#/login";
+    });
+
+    view.querySelector("#layout-toolbar-slot").replaceWith(
+      renderLayoutToolbar(layoutId, (id) => renderGraphRoute(id)),
+    );
+    view.querySelector("#graph-legend-slot").outerHTML = renderGraphLegend(typeNames);
+
+    mount(view);
+
+    const detailsPanel = view.querySelector("#graph-details");
+    const showDetails = (html) => {
+      detailsPanel.innerHTML = html;
+      detailsPanel.hidden = false;
+    };
+
+    mountCytoscape(view.querySelector("#graph-canvas"), [...nodes, ...edges], {
+      layoutId,
+      onNodeTap: (data) => {
+        location.hash = `#/entities/${data.id}`;
+      },
+      onEdgeTap: (data) => {
+        const rel = relationById.get(data.id);
+        if (!rel) return;
+        const source = entityById.get(rel.source_id);
+        const target = entityById.get(rel.target_id);
+        showDetails(`
+          <h3>${esc(rel.relation_type)}</h3>
+          <dl>
+            <dt>Source</dt><dd><a href="#/entities/${rel.source_id}">${esc(source ? source.entity_type : rel.source_id)}</a></dd>
+            <dt>Target</dt><dd><a href="#/entities/${rel.target_id}">${esc(target ? target.entity_type : rel.target_id)}</a></dd>
+            <dt>Created</dt><dd>${new Date(rel.created_at).toLocaleString()}</dd>
+          </dl>
+          ${Object.keys(rel.properties || {}).length > 0 ? `<pre>${esc(JSON.stringify(rel.properties, null, 2))}</pre>` : ""}
+        `);
+      },
+    });
+  } catch (err) {
+    mount(el(`<p class="error">${esc(err.message)}</p><p><a href="#/dashboard">&larr; Back</a></p>`));
+  }
+}
+
+// -- #/schema-graph: read-only visual overview of the active schema(s) --
+// entity_types become nodes, relation_types become directed edges between them. Unlike
+// #/graph, node/edge taps only show a details panel (there's no per-type or per-relation-type
+// detail page to navigate to).
+
+async function renderSchemaGraphRoute(layoutId = "cose") {
+  const session = getSession();
+  if (!session) {
+    location.hash = "#/login";
+    return;
+  }
+
+  mount(el(`<p>Loading…</p>`));
+  try {
+    const schemas = await listSchemas(session.apiKey);
+    const activeSchemaNames = [...new Set(schemas.filter((s) => s.status === "active").map((s) => s.name))];
+    const activeSchemas = (
+      await Promise.all(activeSchemaNames.map((n) => getActiveSchema(session.apiKey, n).catch(() => null)))
+    ).filter(Boolean);
+
+    const entityTypeNames = [
+      ...new Set(activeSchemas.flatMap((schema) => Object.keys(schema.definition.entity_types || {}))),
+    ].sort();
+
+    const entityTypeDefs = {};
+    for (const schema of activeSchemas) {
+      for (const [name, def] of Object.entries(schema.definition.entity_types || {})) {
+        entityTypeDefs[name] = def;
+      }
+    }
+
+    const relationTypeDefs = {};
+    for (const schema of activeSchemas) {
+      for (const [name, def] of Object.entries(schema.definition.relation_types || {})) {
+        relationTypeDefs[name] = def;
+      }
+    }
+
+    const nodes = entityTypeNames.map((name) => ({
+      data: {
+        id: `type:${name}`,
+        label: name,
+        color: colorForType(name, entityTypeNames),
+        kind: "entity_type",
+      },
+    }));
+
+    // Only relation_types whose source/target are both known entity_types get an edge -- a
+    // relation_type referencing a type outside the fetched active schemas is skipped rather
+    // than drawn as a dangling edge, same policy as #/graph.
+    const edges = Object.entries(relationTypeDefs)
+      .filter(
+        ([, def]) => entityTypeNames.includes(def.source) && entityTypeNames.includes(def.target),
+      )
+      .map(([name, def]) => ({
+        data: {
+          id: `rel:${name}`,
+          source: `type:${def.source}`,
+          target: `type:${def.target}`,
+          label: name,
+          kind: "relation_type",
+        },
+      }));
+
+    const view = el(`
+      <div>
+        <div class="top-bar">
+          <h1>Schema Graph</h1>
+          <button class="secondary" id="logout-button">Sign out</button>
+        </div>
+        <p><a href="#/dashboard">&larr; Back</a></p>
+        <p class="hint">Visual overview of the active schema's entity_types (nodes) and relation_types (directed edges). Read-only -- edit schemas via the REST API or MCP (see <a href="/docs">/docs</a>).</p>
+
+        <div id="layout-toolbar-slot"></div>
+        <div id="graph-legend-slot"></div>
+        <div class="graph-container" id="graph-canvas"></div>
+        <div class="graph-sidebar" id="graph-details" hidden></div>
+      </div>
+    `);
+
+    view.querySelector("#logout-button").addEventListener("click", () => {
+      clearSession();
+      location.hash = "#/login";
+    });
+
+    view.querySelector("#layout-toolbar-slot").replaceWith(
+      renderLayoutToolbar(layoutId, (id) => renderSchemaGraphRoute(id)),
+    );
+    view.querySelector("#graph-legend-slot").outerHTML = renderGraphLegend(entityTypeNames);
+
+    mount(view);
+
+    const detailsPanel = view.querySelector("#graph-details");
+    const showDetails = (html) => {
+      detailsPanel.innerHTML = html;
+      detailsPanel.hidden = false;
+    };
+
+    mountCytoscape(view.querySelector("#graph-canvas"), [...nodes, ...edges], {
+      layoutId,
+      onNodeTap: (data) => {
+        const typeName = data.id.replace(/^type:/, "");
+        const def = entityTypeDefs[typeName];
+        const fields = Object.keys(def?.fields || {}).sort();
+        showDetails(`
+          <h3>${esc(typeName)}</h3>
+          ${def?.description ? `<p class="hint">${esc(def.description)}</p>` : ""}
+          <ul>
+            ${
+              fields
+                .map((f) => {
+                  const field = def.fields[f];
+                  return `<li><code>${esc(f)}</code>: ${esc(field.type)}${field.required ? " (required)" : ""}${field["x-embed"] ? " (x-embed)" : ""}</li>`;
+                })
+                .join("") || `<li class="hint">no fields</li>`
+            }
+          </ul>
+        `);
+      },
+      onEdgeTap: (data) => {
+        const relName = data.id.replace(/^rel:/, "");
+        const def = relationTypeDefs[relName];
+        showDetails(`
+          <h3>${esc(relName)}</h3>
+          ${def?.description ? `<p class="hint">${esc(def.description)}</p>` : ""}
+          <dl>
+            <dt>Source type</dt><dd>${esc(def.source)}</dd>
+            <dt>Target type</dt><dd>${esc(def.target)}</dd>
+          </dl>
+        `);
+      },
+    });
+  } catch (err) {
+    mount(el(`<p class="error">${esc(err.message)}</p><p><a href="#/dashboard">&larr; Back</a></p>`));
+  }
+}
+
 function renderWorkspaceDetail(detail) {
   const view = el(`
     <div>
@@ -1476,6 +1921,16 @@ function renderDashboardShell(overview, addMemberError) {
         <button class="secondary" id="logout-button">Sign out</button>
       </div>
       <p class="hint">Tenant ${esc(overview.tenant_id)} &middot; plan: ${esc(overview.plan ?? "self-hosted / unmetered")}</p>
+
+      <p>
+        <a href="#/schemas">Browse schemas</a>
+        &middot;
+        <a href="#/entities">Browse entities</a>
+        &middot;
+        <a href="#/graph">Knowledge Graph</a>
+        &middot;
+        <a href="#/schema-graph">Schema Graph</a>
+      </p>
 
       <div class="stat-grid">
         <div class="stat"><div class="value">${overview.usage.workspace_count}</div><div class="label">workspaces${overview.max_workspaces != null ? ` / ${overview.max_workspaces}` : ""}</div></div>
@@ -1586,6 +2041,16 @@ async function router() {
   const entityMatch = hash.match(/^#\/entities\/([0-9a-f-]+)$/i);
   if (entityMatch) {
     renderEntityDetailRoute(entityMatch[1]);
+    return;
+  }
+
+  if (hash === "#/graph") {
+    renderGraphRoute();
+    return;
+  }
+
+  if (hash === "#/schema-graph") {
+    renderSchemaGraphRoute();
     return;
   }
 

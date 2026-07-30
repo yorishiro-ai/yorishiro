@@ -1,4 +1,4 @@
-.PHONY: build init up down restart logs shell test fmt fmt-check clippy admin clean
+.PHONY: build init up down restart logs shell test fmt fmt-check clippy admin clean clean-rust clean-docker clean-all
 
 # Build the app (production) and dev (toolchain) images.
 build:
@@ -43,3 +43,16 @@ admin:
 # Stops containers and deletes the pgdata volume too (fresh database on next `make init`).
 clean:
 	docker compose down -v
+
+# Remove host-side Rust build artifacts (target/). Next build will be a full rebuild.
+clean-rust:
+	cargo clean
+
+# Prune unused Docker images, build cache, and dangling volumes.
+clean-docker:
+	docker image prune -f
+	docker builder prune -f
+	docker volume prune -f
+
+# Full cleanup: Rust artifacts + Docker resources + pgdata.
+clean-all: clean clean-rust clean-docker
