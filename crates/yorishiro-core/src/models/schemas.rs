@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -7,7 +7,7 @@ use crate::metaschema::MetaSchemaDefinition;
 
 /// Represents a row in the `schemas` table. `definition` is JSONB in the DB, but the
 /// application layer always treats it as a parsed `MetaSchemaDefinition`.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SchemaRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,

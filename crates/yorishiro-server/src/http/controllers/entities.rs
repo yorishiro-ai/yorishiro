@@ -7,7 +7,7 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 use yorishiro_core::repositories::entities::{self, EntityRecord};
-use yorishiro_core::repositories::recall::{self, RecallContext};
+use yorishiro_core::repositories::recall::{self, RecallContext, RecallQuery};
 
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, ReadScope, WriteScope};
@@ -166,11 +166,13 @@ pub async fn list_entities(
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct EntityContextParams {
-    /// Maximum number of relations/neighbors to include (defaults to 20 if omitted).
+    /// Maximum number of relations/neighbors to include per hop (defaults to 20 if omitted).
     pub limit: Option<i64>,
     /// When true, neighbor entities include every field instead of only `x-embed` fields
     /// (defaults to false).
     pub full: Option<bool>,
+    /// How many hops to traverse outward from the entity (defaults to 1, max 3).
+    pub depth: Option<i64>,
 }
 
 #[utoipa::path(
@@ -178,7 +180,7 @@ pub struct EntityContextParams {
     path = "/api/entities/{id}/context",
     params(("id" = Uuid, Path, description = "Entity ID"), EntityContextParams),
     responses(
-        (status = 200, description = "Entity, its relations, and connected neighbors", body = RecallContext),
+        (status = 200, description = "Entity, its relations, and connected neighbors (up to `depth` hops away)", body = RecallContext),
         (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
         (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
         (status = 404, description = "Entity not found", body = crate::error::ApiErrorBody),
@@ -191,8 +193,11 @@ pub async fn get_entity_context(
     Query(params): Query<EntityContextParams>,
 ) -> Result<Json<RecallContext>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let limit = params.limit.unwrap_or(recall::DEFAULT_RECALL_LIMIT);
-    let full = params.full.unwrap_or(false);
-    let context = recall::recall_context(authorized.conn(), workspace_id, id, limit, full).await?;
+    let query = RecallQuery {
+        limit: params.limit.unwrap_or(recall::DEFAULT_RECALL_LIMIT),
+        full: params.full.unwrap_or(false),
+        depth: params.depth.unwrap_or(recall::DEFAULT_RECALL_DEPTH),
+    };
+    let context = recall::recall_context(authorized.conn(), workspace_id, id, query).await?;
     Ok(Json(context))
 }

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -7,8 +7,10 @@ use uuid::Uuid;
 /// A row in the `entities` table. `embedding` is managed separately by the
 /// search/embedding pipeline, so this module's CRUD doesn't touch it. `created_by`/
 /// `updated_by` are `None` for entities touched by an unattributed (service/automation) API
-/// key, since there's no user to record.
-#[derive(Debug, Clone, Serialize, sqlx::FromRow, ToSchema)]
+/// key, since there's no user to record. `Deserialize` is derived so this can be read back
+/// from a JSONL export (see `repositories::import`); import treats `id`, `schema_version`,
+/// `created_at`/`updated_at` as informational only (a fresh row is always inserted).
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 pub struct EntityRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
