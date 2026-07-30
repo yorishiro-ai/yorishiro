@@ -7,6 +7,7 @@ version = "0.12.0"
 edition = "2024"
 license = "BUSL-1.1"
 repository = "https://github.com/yotsunagi/yorishiro"
+description = "An MCP-native, multi-tenant knowledge store with user-defined schemas"
 
 [workspace.dependencies]
 anyhow = "1"
