@@ -33,8 +33,8 @@ pub(crate) mod max_tenants_env_lock {
     }
 }
 
-/// Starts a graceful shutdown on either SIGTERM (the standard stop signal from container
-/// orchestrators) or Ctrl-C.
+/// Starts a graceful shutdown on Ctrl-C (all platforms) or SIGTERM (Unix only,
+/// the standard stop signal from container orchestrators).
 pub async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -42,12 +42,16 @@ pub async fn shutdown_signal() {
             .expect("failed to install ctrl-c handler");
     };
 
+    #[cfg(unix)]
     let terminate = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("failed to install SIGTERM handler")
             .recv()
             .await;
     };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
     tokio::select! {
         _ = ctrl_c => {},
