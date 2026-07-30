@@ -37,7 +37,7 @@ jobs:
           fi
       - name: Create issue for vulnerabilities
         if: steps.audit.outputs.has_vulns == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -51,7 +51,7 @@ jobs:
             });
       - name: Create issue for outdated deps
         if: steps.outdated.outputs.has_outdated == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
