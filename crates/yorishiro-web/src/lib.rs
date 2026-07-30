@@ -45,14 +45,21 @@ fn respond(path: &str, bytes: Vec<u8>) -> Response {
 fn serve_embedded(path: &str) -> Response {
     match Assets::get(path) {
         Some(file) => respond(path, file.data.into_owned()),
-        None => StatusCode::NOT_FOUND.into_response(),
+        // SPA fallback: unknown paths serve index.html so the client-side router handles them.
+        None => match Assets::get("index.html") {
+            Some(file) => respond("index.html", file.data.into_owned()),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
     }
 }
 
 async fn serve_from_disk(dir: &Path, path: &str) -> Response {
     match tokio::fs::read(dir.join(path)).await {
         Ok(bytes) => respond(path, bytes),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => match tokio::fs::read(dir.join("index.html")).await {
+            Ok(bytes) => respond("index.html", bytes),
+            Err(_) => StatusCode::NOT_FOUND.into_response(),
+        },
     }
 }
 
