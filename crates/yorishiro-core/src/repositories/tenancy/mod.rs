@@ -6,12 +6,14 @@
 
 mod invites;
 mod memberships;
+mod template_library;
 mod tenants;
 mod users;
 mod workspaces;
 
 pub use invites::*;
 pub use memberships::*;
+pub use template_library::*;
 pub use tenants::*;
 pub use users::*;
 pub use workspaces::*;
