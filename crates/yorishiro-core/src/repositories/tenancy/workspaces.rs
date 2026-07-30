@@ -1,6 +1,6 @@
 use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use super::get_tenant;
@@ -151,6 +151,30 @@ pub async fn get_workspace(
         .ok_or_else(|| {
             YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
         })
+}
+
+/// Resolves the `tenant_id` a workspace belongs to. Schema repository functions (and other
+/// tenant-scoped queries) take `tenant_id` rather than `workspace_id` since the tenant-scoped
+/// schema refactor, so callers that only have a `workspace_id` in hand (e.g. an entity/relation
+/// repository function) use this to bridge the two. Takes a `PgConnection` (rather than the
+/// `PgPool` the rest of this module uses) so it can be called from within an existing
+/// transaction/connection instead of checking out a second one from the pool.
+pub async fn resolve_tenant_id(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    let row: Option<(Uuid,)> =
+        sqlx::query_as("SELECT tenant_id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .internal()?;
+    match row {
+        Some((tenant_id,)) => Ok(tenant_id),
+        None => Err(YorishiroError::not_found(format!(
+            "workspace '{workspace_id}' was not found"
+        ))),
+    }
 }
 
 /// Deletes a workspace and everything under it. `identity.workspaces`'s foreign keys from

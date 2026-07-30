@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::repositories::entities;
 use crate::repositories::schemas;
+use crate::repositories::tenancy::resolve_tenant_id;
 
 pub use crate::models::relations::*;
 
@@ -47,7 +48,8 @@ async fn validate_relation_type(
     target: &entities::EntityRecord,
     relation_type: &str,
 ) -> Result<(), YorishiroError> {
-    let schema = schemas::get_by_id(conn, workspace_id, source.schema_id).await?;
+    let tenant_id = resolve_tenant_id(conn, workspace_id).await?;
+    let schema = schemas::get_by_id(conn, tenant_id, source.schema_id).await?;
 
     let relation_def = schema
         .definition
