@@ -1,0 +1,30 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+categories:
+  - title: '🚀 Features'
+    labels: ['enhancement']
+  - title: '🐛 Bug Fixes'
+    labels: ['bug']
+  - title: '🔒 Security'
+    labels: ['security']
+  - title: '📦 Dependencies'
+    labels: ['dependencies']
+  - title: '🏗 Infrastructure'
+    labels: ['ci']
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+version-resolver:
+  major:
+    labels: ['breaking']
+  minor:
+    labels: ['enhancement']
+  patch:
+    labels: ['bug', 'dependencies', 'ci']
+  default: patch
+template: |
+  ## Changes
+
+  $CHANGES
+
+  ## Contributors
+
+  $CONTRIBUTORS
