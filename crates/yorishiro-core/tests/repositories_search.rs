@@ -358,7 +358,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_a_tenant, tenant_a)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn_a, tenant_a, task_schema_with_embed())
+    schemas::create_schema(&mut conn_a, tenant_a_tenant, task_schema_with_embed())
         .await
         .unwrap();
     seed_embedded_entity(
