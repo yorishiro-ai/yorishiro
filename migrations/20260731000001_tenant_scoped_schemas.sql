@@ -32,7 +32,7 @@ UPDATE identity.workspaces w
  WHERE w.id = sub.workspace_id;
 
 -- Step 3: Drop old workspace_id from schemas, replace unique constraint.
-DROP INDEX IF EXISTS content.schemas_workspace_id_name_version_key;
+-- The UNIQUE constraint owns its backing index, so dropping the constraint removes both.
 ALTER TABLE content.schemas DROP CONSTRAINT IF EXISTS schemas_workspace_id_name_version_key;
 ALTER TABLE content.schemas DROP COLUMN workspace_id;
 ALTER TABLE content.schemas ADD CONSTRAINT schemas_tenant_name_version_key UNIQUE (tenant_id, name, version);
