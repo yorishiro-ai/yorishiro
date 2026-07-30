@@ -5,8 +5,8 @@ use axum::http::{Request, StatusCode};
 use axum::routing::get;
 use sqlx::PgPool;
 use tower::ServiceExt;
-use yorishiro_core::services::embedding::EmbeddingProvider;
 use yorishiro_core::YorishiroError;
+use yorishiro_core::services::embedding::EmbeddingProvider;
 
 use super::*;
 use crate::state::AppState;
