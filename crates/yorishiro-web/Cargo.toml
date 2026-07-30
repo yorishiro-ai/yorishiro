@@ -3,6 +3,9 @@ name = "yorishiro-web"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Embedded web UI for Yorishiro, an MCP-native knowledge store"
+repository.workspace = true
+readme = "README.md"
 
 [dependencies]
 axum.workspace = true
