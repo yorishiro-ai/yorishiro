@@ -1,0 +1,33 @@
+name: Bug Report
+description: Report a bug in Yorishiro
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "v0.12.1"
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment type
+      options:
+        - Docker
+        - Binary
+        - Source build
