@@ -1,5 +1,6 @@
-use super::*;
 use std::sync::Mutex;
+
+use yorishiro_server::config::load_and_apply_env_overrides;
 
 // Env vars are process-wide state; serialize tests through this lock rather than racing
 // each other (same pattern as `yorishiro_core::repositories::tenancy`'s env tests).
