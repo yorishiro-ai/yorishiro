@@ -1,25 +1,75 @@
 {
+  "id": "task-management",
   "name": "task-management",
-  "description": "Tasks grouped into projects, a starting point for project-tracking schemas.",
+  "description": "Personal tasks and projects with deadlines and dependencies",
   "entity_types": {
     "project": {
-      "description": "A project that groups related tasks.",
+      "description": "A project grouping related tasks",
       "fields": {
-        "title": { "type": "string", "required": true, "x-embed": true },
-        "description": { "type": "string", "x-embed": true }
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Project name",
+          "x-embed": true,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "on_hold", "done"],
+          "required": true,
+          "description": "Current project status"
+        },
+        "due": {
+          "type": "string",
+          "format": "date",
+          "description": "Target completion date"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this project is about",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        }
       }
     },
     "task": {
-      "description": "A unit of work belonging to a project.",
+      "description": "A single work item",
       "fields": {
-        "title": { "type": "string", "required": true, "x-embed": true },
-        "notes": { "type": "string", "x-embed": true },
-        "status": {
+        "title": {
           "type": "string",
-          "enum": ["todo", "in_progress", "done"],
-          "default": "todo"
+          "required": true,
+          "description": "What needs to be done",
+          "x-embed": true,
+          "maxLength": 200
         },
-        "priority": { "type": "integer", "minimum": 1, "maximum": 5 }
+        "note": {
+          "type": "string",
+          "description": "Additional details or context",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "done": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the task is completed"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "urgent"],
+          "default": "medium",
+          "description": "Task priority level"
+        },
+        "due": {
+          "type": "string",
+          "format": "date",
+          "description": "Deadline for the task"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Labels for categorization",
+          "uniqueItems": true
+        }
       }
     }
   },
@@ -27,7 +77,17 @@
     "belongs_to": {
       "source": "task",
       "target": "project",
-      "description": "The project a task belongs to."
+      "description": "Task belongs to this project"
+    },
+    "depends_on": {
+      "source": "task",
+      "target": "task",
+      "description": "This task depends on another task being completed first"
+    },
+    "blocks": {
+      "source": "task",
+      "target": "task",
+      "description": "This task blocks another task from starting"
     }
   }
 }
