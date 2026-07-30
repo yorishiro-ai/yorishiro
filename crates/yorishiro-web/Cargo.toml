@@ -6,7 +6,6 @@ license.workspace = true
 description = "Embedded web UI for Yorishiro, an MCP-native knowledge store"
 repository.workspace = true
 readme = "README.md"
-exclude = ["src/**/tests/", "src/**/tests.rs"]
 
 [dependencies]
 axum.workspace = true

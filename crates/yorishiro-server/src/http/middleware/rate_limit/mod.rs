@@ -45,7 +45,11 @@ impl RateLimiter {
     /// Returns `true` if this call is within the limit, `false` if `key` has exhausted its
     /// quota for the current window. The window resets lazily on the first call after it
     /// elapses, rather than on a background timer.
-    fn allow(&self, key: &str) -> bool {
+    ///
+    /// `pub` (rather than private) solely so the crate-root `tests/` integration tests --
+    /// which only see this crate's public API -- can exercise the bucket logic directly
+    /// instead of only through `enforce`.
+    pub fn allow(&self, key: &str) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
 
@@ -86,6 +90,3 @@ pub async fn enforce(
 
     next.run(req).await
 }
-
-#[cfg(test)]
-mod tests;

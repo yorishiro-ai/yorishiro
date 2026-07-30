@@ -70,7 +70,12 @@ fn error_field_pointer(err: &jsonschema::ValidationError<'_>) -> String {
 /// Validates `data` against the JSON Schema generated from the entity_type definition.
 /// Reuses `entity_type_to_json_schema`'s schema as-is so validation logic isn't duplicated
 /// between entities and the MCP inputSchema.
-fn validate_data(
+///
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
+/// it directly; `#[doc(hidden)]` keeps it out of the public API docs since it isn't meant for
+/// external callers.
+#[doc(hidden)]
+pub fn validate_data(
     entity_type_def: &metaschema::EntityTypeDef,
     data: &Value,
 ) -> Result<(), YorishiroError> {
@@ -347,6 +352,3 @@ pub async fn export_all(
         .await
         .internal()
 }
-
-#[cfg(test)]
-mod tests;

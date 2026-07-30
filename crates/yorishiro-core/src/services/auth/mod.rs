@@ -11,11 +11,11 @@ pub use authenticate::*;
 pub use authorize::*;
 pub use keys::*;
 
-#[cfg(test)]
-mod tests;
-
+/// `pub` (rather than `pub(super)`) only so the crate-root integration test in `tests/` can
+/// build its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
+#[doc(hidden)]
 #[derive(Iden)]
-pub(super) enum ApiKeys {
+pub enum ApiKeys {
     Table,
     Id,
     WorkspaceId,

@@ -11,8 +11,11 @@ use crate::models::entities::EntityRecord;
 use crate::repositories::schemas;
 use crate::services::embedding::EmbeddingProvider;
 
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can build
+/// its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
+#[doc(hidden)]
 #[derive(Iden)]
-enum Entities {
+pub enum Entities {
     Table,
     Id,
     WorkspaceId,
@@ -25,7 +28,11 @@ enum Entities {
 /// context that helps the embedding model, compared to concatenating raw
 /// values alone. Returns `None` when there are no such fields or all are
 /// absent, so callers can skip the embedding API call entirely.
-fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> Option<String> {
+///
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
+/// it directly; `#[doc(hidden)]` keeps it out of the public API docs.
+#[doc(hidden)]
+pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> Option<String> {
     let parts: Vec<String> = entity_type_def
         .fields
         .iter()
@@ -137,6 +144,3 @@ pub async fn sync_embedding_for_record(
     )
     .await
 }
-
-#[cfg(test)]
-mod tests;
