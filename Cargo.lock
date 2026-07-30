@@ -4595,7 +4595,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro-core"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4624,7 +4624,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro-server"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4658,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro-web"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "axum",
  "mime_guess",
