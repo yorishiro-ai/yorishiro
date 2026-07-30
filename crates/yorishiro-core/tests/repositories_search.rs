@@ -72,6 +72,7 @@ async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
 
 async fn seed_embedded_entity(
     conn: &mut PgConnection,
+    tenant_id: Uuid,
     workspace_id: Uuid,
     entity_type: &str,
     title: &str,
@@ -90,7 +91,7 @@ async fn seed_embedded_entity(
     .await
     .unwrap();
 
-    let schema = schemas::get_by_id(conn, workspace_id, entity.schema_id)
+    let schema = schemas::get_by_id(conn, tenant_id, entity.schema_id)
         .await
         .unwrap();
     let entity_type_def = &schema.definition.entity_types[entity_type];
@@ -126,6 +127,7 @@ async fn returns_closest_entities_first(pool: PgPool) {
 
     let apple = seed_embedded_entity(
         &mut conn,
+        workspace_id_tenant,
         workspace_id,
         "task",
         "apple pie recipe",
@@ -134,6 +136,7 @@ async fn returns_closest_entities_first(pool: PgPool) {
     .await;
     let car = seed_embedded_entity(
         &mut conn,
+        workspace_id_tenant,
         workspace_id,
         "task",
         "car engine repair",
@@ -173,6 +176,7 @@ async fn filters_by_entity_type(pool: PgPool) {
     // project has a vector closer to the query, but we filter to entity_type=task.
     let task = seed_embedded_entity(
         &mut conn,
+        workspace_id_tenant,
         workspace_id,
         "task",
         "distant task",
@@ -181,6 +185,7 @@ async fn filters_by_entity_type(pool: PgPool) {
     .await;
     seed_embedded_entity(
         &mut conn,
+        workspace_id_tenant,
         workspace_id,
         "project",
         "close project",
@@ -303,6 +308,7 @@ async fn filters_by_data_field_value(pool: PgPool) {
 
     let active = seed_embedded_entity(
         &mut conn,
+        workspace_id_tenant,
         workspace_id,
         "task",
         "active one",
@@ -318,8 +324,15 @@ async fn filters_by_data_field_value(pool: PgPool) {
     )
     .await
     .unwrap();
-    let done =
-        seed_embedded_entity(&mut conn, workspace_id, "task", "done one", unit_vector(0)).await;
+    let done = seed_embedded_entity(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        "task",
+        "done one",
+        unit_vector(0),
+    )
+    .await;
     entities::update(
         &mut conn,
         workspace_id,
@@ -363,6 +376,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .unwrap();
     seed_embedded_entity(
         &mut conn_a,
+        tenant_a_tenant,
         tenant_a,
         "task",
         "tenant a task",

@@ -74,10 +74,12 @@ async fn creating_new_version_archives_previous_and_reports_breaking_diff(pool: 
     assert_eq!(v2.version, 2);
     assert!(diff.is_breaking, "reasons: {:?}", diff.reasons);
 
-    let archived = get_by_id(&mut conn, workspace_id, v1.id).await.unwrap();
+    let archived = get_by_id(&mut conn, workspace_id_tenant, v1.id)
+        .await
+        .unwrap();
     assert_eq!(archived.status, "archived");
 
-    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+    let active = get_active_schema(&mut conn, workspace_id_tenant, "task-management")
         .await
         .unwrap();
     assert_eq!(active.id, v2.id);
@@ -92,7 +94,7 @@ async fn get_active_schema_reports_not_found_when_absent(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = get_active_schema(&mut conn, workspace_id, "does-not-exist")
+    let err = get_active_schema(&mut conn, workspace_id_tenant, "does-not-exist")
         .await
         .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
