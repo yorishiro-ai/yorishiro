@@ -155,7 +155,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_a_tenant, tenant_a)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn_a, tenant_a, task_schema())
+    schemas::create_schema(&mut conn_a, tenant_a_tenant, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -276,7 +276,7 @@ async fn list_filters_by_entity_type(pool: PgPool) {
         .unwrap();
     schemas::create_schema(
         &mut conn,
-        workspace_id,
+        workspace_id_tenant,
         serde_json::from_value(json!({
             "name": "task-management",
             "entity_types": {
