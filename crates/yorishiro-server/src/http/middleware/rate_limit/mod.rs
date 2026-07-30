@@ -87,6 +87,5 @@ pub async fn enforce(
     next.run(req).await
 }
 
-
 #[cfg(test)]
 mod tests;
