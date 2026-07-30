@@ -1000,10 +1000,47 @@ function renderWorkspaceDetail(detail) {
         <dt>Created</dt><dd>${new Date(detail.created_at).toLocaleString()}</dd>
       </dl>
 
+      <h2>Apply a schema template</h2>
+      <p class="hint">Register a built-in template as a schema in this workspace.</p>
+      <form id="apply-template-form">
+        <label>Template
+          <select name="templateId" required>
+            <option value="">Select a template…</option>
+            <option value="general-notes">general-notes — Notes with tags and links</option>
+            <option value="task-management">task-management — Tasks and projects</option>
+            <option value="worldbuilding">worldbuilding — Characters, locations, factions</option>
+            <option value="software-adr">software-adr — Architecture decisions and services</option>
+          </select>
+        </label>
+        <button type="submit">Apply template</button>
+      </form>
+      <p class="error" id="template-error" hidden></p>
+      <p class="hint" id="template-success" hidden></p>
+
       <button class="danger" id="delete-workspace-button">Delete workspace</button>
       <p class="error" id="delete-error" hidden></p>
     </div>
   `);
+
+  view.querySelector("#apply-template-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const templateId = form.get("templateId");
+    if (!templateId) return;
+    const session = getSession();
+    const errorEl = view.querySelector("#template-error");
+    const successEl = view.querySelector("#template-success");
+    errorEl.hidden = true;
+    successEl.hidden = true;
+    try {
+      await createSchemaFromTemplate(session.apiKey, templateId);
+      successEl.textContent = `Template "${templateId}" applied successfully.`;
+      successEl.hidden = false;
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+    }
+  });
 
   view.querySelector("#logout-button").addEventListener("click", () => {
     clearSession();
