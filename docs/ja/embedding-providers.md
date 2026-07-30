@@ -2,11 +2,11 @@
 
 [English](../embedding-providers.md) | **日本語**
 
-`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます(次元は768固定)。埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
+`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます。次元数は`YSR_EMBEDDING_DIMENSIONS`(既定768)で設定し、使用するモデルの出力次元と一致させる必要があります。埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
 
 ## `local` — ローカルONNXモデル(デフォルト)
 
-外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。768次元のBERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。
+外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。BERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。デフォルトのモデル(all-mpnet-base-v2)は768次元のベクトルを出力します。
 
 ```console
 $ mkdir -p models

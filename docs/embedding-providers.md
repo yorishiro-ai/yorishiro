@@ -2,11 +2,11 @@
 
 **English** | [日本語](ja/embedding-providers.md)
 
-Embedding generation for `x-embed` fields is switched with `YSR_EMBEDDING_PROVIDER` (dimensions are fixed at 768). Embeddings are generated asynchronously in the background after an entity is written, so write API latency is unaffected.
+Embedding generation for `x-embed` fields is switched with `YSR_EMBEDDING_PROVIDER`. The dimension count is configurable via `YSR_EMBEDDING_DIMENSIONS` (default 768) and must match the model's output. Embeddings are generated asynchronously in the background after an entity is written, so write API latency is unaffected.
 
 ## `local` — Local ONNX model (default)
 
-Requires no external service or API key — just the model files below — so it's the default and what a self-hosted deployment normally wants. Requires a 768-dimensional BERT-family ONNX export at `YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`, which already default to `models/model.onnx`/`models/tokenizer.json`:
+Requires no external service or API key — just the model files below — so it's the default and what a self-hosted deployment normally wants. Requires a BERT-family ONNX export at `YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`, which already default to `models/model.onnx`/`models/tokenizer.json`. The default model (all-mpnet-base-v2) outputs 768-dimensional vectors:
 
 ```console
 $ mkdir -p models
