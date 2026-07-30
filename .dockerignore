@@ -4,3 +4,7 @@ target
 models
 .git
 .env
+**/tests/
+**/*_test.rs
+test/
+.claude
