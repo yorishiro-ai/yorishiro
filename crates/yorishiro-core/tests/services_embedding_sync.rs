@@ -117,7 +117,7 @@ async fn writes_embedding_for_x_embed_field(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -134,7 +134,7 @@ async fn writes_embedding_for_x_embed_field(pool: PgPool) {
     .await
     .unwrap();
 
-    let schema = schemas::get_by_id(&mut conn, workspace_id, entity.schema_id)
+    let schema = schemas::get_by_id(&mut conn, workspace_id_tenant, entity.schema_id)
         .await
         .unwrap();
     let entity_type_def = &schema.definition.entity_types["task"];
@@ -166,7 +166,7 @@ async fn sync_for_record_resolves_schema_and_writes_embedding(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -202,7 +202,7 @@ async fn skips_embedding_when_no_x_embed_field_is_defined(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_without_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_without_embed())
         .await
         .unwrap();
 
@@ -219,7 +219,7 @@ async fn skips_embedding_when_no_x_embed_field_is_defined(pool: PgPool) {
     .await
     .unwrap();
 
-    let schema = schemas::get_by_id(&mut conn, workspace_id, entity.schema_id)
+    let schema = schemas::get_by_id(&mut conn, workspace_id_tenant, entity.schema_id)
         .await
         .unwrap();
     let entity_type_def = &schema.definition.entity_types["task"];
@@ -300,7 +300,7 @@ async fn propagates_provider_errors(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -317,7 +317,7 @@ async fn propagates_provider_errors(pool: PgPool) {
     .await
     .unwrap();
 
-    let schema = schemas::get_by_id(&mut conn, workspace_id, entity.schema_id)
+    let schema = schemas::get_by_id(&mut conn, workspace_id_tenant, entity.schema_id)
         .await
         .unwrap();
     let entity_type_def = &schema.definition.entity_types["task"];
@@ -345,7 +345,7 @@ async fn silently_succeeds_when_entity_no_longer_exists(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -362,7 +362,7 @@ async fn silently_succeeds_when_entity_no_longer_exists(pool: PgPool) {
     .await
     .unwrap();
 
-    let schema = schemas::get_by_id(&mut conn, workspace_id, entity.schema_id)
+    let schema = schemas::get_by_id(&mut conn, workspace_id_tenant, entity.schema_id)
         .await
         .unwrap();
     let entity_type_def = &schema.definition.entity_types["task"];

@@ -8,7 +8,7 @@ use yorishiro_server::test_support::*;
 #[sqlx::test(migrations = "../../migrations")]
 async fn signup_consumes_invite_and_creates_membership(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let (_invite, token) = tenancy::create_invite(
@@ -55,7 +55,7 @@ async fn signup_consumes_invite_and_creates_membership(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn signup_rejects_an_already_used_invite_token(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    tenancy::create_workspace(&pool, tenant.id, "main", None)
+    tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let (_invite, token) = tenancy::create_invite(
@@ -84,7 +84,7 @@ async fn signup_rejects_an_already_used_invite_token(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn login_issues_an_api_key_scoped_to_the_members_role(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let (_invite, token) = tenancy::create_invite(
@@ -143,7 +143,7 @@ async fn login_issues_an_api_key_scoped_to_the_members_role(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn login_rejects_an_incorrect_password(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     tenancy::create_user(&pool, "someone@example.com", "correct-horse", None)
@@ -170,7 +170,7 @@ async fn login_rejects_an_incorrect_password(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn login_resolves_the_workspace_automatically_when_the_account_has_exactly_one(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
     let (_invite, token) = tenancy::create_invite(
@@ -225,11 +225,11 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
     yorishiro_server::max_tenants_env_lock::set(Some("0"));
 
     let tenant_a = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    tenancy::create_workspace(&pool, tenant_a.id, "main", None)
+    tenancy::create_workspace(&pool, tenant_a.id, "main", None, None)
         .await
         .unwrap();
     let tenant_b = tenancy::create_tenant(&pool, "beta", None).await.unwrap();
-    tenancy::create_workspace(&pool, tenant_b.id, "main", None)
+    tenancy::create_workspace(&pool, tenant_b.id, "main", None, None)
         .await
         .unwrap();
 

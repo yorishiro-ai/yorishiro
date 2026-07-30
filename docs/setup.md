@@ -133,10 +133,10 @@ The admin CLI below remains available for anything the wizard doesn't cover: add
 
 Yorishiro's control plane is two-tiered:
 
-- A **tenant** is an organization/account. It can have `max_workspaces` set (a billing cap; `NULL`, the default, means unlimited, which is appropriate for self-hosted deployments). It can have any number of human **users** attached to it, each with a role (`owner` / `admin` / `member` / `viewer`) recorded in a membership. A user can belong to multiple tenants.
-- A **workspace** belongs to exactly one tenant and is the actual operational container. Schemas, entities, relations, and API keys all scope to a workspace, not directly to the tenant. A workspace can have `max_entities` set (also `NULL`/unlimited by default).
+- A **tenant** is an organization/account. It can have `max_workspaces` set (a billing cap; `NULL`, the default, means unlimited, which is appropriate for self-hosted deployments). It can have any number of human **users** attached to it, each with a role (`owner` / `admin` / `member` / `viewer`) recorded in a membership. A user can belong to multiple tenants. **Schemas** are owned at the tenant level — all workspaces under the same tenant share the same pool of schemas.
+- A **workspace** belongs to exactly one tenant and is the actual operational container. Entities, relations, and API keys all scope to a workspace. A workspace references one schema (via `schema_id`) and can have `max_entities` set (also `NULL`/unlimited by default).
 
-Splitting tenant from workspace lets one organization run several isolated projects (e.g. separate workspaces per environment or team) without provisioning a whole new tenant for each. It also lets several people share administrative access to the same tenant via memberships.
+Splitting tenant from workspace lets one organization run several isolated projects (e.g. separate workspaces per environment or team) without provisioning a whole new tenant for each. Schemas being tenant-level means a schema definition created for one workspace is automatically available to every other workspace under the same tenant. It also lets several people share administrative access to the same tenant via memberships.
 
 Tenant/workspace *creation* is only available through the admin CLI below, by whoever holds `DATABASE_URL`. Day-to-day *membership* management (inviting/adding/listing members) is available to tenant owners/admins over REST -- see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management).
 
@@ -175,7 +175,7 @@ Other admin commands:
 | Command | Description |
 |---|---|
 | `admin list-tenants` | List all tenants |
-| `admin create-workspace <tenant-id> <name> [--max-entities <n>]` | Create an additional workspace under a tenant |
+| `admin create-workspace <tenant-id> <name> [--schema-id <id>] [--max-entities <n>]` | Create an additional workspace under a tenant, optionally linking it to a schema |
 | `admin list-workspaces <tenant-id>` | List a tenant's workspaces |
 | `admin create-user <email> <password> [--display-name <name>]` | Create a human user account |
 | `admin add-member <tenant-id> <user-id> <role>` | Add (or change the role of) a user's membership in a tenant (`owner`/`admin`/`member`/`viewer`) |

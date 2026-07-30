@@ -116,7 +116,7 @@ pub async fn setup(
 
     let tenant = tenancy::create_tenant(&state.identity_pool, "default", None).await?;
     let workspace =
-        tenancy::create_workspace(&state.identity_pool, tenant.id, "default", None).await?;
+        tenancy::create_workspace(&state.identity_pool, tenant.id, "default", None, None).await?;
     let user = tenancy::create_user(
         &state.identity_pool,
         &body.email,

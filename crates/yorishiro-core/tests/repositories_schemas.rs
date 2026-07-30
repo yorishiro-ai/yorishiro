@@ -37,7 +37,7 @@ async fn creates_first_version_as_active(pool: PgPool) {
         .await
         .unwrap();
 
-    let (record, diff) = create_schema(&mut conn, workspace_id, task_schema(false))
+    let (record, diff) = create_schema(&mut conn, workspace_id_tenant, task_schema(false))
         .await
         .unwrap();
     assert_eq!(record.version, 1);
@@ -54,7 +54,7 @@ async fn creating_new_version_archives_previous_and_reports_breaking_diff(pool: 
         .await
         .unwrap();
 
-    let (v1, _) = create_schema(&mut conn, workspace_id, task_schema(false))
+    let (v1, _) = create_schema(&mut conn, workspace_id_tenant, task_schema(false))
         .await
         .unwrap();
 
@@ -68,16 +68,18 @@ async fn creating_new_version_archives_previous_and_reports_breaking_diff(pool: 
         .unwrap()
         .required = true;
 
-    let (v2, diff) = create_schema(&mut conn, workspace_id, required_priority)
+    let (v2, diff) = create_schema(&mut conn, workspace_id_tenant, required_priority)
         .await
         .unwrap();
     assert_eq!(v2.version, 2);
     assert!(diff.is_breaking, "reasons: {:?}", diff.reasons);
 
-    let archived = get_by_id(&mut conn, workspace_id, v1.id).await.unwrap();
+    let archived = get_by_id(&mut conn, workspace_id_tenant, v1.id)
+        .await
+        .unwrap();
     assert_eq!(archived.status, "archived");
 
-    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+    let active = get_active_schema(&mut conn, workspace_id_tenant, "task-management")
         .await
         .unwrap();
     assert_eq!(active.id, v2.id);
@@ -92,7 +94,7 @@ async fn get_active_schema_reports_not_found_when_absent(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = get_active_schema(&mut conn, workspace_id, "does-not-exist")
+    let err = get_active_schema(&mut conn, workspace_id_tenant, "does-not-exist")
         .await
         .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
