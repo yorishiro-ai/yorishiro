@@ -1,0 +1,47 @@
+name: Clippy Suggestions
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: yorishiro
+          POSTGRES_PASSWORD: yorishiro
+          POSTGRES_DB: yorishiro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yorishiro"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: ~/.cache/ort.pyke.io
+      - name: Run migrations
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres
+          cargo sqlx migrate run
+      - uses: giraffate/clippy-action@v1
+        with:
+          reporter: github-pr-review
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clippy_flags: --all-targets --all-features -- -D warnings
