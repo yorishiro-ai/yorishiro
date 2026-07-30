@@ -6,4 +6,5 @@
 .cargo-cache
 .worktrees/
 /models
-.claude/
+.claude/*
+!.claude/rules/
