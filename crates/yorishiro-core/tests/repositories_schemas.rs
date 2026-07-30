@@ -37,7 +37,7 @@ async fn creates_first_version_as_active(pool: PgPool) {
         .await
         .unwrap();
 
-    let (record, diff) = create_schema(&mut conn, workspace_id, task_schema(false))
+    let (record, diff) = create_schema(&mut conn, workspace_id_tenant, task_schema(false))
         .await
         .unwrap();
     assert_eq!(record.version, 1);
@@ -54,7 +54,7 @@ async fn creating_new_version_archives_previous_and_reports_breaking_diff(pool: 
         .await
         .unwrap();
 
-    let (v1, _) = create_schema(&mut conn, workspace_id, task_schema(false))
+    let (v1, _) = create_schema(&mut conn, workspace_id_tenant, task_schema(false))
         .await
         .unwrap();
 
@@ -68,7 +68,7 @@ async fn creating_new_version_archives_previous_and_reports_breaking_diff(pool: 
         .unwrap()
         .required = true;
 
-    let (v2, diff) = create_schema(&mut conn, workspace_id, required_priority)
+    let (v2, diff) = create_schema(&mut conn, workspace_id_tenant, required_priority)
         .await
         .unwrap();
     assert_eq!(v2.version, 2);

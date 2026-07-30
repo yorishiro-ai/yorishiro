@@ -16,19 +16,19 @@ enum Entities {
     Embedding,
 }
 
-async fn seed_workspace(pool: &PgPool) -> Uuid {
+async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
     let tenant = tenancy::create_tenant(pool, "bootstrap-tenant", None)
         .await
         .unwrap();
     let workspace = tenancy::create_workspace(pool, tenant.id, "default", None, None)
         .await
         .unwrap();
-    workspace.id
+    (tenant.id, workspace.id)
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn creates_workspace_and_issues_a_usable_key(pool: PgPool) {
-    let workspace_id = seed_workspace(&pool).await;
+    let (_workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
 
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Write, None)
         .await
@@ -98,7 +98,7 @@ async fn create_api_key_rejects_a_user_who_is_not_a_member(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn revoked_key_no_longer_authenticates(pool: PgPool) {
-    let workspace_id = seed_workspace(&pool).await;
+    let (_workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
@@ -137,7 +137,7 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
         }
     }
 
-    let workspace_id = seed_workspace(&pool).await;
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
     let mut conn = pool.acquire().await.unwrap();
     let definition = serde_json::from_value(serde_json::json!({
         "name": "task-management",
@@ -148,9 +148,13 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
         }
     }))
     .unwrap();
-    yorishiro_core::repositories::schemas::create_schema(&mut conn, workspace_id, definition)
-        .await
-        .unwrap();
+    yorishiro_core::repositories::schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        definition,
+    )
+    .await
+    .unwrap();
     // core's create doesn't write the embedding (that's the adapter's background sync
     // job), so this entity reproduces one left behind by a failed sync.
     let entity = yorishiro_core::repositories::entities::create(

@@ -35,7 +35,7 @@ async fn seed_task_and_project(
     conn: &mut PgConnection,
     workspace_id: Uuid,
 ) -> (entities::EntityRecord, entities::EntityRecord) {
-    schemas::create_schema(conn, workspace_id, project_task_schema())
+    schemas::create_schema(conn, workspace_id_tenant, project_task_schema())
         .await
         .unwrap();
 

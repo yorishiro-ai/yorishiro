@@ -120,7 +120,7 @@ async fn returns_closest_entities_first(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -166,7 +166,7 @@ async fn filters_by_entity_type(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -214,7 +214,7 @@ async fn excludes_entities_without_an_embedding(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -254,7 +254,7 @@ async fn surfaces_entities_without_an_embedding_via_trigram_fuzzy_match(pool: Pg
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
@@ -297,7 +297,7 @@ async fn filters_by_data_field_value(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id, task_schema_with_embed())
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema_with_embed())
         .await
         .unwrap();
 
