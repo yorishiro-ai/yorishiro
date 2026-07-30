@@ -19,8 +19,16 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: amd64
+            ext: ""
+            archive: tar.gz
           - os: ubuntu-24.04-arm
             arch: arm64
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            arch: amd64
+            ext: .exe
+            archive: zip
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -30,22 +38,30 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # See ci.yml: ort-sys extracts the onnxruntime binary here at build time.
           cache-directories: ~/.cache/ort.pyke.io
 
       - name: Build
         run: cargo build --release -p yorishiro-server
 
-      - name: Package
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
         run: |
           mkdir -p dist
           tar -czf "dist/yorishiro-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz" \
             -C target/release yorishiro-server
 
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Compress-Archive -Path "target/release/yorishiro-server.exe" `
+            -DestinationPath "dist/yorishiro-server-${{ github.ref_name }}-windows-${{ matrix.arch }}.zip"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: binary-linux-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          name: binary-${{ runner.os == 'Windows' && 'windows' || 'linux' }}-${{ matrix.arch }}
+          path: dist/*
 
   docker:
     strategy:
@@ -113,5 +129,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
           generate_release_notes: true
