@@ -183,6 +183,46 @@ async function deleteWorkspace(apiKey, id) {
   }
 }
 
+async function listTemplateLibrary(apiKey) {
+  const response = await fetch(`${apiBase()}/api/template-library`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+  return response.json();
+}
+
+async function createTemplateLibraryItem(apiKey, { name, description, definition, tags }) {
+  const response = await fetch(`${apiBase()}/api/template-library`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      name,
+      description: description || undefined,
+      definition,
+      tags: tags.length > 0 ? tags : undefined,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+  return response.json();
+}
+
+async function deleteTemplateLibraryItem(apiKey, id) {
+  const response = await fetch(`${apiBase()}/api/template-library/${id}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+}
+
 async function renderSetup(errorMessage) {
 
   const view = el(`
@@ -329,16 +369,48 @@ function renderWorkspacesTable(workspaces) {
   `;
 }
 
+function renderTemplateLibraryTable(templates) {
+  if (templates.length === 0) {
+    return `<p class="hint">No templates yet.</p>`;
+  }
+  const rows = templates
+    .map(
+      (tpl) => `
+        <tr>
+          <td>${tpl.name}</td>
+          <td>${tpl.description ?? ""}</td>
+          <td>${tpl.tags.join(", ")}</td>
+          <td><button class="danger" data-delete-template="${tpl.id}">Delete</button></td>
+        </tr>`,
+    )
+    .join("");
+  return `
+    <table>
+      <thead><tr><th>Name</th><th>Description</th><th>Tags</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
 // The community edition has no `/hosted/tenant/overview` dashboard, so this is what
 // `renderDashboard` falls back to: the just-issued API key, plus workspace management
 // (create/list/select -- see `renderWorkspaceDetail` for delete) since a self-hosted deployment
-// otherwise has no way to see or manage workspaces beyond the one `/setup` created.
-async function renderLoginComplete(session, createError) {
+// otherwise has no way to see or manage workspaces beyond the one `/setup` created. Also hosts
+// the tenant's DB-backed template library (distinct from the built-in `/api/templates` offered
+// during setup) since there is no other admin surface for it in the community edition.
+async function renderLoginComplete(session, createError, templateError) {
   let workspaces;
   try {
     workspaces = await listWorkspaces(session.apiKey);
   } catch (err) {
     workspaces = [];
+  }
+
+  let templates;
+  try {
+    templates = await listTemplateLibrary(session.apiKey);
+  } catch (err) {
+    templates = [];
   }
 
   const view = el(`
@@ -368,6 +440,32 @@ async function renderLoginComplete(session, createError) {
         ${createError ? `<p class="error">${createError}</p>` : ""}
         <button type="submit">Create workspace</button>
       </form>
+
+      <h2>Template Library</h2>
+      <p class="hint">Templates your tenant has saved for reuse when creating schemas (via the
+      REST API's <code>template_id</code> or MCP's <code>create_schema</code>). Distinct from the
+      built-in templates offered during setup.</p>
+      <div id="template-library-table">${renderTemplateLibraryTable(templates)}</div>
+
+      <h3>Add a template</h3>
+      <p class="hint">Paste a schema definition JSON (the same shape used by
+      <a href="/docs">POST /api/schemas</a>).</p>
+      <form id="create-template-form">
+        <label>Name
+          <input type="text" name="name" required>
+        </label>
+        <label>Description (optional)
+          <input type="text" name="description">
+        </label>
+        <label>Tags (comma-separated, optional)
+          <input type="text" name="tags" placeholder="notes, personal">
+        </label>
+        <label>Definition (JSON)
+          <textarea name="definition" rows="8" required placeholder='{"name": "...", "entity_types": {...}}'></textarea>
+        </label>
+        ${templateError ? `<p class="error">${templateError}</p>` : ""}
+        <button type="submit">Add template</button>
+      </form>
     </div>
   `);
 
@@ -388,6 +486,49 @@ async function renderLoginComplete(session, createError) {
     } catch (err) {
       mount(await renderLoginComplete(session, err.message));
     }
+  });
+
+  view.querySelector("#create-template-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const tags = (form.get("tags") || "")
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+    let definition;
+    try {
+      definition = JSON.parse(form.get("definition"));
+    } catch {
+      mount(await renderLoginComplete(session, undefined, "definition must be valid JSON"));
+      return;
+    }
+    try {
+      await createTemplateLibraryItem(session.apiKey, {
+        name: form.get("name"),
+        description: form.get("description"),
+        definition,
+        tags,
+      });
+      mount(await renderLoginComplete(session));
+    } catch (err) {
+      mount(await renderLoginComplete(session, undefined, err.message));
+    }
+  });
+
+  view.querySelectorAll("[data-delete-template]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.getAttribute("data-delete-template");
+      const confirmed = confirm("Delete this template? This cannot be undone.");
+      if (!confirmed) {
+        return;
+      }
+      try {
+        await deleteTemplateLibraryItem(session.apiKey, id);
+        mount(await renderLoginComplete(session));
+      } catch (err) {
+        mount(await renderLoginComplete(session, undefined, err.message));
+      }
+    });
   });
 
   return view;

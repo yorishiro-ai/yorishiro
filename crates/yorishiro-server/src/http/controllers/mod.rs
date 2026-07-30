@@ -7,6 +7,7 @@ mod relations;
 mod schemas;
 mod search;
 mod setup;
+mod template_library;
 pub(crate) mod whoami;
 mod workspaces;
 
@@ -107,6 +108,12 @@ impl Modify for SecurityAddon {
         workspaces::create_workspace,
         workspaces::get_workspace,
         workspaces::delete_workspace,
+        template_library::list_templates,
+        template_library::get_template,
+        template_library::create_template,
+        template_library::update_template,
+        template_library::delete_template,
+        template_library::fork_template,
     ),
     components(schemas(
         identity::SignupRequest,
@@ -129,6 +136,10 @@ impl Modify for SecurityAddon {
         schemas::CreateSchemaRequest,
         workspaces::CreateWorkspaceRequest,
         workspaces::WorkspaceDetail,
+        yorishiro_core::repositories::tenancy::TemplateRecord,
+        template_library::CreateTemplateRequest,
+        template_library::UpdateTemplateRequest,
+        template_library::ForkTemplateRequest,
     )),
     modifiers(&SecurityAddon),
     security(("bearer_auth" = [])),
@@ -141,6 +152,7 @@ impl Modify for SecurityAddon {
         (name = "schemas", description = "Meta-schema operations"),
         (name = "search", description = "Vector similarity search"),
         (name = "export", description = "Bulk data export"),
+        (name = "template-library", description = "Tenant-scoped, DB-backed schema template library (create/delete are owner/admin only)"),
     ),
     info(
         title = "Yorishiro API",
@@ -218,6 +230,20 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/schemas/{schema_id}", get(schemas::get_schema_by_id))
         .route("/api/templates", get(schemas::list_templates))
+        .route(
+            "/api/template-library",
+            post(template_library::create_template).get(template_library::list_templates),
+        )
+        .route(
+            "/api/template-library/{id}",
+            get(template_library::get_template)
+                .put(template_library::update_template)
+                .delete(template_library::delete_template),
+        )
+        .route(
+            "/api/template-library/{id}/fork",
+            post(template_library::fork_template),
+        )
         .route("/api/search", get(search::search_entities))
         .route("/api/export.jsonl", get(export::export_jsonl))
 }

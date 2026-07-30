@@ -3,6 +3,7 @@ mod recall;
 mod relations;
 mod schemas;
 mod search;
+mod template_library;
 
 use http::request::Parts;
 use rmcp::ErrorData;
@@ -31,7 +32,8 @@ impl YorishiroMcpServer {
                 + Self::tool_router_recall()
                 + Self::tool_router_relations()
                 + Self::tool_router_search()
-                + Self::tool_router_schemas(),
+                + Self::tool_router_schemas()
+                + Self::tool_router_template_library(),
         }
     }
 }

@@ -214,6 +214,8 @@ pub(super) fn dummy_arguments_for_tool(name: &str) -> serde_json::Value {
         "search_entities" => serde_json::json!({ "query_text": "dummy" }),
         "recall_context" => serde_json::json!({ "entity_id": NIL_UUID }),
         "list_templates" => serde_json::json!({}),
+        "list_template_library" => serde_json::json!({}),
+        "get_template_library_item" => serde_json::json!({ "id": NIL_UUID }),
         other => panic!("no dummy arguments registered for tool `{other}`"),
     }
 }

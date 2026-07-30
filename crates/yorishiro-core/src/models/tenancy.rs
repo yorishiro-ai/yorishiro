@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::metaschema::MetaSchemaDefinition;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -90,4 +91,49 @@ pub struct InviteRecord {
     pub role: MembershipRole,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+/// A user-contributed schema template stored in `identity.templates`. Distinct from the
+/// built-in templates in `crate::templates` (shipped with the binary, served from memory):
+/// this is the tenant-scoped, DB-backed template library.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TemplateRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub definition: MetaSchemaDefinition,
+    pub tags: Vec<String>,
+    pub locale: Option<String>,
+    pub visibility: String,
+    pub author: Option<String>,
+    pub fork_of: Option<Uuid>,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Input for creating a new template. `visibility` is not settable here -- every template
+/// starts as tenant-private (`visibility = 'tenant'`); community publishing is a future,
+/// separate operation once that workflow is designed (see the migration's comment).
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
+pub struct CreateTemplateInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub definition: MetaSchemaDefinition,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub locale: Option<String>,
+    pub author: Option<String>,
+}
+
+/// Input for updating an existing template. Every field is optional; `None` leaves the
+/// existing value unchanged.
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
+pub struct UpdateTemplateInput {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub definition: Option<MetaSchemaDefinition>,
+    pub tags: Option<Vec<String>>,
+    pub locale: Option<String>,
 }
