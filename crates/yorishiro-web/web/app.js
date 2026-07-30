@@ -123,6 +123,29 @@ async function listWorkspaces(apiKey) {
   return response.json();
 }
 
+async function listTemplates(apiKey) {
+  const response = await fetch(`${apiBase()}/api/templates`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) return [];
+  return response.json();
+}
+
+async function createSchemaFromTemplate(apiKey, templateId) {
+  const response = await fetch(`${apiBase()}/api/schemas`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ template_id: templateId }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+  return response.json();
+}
+
 async function createWorkspace(apiKey, { name, maxEntities }) {
   const response = await fetch(`${apiBase()}/api/workspaces`, {
     method: "POST",
@@ -160,7 +183,8 @@ async function deleteWorkspace(apiKey, id) {
   }
 }
 
-function renderSetup(errorMessage) {
+async function renderSetup(errorMessage) {
+
   const view = el(`
     <div>
       <h1>Welcome to Yorishiro</h1>
@@ -175,6 +199,14 @@ function renderSetup(errorMessage) {
         <label>Display name (optional)
           <input type="text" name="displayName" autocomplete="name">
         </label>
+        <label>Schema template
+          <select name="templateId">
+            <option value="">None — start with an empty workspace</option>
+            <option value="general-notes">general-notes — A general-purpose note-taking schema with tags and links</option>
+            <option value="task-management">task-management — Personal tasks and projects with deadlines and dependencies</option>
+            <option value="worldbuilding">worldbuilding — Characters, locations, factions, and items for creative writing and TRPG</option>
+          </select>
+        </label>
         ${errorMessage ? `<p class="error">${errorMessage}</p>` : ""}
         <button type="submit">Create owner account</button>
       </form>
@@ -184,15 +216,25 @@ function renderSetup(errorMessage) {
   view.querySelector("#setup-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
+    const templateId = form.get("templateId");
     try {
       const result = await setup({
         email: form.get("email"),
         password: form.get("password"),
         displayName: form.get("displayName"),
       });
+      if (templateId) {
+        try {
+          await createSchemaFromTemplate(result.api_key, templateId);
+        } catch {
+          // Schema creation is best-effort during setup; the workspace
+          // is already usable and the template can be applied later via
+          // the API or MCP.
+        }
+      }
       mount(renderSetupComplete(result));
     } catch (err) {
-      mount(renderSetup(err.message));
+      mount(await renderSetup(err.message));
     }
   });
 
@@ -547,7 +589,7 @@ async function router() {
     return;
   }
 
-  mount(hash === "#/setup" ? renderSetup() : renderLogin());
+  mount(hash === "#/setup" ? await renderSetup() : renderLogin());
 }
 
 window.addEventListener("hashchange", router);
