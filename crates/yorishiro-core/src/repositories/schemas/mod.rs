@@ -14,7 +14,7 @@ pub use crate::models::schemas::*;
 enum Schemas {
     Table,
     Id,
-    WorkspaceId,
+    TenantId,
     Name,
     Version,
     Definition,
@@ -25,7 +25,7 @@ enum Schemas {
 #[derive(sqlx::FromRow)]
 struct SchemaRow {
     id: Uuid,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
     name: String,
     version: i32,
     definition: Value,
@@ -38,7 +38,7 @@ impl SchemaRow {
         let definition = serde_json::from_value(self.definition).internal()?;
         Ok(SchemaRecord {
             id: self.id,
-            workspace_id: self.workspace_id,
+            tenant_id: self.tenant_id,
             name: self.name,
             version: self.version,
             definition,
@@ -52,7 +52,7 @@ impl SchemaRow {
 /// and version.
 pub async fn list(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
 ) -> Result<Vec<SchemaSummary>, YorishiroError> {
     let (sql, values) = Query::select()
         .columns([
@@ -63,7 +63,7 @@ pub async fn list(
             Schemas::CreatedAt,
         ])
         .from((Alias::new("content"), Schemas::Table))
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .order_by(Schemas::Name, Order::Asc)
         .order_by(Schemas::Version, Order::Asc)
         .build_sqlx(PostgresQueryBuilder);
@@ -74,18 +74,18 @@ pub async fn list(
         .internal()
 }
 
-/// Counts a workspace's currently *active* schemas -- one row per distinct schema name, since
+/// Counts a tenant's currently *active* schemas -- one row per distinct schema name, since
 /// `create_schema` archives the previous version before activating a new one. For
-/// workspace-detail summaries, this is a more meaningful "how many schemas does this workspace
+/// tenant-detail summaries, this is a more meaningful "how many schemas does this tenant
 /// define" figure than counting every archived version too.
 pub async fn count_active(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
 ) -> Result<i64, YorishiroError> {
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
         .from((Alias::new("content"), Schemas::Table))
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .and_where(Expr::col(Schemas::Status).eq("active"))
         .build_sqlx(PostgresQueryBuilder);
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
@@ -98,7 +98,7 @@ pub async fn count_active(
 fn schema_columns() -> [Schemas; 7] {
     [
         Schemas::Id,
-        Schemas::WorkspaceId,
+        Schemas::TenantId,
         Schemas::Name,
         Schemas::Version,
         Schemas::Definition,
@@ -111,13 +111,13 @@ fn schema_columns() -> [Schemas; 7] {
 /// the given tenant and name.
 pub async fn get_active_schema(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
     name: &str,
 ) -> Result<SchemaRecord, YorishiroError> {
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .and_where(Expr::col(Schemas::Name).eq(name))
         .and_where(Expr::col(Schemas::Status).eq("active"))
         .order_by(Schemas::Version, Order::Desc)
@@ -140,13 +140,13 @@ pub async fn get_active_schema(
 /// references).
 pub async fn get_by_id(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .and_where(Expr::col(Schemas::Id).eq(schema_id))
         .build_sqlx(PostgresQueryBuilder);
     let row: Option<SchemaRow> = sqlx::query_as_with(&sql, values)
@@ -166,12 +166,12 @@ pub async fn get_by_id(
 /// limit and the full `definition` body, for a full-tenant export.
 pub async fn export_all(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
 ) -> Result<Vec<SchemaRecord>, YorishiroError> {
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .order_by(Schemas::Name, Order::Asc)
         .order_by(Schemas::Version, Order::Asc)
         .build_sqlx(PostgresQueryBuilder);
@@ -188,13 +188,13 @@ pub async fn export_all(
 /// a `versioning::diff`, archives the previous active version, and always inserts
 /// the new definition as the next version (reporting whether the diff is breaking).
 ///
-/// Concurrent creates for the same (workspace_id, name) are serialized with an advisory lock:
+/// Concurrent creates for the same (tenant_id, name) are serialized with an advisory lock:
 /// without it, reading the active version and then archiving-it-plus-inserting the new one
-/// would race, letting concurrent calls fail on the UNIQUE(workspace_id, name, version)
+/// would race, letting concurrent calls fail on the UNIQUE(tenant_id, name, version)
 /// constraint or archive a version another call just committed as active.
 pub async fn create_schema(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
+    tenant_id: Uuid,
     definition: MetaSchemaDefinition,
 ) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
     validate_definition(&definition)?;
@@ -207,7 +207,7 @@ pub async fn create_schema(
     // no SELECT/INSERT/UPDATE/DELETE form exists for sea-query to build, same category as the
     // session commands in `db.rs`/`auth.rs`.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("{workspace_id}:{name}"))
+        .bind(format!("{tenant_id}:{name}"))
         .execute(&mut *tx)
         .await
         .internal()?;
@@ -215,7 +215,7 @@ pub async fn create_schema(
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .and_where(Expr::col(Schemas::Name).eq(&name))
         .and_where(Expr::col(Schemas::Status).eq("active"))
         .order_by(Schemas::Version, Order::Desc)
@@ -244,7 +244,7 @@ pub async fn create_schema(
     let (sql, values) = Query::update()
         .table((Alias::new("content"), Schemas::Table))
         .values([(Schemas::Status, "archived".into())])
-        .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Schemas::TenantId).eq(tenant_id))
         .and_where(Expr::col(Schemas::Name).eq(&name))
         .and_where(Expr::col(Schemas::Status).eq("active"))
         .build_sqlx(PostgresQueryBuilder);
@@ -258,14 +258,14 @@ pub async fn create_schema(
     let (sql, values) = Query::insert()
         .into_table((Alias::new("content"), Schemas::Table))
         .columns([
-            Schemas::WorkspaceId,
+            Schemas::TenantId,
             Schemas::Name,
             Schemas::Version,
             Schemas::Definition,
             Schemas::Status,
         ])
         .values_panic([
-            workspace_id.into(),
+            tenant_id.into(),
             name.clone().into(),
             next_version.into(),
             definition_json.into(),

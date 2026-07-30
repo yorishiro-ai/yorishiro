@@ -26,7 +26,7 @@ pub use crate::models::import::*;
 /// *current* active schema rather than trusting the exported `schema_version`), so:
 ///
 /// - an entity line resolves its schema by *name*, preferring a schema line this same
-///   import already processed over the (workspace-local, so likely meaningless here)
+///   import already processed over the (tenant-local, so likely meaningless here)
 ///   exported `schema_id`;
 /// - a relation line's `source_id`/`target_id` are remapped through the entity lines this
 ///   same import already processed.
@@ -35,6 +35,7 @@ pub use crate::models::import::*;
 /// exactly the order `export::export_all` produces (schemas, then entities, then relations).
 pub async fn import_jsonl(
     conn: &mut PgConnection,
+    tenant_id: Uuid,
     workspace_id: Uuid,
     reader: impl BufRead,
 ) -> Result<ImportResult, YorishiroError> {
@@ -42,9 +43,9 @@ pub async fn import_jsonl(
 
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
-    // Exported `schema_id`s are only meaningful in the *source* workspace they came
+    // Exported `schema_id`s are only meaningful in the *source* tenant they came
     // from -- `create_schema` always mints a fresh ID. So entity lines can't resolve their
-    // schema by re-querying the exported `schema_id` in the destination workspace; instead
+    // schema by re-querying the exported `schema_id` in the destination tenant; instead
     // track name-by-old-id for every schema line this import itself has processed so far.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
 
@@ -69,7 +70,7 @@ pub async fn import_jsonl(
             ExportRecord::Schema(schema) => {
                 let old_id = schema.id;
                 let name = schema.definition.name.clone();
-                schemas::create_schema(&mut tx, workspace_id, schema.definition)
+                schemas::create_schema(&mut tx, tenant_id, schema.definition)
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 schema_name_by_old_id.insert(old_id, name);
@@ -79,15 +80,15 @@ pub async fn import_jsonl(
                 let old_id = entity.id;
 
                 // `entities::create` takes a schema *name* (it always resolves against the
-                // workspace's currently active version), not a schema ID. Prefer the name
+                // tenant's currently active version), not a schema ID. Prefer the name
                 // of a schema line this same import just created; a `schema_id` exported
-                // from a different workspace means nothing here. Fall back to looking the
-                // ID up in the destination workspace, for the case of importing entities
+                // from a different tenant means nothing here. Fall back to looking the
+                // ID up in the destination tenant, for the case of importing entities
                 // against a schema that already exists there (not part of this import).
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {
-                        schemas::get_by_id(&mut tx, workspace_id, entity.schema_id)
+                        schemas::get_by_id(&mut tx, tenant_id, entity.schema_id)
                             .await
                             .map_err(|err| annotate_line(line_no, err))?
                             .name

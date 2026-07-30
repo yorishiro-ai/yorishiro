@@ -36,9 +36,16 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Schema);
 
+        let tenant_id = authorized.ctx.tenant_id;
         let workspace_id = authorized.ctx.workspace_id;
         let result = mcp_try!(
-            import::import_jsonl(authorized.conn(), workspace_id, args.jsonl.as_bytes()).await
+            import::import_jsonl(
+                authorized.conn(),
+                tenant_id,
+                workspace_id,
+                args.jsonl.as_bytes()
+            )
+            .await
         );
         ok_json(result)
     }

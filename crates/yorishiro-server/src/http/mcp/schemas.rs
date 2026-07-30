@@ -60,8 +60,8 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
-        let workspace_id = authorized.ctx.workspace_id;
-        let summaries = mcp_try!(schemas::list(authorized.conn(), workspace_id).await);
+        let tenant_id = authorized.ctx.tenant_id;
+        let summaries = mcp_try!(schemas::list(authorized.conn(), tenant_id).await);
         ok_json(summaries)
     }
 
@@ -75,9 +75,9 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let tenant_id = authorized.ctx.tenant_id;
         let record =
-            mcp_try!(schemas::get_active_schema(authorized.conn(), workspace_id, &args.name).await);
+            mcp_try!(schemas::get_active_schema(authorized.conn(), tenant_id, &args.name).await);
         ok_json(record)
     }
 
@@ -91,9 +91,9 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let tenant_id = authorized.ctx.tenant_id;
         let record =
-            mcp_try!(schemas::get_by_id(authorized.conn(), workspace_id, args.schema_id).await);
+            mcp_try!(schemas::get_by_id(authorized.conn(), tenant_id, args.schema_id).await);
         ok_json(record)
     }
 
@@ -138,9 +138,9 @@ impl YorishiroMcpServer {
             (None, Some(template_id)) => mcp_try!(templates::get_template(&template_id)),
         };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let tenant_id = authorized.ctx.tenant_id;
         let (record, diff) =
-            mcp_try!(schemas::create_schema(authorized.conn(), workspace_id, definition).await);
+            mcp_try!(schemas::create_schema(authorized.conn(), tenant_id, definition).await);
         ok_json(serde_json::json!({
             "schema": record,
             "diff": diff,
@@ -173,9 +173,9 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let tenant_id = authorized.ctx.tenant_id;
         let record = mcp_try!(
-            schemas::get_active_schema(authorized.conn(), workspace_id, &args.schema_name).await
+            schemas::get_active_schema(authorized.conn(), tenant_id, &args.schema_name).await
         );
 
         match record.definition.entity_types.get(&args.entity_type) {

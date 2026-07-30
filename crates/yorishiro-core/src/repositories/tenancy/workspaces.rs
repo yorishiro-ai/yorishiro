@@ -15,6 +15,7 @@ enum Workspaces {
     TenantId,
     Name,
     MaxEntities,
+    SchemaId,
     CreatedAt,
 }
 
@@ -26,6 +27,7 @@ pub async fn create_workspace(
     tenant_id: Uuid,
     name: &str,
     max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
 ) -> Result<WorkspaceRecord, YorishiroError> {
     let tenant = get_tenant(pool, tenant_id).await?;
 
@@ -55,8 +57,14 @@ pub async fn create_workspace(
             Workspaces::TenantId,
             Workspaces::Name,
             Workspaces::MaxEntities,
+            Workspaces::SchemaId,
         ])
-        .values_panic([tenant_id.into(), name.into(), max_entities.into()])
+        .values_panic([
+            tenant_id.into(),
+            name.into(),
+            max_entities.into(),
+            schema_id.into(),
+        ])
         .returning(Query::returning().columns(workspace_columns()))
         .build_sqlx(PostgresQueryBuilder);
 
@@ -66,12 +74,13 @@ pub async fn create_workspace(
         .internal()
 }
 
-fn workspace_columns() -> [Workspaces; 5] {
+fn workspace_columns() -> [Workspaces; 6] {
     [
         Workspaces::Id,
         Workspaces::TenantId,
         Workspaces::Name,
         Workspaces::MaxEntities,
+        Workspaces::SchemaId,
         Workspaces::CreatedAt,
     ]
 }
@@ -106,6 +115,7 @@ pub async fn list_workspaces_for_user(
             (Workspaces::Table, Workspaces::TenantId),
             (Workspaces::Table, Workspaces::Name),
             (Workspaces::Table, Workspaces::MaxEntities),
+            (Workspaces::Table, Workspaces::SchemaId),
             (Workspaces::Table, Workspaces::CreatedAt),
         ])
         .from((Alias::new("identity"), Workspaces::Table))

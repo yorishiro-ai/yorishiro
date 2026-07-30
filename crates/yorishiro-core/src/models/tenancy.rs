@@ -21,6 +21,7 @@ pub struct WorkspaceRecord {
     pub tenant_id: Uuid,
     pub name: String,
     pub max_entities: Option<i32>,
+    pub schema_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 

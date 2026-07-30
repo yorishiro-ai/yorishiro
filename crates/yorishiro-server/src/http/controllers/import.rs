@@ -28,7 +28,9 @@ pub async fn import_jsonl(
     mut authorized: Authorized<SchemaScope>,
     body: String,
 ) -> Result<(StatusCode, Json<ImportResult>), ApiError> {
+    let tenant_id = authorized.ctx.tenant_id;
     let workspace_id = authorized.ctx.workspace_id;
-    let result = import::import_jsonl(authorized.conn(), workspace_id, body.as_bytes()).await?;
+    let result =
+        import::import_jsonl(authorized.conn(), tenant_id, workspace_id, body.as_bytes()).await?;
     Ok((StatusCode::OK, Json(result)))
 }

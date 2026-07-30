@@ -20,7 +20,7 @@ async fn seed_workspace(pool: &PgPool) -> Uuid {
     let tenant = tenancy::create_tenant(pool, "bootstrap-tenant", None)
         .await
         .unwrap();
-    let workspace = tenancy::create_workspace(pool, tenant.id, "default", None)
+    let workspace = tenancy::create_workspace(pool, tenant.id, "default", None, None)
         .await
         .unwrap();
     workspace.id
@@ -55,7 +55,7 @@ async fn rejects_key_creation_for_unknown_workspace(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn create_api_key_for_user_is_capped_by_their_role(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None, None)
         .await
         .unwrap();
     let user = tenancy::create_user(&pool, "viewer@example.com", "pw", None)
@@ -82,7 +82,7 @@ async fn create_api_key_for_user_is_capped_by_their_role(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn create_api_key_rejects_a_user_who_is_not_a_member(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None, None)
         .await
         .unwrap();
     let user = tenancy::create_user(&pool, "outsider@example.com", "pw", None)
@@ -210,11 +210,11 @@ async fn enforces_workspace_limit_on_create_workspace(pool: PgPool) {
     // create_tenant alone doesn't create a workspace here (unlike the CLI's CreateTenant
     // handler, which additionally creates a "default" one); this test drives
     // tenancy::create_workspace directly to check the cap.
-    tenancy::create_workspace(&pool, tenant.id, "first", None)
+    tenancy::create_workspace(&pool, tenant.id, "first", None, None)
         .await
         .unwrap();
 
-    let err = tenancy::create_workspace(&pool, tenant.id, "second", None)
+    let err = tenancy::create_workspace(&pool, tenant.id, "second", None, None)
         .await
         .unwrap_err();
     assert!(matches!(
