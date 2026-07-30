@@ -115,11 +115,43 @@ button.danger {
 .error {
   color: var(--danger);
   font-size: 0.9rem;
+  white-space: pre-wrap;
 }
 
 .hint {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.warning {
+  color: var(--danger);
+  font-size: 0.85rem;
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.success {
+  color: #1a7f37;
+  font-size: 0.9rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .success {
+    color: #4ac26b;
+  }
+}
+
+.ai-schema-generator {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1.5rem 0;
+}
+
+.ai-schema-generator h2 {
+  margin-top: 0;
 }
 
 table {
