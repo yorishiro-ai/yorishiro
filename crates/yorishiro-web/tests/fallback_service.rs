@@ -7,12 +7,7 @@ use yorishiro_web::fallback_service;
 
 async fn get(router: Router, uri: &str) -> Response {
     router
-        .oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap()
 }
