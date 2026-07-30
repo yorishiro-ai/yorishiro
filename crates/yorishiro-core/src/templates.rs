@@ -22,6 +22,10 @@ const TEMPLATES: &[BuiltinTemplate] = &[
         id: "worldbuilding",
         source: include_str!("../../../templates/worldbuilding.json"),
     },
+    BuiltinTemplate {
+        id: "software-adr",
+        source: include_str!("../../../templates/software-adr.json"),
+    },
 ];
 
 /// Summary of a built-in schema template, returned by `list_templates` so a caller can
