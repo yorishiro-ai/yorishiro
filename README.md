@@ -115,3 +115,4 @@ Placing an ONNX model under `models/` enables embedding integration tests agains
 ## License
 
 Licensed under the [Business Source License 1.1](LICENSE). Self-hosting (including for internal/commercial use) is permitted; the only restriction is offering Yorishiro itself as a competing hosted/managed service. On 2030-07-14 this version automatically converts to the GNU General Public License, Version 2.0 or later.
+# test
