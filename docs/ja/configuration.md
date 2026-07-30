@@ -55,9 +55,9 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | 変数 | 内容 |
 |---|---|
 | `YSR_EMBEDDING_PROVIDER` | `local`(既定)または`openai` |
-| `YSR_EMBEDDING_DIMENSIONS` | `entities.embedding`はvector(768)固定のため、768以外は起動時エラー |
+| `YSR_EMBEDDING_DIMENSIONS` | 埋め込みベクトルの次元数(既定: `768`)。使用するモデルの出力次元と一致する必要があります。デプロイメント内の全ベクトルはこの値を共有します。データが存在する状態で変更する場合は再埋め込みが必要です |
 
-### `YSR_EMBEDDING_PROVIDER=local`の場合(768次元のBERT系ONNXエクスポート、既定)
+### `YSR_EMBEDDING_PROVIDER=local`の場合(ONNXエクスポート、既定)
 
 | 変数 | 内容 |
 |---|---|
