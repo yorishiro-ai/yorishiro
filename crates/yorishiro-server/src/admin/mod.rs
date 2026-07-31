@@ -156,15 +156,18 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             if let Some(template_id) = template {
                 let definition = yorishiro_core::templates::get_template(&template_id)?;
                 let mut conn = pool.acquire().await.context("acquire connection")?;
-                let (schema, _diff) =
-                    yorishiro_core::repositories::schemas::create_schema(&mut conn, tenant.id, definition).await?;
+                let (schema, _diff) = yorishiro_core::repositories::schemas::create_schema(
+                    &mut conn, tenant.id, definition,
+                )
+                .await?;
                 println!("schema created (from template '{template_id}')");
                 println!("  id:      {}", schema.id);
                 println!("  name:    {}", schema.name);
                 println!("  version: {}", schema.version);
 
                 let workspace =
-                    tenancy::create_workspace(pool, tenant.id, "default", None, Some(schema.id)).await?;
+                    tenancy::create_workspace(pool, tenant.id, "default", None, Some(schema.id))
+                        .await?;
                 println!("default workspace created");
                 println!("  id:        {}", workspace.id);
                 println!("  name:      {}", workspace.name);
@@ -173,7 +176,10 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
                 println!();
                 println!("next steps:");
                 println!("  1. create a schema (via REST API or --template)");
-                println!("  2. admin create-workspace {} <name> --schema-id <id>", tenant.id);
+                println!(
+                    "  2. admin create-workspace {} <name> --schema-id <id>",
+                    tenant.id
+                );
             }
         }
         AdminCommand::ListTenants => {
