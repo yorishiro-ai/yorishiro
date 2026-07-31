@@ -138,6 +138,28 @@ pub async fn list_templates(
 
 #[utoipa::path(
     get,
+    path = "/api/templates/{id}",
+    params(
+        ("id" = String, Path, description = "Template ID (e.g. task-management)"),
+    ),
+    responses(
+        (status = 200, description = "Full template definition", body = MetaSchemaDefinition),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "Template not found", body = crate::error::ApiErrorBody),
+    ),
+    tag = "schemas",
+)]
+pub async fn get_template(
+    _authorized: Authorized<ReadScope>,
+    Path(id): Path<String>,
+) -> Result<Json<MetaSchemaDefinition>, ApiError> {
+    let definition = templates::get_template(&id)?;
+    Ok(Json(definition))
+}
+
+#[utoipa::path(
+    get,
     path = "/api/schemas/active/{name}/entity-types/{entity_type}/json-schema",
     params(
         ("name" = String, Path, description = "Name of the active schema"),
