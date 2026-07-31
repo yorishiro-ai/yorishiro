@@ -154,11 +154,12 @@ tenant created
   id:            019f565d-f1e3-7afb-b876-b7003e43c230
   name:          my-team
   max_workspaces: unlimited
-default workspace created
-  id:   019f565d-f204-7f3e-9a1e-2b6b6e2b6b6e
-  name: default
 
-$ make admin ARGS="create-api-key 019f565d-f204-7f3e-9a1e-2b6b6e2b6b6e write"
+next steps:
+  1. create a schema:    admin create-workspace needs a schema_id
+  2. create a workspace: admin create-workspace 019f565d-... my-ws --schema-id <id>
+
+$ make admin ARGS="create-api-key <workspace-id> write"
 api key created (the plaintext key is shown ONLY once — store it now)
   key:          ysr_928e48292888_ef72...
   ...
@@ -166,7 +167,7 @@ api key created (the plaintext key is shown ONLY once — store it now)
 $ make admin ARGS="list-tenants"
 ```
 
-`create-tenant` also creates a `default` workspace under the new tenant, since most deployments only need one workspace per tenant. Use `create-workspace` for additional ones. The plaintext API key is shown only once, at issuance time.
+`create-tenant` creates the tenant only. To start working, create a schema first (from a template or a custom definition via the REST API or Web UI), then create a workspace with `--schema-id` to link it. Each workspace uses exactly one schema (1:1 relationship). The plaintext API key is shown only once, at issuance time.
 
 Admin commands access the database directly using the connection role from `DATABASE_URL`. This is the same administrative role used for migrations, and the only role permitted to touch `identity.tenants`/`identity.users`/`identity.tenant_memberships` at all -- the application's own `yorishiro_app` role cannot.
 
