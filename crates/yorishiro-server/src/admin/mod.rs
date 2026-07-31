@@ -14,13 +14,17 @@ use commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key}
 /// CLI is the only bootstrap mechanism.
 #[derive(Subcommand)]
 pub enum AdminCommand {
-    /// Create a new tenant, along with a default workspace under it.
+    /// Create a new tenant. With --template, also creates a schema from the template
+    /// and a default workspace linked to it (required for login to work).
     CreateTenant {
         name: String,
-        /// Cap on the number of workspaces this tenant may create. Omit for unlimited
-        /// (the default, appropriate for self-hosted deployments).
+        /// Cap on the number of workspaces this tenant may create. Omit for unlimited.
         #[arg(long)]
         max_workspaces: Option<i32>,
+        /// Built-in template ID to bootstrap a schema and default workspace.
+        /// Without this, only a tenant is created (no workspace, no login possible).
+        #[arg(long)]
+        template: Option<String>,
     },
     /// List all tenants.
     ListTenants,
@@ -141,17 +145,42 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
         AdminCommand::CreateTenant {
             name,
             max_workspaces,
+            template,
         } => {
             let tenant = tenancy::create_tenant(pool, &name, max_workspaces).await?;
-            let workspace =
-                tenancy::create_workspace(pool, tenant.id, "default", None, None).await?;
             println!("tenant created");
             println!("  id:            {}", tenant.id);
             println!("  name:          {}", tenant.name);
             println!("  max_workspaces: {}", format_limit(tenant.max_workspaces));
-            println!("default workspace created");
-            println!("  id:   {}", workspace.id);
-            println!("  name: {}", workspace.name);
+
+            if let Some(template_id) = template {
+                let definition = yorishiro_core::templates::get_template(&template_id)?;
+                let mut conn = pool.acquire().await.context("acquire connection")?;
+                let (schema, _diff) = yorishiro_core::repositories::schemas::create_schema(
+                    &mut conn, tenant.id, definition,
+                )
+                .await?;
+                println!("schema created (from template '{template_id}')");
+                println!("  id:      {}", schema.id);
+                println!("  name:    {}", schema.name);
+                println!("  version: {}", schema.version);
+
+                let workspace =
+                    tenancy::create_workspace(pool, tenant.id, "default", None, Some(schema.id))
+                        .await?;
+                println!("default workspace created");
+                println!("  id:        {}", workspace.id);
+                println!("  name:      {}", workspace.name);
+                println!("  schema_id: {}", schema.id);
+            } else {
+                println!();
+                println!("next steps:");
+                println!("  1. create a schema (via REST API or --template)");
+                println!(
+                    "  2. admin create-workspace {} <name> --schema-id <id>",
+                    tenant.id
+                );
+            }
         }
         AdminCommand::ListTenants => {
             let tenants = tenancy::list_tenants(pool).await?;

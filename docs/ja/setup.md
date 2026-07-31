@@ -146,11 +146,12 @@ tenant created
   id:            019f565d-f1e3-7afb-b876-b7003e43c230
   name:          my-team
   max_workspaces: unlimited
-default workspace created
-  id:   019f565d-f204-7f3e-9a1e-2b6b6e2b6b6e
-  name: default
 
-$ make admin ARGS="create-api-key 019f565d-f204-7f3e-9a1e-2b6b6e2b6b6e write"
+next steps:
+  1. create a schema:    admin create-workspace needs a schema_id
+  2. create a workspace: admin create-workspace 019f565d-... my-ws --schema-id <id>
+
+$ make admin ARGS="create-api-key <workspace-id> write"
 api key created (the plaintext key is shown ONLY once — store it now)
   key:          ysr_928e48292888_ef72...
   ...
@@ -158,7 +159,7 @@ api key created (the plaintext key is shown ONLY once — store it now)
 $ make admin ARGS="list-tenants"
 ```
 
-`create-tenant`は新規テナントの下に`default`ワークスペースも自動作成します。多くの運用ではテナントごとに1ワークスペースで十分なためです。追加のワークスペースが必要な場合は`create-workspace`を使ってください。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
+`create-tenant`はテナントのみを作成します。作業を開始するには、まずスキーマを作成し（テンプレートまたはREST API/Web UIからカスタム定義）、次に`--schema-id`を指定してワークスペースを作成します。各ワークスペースは1つのスキーマと1:1で紐付きます。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
 
 その他の管理コマンド:
 
