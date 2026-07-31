@@ -13,8 +13,8 @@ name = "yorishiro-server"
 path = "src/main.rs"
 
 [dependencies]
-yorishiro-core = { path = "../yorishiro-core", version = "0.15" }
-yorishiro-web = { path = "../yorishiro-web", version = "0.15" }
+yorishiro-core = { path = "../yorishiro-core", version = "0.16" }
+yorishiro-web = { path = "../yorishiro-web", version = "0.16" }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
