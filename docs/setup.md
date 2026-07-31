@@ -169,6 +169,8 @@ $ make admin ARGS="list-tenants"
 
 `create-tenant` creates the tenant only. To start working, create a schema first (from a template or a custom definition via the REST API or Web UI), then create a workspace with `--schema-id` to link it. Each workspace uses exactly one schema (1:1 relationship). The plaintext API key is shown only once, at issuance time.
 
+Pass `--template <id>` to `create-tenant` to bootstrap a schema from a built-in template and create a default workspace linked to it in the same step. Without this flag, only a tenant is created (no workspace, no login possible). Example: `admin create-tenant acme --template general-notes`.
+
 Admin commands access the database directly using the connection role from `DATABASE_URL`. This is the same administrative role used for migrations, and the only role permitted to touch `identity.tenants`/`identity.users`/`identity.tenant_memberships` at all -- the application's own `yorishiro_app` role cannot.
 
 Other admin commands:

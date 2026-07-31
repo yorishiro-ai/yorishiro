@@ -161,6 +161,8 @@ $ make admin ARGS="list-tenants"
 
 `create-tenant`はテナントのみを作成します。作業を開始するには、まずスキーマを作成し（テンプレートまたはREST API/Web UIからカスタム定義）、次に`--schema-id`を指定してワークスペースを作成します。各ワークスペースは1つのスキーマと1:1で紐付きます。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
 
+`create-tenant`は`--template <id>`も受け付けます。組み込みテンプレートからスキーマを作成し、それに紐づくデフォルトワークスペースを自動作成します。このフラグなしではテナントのみが作成されます(ワークスペースなし、ログイン不可)。例: `admin create-tenant acme --template general-notes`
+
 その他の管理コマンド:
 
 | コマンド | 内容 |
