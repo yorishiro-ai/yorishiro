@@ -69,6 +69,16 @@
 
 - **Never push directly to master.** All changes go through a PR.
 - Branch naming: `feat/<name>`, `fix/<name>`, `docs/<name>`, `refactor/<name>`
+- **Before creating a PR branch**, always:
+  1. `git fetch origin master`
+  2. `git checkout master && git pull origin master`
+  3. `git checkout -b <branch-name>` (from up-to-date master)
+- **Before pushing a PR branch**, always:
+  1. Run `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt --check` locally
+  2. Confirm all pass before pushing
+- **Before merging a PR**, always:
+  1. Verify all CI checks have passed on the latest commit
+  2. If the branch is behind master, rebase first: `git fetch origin master && git rebase origin/master`
 - Every PR must pass CI (check + security) before merge.
 - Squash merge is the default merge strategy.
 - Every PR that changes source code must also update docs (English + Japanese).
