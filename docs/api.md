@@ -28,7 +28,7 @@ $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Beare
 $ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
 ```
 
-`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`), and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`.
+`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`), and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`. `GET /api/templates/{id}` returns the full definition of a single built-in template by its ID (e.g. `general-notes`) as a `MetaSchemaDefinition` JSON object -- the same structure `POST /api/schemas` accepts.
 
 ### Auth & member management
 
@@ -57,7 +57,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 `POST /api/members` attaches an *existing* account to the caller's tenant. It never creates one -- that's what signup does. Both member-management endpoints are gated on the caller's tenant role (owner/admin), independent of their key's own scope.
 
-Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member.
+Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace.
 
 ## MCP Tools
 
