@@ -233,6 +233,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/schemas/{schema_id}", get(schemas::get_schema_by_id))
         .route("/api/templates", get(schemas::list_templates))
+        .route("/api/templates/{id}", get(schemas::get_template))
         .route(
             "/api/template-library",
             post(template_library::create_template).get(template_library::list_templates),
