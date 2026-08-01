@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # This workflow runs on a schedule against master, never on a PR, so it's always safe
+          # to save -- but pin the condition anyway for consistency with ci.yml/clippy-suggestions.yml.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install tools
         run: cargo install cargo-audit cargo-outdated
       - name: Run audit

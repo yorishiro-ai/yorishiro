@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::io;
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
