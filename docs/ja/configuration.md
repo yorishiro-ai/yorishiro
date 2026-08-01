@@ -36,7 +36,7 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 
 | 変数 | 内容 |
 |---|---|
-| `YSR_LOG_TARGET` | `stdout`(既定、コンテナランタイムのログドライバ向け)、`single`(単一ファイルへ追記、ローテーションなし)、`daily`(日次ローテーションするファイル)、`syslog` |
+| `YSR_LOG_TARGET` | `stdout`(既定、コンテナランタイムのログドライバ向け)、`single`(単一ファイルへ追記、ローテーションなし)、`daily`(日次ローテーションするファイル)、`syslog`(Linux/Unix系OS限定。他プラットフォームでは起動時にエラーになる) |
 
 ### `YSR_LOG_TARGET=single`または`daily`の場合
 

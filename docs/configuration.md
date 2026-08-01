@@ -36,7 +36,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 
 | Variable | Description |
 |---|---|
-| `YSR_LOG_TARGET` | `stdout` (default, for a container runtime's log driver), `single` (one file, never rotated), `daily` (one file per day), or `syslog` |
+| `YSR_LOG_TARGET` | `stdout` (default, for a container runtime's log driver), `single` (one file, never rotated), `daily` (one file per day), or `syslog` (Unix only -- rejected at startup on other platforms) |
 
 ### When `YSR_LOG_TARGET=single` or `daily`
 
