@@ -24,7 +24,11 @@ Entity types are defined with a JSON meta-schema (example: `templates/task-manag
 }
 ```
 
-- `type`: one of `string` / `integer` / `number` / `boolean` / `array`
-- Constraints such as `required` / `enum` / `minimum` / `maximum` / `format`
-- A `string` field marked `x-embed: true` becomes a target for vector embedding
+- `type`: one of `string` / `integer` / `number` / `boolean` / `array` / `object`
+- Constraints: `required`, `enum`, `minimum`/`maximum` (number/integer), `minLength`/`maxLength`/`pattern` (string), `minItems`/`maxItems`/`uniqueItems` (array), `format` (string; one of `date` / `date-time` / `uri` / `email` / `uuid`)
+- `array` fields need `items: { "type": ..., "properties": {...} }` -- item type is `string` or `object` (with `object` items needing their own `properties`)
+- `object` fields need `properties: { ...FieldDef }`, nesting up to 5 levels deep
+- `description` is optional at every level (schema, entity type, relation type, field)
+- `x-ui` on a field is an arbitrary JSON object of UI hints, preserved as-is (e.g. `{"widget": "textarea"}`)
+- A field marked `x-embed: true` (typically `string`) becomes a target for vector embedding; non-string values are stringified first
 - `relation_types` defines directed relations between entity types

@@ -125,7 +125,7 @@ $ curl -X POST localhost:8080/setup -H "Content-Type: application/json" \
  "api_key":"ysr_..."}
 ```
 
-`POST /setup` returns `404` once a tenant already exists, or on any deployment where `YORISHIRO_MAX_TENANTS` resolves to unlimited (i.e. explicitly set to `0`). Hosted deployments onboard tenants via signup/invite instead (see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management)).
+`POST /setup` returns `409` once a tenant already exists, and `404` on any deployment where `YORISHIRO_MAX_TENANTS` resolves to unlimited (i.e. explicitly set to `0`). Hosted deployments onboard tenants via signup/invite instead (see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management)).
 
 The admin CLI below remains available for anything the wizard doesn't cover: additional workspaces/tenants, invites, and key rotation.
 
@@ -138,7 +138,7 @@ Yorishiro's control plane is two-tiered:
 
 Splitting tenant from workspace lets one organization run several isolated projects (e.g. separate workspaces per environment or team) without provisioning a whole new tenant for each. Schemas being tenant-level means a schema definition created for one workspace is automatically available to every other workspace under the same tenant. It also lets several people share administrative access to the same tenant via memberships.
 
-Tenant/workspace *creation* is only available through the admin CLI below, by whoever holds `DATABASE_URL`. Day-to-day *membership* management (inviting/adding/listing members) is available to tenant owners/admins over REST -- see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management).
+Tenant *creation* is only available through the admin CLI below, by whoever holds `DATABASE_URL`. Workspace creation is available there too, but once a tenant has at least one owner/admin with an API key, they can also create additional workspaces over REST. Day-to-day *membership* management (inviting/adding/listing members) is likewise available to tenant owners/admins over REST -- see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management).
 
 By default (unset `YORISHIRO_MAX_TENANTS`), a deployment is capped at a single tenant, so `admin create-tenant` and the signup flow below can never create a second one. Set `YORISHIRO_MAX_TENANTS=0` (see [configuration.md](configuration.md)) to allow unlimited tenants, or to a specific number to allow that many.
 
@@ -156,8 +156,8 @@ tenant created
   max_workspaces: unlimited
 
 next steps:
-  1. create a schema:    admin create-workspace needs a schema_id
-  2. create a workspace: admin create-workspace 019f565d-... my-ws --schema-id <id>
+  1. create a schema (via REST API or --template)
+  2. admin create-workspace 019f565d-f1e3-7afb-b876-b7003e43c230 <name> --schema-id <id>
 
 $ make admin ARGS="create-api-key <workspace-id> write"
 api key created (the plaintext key is shown ONLY once — store it now)
@@ -167,7 +167,7 @@ api key created (the plaintext key is shown ONLY once — store it now)
 $ make admin ARGS="list-tenants"
 ```
 
-`create-tenant` creates the tenant only. To start working, create a schema first (from a template or a custom definition via the REST API or Web UI), then create a workspace with `--schema-id` to link it. Each workspace uses exactly one schema (1:1 relationship). The plaintext API key is shown only once, at issuance time.
+`create-tenant <name> [--max-workspaces <n>] [--template <id>]` creates the tenant only, by default. `--max-workspaces` caps the number of workspaces the tenant may create (omit for unlimited). To start working, create a schema first (from a template or a custom definition via the REST API or Web UI), then create a workspace with `--schema-id` to link it. Each workspace uses exactly one schema (1:1 relationship). The plaintext API key is shown only once, at issuance time.
 
 Pass `--template <id>` to `create-tenant` to bootstrap a schema from a built-in template and create a default workspace linked to it in the same step. Without this flag, only a tenant is created (no workspace, no login possible). Example: `admin create-tenant acme --template general-notes`.
 
@@ -177,6 +177,7 @@ Other admin commands:
 
 | Command | Description |
 |---|---|
+| `admin create-tenant <name> [--max-workspaces <n>] [--template <id>]` | Create a tenant, optionally capping its workspace count and bootstrapping a schema/workspace from a template |
 | `admin list-tenants` | List all tenants |
 | `admin create-workspace <tenant-id> <name> [--schema-id <id>] [--max-entities <n>]` | Create an additional workspace under a tenant, optionally linking it to a schema |
 | `admin list-workspaces <tenant-id>` | List a tenant's workspaces |
