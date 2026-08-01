@@ -103,6 +103,7 @@ impl Modify for SecurityAddon {
         schemas::create_schema,
         schemas::get_entity_type_json_schema,
         schemas::list_templates,
+        schemas::get_template,
         search::search_entities,
         export::export_jsonl,
         import::import_jsonl,

@@ -26,9 +26,29 @@ $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Beare
 
 # Full-workspace JSON Lines export (read scope)
 $ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
+
+# Import the same JSON Lines format back in, as a single transaction (schema scope,
+# since importing schemas is itself a schema-scope-only operation)
+$ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
 `GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`), and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`. `GET /api/templates/{id}` returns the full definition of a single built-in template by its ID (e.g. `general-notes`) as a `MetaSchemaDefinition` JSON object -- the same structure `POST /api/schemas` accepts.
+
+### Template library
+
+Separate from the built-in templates above (`/api/templates`, read-only, bundled with the server), each tenant also has a DB-backed template library it can create, edit, and fork templates in:
+
+| Endpoint | Scope | Description |
+|---|---|---|
+| `GET /api/template-library` | any member | List templates visible to the caller's tenant (own plus any community-visible ones) |
+| `GET /api/template-library/{id}` | any member | Fetch a single template by ID |
+| `POST /api/template-library` | owner/admin | Create a template |
+| `PUT /api/template-library/{id}` | owner/admin | Update a template |
+| `DELETE /api/template-library/{id}` | owner/admin | Delete a template |
+| `POST /api/template-library/{id}/fork` | owner/admin | Fork an existing template into a new one |
+
+As with member/workspace management, the write endpoints are gated on the caller's tenant role (owner/admin), independent of their key's own scope.
 
 ### Auth & member management
 
@@ -61,7 +81,7 @@ Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetc
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 17 tools. Example connection from Claude Code:
+Connecting to `/mcp` (Streamable HTTP) gives you access to 20 tools. Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -81,5 +101,8 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | Relation CRUD |
 | `search_entities` | read | Vector similarity search over a natural-language query, optionally narrowed by `entity_type`/`filter`; entities without an embedding can still surface via trigram fuzzy matching |
 | `recall_context` | read | Fetch an entity plus its relations and connected neighbors in one call |
+| `import_jsonl` | schema | Bulk-import schemas/entities/relations from a JSON Lines document in the export format, as a single transaction |
+| `list_template_library` | read | List the tenant's DB-backed schema template library (distinct from `list_templates`, which lists the built-in templates) |
+| `get_template_library_item` | read | Fetch a single template from the tenant's DB-backed template library by ID |
 
-The REST-only `GET /api/export.jsonl` endpoint (full-workspace JSON Lines export) has no MCP tool equivalent.
+The REST-only `GET /api/export.jsonl` endpoint (full-workspace JSON Lines export) has no MCP tool equivalent, but its counterpart `POST /api/import.jsonl` does: `import_jsonl` above.

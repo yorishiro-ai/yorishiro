@@ -26,6 +26,11 @@ $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Beare
 
 # ワークスペース全体のJSON Linesエクスポート(read scope)
 $ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
+
+# 同じJSON Lines形式を取り込む。単一トランザクションとして実行(schema scope。
+# スキーマのインポート自体がschema scope専用の操作であるため)
+$ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
 `GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)も受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を渡すことで、`GET /api/templates`で一覧取得できる組み込みテンプレートからスキーマを登録できます。
@@ -33,6 +38,21 @@ $ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
 ### `GET /api/templates/{id}`
 
 組み込みテンプレートの完全な定義をIDで取得します(例: `general-notes`)。レスポンスは`MetaSchemaDefinition` JSONオブジェクト — `POST /api/schemas`が受け付けるのと同じ構造です。
+
+### テンプレートライブラリ
+
+上記の組み込みテンプレート(`/api/templates`、読み取り専用、サーバーに同梱)とは別に、各テナントはDBに保存されたテンプレートライブラリを持ち、テンプレートの作成・編集・フォークができます。
+
+| エンドポイント | scope | 内容 |
+|---|---|---|
+| `GET /api/template-library` | 全メンバー | 呼び出し元のテナントから見えるテンプレート一覧(自身のもの + コミュニティ公開のもの) |
+| `GET /api/template-library/{id}` | 全メンバー | 単一テンプレートをIDで取得 |
+| `POST /api/template-library` | owner/admin | テンプレートを作成 |
+| `PUT /api/template-library/{id}` | owner/admin | テンプレートを更新 |
+| `DELETE /api/template-library/{id}` | owner/admin | テンプレートを削除 |
+| `POST /api/template-library/{id}/fork` | owner/admin | 既存のテンプレートを新しいテンプレートとしてフォーク |
+
+メンバー/ワークスペース管理と同様、書き込み系エンドポイントはキー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
 
 ### 認証・メンバー管理・ワークスペース管理
 
@@ -65,7 +85,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると17のツールが使えます。Claude Codeでの接続例:
+`/mcp`(Streamable HTTP)に接続すると20のツールが使えます。Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -85,5 +105,8 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | リレーションCRUD |
 | `search_entities` | read | 自然文クエリによるベクトル類似検索。`entity_type`/`filter`で絞り込み可能。埋め込みを持たないエンティティも trigram によるあいまい検索でヒットし得る |
 | `recall_context` | read | エンティティとそのリレーション・隣接エンティティを一括取得 |
+| `import_jsonl` | schema | エクスポート形式のJSON Linesドキュメントからスキーマ/エンティティ/リレーションを一括インポート。単一トランザクションとして実行 |
+| `list_template_library` | read | テナントのDB保存スキーマテンプレートライブラリの一覧(組み込みテンプレートを一覧する`list_templates`とは別物) |
+| `get_template_library_item` | read | テナントのDB保存テンプレートライブラリから単一テンプレートをIDで取得 |
 
-REST専用の`GET /api/export.jsonl`エンドポイント(ワークスペース全体のJSON Linesエクスポート)に対応するMCPツールはありません。
+REST専用の`GET /api/export.jsonl`エンドポイント(ワークスペース全体のJSON Linesエクスポート)に対応するMCPツールはありませんが、対になる`POST /api/import.jsonl`には上記の`import_jsonl`が対応します。
