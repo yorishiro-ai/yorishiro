@@ -17,6 +17,7 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string (required) |
+| `YSR_CONFIG_PATH` | Path to the `config.yml` file described below (default: `config.yml` in the working directory) |
 | `YSR_BIND` | Listen address (default: `0.0.0.0:8080`) |
 | `YSR_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector) -- release builds never do this |
 | `YORISHIRO_MAX_TENANTS` | Deployment-wide cap on tenants `admin create-tenant` may create. Defaults to `1` (single-tenant). Set `0` for unlimited, or a higher number for that many. `POST /auth/signup` never creates a tenant (it just redeems an invite), so it's unaffected. Also gates the first-run setup wizard (see [setup.md](setup.md#first-run-setup)), enabled only when the cap isn't `0` |

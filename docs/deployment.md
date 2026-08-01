@@ -59,7 +59,7 @@ $ journalctl -u yorishiro -f
 
 ## Releasing
 
-Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`. It builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and attaches them to a GitHub Release.
+Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`. It builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), and attaches them to a GitHub Release.
 
 It also builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
 

@@ -121,7 +121,7 @@ $ curl -X POST localhost:8080/setup -H "Content-Type: application/json" \
  "api_key":"ysr_..."}
 ```
 
-`POST /setup`は既にテナントが存在する場合、または`YORISHIRO_MAX_TENANTS`が無制限に解決されるデプロイ(明示的に`0`を設定した場合)では`404`を返します。後者はサインアップ・招待でテナントを増やします。詳しくは[サインアップ・ログイン・メンバー・ワークスペース管理](#サインアップログインメンバーワークスペース管理)を参照してください。下記の管理CLIは、ウィザードがカバーしない操作(追加のワークスペース/テナント、招待、キーのローテーション)に引き続き使えます。
+`POST /setup`は既にテナントが存在する場合は`409`を、`YORISHIRO_MAX_TENANTS`が無制限に解決されるデプロイ(明示的に`0`を設定した場合)では`404`を返します。後者はサインアップ・招待でテナントを増やします。詳しくは[サインアップ・ログイン・メンバー・ワークスペース管理](#サインアップログインメンバーワークスペース管理)を参照してください。下記の管理CLIは、ウィザードがカバーしない操作(追加のワークスペース/テナント、招待、キーのローテーション)に引き続き使えます。
 
 ## テナント・ワークスペース・ユーザー
 
@@ -130,7 +130,7 @@ Yorishiroの制御プレーンは2階層構造です。
 - **テナント**は組織/アカウントです。`max_workspaces`という課金上限を設定できます(デフォルトは`NULL`で無制限。セルフホスト運用に適します)。任意数の人間の**ユーザー**をロール(`owner`/`admin`/`member`/`viewer`)付きのメンバーシップとして紐付けられ、1人のユーザーが複数のテナントに所属することもできます。**スキーマ**はテナント単位で所有され、同一テナント配下の全ワークスペースで共有されます。
 - **ワークスペース**はちょうど1つのテナントに属する、実際の操作対象コンテナです。エンティティ・リレーション・APIキーはワークスペースに紐付きます。ワークスペースは1つのスキーマを参照し(`schema_id`)、`max_entities`という上限も設定できます(デフォルト`NULL`/無制限)。
 
-テナントとワークスペースを分けることで、1つの組織が複数の独立したプロジェクト(環境別・チーム別のワークスペースなど)を新規テナントを都度作らずに運用でき、スキーマがテナント単位であるため、あるワークスペース用に作成したスキーマ定義は同一テナントの他のワークスペースからも自動的に利用可能です。複数人でメンバーシップを介して同一テナントの管理権限を共有できます。テナント/ワークスペースの**作成**は管理CLI(`DATABASE_URL`を持つ者)からのみ可能です。日々の**メンバーシップ**管理(招待・追加・一覧)はテナントのowner/adminであればRESTから行えます。詳しくは[サインアップ・ログイン・メンバー・ワークスペース管理](#サインアップログインメンバーワークスペース管理)を参照してください。
+テナントとワークスペースを分けることで、1つの組織が複数の独立したプロジェクト(環境別・チーム別のワークスペースなど)を新規テナントを都度作らずに運用でき、スキーマがテナント単位であるため、あるワークスペース用に作成したスキーマ定義は同一テナントの他のワークスペースからも自動的に利用可能です。複数人でメンバーシップを介して同一テナントの管理権限を共有できます。テナントの**作成**は管理CLI(`DATABASE_URL`を持つ者)からのみ可能です。ワークスペースの作成もそこから行えますが、テナントにAPIキーを持つowner/adminが1人でもいれば、それ以降はRESTからも追加のワークスペースを作成できます。日々の**メンバーシップ**管理(招待・追加・一覧)も同様にテナントのowner/adminであればRESTから行えます。詳しくは[サインアップ・ログイン・メンバー・ワークスペース管理](#サインアップログインメンバーワークスペース管理)を参照してください。
 
 デフォルト(`YORISHIRO_MAX_TENANTS`未設定)では、1つのデプロイはテナント1つに制限されます。`admin create-tenant`とサインアップフローは2つ目のテナントを作れません。無制限にするには`YORISHIRO_MAX_TENANTS=0`を、特定数までにするにはその数を設定してください([configuration.md](configuration.md)参照)。
 
@@ -148,8 +148,8 @@ tenant created
   max_workspaces: unlimited
 
 next steps:
-  1. create a schema:    admin create-workspace needs a schema_id
-  2. create a workspace: admin create-workspace 019f565d-... my-ws --schema-id <id>
+  1. create a schema (via REST API or --template)
+  2. admin create-workspace 019f565d-f1e3-7afb-b876-b7003e43c230 <name> --schema-id <id>
 
 $ make admin ARGS="create-api-key <workspace-id> write"
 api key created (the plaintext key is shown ONLY once — store it now)
@@ -159,7 +159,7 @@ api key created (the plaintext key is shown ONLY once — store it now)
 $ make admin ARGS="list-tenants"
 ```
 
-`create-tenant`はテナントのみを作成します。作業を開始するには、まずスキーマを作成し（テンプレートまたはREST API/Web UIからカスタム定義）、次に`--schema-id`を指定してワークスペースを作成します。各ワークスペースは1つのスキーマと1:1で紐付きます。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
+`create-tenant <name> [--max-workspaces <n>] [--template <id>]`は既定ではテナントのみを作成します。`--max-workspaces`でそのテナントが作成できるワークスペース数の上限を設定できます(省略時は無制限)。作業を開始するには、まずスキーマを作成し（テンプレートまたはREST API/Web UIからカスタム定義）、次に`--schema-id`を指定してワークスペースを作成します。各ワークスペースは1つのスキーマと1:1で紐付きます。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
 
 `create-tenant`は`--template <id>`も受け付けます。組み込みテンプレートからスキーマを作成し、それに紐づくデフォルトワークスペースを自動作成します。このフラグなしではテナントのみが作成されます(ワークスペースなし、ログイン不可)。例: `admin create-tenant acme --template general-notes`
 
@@ -167,6 +167,7 @@ $ make admin ARGS="list-tenants"
 
 | コマンド | 内容 |
 |---|---|
+| `admin create-tenant <name> [--max-workspaces <n>] [--template <id>]` | テナントを作成。ワークスペース数の上限設定や、テンプレートからのスキーマ/ワークスペース自動作成も可能 |
 | `admin list-tenants` | 全テナントの一覧 |
 | `admin create-workspace <tenant-id> <name> [--schema-id <id>] [--max-entities <n>]` | テナント配下に追加のワークスペースを作成（スキーマとの紐づけも可能） |
 | `admin list-workspaces <tenant-id>` | テナントのワークスペース一覧 |

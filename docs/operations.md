@@ -6,7 +6,7 @@ Yorishiro itself does not automate the concerns below; operators need to set the
 
 ## Backup and restore
 
-Data lives entirely in PostgreSQL (in the development environment, the named volume `pgdata` in `docker-compose.yml`, backed by the `yorishiro_pgdata` volume). Yorishiro has no built-in backup automation.
+Data lives entirely in PostgreSQL (in the development environment, the named volume `pgdata` in `docker-compose.yml`). Docker Compose has no explicit project name set in this repo, so it prefixes the volume with the checkout directory's basename by default (e.g. `<dir>_pgdata`) -- run `docker compose config` to confirm the resolved name for your checkout. Yorishiro has no built-in backup automation.
 
 Set up scheduled backups with standard `pg_dump`/`pg_restore`, or a WAL-archiving + PITR (Point-in-Time Recovery) setup, on the operator side. Relying on volume snapshots alone can produce an inconsistent backup.
 
@@ -32,6 +32,6 @@ Every request produces one JSON log line (method, path, status, latency) alongsi
 
 - `stdout` is the right choice for a container runtime that collects logs from the process's standard streams.
 - `single`/`daily` suit running the binary directly on a host without a surrounding log collector.
-- `syslog` hands lines off to whatever the host's syslog daemon is already configured to do with them (forward, rotate, aggregate).
+- `syslog` hands lines off to whatever the host's syslog daemon is already configured to do with them (forward, rotate, aggregate) -- Unix only; rejected at startup on other platforms.
 
 None of these targets rotate or prune on their own beyond what `daily`'s day-boundary split does. Pair `single`/`daily` with `logrotate` or an equivalent if disk usage needs to be bounded.
