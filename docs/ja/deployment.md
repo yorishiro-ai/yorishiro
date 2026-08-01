@@ -57,7 +57,7 @@ $ journalctl -u yorishiro -f
 
 ## リリース
 
-`vX.Y.Z`タグをpushすると`.github/workflows/release.yml`がトリガーされます。`yorishiro-server`の`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)バイナリをビルドしてGitHub Releaseに添付し、マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`(および`:latest`)としてビルド・pushします。どちらのアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせて、QEMUを使わずネイティブビルドします。
+`vX.Y.Z`タグをpushすると`.github/workflows/release.yml`がトリガーされます。`yorishiro-server`の`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`として梱包)バイナリをビルドしてGitHub Releaseに添付し、マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`(および`:latest`)としてビルド・pushします。どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせて、QEMUを使わずネイティブビルドします。
 
 ```console
 $ git tag vX.Y.Z && git push origin vX.Y.Z
