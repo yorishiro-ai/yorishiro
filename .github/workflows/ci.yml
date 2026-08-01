@@ -82,3 +82,14 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  claude-md-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: CLAUDE.md must match .claude/rules/rust.md
+        run: |
+          diff CLAUDE.md .claude/rules/rust.md || {
+            echo "::error::CLAUDE.md and .claude/rules/rust.md have drifted apart. They are intentionally kept as two identical copies -- update whichever one you didn't touch so they match again."
+            exit 1
+          }
