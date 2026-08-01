@@ -37,6 +37,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
+          # Same shared-key as ci.yml's `check` job: this workflow only ever runs on PRs, so it
+          # could never populate its own job-scoped cache key on master. Sharing the key lets it
+          # restore what ci.yml saves on master instead of building cold every time.
+          shared-key: rust
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run migrations
         run: |
           cargo install sqlx-cli --no-default-features --features postgres

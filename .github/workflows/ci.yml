@@ -51,6 +51,14 @@ jobs:
           # default cache targets (~/.cargo, ./target), so without caching this the linker
           # fails to find the library on the second and later warm-cache CI runs.
           cache-directories: ~/.cache/ort.pyke.io
+          # Shared with clippy-suggestions.yml (same shared-key) so that workflow -- which never
+          # runs on master and so can never save under its own job-scoped key -- can still
+          # restore the cache master writes here.
+          shared-key: rust
+          # PRs can only ever restore from master's cache and their own -- never write back to
+          # master's key -- so only master needs to save. Letting every PR save left a growing
+          # pile of per-branch caches that never got cleaned up until GitHub's 7-day/10GB evictions.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
