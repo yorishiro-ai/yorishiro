@@ -2,6 +2,11 @@
 //! `tracing-subscriber` one `SyslogWriter` per event; each buffers the formatted line and
 //! sends it as a single `/dev/log` datagram on drop, with a priority derived from the event's
 //! level.
+//!
+//! `/dev/log` is a Unix domain socket, so this whole module is unix-only; the `syslog` log
+//! target itself is rejected at startup on other platforms (see `logging::init`).
+#![cfg(unix)]
+
 use std::io;
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
