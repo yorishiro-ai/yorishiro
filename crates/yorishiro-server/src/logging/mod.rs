@@ -5,21 +5,17 @@
 //! - `single`: JSON lines appended to one file that's never rotated.
 //! - `daily`: JSON lines appended to a file that rotates at midnight UTC.
 //! - `syslog`: forwarded to the local syslog daemon over `/dev/log`, RFC 3164-framed (see the
-//!   `syslog` submodule for the datagram framing).
+//!   `syslog` submodule for the datagram framing). Unix-only -- `/dev/log` is a Unix domain
+//!   socket, so this target is rejected at startup on other platforms.
 //!
 //! `single`/`daily` write under `YSR_LOG_DIR` (default `.`) as `yorishiro.log`. `syslog`
 //! connects to the socket at `YSR_SYSLOG_SOCKET` (default `/dev/log`).
 pub mod syslog;
 
-use std::os::unix::net::UnixDatagram;
-use std::sync::Arc;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::EnvFilter;
-
-use syslog::SyslogMakeWriter;
 
 /// Owns whatever background resource the chosen log target needs to keep running (a
 /// non-blocking writer thread, for the file targets). Dropping it would stop that thread, so
@@ -61,7 +57,15 @@ pub fn init() -> Result<LogGuard> {
                 .init();
             Ok(LogGuard::NonBlocking(guard))
         }
+        #[cfg(unix)]
         "syslog" => {
+            use std::os::unix::net::UnixDatagram;
+            use std::sync::Arc;
+
+            use anyhow::Context;
+
+            use syslog::SyslogMakeWriter;
+
             let socket_path =
                 std::env::var("YSR_SYSLOG_SOCKET").unwrap_or_else(|_| "/dev/log".into());
             let socket = UnixDatagram::unbound().context("failed to create syslog socket")?;
@@ -77,6 +81,10 @@ pub fn init() -> Result<LogGuard> {
                 .with_ansi(false)
                 .init();
             Ok(LogGuard::None)
+        }
+        #[cfg(not(unix))]
+        "syslog" => {
+            anyhow::bail!("the 'syslog' log target is only supported on unix platforms")
         }
         other => {
             anyhow::bail!(
