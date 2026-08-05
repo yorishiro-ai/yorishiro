@@ -8,7 +8,7 @@ use yorishiro_core::metaschema::MetaSchemaDefinition;
 use yorishiro_core::repositories::entities;
 use yorishiro_core::repositories::relations::{
     CreateRelationInput, DEFAULT_NEIGHBORS_LIMIT, ListRelationsQuery, create, delete, get, list,
-    neighbors,
+    neighbors, neighbors_batch,
 };
 use yorishiro_core::repositories::schemas;
 use yorishiro_core::test_support;
@@ -433,4 +433,206 @@ async fn neighbors_is_empty_when_no_relations_exist(pool: PgPool) {
         .await
         .unwrap();
     assert!(result.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn neighbors_batch_matches_per_id_neighbors_calls_for_multiple_pivots(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
+
+    create(
+        &mut conn,
+        workspace_id,
+        CreateRelationInput {
+            source_id: task.id,
+            target_id: project.id,
+            relation_type: "belongs_to".into(),
+            properties: Value::Null,
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut batch = neighbors_batch(
+        &mut conn,
+        workspace_id,
+        &[task.id, project.id],
+        DEFAULT_NEIGHBORS_LIMIT,
+    )
+    .await
+    .unwrap();
+
+    let from_task = batch.remove(&task.id).expect("task has one neighbor");
+    assert_eq!(from_task.len(), 1);
+    assert_eq!(from_task[0].direction, "out");
+    assert_eq!(from_task[0].entity.id, project.id);
+
+    let from_project = batch.remove(&project.id).expect("project has one neighbor");
+    assert_eq!(from_project.len(), 1);
+    assert_eq!(from_project[0].direction, "in");
+    assert_eq!(from_project[0].entity.id, task.id);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn neighbors_batch_omits_pivots_with_no_relations(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+    let (task, _project) =
+        seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
+
+    let batch = neighbors_batch(&mut conn, workspace_id, &[task.id], DEFAULT_NEIGHBORS_LIMIT)
+        .await
+        .unwrap();
+
+    assert!(batch.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn neighbors_batch_applies_limit_per_pivot_not_across_the_whole_batch(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
+        .await
+        .unwrap();
+
+    // Two tasks, each linked to two of their own projects: if `limit` were applied across the
+    // whole batch instead of per pivot, one task's neighbors would starve the other's.
+    let mut task_ids = Vec::new();
+    for task_name in ["task-a", "task-b"] {
+        let task = entities::create(
+            &mut conn,
+            workspace_id,
+            entities::CreateEntityInput {
+                schema_name: "task-management".into(),
+                entity_type: "task".into(),
+                data: json!({ "title": task_name }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        for project_name in ["p1", "p2"] {
+            let project = entities::create(
+                &mut conn,
+                workspace_id,
+                entities::CreateEntityInput {
+                    schema_name: "task-management".into(),
+                    entity_type: "project".into(),
+                    data: json!({ "title": format!("{task_name}-{project_name}") }),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            create(
+                &mut conn,
+                workspace_id,
+                CreateRelationInput {
+                    source_id: task.id,
+                    target_id: project.id,
+                    relation_type: "belongs_to".into(),
+                    properties: Value::Null,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        task_ids.push(task.id);
+    }
+
+    let batch = neighbors_batch(&mut conn, workspace_id, &task_ids, 2)
+        .await
+        .unwrap();
+
+    assert_eq!(batch[&task_ids[0]].len(), 2);
+    assert_eq!(batch[&task_ids[1]].len(), 2);
+}
+
+/// `neighbors_batch` groups its `CROSS JOIN LATERAL` rows into a per-pivot `Vec` in whatever
+/// order they arrive from Postgres; this pins that order to most-recent-first (matching
+/// `neighbors`' documented order) rather than leaving it as an accident of query planning, since
+/// `recall_context` relies on that order when it truncates to `limit`.
+#[sqlx::test(migrations = "../../migrations")]
+async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
+        .await
+        .unwrap();
+
+    let task = entities::create(
+        &mut conn,
+        workspace_id,
+        entities::CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "write report" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Created in order alpha, beta, gamma -- relation_created_at is monotonically increasing,
+    // so the most-recent-first order is exactly the reverse of creation order.
+    let mut project_ids = Vec::new();
+    for name in ["alpha", "beta", "gamma"] {
+        let project = entities::create(
+            &mut conn,
+            workspace_id,
+            entities::CreateEntityInput {
+                schema_name: "task-management".into(),
+                entity_type: "project".into(),
+                data: json!({ "title": name }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        create(
+            &mut conn,
+            workspace_id,
+            CreateRelationInput {
+                source_id: task.id,
+                target_id: project.id,
+                relation_type: "belongs_to".into(),
+                properties: Value::Null,
+            },
+        )
+        .await
+        .unwrap();
+        project_ids.push(project.id);
+    }
+
+    // limit=2 against 3 relations: truncation must drop the oldest (alpha), keeping gamma then
+    // beta -- the same outcome a single `neighbors(&mut conn, workspace_id, task.id, 2)` call
+    // would produce.
+    let batch = neighbors_batch(&mut conn, workspace_id, &[task.id], 2)
+        .await
+        .unwrap();
+
+    let from_task = &batch[&task.id];
+    assert_eq!(from_task.len(), 2);
+    assert_eq!(
+        from_task[0].entity.id, project_ids[2],
+        "gamma (newest) first"
+    );
+    assert_eq!(from_task[1].entity.id, project_ids[1], "beta second");
 }
