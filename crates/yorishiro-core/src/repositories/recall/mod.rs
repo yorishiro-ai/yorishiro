@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 use sqlx::PgConnection;
@@ -8,7 +8,7 @@ use crate::error::YorishiroError;
 use crate::models::entities::EntityRecord;
 use crate::repositories::entities;
 use crate::repositories::relations;
-use crate::repositories::schemas;
+use crate::repositories::schemas::{self, SchemaRecord};
 use crate::repositories::tenancy::resolve_tenant_id;
 
 pub use crate::models::recall::*;
@@ -16,13 +16,11 @@ pub use crate::models::recall::*;
 /// Reduces `entity.data` down to only the fields marked `x-embed` in its entity_type
 /// definition. Falls back to an empty body if the entity's schema version no longer defines
 /// that entity_type at all, rather than failing the whole recall for one neighbor.
-async fn shallow_copy(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    mut entity: EntityRecord,
-) -> Result<EntityRecord, YorishiroError> {
-    let tenant_id = resolve_tenant_id(conn, workspace_id).await?;
-    let schema = schemas::get_by_id(conn, tenant_id, entity.schema_id).await?;
+///
+/// `schema` is the entity's own `schema_id` resolved by the caller (and cached across neighbors
+/// sharing the same schema) rather than looked up here, so a multi-neighbor recall doesn't repeat
+/// the same `schemas::get_by_id` round trip once per neighbor.
+fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord {
     let fields = schema
         .definition
         .entity_types
@@ -40,7 +38,7 @@ async fn shallow_copy(
         }
     }
     entity.data = Value::Object(shallow);
-    Ok(entity)
+    entity
 }
 
 /// Fetches an entity's full body together with its relations and connected neighbors in one
@@ -65,6 +63,12 @@ pub async fn recall_context(
 
     let entity = entities::get(conn, workspace_id, entity_id).await?;
 
+    // Resolved once and reused for every neighbor's `shallow_copy` below, instead of each
+    // neighbor re-resolving its own workspace's tenant_id (always the same value: `neighbors`
+    // never crosses a workspace boundary).
+    let tenant_id = resolve_tenant_id(conn, workspace_id).await?;
+    let mut schema_cache: HashMap<Uuid, SchemaRecord> = HashMap::new();
+
     // BFS outward from entity_id. `visited` tracks every entity already seen (the root plus
     // every neighbor emitted so far) so a given entity is only ever expanded/reported once, at
     // the hop it was first reached -- this both dedups diamond-shaped paths and guarantees
@@ -77,15 +81,23 @@ pub async fn recall_context(
     for hop in 1..=depth {
         let mut next_frontier = Vec::new();
 
+        // One round trip for every node in the frontier instead of one `neighbors()` call per
+        // node -- see `relations::neighbors_batch`'s doc comment for why this isn't a plain
+        // `source_id = ANY(...)` query (that would apply `limit` across the whole batch rather
+        // than per node).
+        let mut by_pivot =
+            relations::neighbors_batch(conn, workspace_id, &frontier, limit + 1).await?;
+
         for &source_id in &frontier {
-            let mut neighbors =
-                relations::neighbors(conn, workspace_id, source_id, limit + 1).await?;
-            if neighbors.len() as i64 > limit {
+            let Some(mut node_neighbors) = by_pivot.remove(&source_id) else {
+                continue;
+            };
+            if node_neighbors.len() as i64 > limit {
                 truncated = true;
             }
-            neighbors.truncate(limit as usize);
+            node_neighbors.truncate(limit as usize);
 
-            for neighbor in neighbors {
+            for neighbor in node_neighbors {
                 if !visited.insert(neighbor.entity.id) {
                     continue;
                 }
@@ -94,7 +106,15 @@ pub async fn recall_context(
                 let neighbor_entity = if full {
                     neighbor.entity
                 } else {
-                    shallow_copy(conn, workspace_id, neighbor.entity).await?
+                    let schema_id = neighbor.entity.schema_id;
+                    let schema = match schema_cache.get(&schema_id) {
+                        Some(schema) => schema,
+                        None => {
+                            let schema = schemas::get_by_id(conn, tenant_id, schema_id).await?;
+                            schema_cache.entry(schema_id).or_insert(schema)
+                        }
+                    };
+                    shallow_copy(schema, neighbor.entity)
                 };
                 relations_out.push(RecallRelation {
                     relation_type: neighbor.relation_type,
