@@ -496,6 +496,45 @@ async fn neighbors_batch_omits_pivots_with_no_relations(pool: PgPool) {
     assert!(batch.is_empty());
 }
 
+/// A duplicate id in `pivot_ids` must contribute its neighbors only once -- `unnest` would
+/// otherwise drive the lateral subquery twice for that id and double its entry in the result.
+#[sqlx::test(migrations = "../../migrations")]
+async fn neighbors_batch_dedups_a_repeated_pivot_id(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+    let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
+
+    create(
+        &mut conn,
+        workspace_id,
+        CreateRelationInput {
+            source_id: task.id,
+            target_id: project.id,
+            relation_type: "belongs_to".into(),
+            properties: Value::Null,
+        },
+    )
+    .await
+    .unwrap();
+
+    let batch = neighbors_batch(
+        &mut conn,
+        workspace_id,
+        &[task.id, task.id],
+        DEFAULT_NEIGHBORS_LIMIT,
+    )
+    .await
+    .unwrap();
+
+    let from_task = &batch[&task.id];
+    assert_eq!(from_task.len(), 1);
+    assert_eq!(from_task[0].entity.id, project.id);
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn neighbors_batch_applies_limit_per_pivot_not_across_the_whole_batch(pool: PgPool) {
     let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;

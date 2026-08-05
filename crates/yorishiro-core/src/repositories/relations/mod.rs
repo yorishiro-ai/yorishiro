@@ -391,7 +391,9 @@ pub async fn neighbors(
 /// Same truncation convention as `neighbors`: pass `desired_limit + 1` in and compare the
 /// returned count against `desired_limit` to detect truncation.
 /// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from
-/// the map rather than present with an empty vec.
+/// the map rather than present with an empty vec. A duplicate id in `pivot_ids` contributes only
+/// once (deduped before querying) -- `unnest` would otherwise drive the lateral subquery twice
+/// for that id and double its entry in the result map.
 pub async fn neighbors_batch(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -399,6 +401,12 @@ pub async fn neighbors_batch(
     limit: i64,
 ) -> Result<std::collections::HashMap<Uuid, Vec<Neighbor>>, YorishiroError> {
     let limit = limit.clamp(1, 200);
+    let pivot_ids: Vec<Uuid> = pivot_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     if pivot_ids.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
