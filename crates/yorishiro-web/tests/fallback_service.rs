@@ -75,3 +75,23 @@ async fn override_dir_404s_on_a_missing_file_without_falling_back_to_embedded_as
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn override_dir_rejects_path_traversal_outside_the_serve_root() {
+    let outer = tempfile::tempdir().unwrap();
+    std::fs::write(outer.path().join("secret.txt"), "TOP_SECRET_CONTENT").unwrap();
+
+    let webroot = outer.path().join("webroot");
+    std::fs::create_dir(&webroot).unwrap();
+    std::fs::write(webroot.join("index.html"), "<html>ok</html>").unwrap();
+
+    let router = Router::new().fallback_service(fallback_service(Some(
+        webroot.to_str().unwrap().to_string(),
+    )));
+
+    let response = get(router, "/../secret.txt").await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(!String::from_utf8_lossy(&body).contains("TOP_SECRET_CONTENT"));
+}

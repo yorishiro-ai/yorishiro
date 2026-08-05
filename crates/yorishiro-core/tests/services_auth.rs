@@ -7,7 +7,8 @@ use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::db::TenantDb;
 use yorishiro_core::services::auth::{
-    ApiKeyScope, ApiKeys, authenticate, authorize, create_api_key, require_scope,
+    ApiKeyScope, ApiKeys, authenticate, authorize, create_api_key, hex_decode, hex_encode,
+    require_scope,
 };
 use yorishiro_core::test_support;
 
@@ -238,4 +239,41 @@ async fn authorize_rejects_an_unknown_key(pool: PgPool) {
         .unwrap_err();
 
     assert!(matches!(err, YorishiroError::Unauthenticated));
+}
+
+#[test]
+fn hex_encode_decode_round_trips() {
+    let bytes = [0xde, 0xad, 0xbe, 0xef, 0x00, 0x01];
+
+    let encoded = hex_encode(&bytes);
+
+    assert_eq!(encoded, "deadbeef0001");
+    assert_eq!(hex_decode(&encoded).unwrap(), bytes);
+}
+
+#[test]
+fn hex_encode_of_empty_bytes_is_empty_string() {
+    assert_eq!(hex_encode(&[]), "");
+    assert_eq!(hex_decode("").unwrap(), Vec::<u8>::new());
+}
+
+#[test]
+fn hex_decode_rejects_odd_length_input() {
+    assert_eq!(hex_decode("abc"), None);
+}
+
+#[test]
+fn hex_decode_rejects_non_hex_characters() {
+    assert_eq!(hex_decode("zz"), None);
+    assert_eq!(hex_decode("gg"), None);
+}
+
+#[test]
+fn hex_decode_rejects_non_ascii_input_without_panicking() {
+    assert_eq!(hex_decode("é0"), None);
+}
+
+#[test]
+fn hex_decode_accepts_uppercase() {
+    assert_eq!(hex_decode("DEADBEEF").unwrap(), [0xde, 0xad, 0xbe, 0xef]);
 }

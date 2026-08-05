@@ -10,7 +10,7 @@
 //! `YORISHIRO_HOSTED_WEB_DIR` in yorishiro-hosted-server) -- see [`fallback_service`]. That
 //! directory is read fresh on every request, so edits show up without a rebuild.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use axum::body::Body;
 use axum::http::{StatusCode, Uri, header};
@@ -60,7 +60,20 @@ fn serve_embedded(path: &str) -> Response {
     }
 }
 
+/// Rejects any path containing a segment other than a plain filename/directory component --
+/// `..`, a bare `.`, an absolute-path root, or (on Windows) a drive prefix -- so
+/// `serve_from_disk` can never be made to read a file outside `dir` via a crafted request path
+/// such as `/../../etc/passwd`.
+fn is_safe_relative_path(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_)))
+}
+
 async fn serve_from_disk(dir: &Path, path: &str) -> Response {
+    if !is_safe_relative_path(path) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     match tokio::fs::read(dir.join(path)).await {
         Ok(bytes) => respond(path, bytes),
         Err(_) if has_file_extension(path) => StatusCode::NOT_FOUND.into_response(),

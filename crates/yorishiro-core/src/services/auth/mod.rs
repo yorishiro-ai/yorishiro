@@ -103,10 +103,31 @@ pub struct CreatedApiKey {
     pub plaintext: String,
 }
 
+/// Lowercase-hex-encodes `bytes`, two characters per byte (e.g. `[0xab, 0x01]` -> `"ab01"`).
+pub fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Decodes a lowercase- or uppercase-hex string back into bytes. Returns `None` (rather than
+/// panicking) for an odd-length string or one containing a non-hex-digit/non-ASCII character.
+pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if !s.is_ascii() || !s.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    (0..bytes.len())
+        .step_by(2)
+        .map(|i| {
+            let pair = std::str::from_utf8(&bytes[i..i + 2]).ok()?;
+            u8::from_str_radix(pair, 16).ok()
+        })
+        .collect()
+}
+
 pub(super) fn random_hex(byte_len: usize) -> String {
     let mut bytes = vec![0u8; byte_len];
     rand::rng().fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    hex_encode(&bytes)
 }
 
 pub(super) fn hash_key(raw: &str) -> Vec<u8> {

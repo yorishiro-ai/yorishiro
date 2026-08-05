@@ -485,3 +485,110 @@ async fn depth_beyond_the_maximum_is_clamped_not_rejected(pool: PgPool) {
     assert_eq!(context.relations.len(), 1);
     assert_eq!(context.relations[0].hop_distance, 1);
 }
+
+/// A single task belonging to two projects, each owned by its own team, so hop 1's frontier
+/// has two nodes at once. Exercises the batched neighbor lookup (`relations::neighbors_batch`)
+/// across a multi-node frontier, not just the single-node chain the other depth tests use.
+#[sqlx::test(migrations = "../../migrations")]
+async fn depth_two_expands_every_node_in_a_multi_node_frontier(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, workspace_id_tenant, task_project_team_schema())
+        .await
+        .unwrap();
+
+    let task = entities::create(
+        &mut conn,
+        workspace_id,
+        entities::CreateEntityInput {
+            schema_name: "task-project-team".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "write report" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let mut team_ids = Vec::new();
+    for (project_name, team_name) in [("alpha", "team-a"), ("beta", "team-b")] {
+        let project = entities::create(
+            &mut conn,
+            workspace_id,
+            entities::CreateEntityInput {
+                schema_name: "task-project-team".into(),
+                entity_type: "project".into(),
+                data: json!({ "title": project_name }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        relations::create(
+            &mut conn,
+            workspace_id,
+            CreateRelationInput {
+                source_id: task.id,
+                target_id: project.id,
+                relation_type: "belongs_to".into(),
+                properties: Value::Null,
+            },
+        )
+        .await
+        .unwrap();
+
+        let team = entities::create(
+            &mut conn,
+            workspace_id,
+            entities::CreateEntityInput {
+                schema_name: "task-project-team".into(),
+                entity_type: "team".into(),
+                data: json!({ "name": team_name }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        relations::create(
+            &mut conn,
+            workspace_id,
+            CreateRelationInput {
+                source_id: project.id,
+                target_id: team.id,
+                relation_type: "owned_by".into(),
+                properties: Value::Null,
+            },
+        )
+        .await
+        .unwrap();
+        team_ids.push(team.id);
+    }
+
+    let context = recall_context(
+        &mut conn,
+        workspace_id,
+        task.id,
+        RecallQuery {
+            limit: DEFAULT_RECALL_LIMIT,
+            full: false,
+            depth: 2,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 2 projects at hop 1 + 2 teams at hop 2, one reached through each project.
+    assert_eq!(context.relations.len(), 4);
+    for team_id in team_ids {
+        let team_relation = context
+            .relations
+            .iter()
+            .find(|r| r.neighbor.id == team_id)
+            .expect("every team should be reachable at hop 2");
+        assert_eq!(team_relation.hop_distance, 2);
+    }
+}
