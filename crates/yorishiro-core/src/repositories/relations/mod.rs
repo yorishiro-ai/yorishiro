@@ -288,6 +288,54 @@ impl NeighborRow {
     }
 }
 
+/// Same shape as [`NeighborRow`] plus the pivot id that produced it, for [`neighbors_batch`]'s
+/// `CROSS JOIN LATERAL` result where multiple pivots' rows come back in a single result set.
+#[derive(sqlx::FromRow)]
+struct BatchNeighborRow {
+    pivot_id: Uuid,
+    relation_id: Uuid,
+    relation_type: String,
+    direction: String,
+    properties: Value,
+    // Only used to drive the SQL-level ORDER BY; not read on the Rust side (same convention as
+    // `NeighborRow::relation_created_at`).
+    #[allow(dead_code)]
+    relation_created_at: DateTime<Utc>,
+    entity_id: Uuid,
+    entity_tenant_id: Uuid,
+    entity_schema_id: Uuid,
+    entity_schema_version: i32,
+    entity_type: String,
+    entity_data: Value,
+    entity_created_at: DateTime<Utc>,
+    entity_updated_at: DateTime<Utc>,
+    entity_created_by: Option<Uuid>,
+    entity_updated_by: Option<Uuid>,
+}
+
+impl BatchNeighborRow {
+    fn into_neighbor(self) -> Neighbor {
+        Neighbor {
+            relation_id: self.relation_id,
+            relation_type: self.relation_type,
+            direction: self.direction,
+            properties: self.properties,
+            entity: entities::EntityRecord {
+                id: self.entity_id,
+                workspace_id: self.entity_tenant_id,
+                schema_id: self.entity_schema_id,
+                schema_version: self.entity_schema_version,
+                entity_type: self.entity_type,
+                data: self.entity_data,
+                created_at: self.entity_created_at,
+                updated_at: self.entity_updated_at,
+                created_by: self.entity_created_by,
+                updated_by: self.entity_updated_by,
+            },
+        }
+    }
+}
+
 /// Returns the entities directly connected to `entity_id` by a relation, in either
 /// direction, together with the relation_type and direction of each connection. Ordered by
 /// the relation's creation time, most recent first.
@@ -334,4 +382,88 @@ pub async fn neighbors(
     .internal()?;
 
     Ok(rows.into_iter().map(NeighborRow::into_neighbor).collect())
+}
+
+/// Batched form of [`neighbors`]: looks up up to `limit` neighbors of every id in `pivot_ids` in
+/// one round trip instead of one `neighbors()` call per id, via `CROSS JOIN LATERAL` so each
+/// pivot still gets its own `limit`-bounded result (a plain `WHERE source_id = ANY(...) LIMIT n`
+/// would apply `limit` across the whole batch instead of per pivot, which is not the same query).
+/// Same truncation convention as `neighbors`: pass `desired_limit + 1` in and compare the
+/// returned count against `desired_limit` to detect truncation.
+/// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from
+/// the map rather than present with an empty vec. A duplicate id in `pivot_ids` contributes only
+/// once (deduped before querying) -- `unnest` would otherwise drive the lateral subquery twice
+/// for that id and double its entry in the result map.
+pub async fn neighbors_batch(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    pivot_ids: &[Uuid],
+    limit: i64,
+) -> Result<std::collections::HashMap<Uuid, Vec<Neighbor>>, YorishiroError> {
+    let limit = limit.clamp(1, 200);
+    let pivot_ids: Vec<Uuid> = pivot_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if pivot_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    // For each pivot, the lateral subquery is the same UNION ALL/ORDER BY/LIMIT as `neighbors`,
+    // just correlated against `pivot.id` instead of a single bound parameter -- `source_id`
+    // drives the 'out' branch and `target_id` drives the 'in' branch, exactly as in `neighbors`,
+    // so per-pivot direction semantics are unchanged. The lateral's own ORDER BY/LIMIT already
+    // picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY is what then
+    // guarantees those rows come back to Rust in per-pivot, most-recent-first order too --
+    // `CROSS JOIN LATERAL` doesn't otherwise promise the driving/inner join order is preserved
+    // across pivots, and `recall_context` relies on that order when it truncates.
+    let rows = sqlx::query_as::<_, BatchNeighborRow>(
+        "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \
+                n.properties, n.relation_created_at, n.entity_id, n.entity_tenant_id, \
+                n.entity_schema_id, n.entity_schema_version, n.entity_type, n.entity_data, \
+                n.entity_created_at, n.entity_updated_at, n.entity_created_by, \
+                n.entity_updated_by \
+         FROM unnest($2::uuid[]) AS pivot(id) \
+         CROSS JOIN LATERAL ( \
+             SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
+                    r.created_at AS relation_created_at, \
+                    e.id AS entity_id, e.workspace_id AS entity_tenant_id, \
+                    e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
+                    e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
+                    e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
+                    e.updated_by AS entity_updated_by \
+             FROM content.relations r \
+             JOIN content.entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
+             WHERE r.workspace_id = $1 AND r.source_id = pivot.id \
+             UNION ALL \
+             SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
+                    e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
+                    e.created_at, e.updated_at, e.created_by, e.updated_by \
+             FROM content.relations r \
+             JOIN content.entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
+             WHERE r.workspace_id = $1 AND r.target_id = pivot.id \
+             ORDER BY relation_created_at DESC \
+             LIMIT $3 \
+         ) AS n \
+         ORDER BY pivot.id, n.relation_created_at DESC",
+    )
+    .bind(workspace_id)
+    .bind(pivot_ids)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await
+    .internal()?;
+
+    let mut by_pivot: std::collections::HashMap<Uuid, Vec<Neighbor>> =
+        std::collections::HashMap::new();
+    for row in rows {
+        by_pivot
+            .entry(row.pivot_id)
+            .or_default()
+            .push(row.into_neighbor());
+    }
+
+    Ok(by_pivot)
 }
