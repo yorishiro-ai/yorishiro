@@ -24,7 +24,8 @@ $ curl "localhost:8080/api/search?query_text=shopping&filter=%7B%22status%22%3A%
 # Entity plus its relations and connected neighbors in one call (read scope)
 $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
 
-# Full-workspace JSON Lines export (read scope)
+# JSON Lines export: every schema version in the tenant, plus this workspace's entities and
+# relations (read scope)
 $ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
 
 # Import the same JSON Lines format back in, as a single transaction (schema scope,
@@ -33,7 +34,13 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
-`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`), and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`. `GET /api/templates/{id}` returns the full definition of a single built-in template by its ID (e.g. `general-notes`) as a `MetaSchemaDefinition` JSON object -- the same structure `POST /api/schemas` accepts.
+`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`), and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`.
+
+All request bodies are capped at 2 MiB (`413 Payload Too Large` beyond that) -- relevant to `POST /api/import.jsonl` for a large export.
+
+### `GET /api/templates/{id}`
+
+Returns the full definition of a single built-in template by its ID (e.g. `general-notes`) as a `MetaSchemaDefinition` JSON object -- the same structure `POST /api/schemas` accepts.
 
 ### Template library
 
@@ -41,18 +48,18 @@ Separate from the built-in templates above (`/api/templates`, read-only, bundled
 
 | Endpoint | Scope | Description |
 |---|---|---|
-| `GET /api/template-library` | any member | List templates visible to the caller's tenant (own plus any community-visible ones) |
-| `GET /api/template-library/{id}` | any member | Fetch a single template by ID |
+| `GET /api/template-library` | any valid API key | List templates visible to the caller's tenant (own plus any community-visible ones) |
+| `GET /api/template-library/{id}` | any valid API key | Fetch a single template by ID |
 | `POST /api/template-library` | owner/admin | Create a template |
 | `PUT /api/template-library/{id}` | owner/admin | Update a template |
 | `DELETE /api/template-library/{id}` | owner/admin | Delete a template |
 | `POST /api/template-library/{id}/fork` | owner/admin | Fork an existing template into a new one |
 
-As with member/workspace management, the write endpoints are gated on the caller's tenant role (owner/admin), independent of their key's own scope.
+The read endpoints only require a valid API key for the tenant (no tenant-membership check beyond that). As with member/workspace management, the write endpoints are additionally gated on the caller's tenant role (owner/admin), independent of their key's own scope.
 
 ### Auth & member management
 
-Unlike every other endpoint, `/auth/signup` and `/auth/login` take no bearer token — their entire purpose is to hand one out. See [setup.md](setup.md#signup-login-member-and-workspace-management) for the full invite → signup → login flow.
+`/auth/signup` and `/auth/login` take no bearer token — their entire purpose is to hand one out. `/setup`/`/setup/status` (see [setup.md](setup.md#first-run-setup)) and the liveness/readiness checks `/up`/`/health` are also unauthenticated. Of those, the four that accept input (`/auth/signup`, `/auth/login`, `/setup`, `/setup/status`) are rate-limited by client IP (`429 Too Many Requests` past the limit; see `YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS` in [configuration.md](configuration.md)) -- the health probes `/up`/`/health` are not. See [setup.md](setup.md#signup-login-member-and-workspace-management) for the full invite → signup → login flow.
 
 ```console
 # Redeem an invite (see `admin create-invite`) to create an account
@@ -77,7 +84,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 `POST /api/members` attaches an *existing* account to the caller's tenant. It never creates one -- that's what signup does. Both member-management endpoints are gated on the caller's tenant role (owner/admin), independent of their key's own scope.
 
-Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace.
+Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace. `DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
 
 ## MCP Tools
 
@@ -105,4 +112,4 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `list_template_library` | read | List the tenant's DB-backed schema template library (distinct from `list_templates`, which lists the built-in templates) |
 | `get_template_library_item` | read | Fetch a single template from the tenant's DB-backed template library by ID |
 
-The REST-only `GET /api/export.jsonl` endpoint (full-workspace JSON Lines export) has no MCP tool equivalent, but its counterpart `POST /api/import.jsonl` does: `import_jsonl` above.
+The REST-only `GET /api/export.jsonl` endpoint (every schema version in the tenant, plus the workspace's entities and relations, as JSON Lines) has no MCP tool equivalent, but its counterpart `POST /api/import.jsonl` does: `import_jsonl` above.

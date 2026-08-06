@@ -100,7 +100,7 @@ systemdで再起動をまたいで動かし続ける方法は[deployment.md](dep
 |---|---|
 | `http://localhost:8080/up` | Liveness probe。プロセスが起動していれば依存関係を見ず常に200 |
 | `http://localhost:8080/health` | Readiness check。DB接続も確認し、障害時は503 |
-| `http://localhost:8080/` | セットアップ・ログイン・ワークスペース管理用Web UI。バイナリに組み込み済み。実ディレクトリから配信させる場合は[configuration.md](configuration.md)の`YSR_WEB_DIR`を参照 |
+| `http://localhost:8080/` | Web UI。バイナリに組み込み済み。実ディレクトリから配信させる場合は[configuration.md](configuration.md)の`YSR_WEB_DIR`を参照。何をカバーするかは下記[Web UI](#web-ui)を参照 |
 | `http://localhost:8080/docs` | Swagger UI(REST APIドキュメント) |
 | `http://localhost:8080/api-docs/openapi.json` | OpenAPI仕様 |
 | `http://localhost:8080/mcp` | MCPエンドポイント(Streamable HTTP) |
@@ -108,7 +108,7 @@ systemdで再起動をまたいで動かし続ける方法は[deployment.md](dep
 
 ## 初回セットアップ
 
-`YORISHIRO_MAX_TENANTS`が実際の上限として解決されるデプロイ(既定は未設定で`1`)は、`http://localhost:8080/`でセットアップウィザードを配信します。管理CLIは不要です。まだテナントが存在しない初回アクセス時は、メールアドレスとパスワードだけを入力するフォームが表示されます。送信するとテナント・`default`ワークスペース・ownerアカウントが一括作成され、発行されたAPIキーが画面に表示されます(他のキー同様、表示は一度だけ)。以降は同じページがログインフォームになります。
+`YORISHIRO_MAX_TENANTS`が実際の上限として解決されるデプロイ(既定は未設定で`1`)は、`http://localhost:8080/`でセットアップウィザードを配信します。管理CLIは不要です。まだテナントが存在しない初回アクセス時は、メールアドレスとパスワードに加えて、任意入力の表示名と、`default`ワークスペースの元になる任意選択のスキーマテンプレートを入力するフォームが表示されます。送信するとテナント・`default`ワークスペース・ownerアカウントが一括作成され、発行されたAPIキーが画面に表示されます(他のキー同様、表示は一度だけ)。以降は同じページがログインフォームになります。
 
 同じフローはブラウザなしでも利用できます。
 
@@ -159,7 +159,7 @@ api key created (the plaintext key is shown ONLY once — store it now)
 $ make admin ARGS="list-tenants"
 ```
 
-`create-tenant <name> [--max-workspaces <n>] [--template <id>]`は既定ではテナントのみを作成します。`--max-workspaces`でそのテナントが作成できるワークスペース数の上限を設定できます(省略時は無制限)。作業を開始するには、まずスキーマを作成し（テンプレートまたはREST API/Web UIからカスタム定義）、次に`--schema-id`を指定してワークスペースを作成します。各ワークスペースは1つのスキーマと1:1で紐付きます。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
+`create-tenant <name> [--max-workspaces <n>] [--template <id>]`は既定ではテナントのみを作成します。`--max-workspaces`でそのテナントが作成できるワークスペース数の上限を設定できます(省略時は無制限)。作業を開始するには、まずスキーマを作成します — 組み込みテンプレートから(REST API、MCP、Web UI、または上記の`--template`のいずれでも可)、またはカスタム定義から(REST APIまたはMCPのみ。Web UIは組み込みテンプレートの適用のみ可能で、任意のスキーマ定義を登録することはできません) — 次に`--schema-id`を指定してワークスペースを作成します。各ワークスペースは1つのスキーマと1:1で紐付きます。平文キーは発行時に一度だけ表示されます。管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。これはマイグレーションと同じ管理ロールで、`identity.tenants`/`identity.users`/`identity.tenant_memberships`に書き込める唯一のロールです(アプリ自身の`yorishiro_app`ロールにはこの権限がありません)。
 
 `create-tenant`は`--template <id>`も受け付けます。組み込みテンプレートからスキーマを作成し、それに紐づくデフォルトワークスペースを自動作成します。このフラグなしではテナントのみが作成されます(ワークスペースなし、ログイン不可)。例: `admin create-tenant acme --template general-notes`
 
@@ -270,4 +270,14 @@ scopeは`read` < `write` < `schema`の3段階です。`write`キーは読み取�
    ```
 
    - ワークスペースを削除すると配下の全て(エンティティ・リレーション・スキーマ・APIキー)も削除されます。テナントに残る唯一のワークスペースは削除できません(409)。`DATABASE_URL`へのアクセスなしには代わりのワークスペースを発行する手段がないためです。
-   - Web UI(`/`)でもログイン後に同じ作成・一覧・削除・詳細表示の操作ができます。
+   - Web UI(`/`)でもログイン後に同じ作成・一覧・削除・詳細表示の操作ができます。詳しくは下記[Web UI](#web-ui)を参照してください。
+
+## Web UI
+
+初回セットアップ・ログイン・メンバー/ワークスペース管理(上記)に加えて、Web UIでは以下も操作できます。
+
+- **スキーマ**: テナントに登録されたスキーマと、スキーマごとのentity type一覧を閲覧できます。
+- **エンティティ**: ワークスペースのエンティティを閲覧・絞り込み・ページングできます。詳細画面ではリレーションが表示され、個々のデータフィールド(JSON)を編集できます。エンティティ・リレーションの**作成**や削除、組み込みテンプレートの適用を超えるスキーマ作成はできません(上記[テナント・ワークスペース・APIキーの発行](#テナントワークスペースapiキーの発行)参照)。それらはREST APIまたはMCP経由で行います。
+- **テンプレートライブラリ**: テナントのDB保存テンプレートの一覧・作成・削除ができます(api.mdの[テンプレートライブラリ](api.md#テンプレートライブラリ)参照。フォークはREST/MCP限定でUIには未搭載)。
+
+完全なデータ管理UIではありません — Web UIがカバーしない部分はREST API(`/docs`のSwagger UI)とMCPツールで補ってください。
