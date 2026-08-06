@@ -59,13 +59,17 @@ $ journalctl -u yorishiro -f
 
 ## Releasing
 
-Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`. It builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), and attaches them to a GitHub Release.
-
-It also builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
+Releases are cut by running `.github/workflows/release.yml` via `workflow_dispatch` with a `version` input (e.g. `0.16.3`, without the leading `v`) -- there is no tag-push trigger. The workflow's `prepare` job validates the version, checks that the tag doesn't already exist, bumps `workspace.package.version` in the root `Cargo.toml`, runs `cargo update -w` to update `Cargo.lock` accordingly, commits both to `master`, and creates and pushes the `vX.Y.Z` tag itself -- there is no need to (and no longer a way to) bump the version or create the tag by hand.
 
 ```console
-$ git tag vX.Y.Z && git push origin vX.Y.Z
+$ gh workflow run release.yml -f version=X.Y.Z
 ```
+
+Or trigger it from the Actions tab on GitHub (select the `Release` workflow, "Run workflow", enter the version).
+
+Once the version is bumped and tagged, the rest of the workflow builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), and attaches them to a GitHub Release.
+
+It also builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
 
 ## Single-tenant mode
 

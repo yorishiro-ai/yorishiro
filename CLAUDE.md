@@ -90,4 +90,8 @@
 
 - `workspace.package.version` in the root `Cargo.toml` is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
-- Tag format: `v{version}` (e.g. `v0.8.1`). Tag every release commit.
+- Tag format: `v{version}` (e.g. `v0.8.1`). Releases are cut by running the
+  `Release` workflow (`workflow_dispatch` with a `version` input) from the
+  Actions tab or `gh workflow run release.yml -f version=X.Y.Z` -- it bumps
+  `Cargo.toml`/`Cargo.lock`, commits, and creates the tag itself. Do not
+  hand-edit the version or create the tag locally.
