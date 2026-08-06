@@ -102,7 +102,7 @@ Migrations are applied automatically on startup, for all three methods above.
 |---|---|
 | `http://localhost:8080/up` | Liveness probe (always 200 if the process is running; no dependency checks) |
 | `http://localhost:8080/health` | Readiness check (also probes DB connectivity; 503 on outage) |
-| `http://localhost:8080/` | Setup/login/workspace-management web UI (compiled into the binary; see `YSR_WEB_DIR` in [configuration.md](configuration.md) to serve it from disk instead) |
+| `http://localhost:8080/` | Web UI (compiled into the binary; see `YSR_WEB_DIR` in [configuration.md](configuration.md) to serve it from disk instead) -- see [Web UI](#web-ui) below for what it covers |
 | `http://localhost:8080/docs` | Swagger UI (REST API documentation) |
 | `http://localhost:8080/api-docs/openapi.json` | OpenAPI specification |
 | `http://localhost:8080/mcp` | MCP endpoint (Streamable HTTP) |
@@ -112,7 +112,7 @@ Migrations are applied automatically on startup, for all three methods above.
 
 Deployments where `YORISHIRO_MAX_TENANTS` resolves to an actual cap (the default: unset means `1`) serve a setup wizard at `http://localhost:8080/`. No admin CLI needed.
 
-On first visit, since no tenant exists yet, the browser shows a form asking only for an email and password. Submitting it creates the tenant, its `default` workspace, and an owner account in one step, and displays the freshly issued API key (shown only once, same as every other key in this system). Visiting the same page afterward shows a login form instead.
+On first visit, since no tenant exists yet, the browser shows a form for an email and password (plus an optional display name and an optional schema template to bootstrap the `default` workspace with). Submitting it creates the tenant, its `default` workspace, and an owner account in one step, and displays the freshly issued API key (shown only once, same as every other key in this system). Visiting the same page afterward shows a login form instead.
 
 The same flow is available without a browser:
 
@@ -167,7 +167,7 @@ api key created (the plaintext key is shown ONLY once — store it now)
 $ make admin ARGS="list-tenants"
 ```
 
-`create-tenant <name> [--max-workspaces <n>] [--template <id>]` creates the tenant only, by default. `--max-workspaces` caps the number of workspaces the tenant may create (omit for unlimited). To start working, create a schema first (from a template or a custom definition via the REST API or Web UI), then create a workspace with `--schema-id` to link it. Each workspace uses exactly one schema (1:1 relationship). The plaintext API key is shown only once, at issuance time.
+`create-tenant <name> [--max-workspaces <n>] [--template <id>]` creates the tenant only, by default. `--max-workspaces` caps the number of workspaces the tenant may create (omit for unlimited). To start working, create a schema first -- from a built-in template (REST API, MCP, the Web UI, or `--template` above) or a custom definition (REST API or MCP only; the Web UI can only apply a built-in template, not register an arbitrary definition) -- then create a workspace with `--schema-id` to link it. Each workspace uses exactly one schema (1:1 relationship). The plaintext API key is shown only once, at issuance time.
 
 Pass `--template <id>` to `create-tenant` to bootstrap a schema from a built-in template and create a default workspace linked to it in the same step. Without this flag, only a tenant is created (no workspace, no login possible). Example: `admin create-tenant acme --template general-notes`.
 
@@ -284,4 +284,14 @@ Account creation is invite-only — there is no public, unauthenticated signup. 
    ```
 
    - Deleting a workspace cascades to everything under it: entities, relations, schemas, API keys. It's rejected with 409 if it's the tenant's only remaining workspace, since there would be no way to provision a replacement without `DATABASE_URL` access.
-   - The web UI (`/`) exposes the same create/list/delete/detail operations after signing in.
+   - The web UI (`/`) exposes the same create/list/delete/detail operations after signing in -- see [Web UI](#web-ui) below.
+
+## Web UI
+
+Beyond first-run setup, login, and member/workspace management (above), the web UI also offers:
+
+- **Schemas**: browse the tenant's registered schemas and, per schema, its entity types.
+- **Entities**: browse/filter/page through a workspace's entities; a detail view per entity shows its relations and supports editing individual data fields (JSON). There is no entity/relation *creation* or deletion, and no schema creation beyond applying a built-in template (see [Provisioning tenants, workspaces, and API keys](#provisioning-tenants-workspaces-and-api-keys) above) -- those go through the REST API or MCP.
+- **Template library**: list, create, and delete the tenant's DB-backed templates (see [Template library](api.md#template-library) in api.md; forking is REST/MCP-only, not exposed in the UI).
+
+It is not a full data-management UI -- the REST API (Swagger UI at `/docs`) and MCP tools cover everything it doesn't.

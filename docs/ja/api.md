@@ -24,7 +24,8 @@ $ curl "localhost:8080/api/search?query_text=買い物&filter=%7B%22status%22%3A
 # エンティティとそのリレーション・隣接エンティティを一括取得(read scope)
 $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
 
-# ワークスペース全体のJSON Linesエクスポート(read scope)
+# JSON Linesエクスポート: テナント内の全スキーマバージョン + このワークスペースのエンティティ・
+# リレーション(read scope)
 $ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
 
 # 同じJSON Lines形式を取り込む。単一トランザクションとして実行(schema scope。
@@ -34,6 +35,8 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
 ```
 
 `GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)も受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を渡すことで、`GET /api/templates`で一覧取得できる組み込みテンプレートからスキーマを登録できます。
+
+リクエストボディはすべて2 MiB上限です(超えると`413 Payload Too Large`)。大きめのエクスポートを`POST /api/import.jsonl`で取り込む際に関係します。
 
 ### `GET /api/templates/{id}`
 
@@ -45,18 +48,18 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
 
 | エンドポイント | scope | 内容 |
 |---|---|---|
-| `GET /api/template-library` | 全メンバー | 呼び出し元のテナントから見えるテンプレート一覧(自身のもの + コミュニティ公開のもの) |
-| `GET /api/template-library/{id}` | 全メンバー | 単一テンプレートをIDで取得 |
+| `GET /api/template-library` | 有効なAPIキー | 呼び出し元のテナントから見えるテンプレート一覧(自身のもの + コミュニティ公開のもの) |
+| `GET /api/template-library/{id}` | 有効なAPIキー | 単一テンプレートをIDで取得 |
 | `POST /api/template-library` | owner/admin | テンプレートを作成 |
 | `PUT /api/template-library/{id}` | owner/admin | テンプレートを更新 |
 | `DELETE /api/template-library/{id}` | owner/admin | テンプレートを削除 |
 | `POST /api/template-library/{id}/fork` | owner/admin | 既存のテンプレートを新しいテンプレートとしてフォーク |
 
-メンバー/ワークスペース管理と同様、書き込み系エンドポイントはキー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
+読み取り系エンドポイントは当該テナントの有効なAPIキーであれば呼び出せます(それ以上のテナントメンバーシップチェックはありません)。メンバー/ワークスペース管理と同様、書き込み系エンドポイントはさらにキー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
 
 ### 認証・メンバー管理・ワークスペース管理
 
-他の全エンドポイントと異なり、`/auth/signup`と`/auth/login`はbearerトークンを必要としません。これらの目的自体がトークンを発行することだからです。招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
+`/auth/signup`と`/auth/login`はbearerトークンを必要としません。これらの目的自体がトークンを発行することだからです。`/setup`/`/setup/status`([setup.md](setup.md#初回セットアップ)参照)と、生存確認・準備確認用の`/up`/`/health`も同様に認証不要です。このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
 
 ```console
 # 招待(`admin create-invite`参照)を引き換えてアカウントを作成
@@ -81,7 +84,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 `POST /api/members`は**既存の**アカウントを呼び出し元のテナントに追加するだけで、新規作成はしません(それはサインアップの役割です)。メンバー管理の両エンドポイントは、キー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。ワークスペース管理の`POST`/`DELETE`も同じ規則に従います(一覧取得と`GET /api/workspaces/{id}`による詳細取得はテナントの全メンバーに開放されています)。
 
-`GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。
+`GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
 
 ## MCPツール
 
@@ -109,4 +112,4 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `list_template_library` | read | テナントのDB保存スキーマテンプレートライブラリの一覧(組み込みテンプレートを一覧する`list_templates`とは別物) |
 | `get_template_library_item` | read | テナントのDB保存テンプレートライブラリから単一テンプレートをIDで取得 |
 
-REST専用の`GET /api/export.jsonl`エンドポイント(ワークスペース全体のJSON Linesエクスポート)に対応するMCPツールはありませんが、対になる`POST /api/import.jsonl`には上記の`import_jsonl`が対応します。
+REST専用の`GET /api/export.jsonl`エンドポイント(テナント内の全スキーマバージョン + ワークスペースのエンティティ・リレーションをJSON Linesで出力)に対応するMCPツールはありませんが、対になる`POST /api/import.jsonl`には上記の`import_jsonl`が対応します。
