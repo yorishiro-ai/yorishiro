@@ -82,3 +82,73 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Verifies the built binary actually boots and serves traffic, not just that it compiles
+  # and its unit/integration tests pass -- `check` above never starts the real `main()`, so a
+  # startup-only failure (a panicking `.expect()` in config/provider construction, a missing
+  # env var only main.rs reads) would otherwise ship unnoticed until a real deploy.
+  package-smoke:
+    runs-on: ubuntu-latest
+    # A cold `cargo build` here pulls in ort/tokenizers same as `check`'s clippy/test steps do,
+    # but doesn't reuse their compiled artifacts (debug profile, different step) -- generous
+    # even with the warm shared-key cache so a slow cold run doesn't misread as a real failure.
+    timeout-minutes: 15
+
+    services:
+      db:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: yorishiro
+          POSTGRES_PASSWORD: yorishiro
+          POSTGRES_DB: yorishiro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yorishiro"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+      # The default "local" provider requires ONNX model files that aren't checked into git
+      # (docker-compose mounts them from disk instead -- see models/ in .gitignore), so a bare
+      # CI checkout can't load it. "openai" only builds an HTTP client at startup -- it never
+      # connects until an actual embed() call, which this smoke test never makes -- so a
+      # non-resolving placeholder URL is enough to boot without needing a real endpoint.
+      YSR_EMBEDDING_PROVIDER: openai
+      YSR_EMBEDDING_BASE_URL: http://localhost:1
+      YSR_EMBEDDING_MODEL: smoke-test-unused
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: ~/.cache/ort.pyke.io
+          shared-key: rust
+          save-if: false
+
+      - name: Build
+        run: cargo build -p yorishiro-server
+
+      # The binary migrates the database itself on startup (see main.rs), so no separate
+      # `sqlx migrate run` step is needed here.
+      - name: Boot and check /up
+        run: |
+          ./target/debug/yorishiro-server &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          ok=
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          [ -n "$ok" ] || { echo "server did not serve /up within 30s"; exit 1; }
+          echo "server booted and served /up"
