@@ -67,15 +67,21 @@ pub async fn signup(
             hint: "ask a tenant admin for a fresh invite".into(),
         })?;
 
+    // create_user + add_member run in one transaction: if a request dies between the two
+    // (e.g. the connection drops), an isolated user row with no tenant membership would
+    // otherwise be unrecoverable (it can never be added to a tenant via a normal signup or
+    // `admin add-member`, both of which expect a user that doesn't already exist / already
+    // does, respectively). See `create_user`'s doc comment.
+    let mut tx = state.identity_pool.begin().await.internal()?;
     let user = tenancy::create_user(
-        &state.identity_pool,
+        &mut tx,
         &invite.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-
-    tenancy::add_member(&state.identity_pool, invite.tenant_id, user.id, invite.role).await?;
+    tenancy::add_member(&mut tx, invite.tenant_id, user.id, invite.role).await?;
+    tx.commit().await.internal()?;
 
     let workspaces = tenancy::list_workspaces(&state.identity_pool, invite.tenant_id)
         .await?

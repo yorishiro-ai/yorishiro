@@ -117,22 +117,17 @@ pub async fn setup(
     let tenant = tenancy::create_tenant(&state.identity_pool, "default", None).await?;
     let workspace =
         tenancy::create_workspace(&state.identity_pool, tenant.id, "default", None, None).await?;
+
+    let mut conn = state.identity_pool.acquire().await.internal()?;
     let user = tenancy::create_user(
-        &state.identity_pool,
+        &mut conn,
         &body.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenancy::add_member(
-        &state.identity_pool,
-        tenant.id,
-        user.id,
-        MembershipRole::Owner,
-    )
-    .await?;
+    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Owner).await?;
 
-    let mut conn = state.identity_pool.acquire().await.internal()?;
     let created = auth::create_api_key(
         &mut conn,
         workspace.id,

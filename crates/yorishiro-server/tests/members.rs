@@ -10,12 +10,18 @@ async fn owner_can_list_and_add_members(pool: PgPool) {
     let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    let owner = tenancy::create_user(&pool, "owner@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, owner.id, tenancy::MembershipRole::Owner)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant.id,
+        owner.id,
+        tenancy::MembershipRole::Owner,
+    )
+    .await
+    .unwrap();
     let owner_key = issue_key_for(
         &pool,
         tenant.id,
@@ -26,9 +32,10 @@ async fn owner_can_list_and_add_members(pool: PgPool) {
     .await;
 
     // The invitee must already have an account before they can be added by email.
-    let invitee = tenancy::create_user(&pool, "invitee@example.com", "hunter2-hunter2", None)
+    let invitee = tenancy::create_user(&mut conn, "invitee@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
+    drop(conn);
 
     let app = build_app(test_state(pool.clone()), None);
 
@@ -74,12 +81,19 @@ async fn add_member_rejects_an_email_with_no_account(pool: PgPool) {
     let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    let owner = tenancy::create_user(&pool, "owner@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, owner.id, tenancy::MembershipRole::Owner)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant.id,
+        owner.id,
+        tenancy::MembershipRole::Owner,
+    )
+    .await
+    .unwrap();
+    drop(conn);
     let owner_key = issue_key_for(
         &pool,
         tenant.id,
@@ -111,12 +125,19 @@ async fn member_role_cannot_manage_members(pool: PgPool) {
     let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    let member = tenancy::create_user(&pool, "member@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let member = tenancy::create_user(&mut conn, "member@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, member.id, tenancy::MembershipRole::Member)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant.id,
+        member.id,
+        tenancy::MembershipRole::Member,
+    )
+    .await
+    .unwrap();
+    drop(conn);
     let member_key = issue_key_for(
         &pool,
         tenant.id,

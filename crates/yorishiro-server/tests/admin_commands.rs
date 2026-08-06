@@ -58,12 +58,14 @@ async fn create_api_key_for_user_is_capped_by_their_role(pool: PgPool) {
     let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None, None)
         .await
         .unwrap();
-    let user = tenancy::create_user(&pool, "viewer@example.com", "pw", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let user = tenancy::create_user(&mut conn, "viewer@example.com", "pw", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, user.id, MembershipRole::Viewer)
+    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Viewer)
         .await
         .unwrap();
+    drop(conn);
 
     // A viewer may be issued a read-scope key...
     let created = create_api_key(&pool, workspace.id, ApiKeyScope::Read, Some(user.id))
@@ -85,9 +87,11 @@ async fn create_api_key_rejects_a_user_who_is_not_a_member(pool: PgPool) {
     let workspace = tenancy::create_workspace(&pool, tenant.id, "default", None, None)
         .await
         .unwrap();
-    let user = tenancy::create_user(&pool, "outsider@example.com", "pw", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let user = tenancy::create_user(&mut conn, "outsider@example.com", "pw", None)
         .await
         .unwrap();
+    drop(conn);
 
     let result = create_api_key(&pool, workspace.id, ApiKeyScope::Read, Some(user.id)).await;
     let Err(err) = result else {
@@ -193,12 +197,14 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn creates_tenant_workspace_user_and_membership(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let user = tenancy::create_user(&pool, "owner@example.com", "pw", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let user = tenancy::create_user(&mut conn, "owner@example.com", "pw", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, user.id, MembershipRole::Owner)
+    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Owner)
         .await
         .unwrap();
+    drop(conn);
 
     let members = tenancy::list_members(&pool, tenant.id).await.unwrap();
     assert_eq!(members.len(), 1);

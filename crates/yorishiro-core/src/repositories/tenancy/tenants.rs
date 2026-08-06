@@ -1,6 +1,6 @@
 use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -119,7 +119,14 @@ fn tenant_columns() -> [Tenants; 6] {
     ]
 }
 
-pub async fn get_tenant(pool: &PgPool, tenant_id: Uuid) -> Result<TenantRecord, YorishiroError> {
+/// Takes `&mut PgConnection` (rather than `&PgPool`, like most of this module) so a caller can
+/// compose it into a larger transaction -- e.g. `add_member` calls this as part of its own
+/// atomic user-creation-plus-membership flow. Pass `&mut pool.acquire().await?` for a
+/// standalone call.
+pub async fn get_tenant(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+) -> Result<TenantRecord, YorishiroError> {
     let (sql, values) = Query::select()
         .columns(tenant_columns())
         .from((Alias::new("identity"), Tenants::Table))
@@ -127,7 +134,7 @@ pub async fn get_tenant(pool: &PgPool, tenant_id: Uuid) -> Result<TenantRecord, 
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))

@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use utoipa::ToSchema;
-use yorishiro_core::YorishiroError;
 use yorishiro_core::repositories::tenancy::{self, MembershipRecord, MembershipRole};
+use yorishiro_core::{ResultExt, YorishiroError};
 
 use crate::error::ApiError;
 use crate::http::controllers::require_tenant_admin;
@@ -68,7 +68,8 @@ pub async fn add_member(
             ))
         })?;
 
-    tenancy::add_member(&state.identity_pool, ctx.tenant_id, user.id, body.role).await?;
+    let mut conn = state.identity_pool.acquire().await.internal()?;
+    tenancy::add_member(&mut conn, ctx.tenant_id, user.id, body.role).await?;
 
     Ok((
         StatusCode::CREATED,
