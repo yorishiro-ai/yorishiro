@@ -8,7 +8,7 @@
 
 以下の設定はすべて`config.yml`ファイルでも指定できます。キー一覧は[`config.example.yml`](../../config.example.yml)を参照してください(`embedding:`・`logging:`・`auth_rate_limit:`はグループごとにネストします)。デフォルトでは作業ディレクトリの`config.yml`を読み込みます。別の場所を使う場合は`YSR_CONFIG_PATH`で指定してください。
 
-ファイルが存在しない場合や、ファイル内に該当キーがない場合はエラーにならず、通常のデフォルト値にフォールバックします。**環境変数が設定されている場合は、対応する`config.yml`のキーより常に優先されます。**
+ファイルが存在しない場合や、ファイル内に該当キーがない場合はエラーにならず、通常のデフォルト値にフォールバックします。**環境変数が設定されている場合は、対応する`config.yml`のキーより常に優先されます。**未知のキー(タイポなど)が含まれている場合は拒否されます — サーバーはそのキーを無視するのではなく、起動に失敗します。
 
 これにより、`config.yml`をデプロイの基本設定として使い、環境変数は一時的な上書き用途(1回限りのDocker `-e`オプションなど)に限定する使い方ができます。
 
@@ -73,6 +73,6 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | `YSR_EMBEDDING_BASE_URL` | `/v1/embeddings`互換エンドポイントのベースURL(必須) |
 | `YSR_EMBEDDING_MODEL` | モデル名(必須) |
 | `YSR_EMBEDDING_API_KEY` | エンドポイントが要求する場合のAPIキー |
-| `YSR_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストボディに`dimensions`パラメータを含めるか(非対応サーバーでは`false`) |
+| `YSR_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストボディに`dimensions`パラメータを含めるか。未設定時は既定で`true`。一度設定すると、小文字の文字列`true`と完全一致する場合のみ有効のまま — `false`・`False`・`FALSE`・`0`等それ以外の値はすべて無効(`false`)として扱われる |
 
 具体的な取得例(`https://huggingface.co/Xenova/all-mpnet-base-v2`の`onnx/model_quantized.onnx`と`tokenizer.json`)は[docs/ja/embedding-providers.md](embedding-providers.md)を参照してください。
