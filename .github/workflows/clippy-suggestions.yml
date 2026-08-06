@@ -13,22 +13,6 @@ permissions:
 jobs:
   clippy:
     runs-on: ubuntu-latest
-    services:
-      db:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_USER: yorishiro
-          POSTGRES_PASSWORD: yorishiro
-          POSTGRES_DB: yorishiro
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U yorishiro"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -42,10 +26,12 @@ jobs:
           # restore what ci.yml saves on master instead of building cold every time.
           shared-key: rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Run migrations
-        run: |
-          cargo install sqlx-cli --no-default-features --features postgres
-          cargo sqlx migrate run
+      # No DB service or migrations here: this repo has zero sqlx::query!/query_as! macros (all
+      # queries are built dynamically via sea-query + query_as_with), so clippy -- a compile-time
+      # lint that only needs the code to type-check, not a live Postgres -- never touches
+      # DATABASE_URL. Verified by running clippy with DATABASE_URL unset and no Postgres reachable
+      # before removing this job's db service/migration steps (they were copy-pasted from ci.yml's
+      # `check` job, where cargo test --all's #[sqlx::test] integration tests genuinely need one).
       - uses: giraffate/clippy-action@v1
         with:
           reporter: github-pr-review
