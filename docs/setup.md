@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-The server needs an embedding model to start. It defaults to the local ONNX provider, which needs no external service beyond the model files themselves.
+The server needs an embedding model to start. It defaults to the local ONNX provider, which needs no external service beyond the model files themselves -- but skipping this step isn't a degraded-mode startup: the process fails to start (before it even binds its listener) if `models/model.onnx`/`models/tokenizer.json` are missing, since neither the repository nor the Docker image bundles them.
 
 1. Fetch a 768-dimensional BERT-family model:
 

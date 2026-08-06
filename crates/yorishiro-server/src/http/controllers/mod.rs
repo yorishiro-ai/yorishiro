@@ -168,21 +168,25 @@ pub struct ApiDoc;
 /// REST API routing. Returned as `Router<AppState>` without state applied, so
 /// that `main.rs` can merge in the MCP routes and SwaggerUi before calling
 /// `with_state` at the end.
-pub fn router() -> Router<AppState> {
-    // Signup/login are the only bearer-token-free endpoints, so they're the only ones an
-    // unauthenticated attacker can brute-force (invite tokens, passwords). Rate-limited by
-    // client IP; see `rate_limit::RateLimiter`.
-    let rate_limiter =
-        std::sync::Arc::new(crate::http::middleware::rate_limit::RateLimiter::from_env());
-    let auth_routes = Router::new()
-        .route("/auth/signup", post(identity::signup))
-        .route("/auth/login", post(identity::login))
-        .route("/setup", post(setup::setup))
-        .route("/setup/status", get(setup::status))
-        .layer(axum::middleware::from_fn_with_state(
-            rate_limiter,
-            crate::http::middleware::rate_limit::enforce,
-        ));
+///
+/// `rate_limiter` protects `/auth/signup`, `/auth/login`, `/setup`, and `/setup/status` --
+/// this crate's own bearer-token-free endpoints, and therefore the ones an unauthenticated
+/// caller can brute-force (invite tokens, passwords). A downstream crate that adds its own
+/// unauthenticated routes (e.g. an OAuth login/callback pair) should rate-limit those too,
+/// via `crate::http::middleware::rate_limit::apply_rate_limit_layer` -- pass this same `Arc`
+/// to share one quota with these routes, or a fresh one for an independent quota. See
+/// `crate::build_app`'s doc comment for the full downstream-integration example.
+pub fn router(
+    rate_limiter: std::sync::Arc<crate::http::middleware::rate_limit::RateLimiter>,
+) -> Router<AppState> {
+    let auth_routes = crate::http::middleware::rate_limit::apply_rate_limit_layer(
+        Router::new()
+            .route("/auth/signup", post(identity::signup))
+            .route("/auth/login", post(identity::login))
+            .route("/setup", post(setup::setup))
+            .route("/setup/status", get(setup::status)),
+        rate_limiter,
+    );
 
     Router::new()
         .merge(auth_routes)

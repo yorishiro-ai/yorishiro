@@ -86,6 +86,15 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace. `DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
 
+## Unmatched paths (web UI fallback)
+
+Any request path that isn't one of the API routes above falls through to the web UI's static file server, and its behavior depends on whether the path *looks like* a file:
+
+- No file extension (e.g. `/foo`, `/dashboard`, `/schemas/abc`) -- always serves the SPA's `index.html`, `200 OK`. This is what makes the web UI's client-side routing work: any unrecognized path is assumed to be a SPA route, not a missing resource.
+- Has a file extension (e.g. `/foo.js`, `/does-not-exist.txt`) -- serves that file if it exists (compiled in, or from `YSR_WEB_DIR` if set), otherwise a real `404 Not Found` with no SPA fallback.
+
+A path with no extension therefore never 404s through this fallback -- a typo'd API route (e.g. `GET /api/entitites`) returns the SPA's HTML instead of a `404` JSON error, which can be surprising when debugging a client. A dotfile-style path (e.g. `/.env`) is also treated as extension-less and falls through to `index.html`, not a straight 404 -- the leading dot is treated as part of the filename, not an extension marker, so `Path::extension()` (and this fallback logic with it) sees no extension at all.
+
 ## MCP Tools
 
 Connecting to `/mcp` (Streamable HTTP) gives you access to 20 tools. Example connection from Claude Code:
