@@ -1,8 +1,11 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.16.3) -- without the leading v'
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,7 +16,72 @@ permissions:
   packages: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version '$VERSION' is not in X.Y.Z format, aborting."
+            exit 1
+          fi
+          echo "tag=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Check if tag already exists
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ env.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ env.tag }} already exists, aborting."
+            exit 1
+          fi
+
+      - name: Set output
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=${{ env.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump workspace version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          sed -i "0,/^version = \".*\"$/s//version = \"$VERSION\"/" Cargo.toml
+          if [ "$(grep -c '^version = "'"$VERSION"'"$' Cargo.toml)" -ne 1 ]; then
+            echo "Expected exactly one '^version = \"$VERSION\"' line in Cargo.toml after the bump, found a different count."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Update lockfile
+        run: cargo update -w
+
+      - name: Commit and tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "tier940"
+          git config user.email "tier940@protonmail.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "Bump version to v$VERSION"
+          git tag "v$VERSION"
+          git push origin HEAD:master
+          git push origin "v$VERSION"
+
   binary:
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -33,6 +101,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -47,7 +117,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          tar -czf "dist/yorishiro-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz" \
+          tar -czf "dist/yorishiro-server-${{ needs.prepare.outputs.tag }}-linux-${{ matrix.arch }}.tar.gz" \
             -C target/release yorishiro-server
 
       - name: Package (Windows)
@@ -56,7 +126,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist
           Compress-Archive -Path "target/release/yorishiro-server.exe" `
-            -DestinationPath "dist/yorishiro-server-${{ github.ref_name }}-windows-${{ matrix.arch }}.zip"
+            -DestinationPath "dist/yorishiro-server-${{ needs.prepare.outputs.tag }}-windows-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -64,6 +134,7 @@ jobs:
           path: dist/*
 
   docker:
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -75,6 +146,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - uses: docker/setup-buildx-action@v4
 
@@ -89,12 +162,12 @@ jobs:
           context: .
           push: true
           provenance: false
-          tags: ${{ env.IMAGE_NAME }}:${{ github.ref_name }}-${{ matrix.arch }}
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
   docker-manifest:
-    needs: docker
+    needs: [docker, prepare]
     runs-on: ubuntu-latest
 
     steps:
@@ -111,13 +184,13 @@ jobs:
       - name: Create multi-arch manifest
         run: |
           docker buildx imagetools create \
-            -t "${{ env.IMAGE_NAME }}:${{ github.ref_name }}" \
+            -t "${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}" \
             -t "${{ env.IMAGE_NAME }}:latest" \
-            "${{ env.IMAGE_NAME }}:${{ github.ref_name }}-amd64" \
-            "${{ env.IMAGE_NAME }}:${{ github.ref_name }}-arm64"
+            "${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-amd64" \
+            "${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-arm64"
 
   github-release:
-    needs: binary
+    needs: [binary, prepare]
     runs-on: ubuntu-latest
 
     steps:
@@ -129,6 +202,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
           files: |
             dist/*.tar.gz
             dist/*.zip

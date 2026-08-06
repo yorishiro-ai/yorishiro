@@ -57,11 +57,17 @@ $ journalctl -u yorishiro -f
 
 ## リリース
 
-`vX.Y.Z`タグをpushすると`.github/workflows/release.yml`がトリガーされます。`yorishiro-server`の`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`として梱包)バイナリをビルドしてGitHub Releaseに添付し、マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`(および`:latest`)としてビルド・pushします。どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせて、QEMUを使わずネイティブビルドします。
+リリースは`.github/workflows/release.yml`を`workflow_dispatch`で(`version`入力、例: `0.16.3`、先頭の`v`なし)実行して切ります — タグpushトリガーはありません。ワークフローの`prepare`ジョブがバージョン形式を検証し、タグが既存でないか確認した上で、ルート`Cargo.toml`の`workspace.package.version`を書き換え、`cargo update -w`で`Cargo.lock`も追随させ、両者を`master`にコミットし、`vX.Y.Z`タグを自ら作成・pushします。バージョンの手動変更やタグの手動作成は不要です(またその手段も廃止されました)。
 
 ```console
-$ git tag vX.Y.Z && git push origin vX.Y.Z
+$ gh workflow run release.yml -f version=X.Y.Z
 ```
+
+またはGitHubのActionsタブから(`Release`ワークフローを選び「Run workflow」でバージョンを入力)実行することもできます。
+
+バージョンのbumpとタグ付けが終わると、ワークフローの残りの部分が`yorishiro-server`の`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`として梱包)バイナリをビルドしてGitHub Releaseに添付します。
+
+また、マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`(および`:latest`)としてビルド・pushします。どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせて、QEMUを使わずネイティブビルドします。
 
 ## シングルテナント構成
 
