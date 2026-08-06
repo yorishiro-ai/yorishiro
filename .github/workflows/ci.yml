@@ -89,7 +89,10 @@ jobs:
   # env var only main.rs reads) would otherwise ship unnoticed until a real deploy.
   package-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A cold `cargo build` here pulls in ort/tokenizers same as `check`'s clippy/test steps do,
+    # but doesn't reuse their compiled artifacts (debug profile, different step) -- generous
+    # even with the warm shared-key cache so a slow cold run doesn't misread as a real failure.
+    timeout-minutes: 15
 
     services:
       db:
