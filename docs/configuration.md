@@ -8,7 +8,7 @@ The full list of variables, with comments, lives in [`.env.example`](../.env.exa
 
 Every setting below can also go in a `config.yml` file instead. See [`config.example.yml`](../config.example.yml) for the full key list (nested under `embedding:`, `logging:`, and `auth_rate_limit:` for those groups). By default the server looks for `config.yml` in its working directory; set `YSR_CONFIG_PATH` to point elsewhere.
 
-A missing file, or a missing key within it, is not an error -- that setting just falls back to its usual default. **A set environment variable always wins over the equivalent `config.yml` key.**
+A missing file, or a missing key within it, is not an error -- that setting just falls back to its usual default. **A set environment variable always wins over the equivalent `config.yml` key.** An *unknown* key (e.g. a typo) is rejected: the server fails to start rather than silently ignoring it.
 
 This makes `config.yml` convenient as the base configuration for a deployment, with environment variables reserved for one-off overrides (e.g. a Docker `-e` flag for a single run) rather than the only way to configure anything.
 
@@ -73,6 +73,6 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | `YSR_EMBEDDING_BASE_URL` | Base URL of the `/v1/embeddings`-compatible endpoint (required) |
 | `YSR_EMBEDDING_MODEL` | Model name (required) |
 | `YSR_EMBEDDING_API_KEY` | API key, if required by the endpoint |
-| `YSR_EMBEDDING_SEND_DIMENSIONS_PARAM` | Whether to include a `dimensions` parameter in the request body (set `false` for servers that don't support it) |
+| `YSR_EMBEDDING_SEND_DIMENSIONS_PARAM` | Whether to include a `dimensions` parameter in the request body. Defaults to `true` when unset. Once set, only the exact lowercase string `true` keeps it enabled -- every other value, including `false`, `False`, `FALSE`, and `0`, disables it |
 
 See [docs/embedding-providers.md](embedding-providers.md) for a worked example, e.g. `https://huggingface.co/Xenova/all-mpnet-base-v2` (`onnx/model_quantized.onnx` and `tokenizer.json`).
