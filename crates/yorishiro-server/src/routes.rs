@@ -24,7 +24,47 @@ use crate::state::AppState;
 /// deployment that wants a single process (e.g. `yorishiro-hosted-server` embedding the full
 /// community server) can build this same router and merge its own routes into it, rather than
 /// running two separate processes.
+///
+/// **Merging your own routes in.** `axum::Router::merge` does not propagate a `.layer()` from
+/// either side to the other -- so routes added via `some_router.merge(build_app(state,
+/// web_dir))` get none of this router's `DefaultBodyLimit`/rate-limit/CORS/trace-id layers
+/// unless applied to `some_router` directly, *before* merging. This crate factors those layers
+/// out for exactly that reason:
+///
+/// ```ignore
+/// // `my_unauthenticated_routes` must already be `Router<()>` (call `.with_state(...)` on it
+/// // first if it was built as `Router<MyState>`) -- `apply_observability_layers` and
+/// // `apply_body_limit_layer` both take/return `Router` (i.e. `Router<()>`), matching what
+/// // `build_app`/`build_app_with_rate_limiter` themselves return.
+/// let rate_limiter = std::sync::Arc::new(RateLimiter::from_env());
+/// let my_routes = apply_body_limit_layer(apply_observability_layers(
+///     apply_rate_limit_layer(my_unauthenticated_routes, rate_limiter.clone()),
+/// )); // only routes that should be reachable without a bearer token need the rate limiter
+/// let app = my_routes.merge(build_app_with_rate_limiter(state, web_dir, rate_limiter));
+/// ```
+///
+/// (`RateLimiter`/`apply_rate_limit_layer` are in
+/// `crate::http::middleware::rate_limit`; `apply_body_limit_layer`/`apply_observability_layers`
+/// are in this module.) Pass the same `Arc<RateLimiter>` to both sides to share one quota
+/// across this crate's `/auth/*`/`/setup*` routes and your own unauthenticated routes (e.g. an
+/// OAuth login/callback pair) -- see `build_app_with_rate_limiter`.
 pub fn build_app(state: AppState, web_dir: Option<String>) -> Router {
+    build_app_with_rate_limiter(
+        state,
+        web_dir,
+        std::sync::Arc::new(crate::http::middleware::rate_limit::RateLimiter::from_env()),
+    )
+}
+
+/// Like [`build_app`], but takes the `Arc<RateLimiter>` protecting this crate's own
+/// `/auth/signup`, `/auth/login`, `/setup`, `/setup/status` routes instead of constructing one
+/// internally -- for a downstream crate that wants to share that same quota with its own
+/// unauthenticated routes (see [`build_app`]'s doc comment for the full pattern).
+pub fn build_app_with_rate_limiter(
+    state: AppState,
+    web_dir: Option<String>,
+    rate_limiter: std::sync::Arc<crate::http::middleware::rate_limit::RateLimiter>,
+) -> Router {
     let mcp_service = StreamableHttpService::new(
         {
             let state = state.clone();
@@ -39,14 +79,23 @@ pub fn build_app(state: AppState, web_dir: Option<String>) -> Router {
         .route("/health", get(health::health_check))
         .route("/whoami", get(whoami::whoami))
         .nest_service("/mcp", mcp_service)
-        .merge(controllers::router())
+        .merge(controllers::router(rate_limiter))
         .merge(
             SwaggerUi::new("/docs").url("/api-docs/openapi.json", controllers::ApiDoc::openapi()),
-        )
-        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
-        .with_state(state);
+        );
+    let router = apply_body_limit_layer(router).with_state(state);
 
     apply_observability_layers(router).fallback_service(yorishiro_web::fallback_service(web_dir))
+}
+
+/// Applies the 2 MiB request-body cap every route in this process needs. Factored out for the
+/// same reason as `apply_observability_layers` -- see that function's doc comment and
+/// `build_app`'s "Merging your own routes in" section.
+pub fn apply_body_limit_layer<S>(router: Router<S>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(DefaultBodyLimit::max(2 * 1024 * 1024))
 }
 
 /// Applies the CORS / request-id / access-log stack that every API route in this process needs.

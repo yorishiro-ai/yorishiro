@@ -1,18 +1,22 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-/// A per-key fixed-window rate limiter for `/auth/signup` and `/auth/login` -- the only two
-/// endpoints reachable without a bearer token, and therefore the only ones exposed to
-/// unauthenticated credential/invite-token brute-forcing. Keyed by client IP; falls back to a
-/// single shared bucket when no `ConnectInfo` is present on the request (e.g. tests driven
-/// through `Router::oneshot`, which never populates it).
+/// A per-key fixed-window rate limiter, applied via [`apply_rate_limit_layer`] to whichever
+/// routes a caller considers reachable without a bearer token (in this crate, `/auth/signup`,
+/// `/auth/login`, `/setup`, `/setup/status`) -- the ones exposed to unauthenticated
+/// credential/invite-token brute-forcing. A downstream crate adding its own unauthenticated
+/// routes (e.g. an OAuth callback) needs the same protection; see `apply_rate_limit_layer`'s
+/// doc comment. Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo`
+/// is present on the request (e.g. tests driven through `Router::oneshot`, which never
+/// populates it).
 pub struct RateLimiter {
     max_requests: u32,
     window: Duration,
@@ -68,6 +72,24 @@ impl RateLimiter {
         entry.1 += 1;
         entry.1 <= self.max_requests
     }
+}
+
+/// Applies [`enforce`] to `router`, keyed by `limiter`. Factored out so a process embedding
+/// this crate's routes alongside its own (e.g. a downstream crate adding an OAuth
+/// login/callback pair, which is exactly as reachable without a bearer token as
+/// `/auth/login`) can rate-limit its own unauthenticated routes the same way this crate does
+/// its own -- `axum::Router::merge` doesn't propagate a `.layer()` from either side to the
+/// other, so each sub-router must carry its own copy.
+///
+/// Pass the *same* `Arc<RateLimiter>` used for this crate's own auth routes (for a downstream
+/// crate embedding [`crate::build_app`], reuse the limiter that produced its rate-limited
+/// routes -- see that function's doc comment) to share one quota across both; pass a fresh
+/// `Arc::new(RateLimiter::from_env())` instead for an independent quota.
+pub fn apply_rate_limit_layer<S>(router: Router<S>, limiter: Arc<RateLimiter>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(axum::middleware::from_fn_with_state(limiter, enforce))
 }
 
 pub async fn enforce(

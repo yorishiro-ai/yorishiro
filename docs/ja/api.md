@@ -86,6 +86,15 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 `GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
 
+## 未マッチのパス(Web UIのフォールバック)
+
+上記のAPIルートに一致しないリクエストパスは、すべてWeb UIの静的ファイルサーバーにフォールバックします。その挙動はパスが「ファイルらしく見えるか」によって変わります。
+
+- 拡張子なし(例: `/foo`、`/dashboard`、`/schemas/abc`) — 常にSPAの`index.html`を`200 OK`で返します。これによりWeb UIのクライアントサイドルーティングが機能します — 認識できないパスは全て「存在しないリソース」ではなく「SPAのルート」とみなされます。
+- 拡張子あり(例: `/foo.js`、`/does-not-exist.txt`) — 該当ファイルが存在すれば返し(組み込み、または`YSR_WEB_DIR`設定時はそこから)、存在しなければSPAフォールバックなしの正真正銘の`404 Not Found`を返します。
+
+そのため、拡張子のないパスはこのフォールバックを通じて404になることが決してありません — タイプミスしたAPIルート(例: `GET /api/entitites`)は`404`のJSONエラーではなくSPAのHTMLを返すため、クライアント側のデバッグ時に混乱の原因になり得ます。ドットファイル形式のパス(例: `/.env`)も拡張子なし扱いとなり、単純な404ではなく`index.html`にフォールバックします — 先頭のドットは拡張子の区切りではなくファイル名の一部として扱われるため、`Path::extension()`(およびこのフォールバックロジック)からは拡張子なしに見えます。
+
 ## MCPツール
 
 `/mcp`(Streamable HTTP)に接続すると20のツールが使えます。Claude Codeでの接続例:

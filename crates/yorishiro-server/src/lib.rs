@@ -14,7 +14,9 @@ pub mod logging;
 mod routes;
 mod state;
 
-pub use routes::{apply_observability_layers, build_app};
+pub use routes::{
+    apply_body_limit_layer, apply_observability_layers, build_app, build_app_with_rate_limiter,
+};
 pub use state::AppState;
 
 /// `YORISHIRO_MAX_TENANTS` is process-wide state read by both `http::controllers::setup` and login's
@@ -458,9 +460,19 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
                 .unwrap_or_else(|_| "models/tokenizer.json".into());
             let provider = LocalOnnxProvider::load(LocalOnnxConfig {
                 model_path: model_path.clone().into(),
-                tokenizer_path: tokenizer_path.into(),
+                tokenizer_path: tokenizer_path.clone().into(),
                 dimensions,
                 max_sequence_length,
+            })
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "{err}\n\nThe local ONNX embedding provider (the default; see \
+                     YSR_EMBEDDING_PROVIDER) needs '{model_path}' and '{tokenizer_path}' -- \
+                     these are not bundled in the repository or the Docker image, and must be \
+                     fetched separately. See docs/setup.md#prerequisites for the download \
+                     commands, or set YSR_EMBEDDING_PROVIDER=openai to use an OpenAI-compatible \
+                     endpoint instead (see docs/embedding-providers.md)."
+                )
             })?;
             tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
             Ok(Arc::new(provider))
