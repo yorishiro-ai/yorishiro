@@ -85,8 +85,18 @@ pub async fn create_user(
 /// Looks up an existing user by email, without touching their password hash. Used by member
 /// management (adding an *existing* account to another tenant) to resolve an email to a
 /// `user_id` before calling `add_member` -- as opposed to signup, which creates the account.
+///
+/// Takes `&mut PgConnection` (rather than `&PgPool`) so a find-or-create caller (e.g. an OAuth
+/// login/callback flow: look up by email, `create_user` if absent, then `add_member`) can run
+/// the lookup, insert, and membership grant in one transaction. This does *not* prevent two
+/// concurrent callbacks for the same new email from both seeing "no user" and both attempting
+/// `create_user` -- one still loses to `create_user`'s unique-email constraint and its whole
+/// transaction rolls back. What the shared transaction buys is that the loser's flow fails
+/// cleanly (a `Conflict`, safe to retry as a plain lookup) instead of leaving a user row with no
+/// tenant membership, the way two independent pool round-trips would. Pass
+/// `&mut pool.acquire().await?` for a standalone call.
 pub async fn get_user_by_email(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     email: &str,
 ) -> Result<Option<UserRecord>, YorishiroError> {
     let (sql, values) = Query::select()
@@ -101,7 +111,7 @@ pub async fn get_user_by_email(
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, UserRecord, _>(&sql, values)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await
         .internal()
 }

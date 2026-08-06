@@ -99,7 +99,8 @@ async fn create_user_and_add_member_roll_back_together_on_failure(pool: PgPool) 
     assert!(matches!(err, YorishiroError::NotFound { .. }));
     tx.rollback().await.unwrap();
 
-    let user = get_user_by_email(&pool, "orphan-check@example.com")
+    let mut conn = pool.acquire().await.unwrap();
+    let user = get_user_by_email(&mut conn, "orphan-check@example.com")
         .await
         .unwrap();
     assert!(
