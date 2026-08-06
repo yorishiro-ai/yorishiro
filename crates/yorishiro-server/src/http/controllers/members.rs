@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use utoipa::ToSchema;
-use yorishiro_core::YorishiroError;
 use yorishiro_core::repositories::tenancy::{self, MembershipRecord, MembershipRole};
+use yorishiro_core::{ResultExt, YorishiroError};
 
 use crate::error::ApiError;
 use crate::http::controllers::require_tenant_admin;
@@ -59,7 +59,8 @@ pub async fn add_member(
 ) -> Result<impl IntoResponse, ApiError> {
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
-    let user = tenancy::get_user_by_email(&state.identity_pool, &body.email)
+    let mut conn = state.identity_pool.acquire().await.internal()?;
+    let user = tenancy::get_user_by_email(&mut conn, &body.email)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found(format!(
@@ -68,7 +69,7 @@ pub async fn add_member(
             ))
         })?;
 
-    tenancy::add_member(&state.identity_pool, ctx.tenant_id, user.id, body.role).await?;
+    tenancy::add_member(&mut conn, ctx.tenant_id, user.id, body.role).await?;
 
     Ok((
         StatusCode::CREATED,

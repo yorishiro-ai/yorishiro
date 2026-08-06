@@ -146,9 +146,14 @@ async fn login_rejects_an_incorrect_password(pool: PgPool) {
     let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    tenancy::create_user(&pool, "someone@example.com", "correct-horse", None)
-        .await
-        .unwrap();
+    tenancy::create_user(
+        &mut pool.acquire().await.unwrap(),
+        "someone@example.com",
+        "correct-horse",
+        None,
+    )
+    .await
+    .unwrap();
 
     let app = build_app(test_state(pool), None);
 
@@ -233,15 +238,27 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
         .await
         .unwrap();
 
-    let user = tenancy::create_user(&pool, "multi@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let user = tenancy::create_user(&mut conn, "multi@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant_a.id, user.id, tenancy::MembershipRole::Member)
-        .await
-        .unwrap();
-    tenancy::add_member(&pool, tenant_b.id, user.id, tenancy::MembershipRole::Member)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant_a.id,
+        user.id,
+        tenancy::MembershipRole::Member,
+    )
+    .await
+    .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant_b.id,
+        user.id,
+        tenancy::MembershipRole::Member,
+    )
+    .await
+    .unwrap();
+    drop(conn);
 
     let app = build_app(test_state(pool), None);
 
@@ -262,9 +279,14 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn login_rejects_an_account_with_no_tenant_membership(pool: PgPool) {
-    tenancy::create_user(&pool, "orphan@example.com", "hunter2-hunter2", None)
-        .await
-        .unwrap();
+    tenancy::create_user(
+        &mut pool.acquire().await.unwrap(),
+        "orphan@example.com",
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .unwrap();
 
     let app = build_app(test_state(pool), None);
 

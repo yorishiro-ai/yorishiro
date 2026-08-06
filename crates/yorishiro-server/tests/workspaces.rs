@@ -10,12 +10,19 @@ async fn owner_can_create_list_and_delete_workspaces(pool: PgPool) {
     let main = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    let owner = tenancy::create_user(&pool, "owner@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, owner.id, tenancy::MembershipRole::Owner)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant.id,
+        owner.id,
+        tenancy::MembershipRole::Owner,
+    )
+    .await
+    .unwrap();
+    drop(conn);
     let owner_key = issue_key_for(
         &pool,
         tenant.id,
@@ -101,12 +108,19 @@ async fn cannot_delete_a_tenants_only_workspace(pool: PgPool) {
     let main = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    let owner = tenancy::create_user(&pool, "owner@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, owner.id, tenancy::MembershipRole::Owner)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant.id,
+        owner.id,
+        tenancy::MembershipRole::Owner,
+    )
+    .await
+    .unwrap();
+    drop(conn);
     let owner_key = issue_key_for(
         &pool,
         tenant.id,
@@ -135,12 +149,19 @@ async fn member_role_cannot_create_or_delete_workspaces(pool: PgPool) {
     let main = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
         .await
         .unwrap();
-    let member = tenancy::create_user(&pool, "member@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let member = tenancy::create_user(&mut conn, "member@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&pool, tenant.id, member.id, tenancy::MembershipRole::Member)
-        .await
-        .unwrap();
+    tenancy::add_member(
+        &mut conn,
+        tenant.id,
+        member.id,
+        tenancy::MembershipRole::Member,
+    )
+    .await
+    .unwrap();
+    drop(conn);
     let member_key = issue_key_for(
         &pool,
         tenant.id,
@@ -204,17 +225,19 @@ async fn workspace_endpoints_enforce_tenant_isolation(pool: PgPool) {
     let workspace_a = tenancy::create_workspace(&pool, tenant_a.id, "main", None, None)
         .await
         .unwrap();
-    let owner_a = tenancy::create_user(&pool, "owner-a@example.com", "hunter2-hunter2", None)
+    let mut conn = pool.acquire().await.unwrap();
+    let owner_a = tenancy::create_user(&mut conn, "owner-a@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &pool,
+        &mut conn,
         tenant_a.id,
         owner_a.id,
         tenancy::MembershipRole::Owner,
     )
     .await
     .unwrap();
+    drop(conn);
     let owner_a_key = issue_key_for(
         &pool,
         tenant_a.id,

@@ -236,7 +236,11 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             password,
             display_name,
         } => {
-            let user = tenancy::create_user(pool, &email, &password, display_name.as_deref())
+            let mut conn = pool
+                .acquire()
+                .await
+                .context("failed to acquire a connection")?;
+            let user = tenancy::create_user(&mut conn, &email, &password, display_name.as_deref())
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("user created");
@@ -248,7 +252,11 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             user_id,
             role,
         } => {
-            tenancy::add_member(pool, tenant_id, user_id, role.into())
+            let mut conn = pool
+                .acquire()
+                .await
+                .context("failed to acquire a connection")?;
+            tenancy::add_member(&mut conn, tenant_id, user_id, role.into())
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("membership added: user {user_id} is now {role:?} of tenant {tenant_id}");

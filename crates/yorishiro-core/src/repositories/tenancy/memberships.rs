@@ -1,6 +1,6 @@
 use sea_query::{Alias, Expr, Iden, OnConflict, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use super::get_tenant;
@@ -18,13 +18,17 @@ pub(super) enum TenantMemberships {
 }
 
 /// Adds (or updates the role of) a user's membership in a tenant.
+///
+/// Takes `&mut PgConnection` (rather than `&PgPool`) so a caller can compose this with
+/// `create_user` (and anything else) in one transaction -- see `create_user`'s doc comment for
+/// why. Pass `&mut pool.acquire().await?` for a standalone call.
 pub async fn add_member(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     tenant_id: Uuid,
     user_id: Uuid,
     role: MembershipRole,
 ) -> Result<(), YorishiroError> {
-    get_tenant(pool, tenant_id).await?;
+    get_tenant(&mut *conn, tenant_id).await?;
 
     let (sql, values) = Query::insert()
         .into_table((Alias::new("identity"), TenantMemberships::Table))
@@ -42,7 +46,7 @@ pub async fn add_member(
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_with(&sql, values)
-        .execute(pool)
+        .execute(&mut *conn)
         .await
         .internal()?;
     Ok(())

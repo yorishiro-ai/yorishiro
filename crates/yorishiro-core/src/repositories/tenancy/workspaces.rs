@@ -29,7 +29,8 @@ pub async fn create_workspace(
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
 ) -> Result<WorkspaceRecord, YorishiroError> {
-    let tenant = get_tenant(pool, tenant_id).await?;
+    let mut conn = pool.acquire().await.internal()?;
+    let tenant = get_tenant(&mut conn, tenant_id).await?;
 
     if let Some(max) = tenant.max_workspaces {
         let (sql, values) = Query::select()
