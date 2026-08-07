@@ -59,17 +59,27 @@ $ journalctl -u yorishiro -f
 
 ## Releasing
 
-Releases are cut by running `.github/workflows/release.yml` via `workflow_dispatch` with a `version` input (e.g. `0.16.3`, without the leading `v`) -- there is no tag-push trigger. The workflow's `prepare` job validates the version, checks that the tag doesn't already exist, bumps `workspace.package.version` in the root `Cargo.toml`, runs `cargo update -w` to update `Cargo.lock` accordingly, commits both to `master`, and creates and pushes the `vX.Y.Z` tag itself -- there is no need to (and no longer a way to) bump the version or create the tag by hand.
+Releases are cut in two stages, each its own `workflow_dispatch`-triggered workflow -- there is no tag-push trigger and no direct push to `master`. `master` is protected by a ruleset that requires PR review, so the version bump has to go through a PR rather than being pushed straight to `master`.
 
-```console
-$ gh workflow run release.yml -f version=X.Y.Z
-```
+1. **Bump.** Run `.github/workflows/release.yml` with a `version` input (e.g. `0.16.3`, without the leading `v`):
 
-Or trigger it from the Actions tab on GitHub (select the `Release` workflow, "Run workflow", enter the version).
+   ```console
+   $ gh workflow run release.yml -f version=X.Y.Z
+   ```
 
-Once the version is bumped and tagged, the rest of the workflow builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), and attaches them to a GitHub Release.
+   Or trigger it from the Actions tab (select the `Release` workflow, "Run workflow", enter the version). Its `prepare` job validates the version, checks that the tag doesn't already exist, bumps `workspace.package.version` in the root `Cargo.toml`, runs `cargo update -w` to update `Cargo.lock` accordingly, pushes a `release/vX.Y.Z` branch, and opens a PR titled `Bump version to vX.Y.Z` -- authored by `github-actions[bot]`.
 
-It also builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
+2. **Approve the workflow run.** Because the PR is authored by `github-actions[bot]`, GitHub holds its triggered checks (`check`, `security`, etc.) in `action_required` status until a human approves the run in the Actions tab. Open the run, click "Review pending deployments" / "Approve and run" (wording varies), and approve it -- otherwise the PR's CI never starts. **This step is easy to miss and blocks the whole release if skipped.**
+
+3. **Review and merge.** Once CI is green, approve and squash-merge the bump PR into `master`.
+
+4. **Publish.** Run `.github/workflows/release-publish.yml` with the same version, once the bump PR has landed on `master`:
+
+   ```console
+   $ gh workflow run release-publish.yml -f version=X.Y.Z
+   ```
+
+   Its `prepare` job re-validates the version, checks the tag still doesn't exist, and verifies `master`'s current `Cargo.toml` is actually at `X.Y.Z` (guarding against dispatching this before the bump PR merged, or against a later unrelated commit landing on `master` first) before creating and pushing the `vX.Y.Z` tag. The rest of the workflow then builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), attaches them to a GitHub Release, and builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both Linux architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
 
 ## Single-tenant mode
 
