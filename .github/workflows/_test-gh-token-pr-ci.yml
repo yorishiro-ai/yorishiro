@@ -1,0 +1,36 @@
+name: TEMP - GITHUB_TOKEN PR CI check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create a throwaway branch with a harmless change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b test/gh-token-pr-ci-probe-2
+          echo "" >> .env.example
+          git add .env.example
+          git commit -m "Probe 2: does a GITHUB_TOKEN-authored PR trigger CI now that PR-creation is allowed"
+          git push origin test/gh-token-pr-ci-probe-2 --force
+
+      - name: Open a PR with GITHUB_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --title "TEMP PROBE 2: does GITHUB_TOKEN-authored PR trigger CI (delete me)" \
+            --body "Temporary probe PR for release.yml redesign. Not for merging -- checking whether check/security fire on a GITHUB_TOKEN-authored PR now that GitHub Actions is allowed to create PRs. Will be closed and the branch deleted after observation." \
+            --base master \
+            --head test/gh-token-pr-ci-probe-2
