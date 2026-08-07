@@ -7,20 +7,13 @@ on:
         description: 'Release version (e.g. 0.16.3) -- without the leading v'
         required: true
 
-env:
-  CARGO_TERM_COLOR: always
-  IMAGE_NAME: ghcr.io/yotsunagi/yorishiro
-
 permissions:
   contents: write
-  packages: write
+  pull-requests: write
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v7
@@ -45,14 +38,6 @@ jobs:
             exit 1
           fi
 
-      - name: Set output
-        id: version
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=${{ env.tag }}" >> "$GITHUB_OUTPUT"
-
       - name: Bump workspace version
         env:
           VERSION: ${{ inputs.version }}
@@ -68,142 +53,26 @@ jobs:
       - name: Update lockfile
         run: cargo update -w
 
-      - name: Commit and tag
+      - name: Push bump branch and open a PR
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
         run: |
-          git config user.name "tier940"
-          git config user.email "tier940@protonmail.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "release/v$VERSION"
           git add Cargo.toml Cargo.lock
           git commit -m "Bump version to v$VERSION"
-          git tag "v$VERSION"
-          git push origin HEAD:master
-          git push origin "v$VERSION"
+          git push origin "release/v$VERSION"
 
-  binary:
-    needs: prepare
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-            ext: ""
-            archive: tar.gz
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            ext: ""
-            archive: tar.gz
-          - os: windows-latest
-            arch: amd64
-            ext: .exe
-            archive: zip
-    runs-on: ${{ matrix.os }}
+          {
+            echo "Prepares the v$VERSION release. Merging this (squash) is stage 1 of 2 -- once it's on \`master\`, dispatch \`release-publish.yml\` with \`version: $VERSION\` to tag, build, and publish."
+            echo ""
+            echo "This PR's workflow run needs manual approval in the Actions tab before its CI (\`check\`/\`security\`) can run -- GitHub requires that for PRs authored by \`github-actions[bot]\`."
+          } > /tmp/release-pr-body.md
 
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: ~/.cache/ort.pyke.io
-
-      - name: Build
-        run: cargo build --release -p yorishiro-server
-
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p dist
-          tar -czf "dist/yorishiro-server-${{ needs.prepare.outputs.tag }}-linux-${{ matrix.arch }}.tar.gz" \
-            -C target/release yorishiro-server
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist
-          Compress-Archive -Path "target/release/yorishiro-server.exe" `
-            -DestinationPath "dist/yorishiro-server-${{ needs.prepare.outputs.tag }}-windows-${{ matrix.arch }}.zip"
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: binary-${{ runner.os == 'Windows' && 'windows' || 'linux' }}-${{ matrix.arch }}
-          path: dist/*
-
-  docker:
-    needs: prepare
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-          - os: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          provenance: false
-          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
-
-  docker-manifest:
-    needs: [docker, prepare]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Each arch was pushed as its own tag by the (native, no-QEMU) `docker` job above;
-      # this merges them into one multi-arch manifest under the version and `latest` tags.
-      - name: Create multi-arch manifest
-        run: |
-          docker buildx imagetools create \
-            -t "${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}" \
-            -t "${{ env.IMAGE_NAME }}:latest" \
-            "${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-amd64" \
-            "${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-arm64"
-
-  github-release:
-    needs: [binary, prepare]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: dist
-          pattern: binary-*
-          merge-multiple: true
-
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-          generate_release_notes: true
+          gh pr create \
+            --title "Bump version to v$VERSION" \
+            --body-file /tmp/release-pr-body.md \
+            --base master \
+            --head "release/v$VERSION"

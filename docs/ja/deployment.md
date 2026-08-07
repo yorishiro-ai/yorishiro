@@ -57,17 +57,27 @@ $ journalctl -u yorishiro -f
 
 ## リリース
 
-リリースは`.github/workflows/release.yml`を`workflow_dispatch`で(`version`入力、例: `0.16.3`、先頭の`v`なし)実行して切ります — タグpushトリガーはありません。ワークフローの`prepare`ジョブがバージョン形式を検証し、タグが既存でないか確認した上で、ルート`Cargo.toml`の`workspace.package.version`を書き換え、`cargo update -w`で`Cargo.lock`も追随させ、両者を`master`にコミットし、`vX.Y.Z`タグを自ら作成・pushします。バージョンの手動変更やタグの手動作成は不要です(またその手段も廃止されました)。
+リリースは2段階の`workflow_dispatch`ワークフローで切ります — タグpushトリガーはなく、`master`への直接pushもありません。`master`はPRレビューを必須とするrulesetで保護されているため、バージョンbumpも`master`への直接pushではなくPR経由で行います。
 
-```console
-$ gh workflow run release.yml -f version=X.Y.Z
-```
+1. **Bump。** `.github/workflows/release.yml`を`version`入力(例: `0.16.3`、先頭の`v`なし)で実行します。
 
-またはGitHubのActionsタブから(`Release`ワークフローを選び「Run workflow」でバージョンを入力)実行することもできます。
+   ```console
+   $ gh workflow run release.yml -f version=X.Y.Z
+   ```
 
-バージョンのbumpとタグ付けが終わると、ワークフローの残りの部分が`yorishiro-server`の`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`として梱包)バイナリをビルドしてGitHub Releaseに添付します。
+   またはGitHubのActionsタブから(`Release`ワークフローを選び「Run workflow」でバージョンを入力)実行することもできます。`prepare`ジョブがバージョン形式を検証し、タグが既存でないか確認した上で、ルート`Cargo.toml`の`workspace.package.version`を書き換え、`cargo update -w`で`Cargo.lock`も追随させ、`release/vX.Y.Z`ブランチをpushして、`github-actions[bot]`名義で`Bump version to vX.Y.Z`というPRを作成します。
 
-また、マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`(および`:latest`)としてビルド・pushします。どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせて、QEMUを使わずネイティブビルドします。
+2. **ワークフロー実行の承認。** PRの作成者が`github-actions[bot]`であるため、GitHubはそのPRがトリガーするチェック(`check`・`security`など)を、人間がActionsタブでワークフロー実行を承認するまで`action_required`状態のまま保留します。該当の実行を開き、「Review pending deployments」/「Approve and run」(表記は状況により異なります)から承認してください — これを行わないとPRのCIが開始しません。**この手順は見落としやすく、省略するとリリース全体が詰まります。**
+
+3. **レビューとマージ。** CIがすべて成功したら、bump用PRを承認してsquash mergeします。
+
+4. **Publish。** bump用PRが`master`に取り込まれたら、同じバージョンで`.github/workflows/release-publish.yml`を実行します。
+
+   ```console
+   $ gh workflow run release-publish.yml -f version=X.Y.Z
+   ```
+
+   `prepare`ジョブがバージョン形式とタグ未存在を再検証した上で、`master`の現在の`Cargo.toml`が実際に`X.Y.Z`になっているかを確認してから(bump用PRのマージ前に実行してしまった場合や、その後に無関係なコミットが`master`に入った場合を防ぐためのガードです)、`vX.Y.Z`タグを作成・pushします。その後、ワークフローの残りの部分が`yorishiro-server`の`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`として梱包)バイナリをビルドしてGitHub Releaseに添付し、マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`(および`:latest`)としてビルド・pushします。どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせて、QEMUを使わずネイティブビルドします。
 
 ## シングルテナント構成
 
