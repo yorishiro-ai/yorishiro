@@ -59,7 +59,7 @@ $ journalctl -u yorishiro -f
 
 ## Releasing
 
-Releases are cut in two stages, each its own `workflow_dispatch`-triggered workflow -- there is no tag-push trigger and no direct push to `master`. `master` is protected by a ruleset that requires PR review, so the version bump has to go through a PR rather than being pushed straight to `master`.
+Releases are cut in two stages: bumping the version goes through a PR (`master` is protected by a ruleset that requires PR review, so there's no direct push), and publishing runs automatically once that PR is merged.
 
 1. **Bump.** Run `.github/workflows/release.yml` with a `version` input (e.g. `0.16.3`, without the leading `v`):
 
@@ -71,15 +71,17 @@ Releases are cut in two stages, each its own `workflow_dispatch`-triggered workf
 
 2. **Approve the workflow run.** Because the PR is authored by `github-actions[bot]`, GitHub holds its triggered checks (`check`, `security`, etc.) in `action_required` status until a human approves the run in the Actions tab. Open the run, click "Review pending deployments" / "Approve and run" (wording varies), and approve it -- otherwise the PR's CI never starts. **This step is easy to miss and blocks the whole release if skipped.**
 
-3. **Review and merge.** Once CI is green, approve and squash-merge the bump PR into `master`.
+3. **Review and merge.** Once CI is green, approve and squash-merge the bump PR into `master`. **This alone triggers publishing** -- `release-publish.yml` also runs on any push to `master` that touches `Cargo.toml`, so merging the bump kicks off tagging, building, and publishing without a separate manual step.
 
-4. **Publish.** Run `.github/workflows/release-publish.yml` with the same version, once the bump PR has landed on `master`:
+`release-publish.yml` can still be dispatched manually with a `version` input:
 
-   ```console
-   $ gh workflow run release-publish.yml -f version=X.Y.Z
-   ```
+```console
+$ gh workflow run release-publish.yml -f version=X.Y.Z
+```
 
-   Its `prepare` job re-validates the version, checks the tag still doesn't exist, and verifies `master`'s current `Cargo.toml` is actually at `X.Y.Z` (guarding against dispatching this before the bump PR merged, or against a later unrelated commit landing on `master` first) before creating and pushing the `vX.Y.Z` tag. The rest of the workflow then builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), attaches them to a GitHub Release, and builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both Linux architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
+This is the recovery path if the automatic run after step 3 didn't fire or failed for some reason, and it's also how to re-run publishing for a version whose auto-triggered run failed partway. On a manual dispatch, `prepare` re-validates the version, fails if the tag already exists, and verifies `master`'s current `Cargo.toml` is actually at `X.Y.Z` (guarding against dispatching before the bump PR merged, or against a later unrelated commit landing on `master` first) before creating and pushing the `vX.Y.Z` tag. On the automatic push-triggered run, the version is read from `master`'s `Cargo.toml` directly, and if a tag for that version already exists -- e.g. the push was a dependency bump or another `Cargo.toml` edit that didn't change the version, not an actual release bump -- the run exits cleanly without tagging or building anything; this is expected and not an error.
+
+Either way, once tagging succeeds, the rest of the workflow builds `yorishiro-server` binaries for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (packaged as `windows-amd64.zip`), attaches them to a GitHub Release, and builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` (and `:latest`). Both Linux architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
 
 ## Single-tenant mode
 
