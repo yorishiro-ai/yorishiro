@@ -23,6 +23,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
 
+    # mold links faster than the default bfd/gold linker. Job-scoped (not workflow-level) since
+    # `security` below never builds anything -- there's nothing here for mold to speed up.
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -44,6 +49,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -119,11 +129,18 @@ jobs:
       YSR_EMBEDDING_PROVIDER: openai
       YSR_EMBEDDING_BASE_URL: http://localhost:1
       YSR_EMBEDDING_MODEL: smoke-test-unused
+      # mold links faster than the default bfd/gold linker -- `cargo build` below links a binary.
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
 
     steps:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: Swatinem/rust-cache@v2
         with:
