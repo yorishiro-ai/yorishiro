@@ -6,6 +6,14 @@ on:
       version:
         description: 'Version to tag and publish (e.g. 0.16.3) -- without the leading v. The bump PR from release.yml must already be merged to master.'
         required: true
+  # Merging a bump PR from release.yml is what normally publishes a release -- the bump always
+  # touches Cargo.toml, so filtering on it is enough to catch every real release without needing
+  # to match the squash-merge commit message (which the merger can edit freely).
+  #
+  # A Cargo.lock-only push (dependabot's usual shape) doesn't match this filter and never starts
+  # a run. A Cargo.toml push that isn't a bump (a dependency version change, a metadata edit)
+  # does start one, and `prepare` then finds the current version's tag already exists and skips
+  # the whole publish -- see the tag-existence check below.
   push:
     branches: [master]
     paths:
