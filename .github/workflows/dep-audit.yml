@@ -25,7 +25,9 @@ jobs:
           # to save -- but pin the condition anyway for consistency with ci.yml/clippy-suggestions.yml.
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Route rustc through sccache
-        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       - name: Install tools
         run: cargo install cargo-audit cargo-outdated
       # `cargo audit` exits 0 when it ran and found nothing, and 1 when it ran and has something

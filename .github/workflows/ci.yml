@@ -47,8 +47,9 @@ jobs:
 
       # sccache caches compiled objects by content hash, complementing rust-cache's file-level
       # target/ caching. Installing it is separate from using it: the action exports SCCACHE_PATH
-      # but never sets RUSTC_WRAPPER, so without the "Route rustc through sccache" step below
-      # sccache is present and never invoked (its stats come back all-zero).
+      # and nothing else, so without the "Route rustc through sccache" step below sccache is
+      # present and never invoked (measured: stats came back all-zero), and without
+      # SCCACHE_GHA_ENABLED it caches to local disk on an ephemeral runner, which can never hit.
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: Swatinem/rust-cache@v2
@@ -71,7 +72,9 @@ jobs:
       # already saved (measured: adding RUSTFLAGS earlier turned every restore into "No cache
       # found"). Still before the first cargo invocation below, which is all sccache needs.
       - name: Route rustc through sccache
-        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
@@ -148,7 +151,9 @@ jobs:
 
       # After rust-cache -- see the note in the `check` job above.
       - name: Route rustc through sccache
-        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Build
         run: cargo build -p yorishiro-server

@@ -165,7 +165,9 @@ jobs:
 
       - name: Route rustc through sccache
         if: runner.os == 'Linux'
-        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Build
         run: cargo build --release -p yorishiro-server

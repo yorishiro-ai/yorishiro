@@ -31,7 +31,9 @@ jobs:
           shared-key: rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Route rustc through sccache
-        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       # No DB service or migrations here: this repo has zero sqlx::query!/query_as! macros (all
       # queries are built dynamically via sea-query + query_as_with), so clippy -- a compile-time
       # lint that only needs the code to type-check, not a live Postgres -- never touches
