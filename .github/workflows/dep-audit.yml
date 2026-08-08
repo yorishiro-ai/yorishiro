@@ -15,11 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # The action exports SCCACHE_PATH but not RUSTC_WRAPPER, so cargo has to be pointed at
+      # sccache explicitly or it's installed and never used. The pointing happens after
+      # rust-cache below, since rust-cache folds RUST*-prefixed env vars into its cache key.
+      - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
           # This workflow runs on a schedule against master, never on a PR, so it's always safe
           # to save -- but pin the condition anyway for consistency with ci.yml/clippy-suggestions.yml.
           save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Route rustc through sccache
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       - name: Install tools
         run: cargo install cargo-audit cargo-outdated
       # `cargo audit` exits 0 when it ran and found nothing, and 1 when it ran and has something

@@ -18,6 +18,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # The action exports SCCACHE_PATH but not RUSTC_WRAPPER, so cargo has to be pointed at
+      # sccache explicitly or it's installed and never used. The pointing happens after
+      # rust-cache below, since rust-cache folds RUST*-prefixed env vars into its cache key.
+      - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
@@ -26,6 +30,10 @@ jobs:
           # restore what ci.yml saves on master instead of building cold every time.
           shared-key: rust
           save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Route rustc through sccache
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       # No DB service or migrations here: this repo has zero sqlx::query!/query_as! macros (all
       # queries are built dynamically via sea-query + query_as_with), so clippy -- a compile-time
       # lint that only needs the code to type-check, not a live Postgres -- never touches

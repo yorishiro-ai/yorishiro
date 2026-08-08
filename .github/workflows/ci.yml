@@ -45,6 +45,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # sccache caches compiled objects by content hash, complementing rust-cache's file-level
+      # target/ caching. Installing it is separate from using it: the action exports SCCACHE_PATH
+      # and nothing else, so without the "Route rustc through sccache" step below sccache is
+      # present and never invoked (measured: stats came back all-zero), and without
+      # SCCACHE_GHA_ENABLED it caches to local disk on an ephemeral runner, which can never hit.
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Where ort-sys extracts the onnxruntime binary at build time. Not covered by the
@@ -59,6 +66,15 @@ jobs:
           # master's key -- so only master needs to save. Letting every PR save left a growing
           # pile of per-branch caches that never got cleaned up until GitHub's 7-day/10GB evictions.
           save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache
+      # key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache master
+      # already saved (measured: adding RUSTFLAGS earlier turned every restore into "No cache
+      # found"). Still before the first cargo invocation below, which is all sccache needs.
+      - name: Route rustc through sccache
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
@@ -125,11 +141,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
       - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
           shared-key: rust
           save-if: false
+
+      # After rust-cache -- see the note in the `check` job above.
+      - name: Route rustc through sccache
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Build
         run: cargo build -p yorishiro-server
