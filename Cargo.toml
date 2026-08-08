@@ -16,7 +16,6 @@ async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-hmac = "0.13"
 http = "1"
 jsonschema = "0.49"
 mime_guess = "2"

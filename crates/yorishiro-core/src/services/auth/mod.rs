@@ -124,12 +124,12 @@ pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-pub(super) fn random_hex(byte_len: usize) -> String {
+pub(crate) fn random_hex(byte_len: usize) -> String {
     let mut bytes = vec![0u8; byte_len];
     rand::rng().fill_bytes(&mut bytes);
     hex_encode(&bytes)
 }
 
-pub(super) fn hash_key(raw: &str) -> Vec<u8> {
+pub(crate) fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }
