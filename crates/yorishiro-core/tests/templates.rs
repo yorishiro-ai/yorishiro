@@ -1,4 +1,5 @@
 use yorishiro_core::YorishiroError;
+use yorishiro_core::metaschema::validate_definition;
 use yorishiro_core::templates::{get_template, list_templates};
 
 #[test]
@@ -19,4 +20,26 @@ fn fetches_a_template_by_id() {
 fn reports_not_found_for_an_unknown_template_id() {
     let err = get_template("does-not-exist").unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
+}
+
+/// Every built-in template must pass the same validator a user-submitted schema goes through.
+/// `templates.rs` itself only parses the embedded JSON, so without this a template that parses
+/// but violates a metaschema rule (a relation pointing at an undeclared entity type, a `format`
+/// on a non-string field) would ship and only fail when someone tried to register it.
+#[test]
+fn every_built_in_template_passes_metaschema_validation() {
+    let templates = list_templates();
+    assert!(!templates.is_empty(), "no built-in templates were listed");
+
+    for summary in templates {
+        let definition = get_template(&summary.id).unwrap_or_else(|err| {
+            panic!("built-in template '{}' failed to load: {err}", summary.id)
+        });
+        assert!(
+            validate_definition(&definition).is_ok(),
+            "built-in template '{}' failed metaschema validation: {:?}",
+            summary.id,
+            validate_definition(&definition)
+        );
+    }
 }
