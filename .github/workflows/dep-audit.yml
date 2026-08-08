@@ -22,26 +22,56 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install tools
         run: cargo install cargo-audit cargo-outdated
+      # `cargo audit` exits 0 when it ran and found nothing, and 1 when it ran and has something
+      # to report (an advisory, or a warning such as an unmaintained or yanked crate) -- valid
+      # JSON on stdout either way. A higher code means it never ran at all: a bad flag, a missing
+      # Cargo.lock, a failed advisory-db fetch. Those leave stdout empty, which is why this step
+      # gates on the report parsing rather than on the exit code alone.
+      #
+      # This step used to pipe stderr to /dev/null and swallow the exit code, which made "no
+      # vulnerabilities" and "audit never ran" the same silent success. Now the third case fails
+      # the job and the reason stays in the log; a finding still exits 0 here so the issue below
+      # gets filed rather than turning the run red.
       - name: Run audit
         id: audit
-        continue-on-error: true
         run: |
-          cargo audit --json 2>/dev/null | jq -r '.vulnerabilities.list[]?.advisory.id' > /tmp/vulns.txt || true
-          if [ -s /tmp/vulns.txt ]; then
-            echo "has_vulns=true" >> $GITHUB_OUTPUT
+          status=0
+          cargo audit --json > /tmp/audit.json || status=$?
+          if [ "$status" -gt 1 ] || ! jq -e . /tmp/audit.json >/dev/null 2>&1; then
+            echo "::error::cargo audit did not produce a report (exit $status) -- see the step log above. Not reporting this as 'no vulnerabilities'."
+            exit 1
           fi
+
+          jq -r '.vulnerabilities.list[]?.advisory.id' /tmp/audit.json > /tmp/vulns.txt
+          if [ -s /tmp/vulns.txt ]; then
+            echo "has_vulns=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Same shape as the audit step: `cargo outdated`'s exit code isn't a reliable
+      # found/not-found signal, so the report's own validity is what's checked. An unparseable
+      # or absent report fails the job rather than passing as "nothing outdated".
+      #
+      # `always()` so a broken audit doesn't also suppress the outdated report -- the two checks
+      # are independent, and the issue-filing steps below gate on their own step's output, so
+      # each half still reports whatever it managed to collect.
       - name: Run outdated
         id: outdated
-        continue-on-error: true
+        if: always()
         run: |
-          cargo outdated --root-deps-only --format json 2>/dev/null > /tmp/outdated.json || true
-          count=$(jq '.dependencies | length' /tmp/outdated.json 2>/dev/null || echo 0)
-          if [ "$count" -gt 0 ]; then
-            echo "has_outdated=true" >> $GITHUB_OUTPUT
+          status=0
+          cargo outdated --root-deps-only --format json > /tmp/outdated.json || status=$?
+          if ! jq -e '.dependencies' /tmp/outdated.json >/dev/null 2>&1; then
+            echo "::error::cargo outdated did not produce a report (exit $status) -- see the step log above. Not reporting this as 'nothing outdated'."
+            exit 1
+          fi
+
+          if [ "$(jq '.dependencies | length' /tmp/outdated.json)" -gt 0 ]; then
+            echo "has_outdated=true" >> "$GITHUB_OUTPUT"
             jq -r '.dependencies[] | "- \(.name): \(.project) → \(.latest)"' /tmp/outdated.json > /tmp/outdated.txt
           fi
+      # `always() &&` so that one half failing (or finding nothing) doesn't suppress the other
+      # half's issue: each of these gates only on the output of the step it reports for.
       - name: Create issue for vulnerabilities
-        if: steps.audit.outputs.has_vulns == 'true'
+        if: always() && steps.audit.outputs.has_vulns == 'true'
         uses: actions/github-script@v9
         with:
           script: |
@@ -55,7 +85,7 @@ jobs:
               labels: ['security', 'dependencies']
             });
       - name: Create issue for outdated deps
-        if: steps.outdated.outputs.has_outdated == 'true'
+        if: always() && steps.outdated.outputs.has_outdated == 'true'
         uses: actions/github-script@v9
         with:
           script: |
