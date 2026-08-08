@@ -50,12 +50,13 @@ jobs:
       # found/not-found signal, so the report's own validity is what's checked. An unparseable
       # or absent report fails the job rather than passing as "nothing outdated".
       #
-      # `always()` so a broken audit doesn't also suppress the outdated report -- the two checks
-      # are independent, and the issue-filing steps below gate on their own step's output, so
-      # each half still reports whatever it managed to collect.
+      # `!cancelled()` rather than the default `success()` so a broken audit doesn't also suppress
+      # the outdated report -- the two checks are independent, and the issue-filing steps below
+      # gate on their own step's output, so each half still reports whatever it collected.
+      # `!cancelled()` rather than `always()` so cancelling the run actually stops it.
       - name: Run outdated
         id: outdated
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           status=0
           cargo outdated --root-deps-only --format json > /tmp/outdated.json || status=$?
@@ -68,10 +69,11 @@ jobs:
             echo "has_outdated=true" >> "$GITHUB_OUTPUT"
             jq -r '.dependencies[] | "- \(.name): \(.project) → \(.latest)"' /tmp/outdated.json > /tmp/outdated.txt
           fi
-      # `always() &&` so that one half failing (or finding nothing) doesn't suppress the other
-      # half's issue: each of these gates only on the output of the step it reports for.
+      # `!cancelled() &&` so that one half failing (or finding nothing) doesn't suppress the other
+      # half's issue -- each of these gates only on the output of the step it reports for -- while
+      # still not filing issues on a cancelled run, since creating one is an API write.
       - name: Create issue for vulnerabilities
-        if: always() && steps.audit.outputs.has_vulns == 'true'
+        if: ${{ !cancelled() && steps.audit.outputs.has_vulns == 'true' }}
         uses: actions/github-script@v9
         with:
           script: |
@@ -85,7 +87,7 @@ jobs:
               labels: ['security', 'dependencies']
             });
       - name: Create issue for outdated deps
-        if: always() && steps.outdated.outputs.has_outdated == 'true'
+        if: ${{ !cancelled() && steps.outdated.outputs.has_outdated == 'true' }}
         uses: actions/github-script@v9
         with:
           script: |
