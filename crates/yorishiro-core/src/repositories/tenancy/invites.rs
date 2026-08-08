@@ -1,14 +1,13 @@
 use chrono::{DateTime, Duration, Utc};
-use rand::Rng;
 use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::get_tenant;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy::{InviteRecord, MembershipRole};
+use crate::services::auth::{hash_key, random_hex};
 
 #[derive(Iden)]
 enum Invites {
@@ -24,16 +23,6 @@ enum Invites {
 }
 
 const INVITE_TOKEN_BYTES: usize = 24;
-
-fn random_invite_token() -> String {
-    let mut bytes = [0u8; INVITE_TOKEN_BYTES];
-    rand::rng().fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn hash_invite_token(raw: &str) -> Vec<u8> {
-    Sha256::digest(raw.as_bytes()).to_vec()
-}
 
 #[derive(sqlx::FromRow)]
 struct InviteRow {
@@ -91,8 +80,8 @@ pub async fn create_invite(
     let mut conn = pool.acquire().await.internal()?;
     get_tenant(&mut conn, tenant_id).await?;
 
-    let token = random_invite_token();
-    let token_hash = hash_invite_token(&token);
+    let token = random_hex(INVITE_TOKEN_BYTES);
+    let token_hash = hash_key(&token);
     let expires_at = Utc::now() + ttl;
 
     let (sql, values) = Query::insert()
@@ -130,7 +119,7 @@ pub async fn redeem_invite(
     pool: &PgPool,
     raw_token: &str,
 ) -> Result<Option<InviteRecord>, YorishiroError> {
-    let token_hash = hash_invite_token(raw_token);
+    let token_hash = hash_key(raw_token);
 
     let (sql, values) = Query::update()
         .table((Alias::new("identity"), Invites::Table))
