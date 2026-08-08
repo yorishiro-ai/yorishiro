@@ -50,6 +50,9 @@ jobs:
       # found/not-found signal, so the report's own validity is what's checked. An unparseable
       # or absent report fails the job rather than passing as "nothing outdated".
       #
+      # `--format json` emits one JSON object per workspace member (concatenated, not an array),
+      # so every jq expression here uses `-s` (slurp) to gather them before counting/flattening.
+      #
       # `!cancelled()` rather than the default `success()` so a broken audit doesn't also suppress
       # the outdated report -- the two checks are independent, and the issue-filing steps below
       # gate on their own step's output, so each half still reports whatever it collected.
@@ -60,14 +63,14 @@ jobs:
         run: |
           status=0
           cargo outdated --root-deps-only --format json > /tmp/outdated.json || status=$?
-          if ! jq -e '.dependencies' /tmp/outdated.json >/dev/null 2>&1; then
+          if ! jq -se 'length > 0 and all(.[]; has("dependencies"))' /tmp/outdated.json >/dev/null 2>&1; then
             echo "::error::cargo outdated did not produce a report (exit $status) -- see the step log above. Not reporting this as 'nothing outdated'."
             exit 1
           fi
 
-          if [ "$(jq '.dependencies | length' /tmp/outdated.json)" -gt 0 ]; then
+          if [ "$(jq -s '[.[].dependencies[]] | length' /tmp/outdated.json)" -gt 0 ]; then
             echo "has_outdated=true" >> "$GITHUB_OUTPUT"
-            jq -r '.dependencies[] | "- \(.name): \(.project) → \(.latest)"' /tmp/outdated.json > /tmp/outdated.txt
+            jq -sr '.[].dependencies[] | "- \(.name): \(.project) → \(.latest)"' /tmp/outdated.json > /tmp/outdated.txt
           fi
       # `!cancelled() &&` so that one half failing (or finding nothing) doesn't suppress the other
       # half's issue -- each of these gates only on the output of the step it reports for -- while
