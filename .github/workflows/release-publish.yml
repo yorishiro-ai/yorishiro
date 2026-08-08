@@ -68,6 +68,19 @@ jobs:
       # means this Cargo.toml change wasn't a version bump (a dependency bump, a metadata edit,
       # a bump for a version that's already published) -- that's normal, so skip quietly rather
       # than spamming a failed run on every unrelated master push that happens to touch Cargo.toml.
+      #
+      # Known gap: if a run fails anywhere *before* the Tag step below (a checkout failure, a
+      # transient network error reaching the remote), master is left at a bumped version with no
+      # tag pushed for it. This check can't tell that apart from a fresh bump, so the next
+      # unrelated Cargo.toml merge finds no tag, passes here, and tags *that* commit as the
+      # release. The window is narrow -- it needs a mid-run failure followed by an unrelated
+      # Cargo.toml change before anyone notices.
+      #
+      # Manual workflow_dispatch does NOT close this gap: the version check below compares only
+      # the version *string*, so it catches "the bump PR hasn't merged yet" but not "the version
+      # is right and HEAD has moved past the bump commit" -- both paths tag whatever master's
+      # HEAD is at the time. Whoever recovers from a failed run has to confirm master's HEAD is
+      # the intended bump commit before dispatching, or move the tag afterwards.
       - name: Check if tag already exists
         id: tag-check
         run: |

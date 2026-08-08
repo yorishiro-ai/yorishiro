@@ -28,6 +28,15 @@
   All `.columns(...)` call sites use this helper. Adding a column means updating
   one place.
 
+## Visibility and dead code (yorishiro-core)
+
+- `yorishiro-core`'s `pub` API has consumers outside this repository. **"No caller
+  in this workspace" does not mean unused** -- a repo-wide grep can only prove
+  that *this* repo doesn't call it. Check the downstream consumers before
+  deleting a `pub` item or narrowing its visibility.
+- Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the
+  distinction is visible in the code, not something a reviewer has to remember.
+
 ## Module structure
 
 - Controllers go in `http/controllers/`, middleware in `http/middleware/`,
