@@ -152,20 +152,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # mold only supports Linux; Windows keeps the default linker.
-      - name: Install mold
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y mold
-
+      # The action exports SCCACHE_PATH but not RUSTC_WRAPPER, so cargo has to be pointed at
+      # sccache explicitly, and that happens after rust-cache below since rust-cache folds
+      # RUST*-prefixed env vars into its cache key. Linux legs only -- the $GITHUB_ENV append is
+      # bash syntax and this matrix also runs on windows-latest.
       - uses: mozilla-actions/sccache-action@v0.0.11
+        if: runner.os == 'Linux'
 
       - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
 
+      - name: Route rustc through sccache
+        if: runner.os == 'Linux'
+        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+
       - name: Build
-        env:
-          RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
         run: cargo build --release -p yorishiro-server
 
       - name: Package (Linux)

@@ -23,11 +23,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
 
-    # mold links faster than the default bfd/gold linker. Job-scoped (not workflow-level) since
-    # `security` below never builds anything -- there's nothing here for mold to speed up.
-    env:
-      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -50,9 +45,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install mold
-        run: sudo apt-get install -y mold
-
+      # sccache caches compiled objects by content hash, complementing rust-cache's file-level
+      # target/ caching. Installing it is separate from using it: the action exports SCCACHE_PATH
+      # but never sets RUSTC_WRAPPER, so without the "Route rustc through sccache" step below
+      # sccache is present and never invoked (its stats come back all-zero).
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: Swatinem/rust-cache@v2
@@ -69,6 +65,13 @@ jobs:
           # master's key -- so only master needs to save. Letting every PR save left a growing
           # pile of per-branch caches that never got cleaned up until GitHub's 7-day/10GB evictions.
           save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache
+      # key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache master
+      # already saved (measured: adding RUSTFLAGS earlier turned every restore into "No cache
+      # found"). Still before the first cargo invocation below, which is all sccache needs.
+      - name: Route rustc through sccache
+        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
@@ -129,16 +132,11 @@ jobs:
       YSR_EMBEDDING_PROVIDER: openai
       YSR_EMBEDDING_BASE_URL: http://localhost:1
       YSR_EMBEDDING_MODEL: smoke-test-unused
-      # mold links faster than the default bfd/gold linker -- `cargo build` below links a binary.
-      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
 
     steps:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install mold
-        run: sudo apt-get install -y mold
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
@@ -147,6 +145,10 @@ jobs:
           cache-directories: ~/.cache/ort.pyke.io
           shared-key: rust
           save-if: false
+
+      # After rust-cache -- see the note in the `check` job above.
+      - name: Route rustc through sccache
+        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
 
       - name: Build
         run: cargo build -p yorishiro-server
