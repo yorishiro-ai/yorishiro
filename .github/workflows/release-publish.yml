@@ -6,6 +6,10 @@ on:
       version:
         description: 'Version to tag and publish (e.g. 0.16.3) -- without the leading v. The bump PR from release.yml must already be merged to master.'
         required: true
+  push:
+    branches: [master]
+    paths:
+      - 'Cargo.toml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,6 +25,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      should_publish: ${{ steps.tag-check.outputs.should_publish }}
 
     steps:
       - uses: actions/checkout@v7
@@ -29,46 +34,70 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Validate version format
+      # Manual dispatch takes the version from the input. The push trigger (a merged bump PR)
+      # has no input to take it from, so it reads the version master's Cargo.toml was just
+      # bumped to -- the same bump the tag-existence/publish check below is guarding.
+      - name: Determine version
         env:
-          VERSION: ${{ inputs.version }}
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version '$VERSION' is not in X.Y.Z format, aborting."
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="$DISPATCH_VERSION"
+          else
+            version="$(sed -n '0,/^version = "\(.*\)"$/s//\1/p' Cargo.toml | head -1)"
+          fi
+
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version '$version' is not in X.Y.Z format, aborting."
             exit 1
           fi
-          echo "tag=v$VERSION" >> "$GITHUB_ENV"
 
+          echo "version=$version" >> "$GITHUB_ENV"
+          echo "tag=v$version" >> "$GITHUB_ENV"
+
+      # On workflow_dispatch, an existing tag means the user asked to (re-)publish a version
+      # that's already out -- that's a mistake, so fail loudly. On push, an existing tag just
+      # means this Cargo.toml change wasn't a version bump (a dependency bump, a metadata edit,
+      # a bump for a version that's already published) -- that's normal, so skip quietly rather
+      # than spamming a failed run on every unrelated master push that happens to touch Cargo.toml.
       - name: Check if tag already exists
+        id: tag-check
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/${{ env.tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ env.tag }} already exists, aborting."
-            exit 1
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "Tag ${{ env.tag }} already exists, aborting."
+              exit 1
+            fi
+            echo "Tag ${{ env.tag }} already exists, nothing to publish for this push."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
 
       # master's HEAD here is whatever the bump PR's squash merge produced -- not the commit
       # release.yml's `prepare` job built. Without this check, tagging master's HEAD blindly
       # would tag whatever happened to land there (a later, unrelated merge) as this release.
+      # On push this is trivially true (the version came from this same Cargo.toml), but the
+      # guard stays unconditional -- it's the only thing standing between workflow_dispatch and
+      # tagging the wrong commit, so it isn't worth weakening for the push case's benefit.
       - name: Verify master HEAD is at the expected version
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
           actual="$(sed -n '0,/^version = "\(.*\)"$/s//\1/p' Cargo.toml | head -1)"
-          if [ "$actual" != "$VERSION" ]; then
-            echo "Cargo.toml's workspace.package.version is '$actual', expected '$VERSION'."
-            echo "Has the v$VERSION bump PR from release.yml been merged to master yet?"
+          if [ "$actual" != "$version" ]; then
+            echo "Cargo.toml's workspace.package.version is '$actual', expected '$version'."
+            echo "Has the v$version bump PR from release.yml been merged to master yet?"
             exit 1
           fi
 
       - name: Set output
         id: version
-        env:
-          VERSION: ${{ inputs.version }}
+        if: steps.tag-check.outputs.should_publish == 'true'
         run: |
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=${{ env.tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Tag
+        if: steps.tag-check.outputs.should_publish == 'true'
         run: |
           git config user.name "tier940"
           git config user.email "tier940@protonmail.com"
@@ -77,6 +106,7 @@ jobs:
 
   binary:
     needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     strategy:
       matrix:
         include:
@@ -130,6 +160,7 @@ jobs:
 
   docker:
     needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     strategy:
       matrix:
         include:
@@ -163,6 +194,7 @@ jobs:
 
   docker-manifest:
     needs: [docker, prepare]
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -186,6 +218,7 @@ jobs:
 
   github-release:
     needs: [binary, prepare]
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
 
     steps:
