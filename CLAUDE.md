@@ -48,8 +48,17 @@
   (e.g. `crates/yorishiro-core/tests/repositories_schemas.rs`), never inline
   in `src/` behind `#[cfg(test)]` and never in a `src/**/tests/` or
   `src/**/tests.rs` module. Each file under `tests/` compiles as its own
-  integration-test binary against the crate's public API — name it after the
-  module/feature it covers (e.g. `services_auth.rs`, `http_middleware_auth.rs`).
+  integration-test binary against the crate's public API.
+- **Name a test file after the `src/` module path it covers, with `/` replaced
+  by `_`** — `src/services/auth.rs` is tested by `tests/services_auth.rs`,
+  `src/http/controllers/schemas.rs` by `tests/http_controllers_schemas.rs`.
+  The rule used to say "module/feature", and that "or feature" was enough
+  slack for `yorishiro-server` to end up with `schemas.rs` and
+  `http_middleware_auth.rs` side by side — two names for the same depth of
+  thing, so neither told you where to look. The mapping is now mechanical:
+  read the filename, you know the module; know the module, you know the
+  filename. A test genuinely spanning several modules is named for the
+  behaviour it covers (`http_routes_layers.rs`), not for one arbitrary member.
 - Because `tests/` compiles the crate as an ordinary external dependency
   (no `cfg(test)`), test-only fixtures/helpers the crate wants to expose live
   in a `pub` (not `pub(crate)`), `#[doc(hidden)]` module such as
