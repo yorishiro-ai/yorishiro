@@ -125,7 +125,7 @@ $ curl -X POST localhost:8080/setup -H "Content-Type: application/json" \
  "api_key":"ysr_..."}
 ```
 
-`POST /setup` returns `409` once a tenant already exists, and `404` on any deployment where `YORISHIRO_MAX_TENANTS` resolves to unlimited (i.e. explicitly set to `0`). Hosted deployments onboard tenants via signup/invite instead (see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management)).
+`POST /setup` returns `409` once a tenant already exists, and `404` on any deployment where `YORISHIRO_MAX_TENANTS` resolves to unlimited (i.e. explicitly set to `0`). Those deployments add tenants via signup/invite instead (see [Signup, login, member, and workspace management](#signup-login-member-and-workspace-management)).
 
 The admin CLI below remains available for anything the wizard doesn't cover: additional workspaces/tenants, invites, and key rotation.
 
@@ -246,7 +246,7 @@ Account creation is invite-only — there is no public, unauthenticated signup. 
 
    From then on, the user exchanges their password for a freshly issued API key, scoped to one workspace and capped at their role's `max_scope()` (see above).
 
-   - `workspace_id` can be omitted: it's auto-resolved when the account has access to exactly one workspace, which is true for every community-edition deployment by default.
+   - `workspace_id` can be omitted: it's auto-resolved when the account has access to exactly one workspace, which is true for every deployment by default.
    - It only needs to be passed explicitly when the account belongs to more than one, in which case a 422 asks for it:
 
    ```console

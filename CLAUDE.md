@@ -14,9 +14,9 @@
 - Use `YorishiroError::not_found(msg)` for NotFound construction instead of
   building the struct literal directly.
 - The `into_response` mapping from `YorishiroError` to HTTP status+body lives in
-  `YorishiroError::into_http_parts()` (in `yorishiro_core::error`). Both
-  `ApiError` (server) and `HostedApiError` (hosted) call it — never duplicate
-  the match block.
+  `YorishiroError::into_http_parts()` (in `yorishiro_core::error`). `ApiError`
+  calls it, and so must any other axum error wrapper built on `YorishiroError`
+  — never duplicate the match block.
 
 ## MCP handlers (yorishiro-server)
 
@@ -83,8 +83,8 @@
 
 ## Naming
 
-- Newtype wrappers over `YorishiroError` for axum: `ApiError` (server),
-  `HostedApiError` (hosted). The names are fixed — do not rename.
+- The newtype wrapper over `YorishiroError` for axum is `ApiError`
+  (`yorishiro-server`). The name is fixed — do not rename.
 - Avoid naming collisions across layers. If a type name already exists in
   `yorishiro-core`, the server-layer type that wraps/extends it should have a
   distinct name (e.g. core's `AuthContext` vs. server's auth extractor).
