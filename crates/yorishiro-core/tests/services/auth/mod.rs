@@ -7,8 +7,8 @@ use uuid::Uuid;
 use crate::YorishiroError;
 use crate::db::TenantDb;
 use crate::services::auth::{
-    ApiKeyScope, ApiKeys, authenticate, authorize, create_api_key, hex_decode, hex_encode,
-    require_scope,
+    ApiKeyScope, ApiKeys, authenticate, authorize, bearer_credential, create_api_key, hex_decode,
+    hex_encode, require_scope,
 };
 use crate::test_support;
 
@@ -276,4 +276,47 @@ fn hex_decode_rejects_non_ascii_input_without_panicking() {
 #[test]
 fn hex_decode_accepts_uppercase() {
     assert_eq!(hex_decode("DEADBEEF").unwrap(), [0xde, 0xad, 0xbe, 0xef]);
+}
+
+/// Every adapter that authenticates a request routes its `Authorization` header through this,
+/// so the shapes it accepts and rejects are the shapes the whole server accepts and rejects.
+/// The empty-credential case is why this is shared at all: `Authorization: Bearer ` used to be
+/// rejected by the hosted admin path and accepted (then hashed into a lookup that could never
+/// match) by the REST and MCP paths.
+#[test]
+fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
+    assert_eq!(
+        bearer_credential(Some("Bearer ysr_abc123")),
+        Some("ysr_abc123")
+    );
+
+    for rejected in [
+        None,
+        Some(""),
+        // A `Bearer` with nothing after it. Hashing the empty string is a lookup that cannot
+        // match any key, so accepting it only costs a query -- but two adapters disagreeing on
+        // the same request is the thing worth preventing.
+        Some("Bearer "),
+        Some("Bearer"),
+        // Another scheme entirely.
+        Some("Basic ysr_abc123"),
+        // The scheme is case-sensitive here, matching what every client actually sends.
+        Some("bearer ysr_abc123"),
+        // No space after the scheme, so `ysr_abc123` is not a credential this header carries.
+        Some("Bearerysr_abc123"),
+    ] {
+        assert_eq!(
+            bearer_credential(rejected),
+            None,
+            "{rejected:?} must not yield a credential"
+        );
+    }
+}
+
+/// Whitespace inside the credential is preserved rather than trimmed -- an API key never
+/// contains a space, so a token that has one is wrong and must fail the key lookup rather than
+/// be silently repaired into a different string.
+#[test]
+fn bearer_credential_does_not_trim_the_token() {
+    assert_eq!(bearer_credential(Some("Bearer  padded")), Some(" padded"));
 }
