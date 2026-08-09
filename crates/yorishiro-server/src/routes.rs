@@ -156,11 +156,11 @@ fn build_cors_layer() -> CorsLayer {
 
     layer
         .allow_methods([
-            http::Method::GET,
-            http::Method::POST,
-            http::Method::PUT,
-            http::Method::DELETE,
-            http::Method::OPTIONS,
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
         ])
         .allow_headers(AllowHeaders::list([
             "authorization".parse().unwrap(),
