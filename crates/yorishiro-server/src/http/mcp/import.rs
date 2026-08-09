@@ -1,4 +1,4 @@
-use http::request::Parts;
+use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
 use rmcp::handler::server::wrapper::Parameters;

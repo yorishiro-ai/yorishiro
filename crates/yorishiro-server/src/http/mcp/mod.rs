@@ -6,7 +6,7 @@ mod schemas;
 mod search;
 mod template_library;
 
-use http::request::Parts;
+use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo};
@@ -78,7 +78,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     auth::bearer_credential(
         parts
             .headers
-            .get(http::header::AUTHORIZATION)
+            .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok()),
     )
     .ok_or_else(|| ErrorData::invalid_request("missing or malformed Authorization header", None))

@@ -4676,7 +4676,6 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
- "http",
  "rmcp",
  "schemars",
  "sea-query",
