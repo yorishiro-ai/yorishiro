@@ -19,12 +19,11 @@ enum Tenants {
     Table,
 }
 
-/// Whether the community-edition first-run setup wizard is enabled at all. Gated on
-/// `YORISHIRO_MAX_TENANTS` resolving to an actual cap (`yorishiro-server` defaults this to `1`;
-/// hosted deployments set it to `0`, i.e. unlimited) rather than a separate flag, so the wizard
-/// can never be enabled on a deployment that lacks the tenant cap that makes it safe -- without
-/// that cap, anyone could hit `POST /setup` between a hosted deploy and its first real tenant and
-/// claim ownership of the whole deployment.
+/// Whether the first-run setup wizard is enabled at all. Gated on `YORISHIRO_MAX_TENANTS`
+/// resolving to an actual cap (the default is `1`; setting it to `0` means unlimited) rather
+/// than a separate flag, so the wizard can never be enabled on a deployment that lacks the
+/// tenant cap that makes it safe -- without that cap, anyone could hit `POST /setup` between a
+/// deploy and its first real tenant and claim ownership of the whole deployment.
 fn wizard_enabled() -> bool {
     matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
 }

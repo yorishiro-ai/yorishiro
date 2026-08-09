@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     // SAFETY: no other thread exists at this point in `main`.
     unsafe {
         config::load_and_apply_env_overrides()?;
-        // Community-edition default: a single-tenant deployment unless the operator opts into
+        // Default to a single-tenant deployment unless the operator opts into
         // more (set YORISHIRO_MAX_TENANTS=0 for unlimited, or a higher count). Set before parsing
         // the CLI so `admin create-tenant` enforces the same default as the HTTP server.
         if std::env::var_os("YORISHIRO_MAX_TENANTS").is_none() {

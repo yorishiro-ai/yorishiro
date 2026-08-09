@@ -19,7 +19,7 @@ use crate::state::AppState;
 /// since no tenant/workspace context exists yet for RLS to scope by.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SignupRequest {
-    /// The plaintext token from an `admin create-invite` (or hosted dashboard) invitation.
+    /// The plaintext token from an `admin create-invite` invitation.
     pub invite_token: String,
     pub password: String,
     pub display_name: Option<String>,
@@ -110,8 +110,8 @@ pub struct LoginRequest {
     pub password: String,
     /// Which of the account's workspaces to issue an API key for -- a key is always scoped to
     /// exactly one workspace, same as one created through `admin create-api-key`. Omit this
-    /// when the account can only ever log into one workspace (true for every community-edition
-    /// deployment, since `YORISHIRO_MAX_TENANTS` defaults to a single tenant with one
+    /// when the account can only ever log into one workspace (true by default, since
+    /// `YORISHIRO_MAX_TENANTS` defaults to a single tenant with one
     /// workspace) -- it resolves automatically. An account with access to more than one
     /// workspace must specify which one explicitly (422 otherwise).
     pub workspace_id: Option<Uuid>,
@@ -155,7 +155,7 @@ pub async fn login(
 
     let workspace = match body.workspace_id {
         Some(workspace_id) => tenancy::get_workspace(&state.identity_pool, workspace_id).await?,
-        // Every community-edition deployment has exactly one workspace by default (see
+        // A deployment has exactly one workspace by default (see
         // YORISHIRO_MAX_TENANTS), so resolving it automatically here means the login form
         // never needs to ask for a workspace id in the common case.
         None => {
