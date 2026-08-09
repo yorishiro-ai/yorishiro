@@ -176,3 +176,45 @@ async fn apply_rate_limit_layer_shares_one_quota_when_given_the_same_arc() {
         .unwrap();
     assert_eq!(third.status(), StatusCode::TOO_MANY_REQUESTS);
 }
+
+/// The quota has to hold when calls arrive at once, not just one after another. Every existing
+/// test drives `allow` sequentially, which cannot tell a correctly-locked counter apart from one
+/// where two threads read the same value and both write back `n + 1` -- under that bug the limit
+/// is exceeded by however many callers raced.
+///
+/// This is a property of the current single-`Mutex` design rather than something at risk today.
+/// It is worth pinning because the obvious optimisations (an `RwLock`, sharding the map, a
+/// per-key lock) are exactly the changes that would reintroduce the race, and a sequential test
+/// would still pass afterwards.
+#[test]
+fn the_limit_holds_when_calls_arrive_concurrently() {
+    const MAX: u32 = 50;
+    const THREADS: usize = 16;
+    const CALLS_PER_THREAD: usize = 20;
+
+    let limiter = std::sync::Arc::new(RateLimiter::new(MAX, Duration::from_secs(60)));
+
+    let granted: usize = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let limiter = std::sync::Arc::clone(&limiter);
+                scope.spawn(move || {
+                    (0..CALLS_PER_THREAD)
+                        .filter(|_| limiter.allow("same-key"))
+                        .count()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).sum()
+    });
+
+    // Every thread hammers the same key, and there are far more calls than the quota, so the
+    // count is exact rather than an upper bound: the first MAX calls are granted whichever order
+    // the threads interleave in.
+    assert_eq!(
+        granted,
+        MAX as usize,
+        "{THREADS} threads issuing {} calls against a quota of {MAX} must be granted exactly {MAX}",
+        THREADS * CALLS_PER_THREAD
+    );
+}
