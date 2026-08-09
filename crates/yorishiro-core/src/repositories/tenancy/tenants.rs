@@ -153,10 +153,11 @@ pub async fn list_tenants(pool: &PgPool) -> Result<Vec<TenantRecord>, YorishiroE
         .internal()
 }
 
-/// Updates a tenant's billing plan and `max_workspaces` cap together, since the two always
-/// change in lockstep when a subscription changes tier (see `yorishiro-hosted`'s plan-to-cap
-/// mapping). Existing workspaces' own `max_entities` are left untouched -- only newly created
-/// workspaces pick up a plan's default cap.
+/// Updates a tenant's `plan` and `max_workspaces` cap together, since a caller changing one
+/// generally has to change the other -- the cap is whatever the new plan allows. Existing
+/// workspaces' own `max_entities` are left untouched: only newly created workspaces pick up a
+/// plan's default cap. Both columns are `NULL` (unlimited) by default and stay that way unless
+/// something sets them.
 pub async fn set_tenant_plan(
     pool: &PgPool,
     tenant_id: Uuid,

@@ -36,10 +36,11 @@ impl YorishiroError {
         }
     }
 
-    /// Maps this error to an HTTP status code and JSON response body. Shared between
-    /// `yorishiro-server`'s `ApiError` and `yorishiro-hosted`'s `HostedApiError` so the
-    /// status/body mapping is defined once. Internal errors are logged here (the caller
-    /// should not log them again).
+    /// Maps this error to an HTTP status code and JSON response body. Every axum error wrapper
+    /// built on `YorishiroError` -- `yorishiro-server`'s `ApiError` and any downstream
+    /// equivalent -- delegates here so the status/body mapping is defined once and never
+    /// duplicated as a second `match`. Internal errors are logged here (the caller should not
+    /// log them again).
     pub fn into_http_parts(self) -> (u16, serde_json::Value) {
         match self {
             Self::ValidationFailed {

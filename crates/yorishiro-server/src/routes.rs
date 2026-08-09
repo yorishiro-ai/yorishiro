@@ -15,15 +15,12 @@ use crate::state::AppState;
 /// The routing configuration itself needs to be identical between `main` and the
 /// integration tests, so it's factored into a function that builds the app from just an
 /// `AppState`. The setup/login SPA (see `web/`, compiled into the binary via `yorishiro-web`)
-/// is always mounted as the fallback for any path not matched by an API route -- this is how
-/// this process's first-run setup wizard and the hosted dashboard's static assets share the
-/// same `web/` tree while each process opts in independently (`YSR_WEB_DIR` here vs.
-/// `YORISHIRO_HOSTED_WEB_DIR` in `yorishiro-hosted-server`). `web_dir`, when set, serves that
-/// SPA from a real directory on disk instead of the compiled-in copy, for local iteration on
-/// `web/` without a rebuild -- see `yorishiro_web::fallback_service`. Exposed publicly so a
-/// deployment that wants a single process (e.g. `yorishiro-hosted-server` embedding the full
-/// community server) can build this same router and merge its own routes into it, rather than
-/// running two separate processes.
+/// is always mounted as the fallback for any path not matched by an API route. `web_dir`, when
+/// set (`YSR_WEB_DIR`), serves that SPA from a real directory on disk instead of the compiled-in
+/// copy, for local iteration on `web/` without a rebuild -- see
+/// `yorishiro_web::fallback_service`. Exposed publicly so a deployment that wants a single
+/// process can build this same router and merge its own routes into it, rather than running two
+/// separate processes.
 ///
 /// **Merging your own routes in.** `axum::Router::merge` does not propagate a `.layer()` from
 /// either side to the other -- so routes added via `some_router.merge(build_app(state,
@@ -99,8 +96,8 @@ where
 }
 
 /// Applies the CORS / request-id / access-log stack that every API route in this process needs.
-/// Factored out of `build_app` so a process embedding this server alongside its own routes
-/// (e.g. `yorishiro-hosted-server`) can apply the same stack to its own sub-router *before*
+/// Factored out of `build_app` so a process embedding this server alongside its own routes can
+/// apply the same stack to its own sub-router *before*
 /// merging it with `build_app`'s -- `axum::Router::merge` doesn't propagate layers from either
 /// side to the other, so each sub-router must carry its own copy of this stack for every route
 /// to get it exactly once. Not applied to `build_app`'s static-asset fallback (added after this

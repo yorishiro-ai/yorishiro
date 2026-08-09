@@ -40,7 +40,7 @@ pub(crate) fn parse_filter_param(
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and
 /// stricter than) the presented API key's own scope -- a Member-role key can carry `write`
 /// scope for content operations while still having no business adding members or managing
-/// workspaces. This mirrors `yorishiro-hosted`'s `authenticate_tenant_admin`.
+/// workspaces.
 pub(crate) async fn require_tenant_admin(
     state: &AppState,
     tenant_id: Uuid,
