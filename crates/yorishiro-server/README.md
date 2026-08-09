@@ -6,7 +6,7 @@ This crate provides the `yorishiro-server` binary: an axum-based HTTP server tha
 
 ## Not a library
 
-While this crate does export a library API (`build_app`, `apply_observability_layers`, `logging::init`, etc.) for embedding by other binaries (e.g. `yorishiro-hosted-server`), it is primarily a binary crate. Most users should interact with Yorishiro through its REST API, MCP tools, or the admin CLI rather than depending on this crate directly.
+While this crate does export a library API (`build_app`, `apply_observability_layers`, `logging::init`, etc.) for embedding by other binaries, it is primarily a binary crate. Most users should interact with Yorishiro through its REST API, MCP tools, or the admin CLI rather than depending on this crate directly.
 
 ## License
 

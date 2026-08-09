@@ -1,13 +1,11 @@
 //! Serves the Yorishiro setup/login/admin-dashboard SPA (this crate's own `web/`), compiled
-//! into the binary at build time via `rust-embed`. This is what lets `yorishiro-server` (and,
-//! via that crate's `build_app`, `yorishiro-hosted-server` too -- see that repo) serve a working
-//! web UI without a deployment needing to separately fetch and place a `web/` directory
+//! into the binary at build time via `rust-embed`. This is what lets `yorishiro-server` serve a
+//! working web UI without a deployment needing to separately fetch and place a `web/` directory
 //! alongside the binary; the release tarball and Docker image both only ever shipped the binary
 //! itself.
 //!
 //! An operator actively iterating on `web/`'s contents can still point at a real directory on
-//! disk instead of the compiled-in copy (`YSR_WEB_DIR` in yorishiro-server,
-//! `YORISHIRO_HOSTED_WEB_DIR` in yorishiro-hosted-server) -- see [`fallback_service`]. That
+//! disk instead of the compiled-in copy (`YSR_WEB_DIR`) -- see [`fallback_service`]. That
 //! directory is read fresh on every request, so edits show up without a rebuild.
 
 use std::path::{Component, Path, PathBuf};

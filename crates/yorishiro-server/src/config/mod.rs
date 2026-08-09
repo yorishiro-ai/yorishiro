@@ -10,9 +10,9 @@
 //!
 //! This is only ever invoked from this crate's `main` (in its synchronous prologue, before the
 //! tokio runtime starts -- see `load_and_apply_env_overrides`'s safety contract). It lives here
-//! rather than in `main.rs` so `tests/config.rs` can reach it as an ordinary public item;
-//! `yorishiro-hosted-server`, which embeds this crate's library API directly rather than going
-//! through this binary's `main`, simply never calls it.
+//! rather than in `main.rs` so `tests/config.rs` can reach it as an ordinary public item. A
+//! downstream binary that embeds this crate's library API directly, rather than going through
+//! this binary's `main`, simply never calls it.
 
 use std::path::Path;
 
