@@ -23,11 +23,11 @@ pub use state::AppState;
 /// workspace auto-resolution, so every test across the crate that sets it (rather than just
 /// asserting the default) must serialize through this one shared lock -- a per-module lock
 /// only prevents that module's own tests from racing each other, not tests in a different
-/// module running concurrently in the same `cargo test` process. `pub` (rather than
-/// `pub(crate)`) so that `tests/` -- a separate crate that only sees this crate's public API --
-/// can also serialize through it.
-#[doc(hidden)]
-pub mod max_tenants_env_lock {
+/// module running concurrently in the same `cargo test` process. `#[cfg(test)]`-gated and
+/// `pub(crate)`: `tests/` reaches it as `crate::max_tenants_env_lock`, since every test file
+/// compiles as its own module's `mod tests` rather than as an external integration test.
+#[cfg(test)]
+pub(crate) mod max_tenants_env_lock {
     pub static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     pub fn set(value: Option<&str>) {
@@ -40,11 +40,12 @@ pub mod max_tenants_env_lock {
 
 /// Shared test-only fixtures used by the crate-root integration tests in `tests/`.
 ///
-/// `pub` (rather than `pub(crate)`) and not `#[cfg(test)]`-gated so `tests/` (which compiles
-/// this crate as an ordinary dependency, without `cfg(test)`) can call it too. `#[doc(hidden)]`
-/// keeps it out of the public API docs since it isn't meant for external callers.
-#[doc(hidden)]
-pub mod test_support {
+/// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::test_support`, since
+/// every test file compiles as its own module's `mod tests` rather than as an external
+/// integration test. It is therefore never part of a release build or of this crate's public
+/// API.
+#[cfg(test)]
+pub(crate) mod test_support {
     use std::sync::Arc;
 
     use async_trait::async_trait;
