@@ -11,9 +11,7 @@ enum Tenants {
     Table,
     Id,
     Name,
-    Plan,
     MaxWorkspaces,
-    StripeCustomerId,
     CreatedAt,
 }
 
@@ -92,14 +90,7 @@ pub async fn create_tenant_with_cap(
         .into_table((Alias::new("identity"), Tenants::Table))
         .columns([Tenants::Name, Tenants::MaxWorkspaces])
         .values_panic([name.into(), max_workspaces.into()])
-        .returning(Query::returning().columns([
-            Tenants::Id,
-            Tenants::Name,
-            Tenants::Plan,
-            Tenants::MaxWorkspaces,
-            Tenants::StripeCustomerId,
-            Tenants::CreatedAt,
-        ]))
+        .returning(Query::returning().columns(tenant_columns()))
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
@@ -108,13 +99,11 @@ pub async fn create_tenant_with_cap(
         .internal()
 }
 
-fn tenant_columns() -> [Tenants; 6] {
+fn tenant_columns() -> [Tenants; 4] {
     [
         Tenants::Id,
         Tenants::Name,
-        Tenants::Plan,
         Tenants::MaxWorkspaces,
-        Tenants::StripeCustomerId,
         Tenants::CreatedAt,
     ]
 }
@@ -153,23 +142,18 @@ pub async fn list_tenants(pool: &PgPool) -> Result<Vec<TenantRecord>, YorishiroE
         .internal()
 }
 
-/// Updates a tenant's `plan` and `max_workspaces` cap together, since a caller changing one
-/// generally has to change the other -- the cap is whatever the new plan allows. Existing
-/// workspaces' own `max_entities` are left untouched: only newly created workspaces pick up a
-/// plan's default cap. Both columns are `NULL` (unlimited) by default and stay that way unless
-/// something sets them.
-pub async fn set_tenant_plan(
+/// Updates a tenant's workspace cap. `None` means unlimited. Existing workspaces keep whatever
+/// `max_entities` they were created with -- only newly created workspaces are affected by a
+/// change here, since retroactively shrinking a cap could put an existing workspace over its own
+/// limit.
+pub async fn set_tenant_max_workspaces(
     pool: &PgPool,
     tenant_id: Uuid,
-    plan: &str,
     max_workspaces: Option<i32>,
 ) -> Result<TenantRecord, YorishiroError> {
     let (sql, values) = Query::update()
         .table((Alias::new("identity"), Tenants::Table))
-        .values([
-            (Tenants::Plan, plan.into()),
-            (Tenants::MaxWorkspaces, max_workspaces.into()),
-        ])
+        .values([(Tenants::MaxWorkspaces, max_workspaces.into())])
         .and_where(Expr::col(Tenants::Id).eq(tenant_id))
         .returning(Query::returning().columns(tenant_columns()))
         .build_sqlx(PostgresQueryBuilder);
@@ -179,42 +163,4 @@ pub async fn set_tenant_plan(
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))
-}
-
-/// Records the Stripe customer id created for a tenant at checkout time, so later webhook
-/// events (subscription updated/deleted) -- which only carry the Stripe customer id -- can be
-/// routed back to this tenant via `get_tenant_by_stripe_customer`.
-pub async fn link_stripe_customer(
-    pool: &PgPool,
-    tenant_id: Uuid,
-    stripe_customer_id: &str,
-) -> Result<TenantRecord, YorishiroError> {
-    let (sql, values) = Query::update()
-        .table((Alias::new("identity"), Tenants::Table))
-        .values([(Tenants::StripeCustomerId, stripe_customer_id.into())])
-        .and_where(Expr::col(Tenants::Id).eq(tenant_id))
-        .returning(Query::returning().columns(tenant_columns()))
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
-        .fetch_optional(pool)
-        .await
-        .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))
-}
-
-pub async fn get_tenant_by_stripe_customer(
-    pool: &PgPool,
-    stripe_customer_id: &str,
-) -> Result<Option<TenantRecord>, YorishiroError> {
-    let (sql, values) = Query::select()
-        .columns(tenant_columns())
-        .from((Alias::new("identity"), Tenants::Table))
-        .and_where(Expr::col(Tenants::StripeCustomerId).eq(stripe_customer_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
-        .fetch_optional(pool)
-        .await
-        .internal()
 }
