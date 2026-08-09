@@ -201,3 +201,7 @@ pub async fn get_entity_context(
     let context = recall::recall_context(authorized.conn(), workspace_id, id, query).await?;
     Ok(Json(context))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/entities.rs"]
+mod tests;

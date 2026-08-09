@@ -137,3 +137,7 @@ pub async fn redeem_invite(
 
     row.map(InviteRow::into_record).transpose()
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/tenancy/invites.rs"]
+mod tests;

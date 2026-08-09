@@ -158,3 +158,7 @@ fn annotate_line(line_no: usize, err: YorishiroError) -> YorishiroError {
         other => other,
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/repositories/import.rs"]
+mod tests;

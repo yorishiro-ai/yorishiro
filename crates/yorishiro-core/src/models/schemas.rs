@@ -29,3 +29,7 @@ pub struct SchemaSummary {
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/schemas.rs"]
+mod tests;

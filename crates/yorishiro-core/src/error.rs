@@ -94,3 +94,7 @@ impl<T, E: Into<anyhow::Error>> ResultExt<T> for Result<T, E> {
         self.map_err(|err| YorishiroError::Internal(err.into()))
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/error.rs"]
+mod tests;

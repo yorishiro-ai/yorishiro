@@ -180,3 +180,7 @@ pub async fn delete_workspace(
     tenancy::delete_workspace(&state.identity_pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/workspaces.rs"]
+mod tests;

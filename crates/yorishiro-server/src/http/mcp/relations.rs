@@ -118,3 +118,7 @@ impl YorishiroMcpServer {
         ok_json(records)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/relations.rs"]
+mod tests;

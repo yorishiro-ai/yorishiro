@@ -6,3 +6,7 @@
 pub(crate) mod controllers;
 pub(crate) mod mcp;
 pub mod middleware;
+
+#[cfg(test)]
+#[path = "../../tests/http/mod.rs"]
+mod tests;

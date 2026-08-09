@@ -15,3 +15,7 @@ pub enum ExportRecord {
     Entity(EntityRecord),
     Relation(RelationRecord),
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/export.rs"]
+mod tests;

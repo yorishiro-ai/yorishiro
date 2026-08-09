@@ -31,3 +31,7 @@ pub struct SearchHit {
     /// text match on `query_text`.
     pub distance: Option<f64>,
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/search.rs"]
+mod tests;

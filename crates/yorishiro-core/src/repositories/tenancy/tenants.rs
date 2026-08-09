@@ -164,3 +164,7 @@ pub async fn set_tenant_max_workspaces(
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/tenancy/tenants.rs"]
+mod tests;

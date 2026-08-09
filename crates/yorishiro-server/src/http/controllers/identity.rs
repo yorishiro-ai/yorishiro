@@ -201,3 +201,7 @@ pub async fn login(
         user_id: user.id,
     }))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/identity.rs"]
+mod tests;

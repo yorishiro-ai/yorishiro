@@ -122,3 +122,7 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         Ok(vectors)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/embedding/openai.rs"]
+mod tests;

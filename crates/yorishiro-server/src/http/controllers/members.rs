@@ -81,3 +81,7 @@ pub async fn add_member(
         }),
     ))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/members.rs"]
+mod tests;

@@ -78,3 +78,7 @@ pub async fn authorize_scope(
 
     Ok(ctx)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/auth/authorize.rs"]
+mod tests;

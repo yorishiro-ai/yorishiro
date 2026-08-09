@@ -54,3 +54,7 @@ impl YorishiroMcpServer {
         ok_json(template)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/template_library.rs"]
+mod tests;

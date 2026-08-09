@@ -88,3 +88,7 @@ impl TenantDb {
         Ok(conn)
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/db.rs"]
+mod tests;

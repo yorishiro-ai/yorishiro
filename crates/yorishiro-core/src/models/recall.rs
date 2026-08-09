@@ -60,3 +60,7 @@ impl Default for RecallQuery {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/recall.rs"]
+mod tests;

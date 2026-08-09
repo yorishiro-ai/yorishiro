@@ -128,3 +128,7 @@ pub async fn list_relations(
     let records = relations::list(authorized.conn(), workspace_id, query).await?;
     Ok(Json(records))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/relations.rs"]
+mod tests;

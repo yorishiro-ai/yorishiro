@@ -63,3 +63,7 @@ pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
         .map(parse)
         .ok_or_else(|| YorishiroError::not_found(format!("no template named '{id}'")))
 }
+
+#[cfg(test)]
+#[path = "../tests/templates.rs"]
+mod tests;

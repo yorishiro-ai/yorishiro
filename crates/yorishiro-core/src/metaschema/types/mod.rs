@@ -103,3 +103,7 @@ pub struct FieldDef {
     #[schema(value_type = Object)]
     pub extra: serde_json::Map<String, Value>,
 }
+
+#[cfg(test)]
+#[path = "../../../tests/metaschema/types/mod.rs"]
+mod tests;

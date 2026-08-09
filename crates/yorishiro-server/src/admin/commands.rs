@@ -173,3 +173,7 @@ pub async fn resync_embeddings(
     }
     Ok(report)
 }
+
+#[cfg(test)]
+#[path = "../../tests/admin/commands.rs"]
+mod tests;

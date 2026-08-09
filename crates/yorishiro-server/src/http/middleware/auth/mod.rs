@@ -179,3 +179,7 @@ where
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/http/middleware/auth/mod.rs"]
+mod tests;

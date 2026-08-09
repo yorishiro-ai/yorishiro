@@ -34,3 +34,7 @@ pub async fn import_jsonl(
         import::import_jsonl(authorized.conn(), tenant_id, workspace_id, body.as_bytes()).await?;
     Ok((StatusCode::OK, Json(result)))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/import.rs"]
+mod tests;

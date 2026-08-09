@@ -69,3 +69,7 @@ impl YorishiroMcpServer {
         ok_json(hits)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/search.rs"]
+mod tests;

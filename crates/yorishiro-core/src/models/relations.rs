@@ -62,3 +62,7 @@ pub struct Neighbor {
     pub properties: Value,
     pub entity: EntityRecord,
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/relations.rs"]
+mod tests;

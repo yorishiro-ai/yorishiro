@@ -257,3 +257,7 @@ pub fn router(
         .route("/api/export.jsonl", get(export::export_jsonl))
         .route("/api/import.jsonl", post(import::import_jsonl))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/mod.rs"]
+mod tests;

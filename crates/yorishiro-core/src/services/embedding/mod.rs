@@ -28,3 +28,7 @@ pub trait EmbeddingProvider: Send + Sync {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/embedding/mod.rs"]
+mod tests;

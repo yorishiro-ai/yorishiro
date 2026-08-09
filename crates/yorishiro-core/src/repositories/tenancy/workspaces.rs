@@ -201,3 +201,7 @@ pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), Y
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/tenancy/workspaces.rs"]
+mod tests;

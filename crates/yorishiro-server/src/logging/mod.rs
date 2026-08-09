@@ -93,3 +93,7 @@ pub fn init() -> Result<LogGuard> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/logging/mod.rs"]
+mod tests;

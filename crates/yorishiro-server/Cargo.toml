@@ -7,6 +7,7 @@ description = "HTTP server (REST + MCP) for Yorishiro, an MCP-native knowledge s
 repository.workspace = true
 readme = "README.md"
 include = ["src/**/*", "README.md", "../../migrations/**/*"]
+autotests = false
 
 [[bin]]
 name = "yorishiro-server"

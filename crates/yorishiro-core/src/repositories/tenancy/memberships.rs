@@ -134,3 +134,7 @@ pub async fn list_members(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/tenancy/memberships.rs"]
+mod tests;

@@ -56,3 +56,7 @@ pub async fn create_api_key(
         plaintext,
     })
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/auth/keys.rs"]
+mod tests;

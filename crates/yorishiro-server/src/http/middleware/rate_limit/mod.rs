@@ -112,3 +112,7 @@ pub async fn enforce(
 
     next.run(req).await
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/http/middleware/rate_limit/mod.rs"]
+mod tests;

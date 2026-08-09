@@ -355,3 +355,7 @@ pub async fn export_all(
         .await
         .internal()
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/entities/mod.rs"]
+mod tests;

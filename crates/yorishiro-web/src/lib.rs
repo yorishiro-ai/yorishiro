@@ -98,3 +98,7 @@ pub fn fallback_service(override_dir: Option<String>) -> MethodRouter {
         }
     })
 }
+
+#[cfg(test)]
+#[path = "../tests/lib.rs"]
+mod tests;

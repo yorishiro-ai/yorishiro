@@ -194,3 +194,7 @@ pub async fn get_entity_type_json_schema(
         entity_type_def,
     )))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/schemas.rs"]
+mod tests;
