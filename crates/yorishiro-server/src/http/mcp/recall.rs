@@ -49,3 +49,7 @@ impl YorishiroMcpServer {
         ok_json(context)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/recall.rs"]
+mod tests;

@@ -181,3 +181,7 @@ fn diff_fields(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/metaschema/versioning/mod.rs"]
+mod tests;

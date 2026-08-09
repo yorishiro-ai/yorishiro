@@ -138,3 +138,7 @@ pub async fn search_by_text(
     let vector = embed_query(provider, query_text).await?;
     search_by_vector(conn, workspace_id, vector, query_text, query).await
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/search/mod.rs"]
+mod tests;

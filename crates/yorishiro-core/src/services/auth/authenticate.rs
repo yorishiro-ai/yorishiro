@@ -72,3 +72,7 @@ pub async fn touch_last_used(
         .internal()?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/auth/authenticate.rs"]
+mod tests;

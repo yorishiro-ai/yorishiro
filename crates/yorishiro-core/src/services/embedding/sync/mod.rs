@@ -146,3 +146,7 @@ pub async fn sync_embedding_for_record(
     )
     .await
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/services/embedding/sync/mod.rs"]
+mod tests;

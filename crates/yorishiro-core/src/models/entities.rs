@@ -51,3 +51,7 @@ impl Default for ListEntitiesQuery {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/entities.rs"]
+mod tests;

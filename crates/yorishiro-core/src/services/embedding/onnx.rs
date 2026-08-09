@@ -294,3 +294,7 @@ impl EmbeddingProvider for LocalOnnxProvider {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/embedding/onnx.rs"]
+mod tests;

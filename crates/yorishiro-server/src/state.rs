@@ -111,3 +111,7 @@ impl FromRef<AppState> for TenantDb {
         state.tenant_db.clone()
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/state.rs"]
+mod tests;

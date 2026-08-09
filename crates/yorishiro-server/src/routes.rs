@@ -179,3 +179,7 @@ fn debug_local_origin_layer() -> CorsLayer {
             .unwrap_or(false)
     }))
 }
+
+#[cfg(test)]
+#[path = "../tests/routes.rs"]
+mod tests;

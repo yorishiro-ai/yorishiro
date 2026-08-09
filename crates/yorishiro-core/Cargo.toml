@@ -6,6 +6,7 @@ license.workspace = true
 description.workspace = true
 repository.workspace = true
 readme = "README.md"
+autotests = false
 
 [dependencies]
 anyhow.workspace = true

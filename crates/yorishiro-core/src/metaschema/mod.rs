@@ -14,3 +14,7 @@ pub use versioning::{VersioningDiff, diff};
 /// `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 pub use validate::MAX_OBJECT_DEPTH;
+
+#[cfg(test)]
+#[path = "../../tests/metaschema/mod.rs"]
+mod tests;

@@ -164,3 +164,7 @@ pub async fn verify_login(
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/tenancy/users.rs"]
+mod tests;

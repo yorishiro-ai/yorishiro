@@ -360,3 +360,7 @@ fn format_limit(limit: Option<i32>) -> String {
         None => "unlimited".to_string(),
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/admin/mod.rs"]
+mod tests;

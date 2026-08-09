@@ -146,3 +146,7 @@ pub async fn setup(
         }),
     ))
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/http/controllers/setup/mod.rs"]
+mod tests;

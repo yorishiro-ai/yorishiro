@@ -157,3 +157,7 @@ pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/config/mod.rs"]
+mod tests;

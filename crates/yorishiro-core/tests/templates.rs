@@ -1,6 +1,6 @@
-use yorishiro_core::YorishiroError;
-use yorishiro_core::metaschema::validate_definition;
-use yorishiro_core::templates::{get_template, list_templates};
+use crate::YorishiroError;
+use crate::metaschema::validate_definition;
+use crate::templates::{get_template, list_templates};
 
 #[test]
 fn lists_the_built_in_task_management_template() {

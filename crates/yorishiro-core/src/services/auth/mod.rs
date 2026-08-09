@@ -133,3 +133,7 @@ pub(crate) fn random_hex(byte_len: usize) -> String {
 pub(crate) fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }
+
+#[cfg(test)]
+#[path = "../../../tests/services/auth/mod.rs"]
+mod tests;

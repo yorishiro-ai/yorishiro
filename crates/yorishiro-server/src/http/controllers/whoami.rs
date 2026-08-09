@@ -22,3 +22,7 @@ pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
         user_id: ctx.user_id,
     })
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/whoami.rs"]
+mod tests;

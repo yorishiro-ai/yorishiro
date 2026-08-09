@@ -59,3 +59,7 @@ pub async fn search_entities(
         .await?;
     Ok(Json(hits))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/search.rs"]
+mod tests;

@@ -206,3 +206,7 @@ pub async fn fork_template(
     .await?;
     Ok((StatusCode::CREATED, Json(template)))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/template_library.rs"]
+mod tests;

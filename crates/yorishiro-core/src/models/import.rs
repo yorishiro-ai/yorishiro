@@ -13,3 +13,7 @@ pub struct ImportResult {
     pub relations: u64,
     pub errors: Vec<String>,
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/import.rs"]
+mod tests;

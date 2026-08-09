@@ -137,3 +137,7 @@ pub async fn recall_context(
         truncated,
     })
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/recall/mod.rs"]
+mod tests;

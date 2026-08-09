@@ -112,3 +112,7 @@ fn field_to_json_schema(field: &FieldDef) -> Value {
 
     Value::Object(schema)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/metaschema/projection/mod.rs"]
+mod tests;

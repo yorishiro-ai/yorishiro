@@ -224,3 +224,7 @@ macro_rules! mcp_try {
     };
 }
 pub(crate) use mcp_try;
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/mod.rs"]
+mod tests;

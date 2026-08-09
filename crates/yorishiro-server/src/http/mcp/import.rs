@@ -50,3 +50,7 @@ impl YorishiroMcpServer {
         ok_json(result)
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/import.rs"]
+mod tests;

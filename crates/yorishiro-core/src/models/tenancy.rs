@@ -136,3 +136,7 @@ pub struct UpdateTemplateInput {
     pub tags: Option<Vec<String>>,
     pub locale: Option<String>,
 }
+
+#[cfg(test)]
+#[path = "../../tests/models/tenancy.rs"]
+mod tests;

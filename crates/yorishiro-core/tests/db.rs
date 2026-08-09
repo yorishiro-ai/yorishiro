@@ -3,7 +3,7 @@ use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use sqlx::Row;
 
-use yorishiro_core::test_support;
+use crate::test_support;
 
 #[derive(Iden)]
 enum Workspaces {

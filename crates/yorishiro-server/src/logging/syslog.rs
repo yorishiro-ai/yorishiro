@@ -93,3 +93,7 @@ impl Drop for SyslogWriter {
         let _ = io::Write::flush(self);
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/logging/syslog.rs"]
+mod tests;

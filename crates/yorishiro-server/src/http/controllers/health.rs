@@ -62,3 +62,7 @@ async fn check_db(state: &AppState) -> Result<(), sqlx::Error> {
         Err(_) => Err(sqlx::Error::PoolTimedOut),
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/health.rs"]
+mod tests;

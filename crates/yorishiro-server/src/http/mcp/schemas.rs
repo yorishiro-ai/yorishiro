@@ -189,3 +189,7 @@ impl YorishiroMcpServer {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/mcp/schemas.rs"]
+mod tests;

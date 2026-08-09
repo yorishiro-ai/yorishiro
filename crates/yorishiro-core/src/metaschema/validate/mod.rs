@@ -250,3 +250,7 @@ fn validate_field(
         });
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/metaschema/validate/mod.rs"]
+mod tests;

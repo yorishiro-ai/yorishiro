@@ -37,3 +37,7 @@ pub async fn export_all(
     );
     Ok(records)
 }
+
+#[cfg(test)]
+#[path = "../../tests/repositories/export.rs"]
+mod tests;

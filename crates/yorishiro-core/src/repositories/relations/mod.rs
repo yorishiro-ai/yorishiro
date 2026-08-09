@@ -467,3 +467,7 @@ pub async fn neighbors_batch(
 
     Ok(by_pivot)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/repositories/relations/mod.rs"]
+mod tests;

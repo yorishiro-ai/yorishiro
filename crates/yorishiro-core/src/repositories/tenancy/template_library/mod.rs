@@ -332,3 +332,7 @@ pub async fn fork_template(
 
     row.into_record()
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/repositories/tenancy/template_library/mod.rs"]
+mod tests;

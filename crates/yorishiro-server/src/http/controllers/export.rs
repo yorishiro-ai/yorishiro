@@ -33,3 +33,7 @@ pub async fn export_jsonl(
 
     Ok(([(header::CONTENT_TYPE, "application/x-ndjson")], body))
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/export.rs"]
+mod tests;
