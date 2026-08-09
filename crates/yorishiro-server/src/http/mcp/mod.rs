@@ -75,14 +75,13 @@ pub(super) enum AuthzOutcome {
 }
 
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
-    parts
-        .headers
-        .get(http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            ErrorData::invalid_request("missing or malformed Authorization header", None)
-        })
+    auth::bearer_credential(
+        parts
+            .headers
+            .get(http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+    )
+    .ok_or_else(|| ErrorData::invalid_request("missing or malformed Authorization header", None))
 }
 
 /// The sole entry point for every tool handler. Because there is no other way to

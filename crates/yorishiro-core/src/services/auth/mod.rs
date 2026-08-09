@@ -103,6 +103,22 @@ pub struct CreatedApiKey {
     pub plaintext: String,
 }
 
+/// Extracts the API key from an `Authorization` header value, or `None` if the header is absent,
+/// is not a `Bearer` credential, or carries an empty one.
+///
+/// Takes the header's string value rather than a `HeaderMap` so this crate needs no `http`
+/// dependency; callers do the `headers.get(AUTHORIZATION)?.to_str().ok()` themselves.
+///
+/// Every adapter that authenticates a request routes through here. `Authorization: Bearer `
+/// with nothing after it is the same request whichever adapter receives it, so it has to get
+/// the same answer -- one adapter accepting the empty string and hashing it into a lookup that
+/// can never match, while another rejects it outright, is a difference with no reason behind it.
+pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
+    header_value
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|token| !token.is_empty())
+}
+
 /// Lowercase-hex-encodes `bytes`, two characters per byte (e.g. `[0xab, 0x01]` -> `"ab01"`).
 pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

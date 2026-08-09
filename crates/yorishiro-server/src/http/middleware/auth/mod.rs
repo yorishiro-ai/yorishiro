@@ -29,16 +29,17 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
 
 /// Shared by both the `AuthContext` and `Authorized<R>` extractors.
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
-    parts
-        .headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            let err = YorishiroError::Unauthenticated;
-            log_auth_rejection(parts, &err);
-            ApiError(err)
-        })
+    auth::bearer_credential(
+        parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+    )
+    .ok_or_else(|| {
+        let err = YorishiroError::Unauthenticated;
+        log_auth_rejection(parts, &err);
+        ApiError(err)
+    })
 }
 
 /// The sole entry point for authenticated requests. Requiring this type as a handler
