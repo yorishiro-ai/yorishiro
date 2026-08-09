@@ -13,7 +13,10 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn new(keys: Vec<&'static str>) -> Self {
-        let lock = ENV_LOCK.lock().unwrap();
+        // A test that panics while holding this poisons the mutex; a plain `unwrap()` would
+        // turn one real failure into a cascade of unrelated ones. `Drop` restores the vars
+        // either way, so the state behind the poisoned lock is not suspect.
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         for key in &keys {
             // SAFETY: serialized by ENV_LOCK, no other threads touch these keys.
             unsafe { std::env::remove_var(key) };
