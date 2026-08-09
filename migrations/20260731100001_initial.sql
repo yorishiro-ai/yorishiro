@@ -18,9 +18,7 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 CREATE TABLE identity.tenants (
   id                  UUID PRIMARY KEY DEFAULT uuidv7(),
   name                TEXT NOT NULL,
-  plan                TEXT,
   max_workspaces      INTEGER,
-  stripe_customer_id  TEXT UNIQUE,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

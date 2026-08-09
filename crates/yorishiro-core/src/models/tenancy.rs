@@ -9,9 +9,7 @@ use crate::services::auth::ApiKeyScope;
 pub struct TenantRecord {
     pub id: Uuid,
     pub name: String,
-    pub plan: Option<String>,
     pub max_workspaces: Option<i32>,
-    pub stripe_customer_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
