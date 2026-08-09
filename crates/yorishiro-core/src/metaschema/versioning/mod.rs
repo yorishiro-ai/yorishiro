@@ -54,6 +54,35 @@ pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> Versionin
     }
 }
 
+/// Whether an upper bound got stricter -- a lower ceiling, or a ceiling where there was none.
+///
+/// Comparing the two `Option`s directly does not express this. `Option`'s ordering places `None`
+/// below every `Some`, so `Some(10) < None` is false, and adding a ceiling where there was none
+/// read as compatible; `None < Some(10)` is true, so *removing* one read as breaking. Both
+/// backwards.
+fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
+    match (old, new) {
+        // A ceiling where there was none: anything above it was valid a moment ago.
+        (None, Some(_)) => true,
+        // Dropping the ceiling only ever admits more data.
+        (Some(_), None) => false,
+        (Some(old), Some(new)) => new < old,
+        (None, None) => false,
+    }
+}
+
+/// The floor-side mirror of [`lowered_ceiling`]. A bare `new > old` happens to give these two
+/// cases the right answer, but only by luck of which way `None` sorts -- spelling it out keeps
+/// the two sides symmetric and stops the next reader from having to recall that ordering.
+fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
+    match (old, new) {
+        (None, Some(_)) => true,
+        (Some(_), None) => false,
+        (Some(old), Some(new)) => new > old,
+        (None, None) => false,
+    }
+}
+
 /// Compares two field maps under a common `path` prefix (e.g. `"task"` at the
 /// top level, `"task.address"` when recursing into a nested object), pushing
 /// human-readable breaking-change reasons into `reasons`.
@@ -138,17 +167,17 @@ fn diff_fields(
             reasons.push(fp("changed its format constraint"));
         }
 
-        if new_field.minimum > old_field.minimum {
+        if raised_floor(old_field.minimum, new_field.minimum) {
             reasons.push(fp("raised its minimum"));
         }
-        if new_field.maximum < old_field.maximum {
+        if lowered_ceiling(old_field.maximum, new_field.maximum) {
             reasons.push(fp("lowered its maximum"));
         }
 
-        if new_field.min_length > old_field.min_length {
+        if raised_floor(old_field.min_length, new_field.min_length) {
             reasons.push(fp("raised its minLength"));
         }
-        if new_field.max_length < old_field.max_length {
+        if lowered_ceiling(old_field.max_length, new_field.max_length) {
             reasons.push(fp("lowered its maxLength"));
         }
 
@@ -161,10 +190,10 @@ fn diff_fields(
             reasons.push(fp("changed its pattern constraint"));
         }
 
-        if new_field.min_items > old_field.min_items {
+        if raised_floor(old_field.min_items, new_field.min_items) {
             reasons.push(fp("raised its minItems"));
         }
-        if new_field.max_items < old_field.max_items {
+        if lowered_ceiling(old_field.max_items, new_field.max_items) {
             reasons.push(fp("lowered its maxItems"));
         }
 
