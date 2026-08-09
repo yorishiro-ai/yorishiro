@@ -1,78 +1,377 @@
 name: Release
 
+# One dispatch is the whole release: bump, tag, build, publish, verify.
+#
+# This used to be two workflows. `release.yml` opened a bump PR, and merging that PR triggered
+# `release-publish.yml` on the Cargo.toml change. Two problems came out of that split:
+#
+#   - The PR was authored by `github-actions[bot]`, and GitHub requires manual approval in the
+#     Actions tab before a bot-authored PR's workflows run. Every release stalled waiting for a
+#     human to click Approve.
+#   - The bump and the publish were separate runs with no shared state, so `release-publish`
+#     had to re-derive the version from Cargo.toml and guess whether master's HEAD was still
+#     the bump commit. Its own comments documented the gap that left.
+#
+# Pushing the tag directly removes both. It is only safe because this repository has no branch
+# protection or ruleset on master (both verified disabled). If either is ever enabled, the push
+# step below starts failing and this needs a token that isn't `github-actions[bot]`.
+
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. 0.16.3) -- without the leading v'
+        description: 'Release version (e.g. 0.18.1) -- without the leading v'
         required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  IMAGE_NAME: ghcr.io/yotsunagi/yorishiro
 
 permissions:
   contents: write
-  pull-requests: write
+  packages: write
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.commit.outputs.tag }}
 
     steps:
+      # workflow_dispatch runs against whatever ref the dispatcher selected, and the checkout
+      # below has no `ref:` pin -- so without this guard, dispatching from a branch that is a
+      # fast-forward descendant of master would push that branch's content straight to master.
+      # Fail loudly rather than silently pinning `ref: master`, which would build something
+      # other than what the dispatcher chose.
+      - name: Require dispatch from master
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
+            echo "Releases must be dispatched from master (got $GITHUB_REF)." >&2
+            exit 1
+          fi
+
+      # persist-credentials stays at its default (true), unlike other checkouts in this repo:
+      # this job needs the injected token to push the bump commit and tag below.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
 
+      # (0|[1-9][0-9]*) per component rather than [0-9]+: the naive form also accepts a
+      # leading-zero component like "01.2.3", which is not a valid SemVer version core and
+      # would confuse `cargo update -w`'s output downstream.
       - name: Validate version format
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version '$VERSION' is not in X.Y.Z format, aborting."
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Version '$VERSION' is not in x.y.z form." >&2
             exit 1
           fi
-          echo "tag=v$VERSION" >> "$GITHUB_ENV"
 
-      - name: Check if tag already exists
+      # A tag on its own does not mean the release shipped -- the GitHub Release, created last
+      # after every artifact is pushed, is what marks it complete. The two together tell the
+      # three cases apart:
+      #
+      #   no tag              -> normal first run: bump, tag, publish
+      #   tag + release       -> already out; dispatching it again is a mistake
+      #   tag, but no release -> a previous run died partway. Skip the bump (the commit and tag
+      #                          are already on master) and republish from the existing tag.
+      #
+      # The resume path is the reason this check exists at all. The tag lands atomically with
+      # the bump, so before this, a publish that failed afterwards left the version unusable:
+      # re-dispatching hit "tag exists, abort", and the only way out was deleting the remote tag
+      # by hand or burning a patch number.
+      - name: Determine release state
+        id: state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ inputs.version }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/${{ env.tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ env.tag }} already exists, aborting."
+          tag_exists=false
+          release_exists=false
+
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            tag_exists=true
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_exists=true
+          fi
+
+          if [ "$tag_exists" = true ] && [ "$release_exists" = true ]; then
+            echo "$TAG is already released. Nothing to do." >&2
             exit 1
           fi
+
+          if [ "$tag_exists" = true ]; then
+            echo "::notice::$TAG exists but has no GitHub Release -- resuming a failed publish."
+            echo "resumed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "resumed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.state.outputs.resumed == 'false'
 
       - name: Bump workspace version
+        if: steps.state.outputs.resumed == 'false'
         env:
           VERSION: ${{ inputs.version }}
         run: |
           sed -i "0,/^version = \".*\"$/s//version = \"$VERSION\"/" Cargo.toml
           if [ "$(grep -c '^version = "'"$VERSION"'"$' Cargo.toml)" -ne 1 ]; then
-            echo "Expected exactly one '^version = \"$VERSION\"' line in Cargo.toml after the bump, found a different count."
+            echo "Expected exactly one '^version = \"$VERSION\"' line in Cargo.toml after the bump." >&2
             exit 1
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Update lockfile
+      # -w only: a bare `cargo update` would also move git dependencies to newer commits on the
+      # same tag ref than what this release was built and tested against.
+      - name: Update Cargo.lock
+        if: steps.state.outputs.resumed == 'false'
         run: cargo update -w
 
-      - name: Push bump branch and open a PR
+      - name: Commit and tag
+        id: commit
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ inputs.version }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+          TAG: v${{ inputs.version }}
+          RESUMED: ${{ steps.state.outputs.resumed }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "release/v$VERSION"
-          git add Cargo.toml Cargo.lock
-          git commit -m "Bump version to v$VERSION"
-          git push origin "release/v$VERSION"
+          if [ "$RESUMED" = "true" ]; then
+            echo "Resuming: $TAG already points at the release commit, not re-bumping."
+          else
+            git add Cargo.toml Cargo.lock
+            git commit -m "Bump version to ${TAG}"
+            git tag "$TAG"
+            # Atomic: master and the tag land together, or neither does -- avoids a bumped
+            # master with no matching tag if the second of two separate pushes failed.
+            git push --atomic origin HEAD:master "$TAG"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "Prepares the v$VERSION release. Merging this (squash) is stage 1 of 2 -- once it's on \`master\`, dispatch \`release-publish.yml\` with \`version: $VERSION\` to tag, build, and publish."
-            echo ""
-            echo "This PR's workflow run needs manual approval in the Actions tab before its CI (\`check\`/\`security\`) can run -- GitHub requires that for PRs authored by \`github-actions[bot]\`."
-          } > /tmp/release-pr-body.md
+  binary:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            ext: ""
+            archive: tar.gz
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            arch: amd64
+            ext: .exe
+            archive: zip
+    runs-on: ${{ matrix.os }}
 
-          gh pr create \
-            --title "Bump version to v$VERSION" \
-            --body-file /tmp/release-pr-body.md \
-            --base master \
-            --head "release/v$VERSION"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The action exports SCCACHE_PATH but not RUSTC_WRAPPER, so cargo has to be pointed at
+      # sccache explicitly, and that happens after rust-cache below since rust-cache folds
+      # RUST*-prefixed env vars into its cache key. Linux legs only -- the $GITHUB_ENV append is
+      # bash syntax and this matrix also runs on windows-latest.
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        if: runner.os == 'Linux'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: ~/.cache/ort.pyke.io
+
+      - name: Route rustc through sccache
+        if: runner.os == 'Linux'
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release -p yorishiro-server
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist
+          tar -czf "dist/yorishiro-server-${TAG}-linux-${ARCH}.tar.gz" \
+            -C target/release yorishiro-server
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Compress-Archive -Path "target/release/yorishiro-server.exe" `
+            -DestinationPath "dist/yorishiro-server-$env:TAG-windows-$env:ARCH.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ runner.os == 'Windows' && 'windows' || 'linux' }}-${{ matrix.arch }}
+          path: dist/*
+
+  docker:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+  docker-manifest:
+    needs: [docker, prepare]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Each arch was pushed as its own tag by the (native, no-QEMU) `docker` job above;
+      # this merges them into one multi-arch manifest under the version and `latest` tags.
+      - name: Create multi-arch manifest
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:latest" \
+            "${IMAGE}:${TAG}-amd64" \
+            "${IMAGE}:${TAG}-arm64"
+
+  # Pulls the manifest that was just published and boots it against a real database. `ci.yml`'s
+  # package-smoke covers the same ground for a debug build on every PR, but nothing until now
+  # checked the actual release artifact -- a release-profile-only fault, or a Dockerfile stage
+  # that only breaks in the published image, would have shipped unnoticed.
+  #
+  # Runs before github-release deliberately: the GitHub Release is what marks a version as
+  # published (see `prepare`), so a failure here leaves the version resumable rather than
+  # looking complete.
+  smoke:
+    needs: [docker-manifest, prepare]
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: yorishiro
+          POSTGRES_PASSWORD: yorishiro
+          POSTGRES_DB: yorishiro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yorishiro"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The image refuses to start without an embedding model on disk (by design -- a missing
+      # model is a hard failure, not a degraded mode), so fetch the same one the docs tell
+      # operators to use.
+      - name: Fetch the embedding model
+        run: |
+          mkdir -p models
+          curl -fsSL -o models/model.onnx \
+            https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/onnx/model_quantized.onnx
+          curl -fsSL -o models/tokenizer.json \
+            https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/tokenizer.json
+
+      - name: Boot the published image and check /up
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          docker run -d --name smoke --network host \
+            -v "$PWD/models:/app/models:ro" \
+            -e DATABASE_URL=postgres://yorishiro:yorishiro@127.0.0.1:5432/yorishiro \
+            "${IMAGE}:${TAG}"
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
+              echo "::notice::${IMAGE}:${TAG} booted and answered /up"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "The published image never answered /up." >&2
+          docker logs smoke >&2 || true
+          exit 1
+
+  github-release:
+    needs: [binary, smoke, prepare]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: binary-*
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+          generate_release_notes: true
