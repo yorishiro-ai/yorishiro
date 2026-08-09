@@ -5,6 +5,12 @@
 - Use `yorishiro_core::ResultExt` (`.internal()`) for any fallible call that
   produces a non-`YorishiroError` error. Never write
   `map_err(|e| YorishiroError::Internal(e.into()))` by hand.
+  `.internal()` only converts an existing error (`E: Into<anyhow::Error>`) and
+  cannot attach a message, so it does not cover raising an `Internal` from a
+  formatted string with no source error. `services/embedding/onnx.rs` has a
+  private `fn internal(message: impl Display)` for exactly that case — a local
+  helper like it is the sanctioned pattern when a module needs it repeatedly.
+  Do not promote one to a shared API until a second module actually wants it.
 - Use `YorishiroError::not_found(msg)` for NotFound construction instead of
   building the struct literal directly.
 - The `into_response` mapping from `YorishiroError` to HTTP status+body lives in
