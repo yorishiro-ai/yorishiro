@@ -1,13 +1,15 @@
-// Yorishiro admin dashboard -- a deliberately framework-free SPA. Scope is limited to first-run
-// setup, login, usage/billing display, member management, workspace management (create/
-// list/delete plus a summary detail view -- entity/relation/schema counts, not their content),
-// and basic read/browse/edit access to schemas and entities (list + detail views, single-field
-// data edits). It is not a full entity/schema/relation editor (no create/delete of schemas or
-// entities, no relation management) -- that's what the REST API + Swagger UI (`/docs` on
-// yorishiro-server) are for. Served by both yorishiro-server (via `YSR_WEB_DIR`) and
-// yorishiro-hosted-server -- `/hosted/tenant/overview` and friends only exist on the latter, so
-// on yorishiro-server alone, `#/dashboard` degrades to the API key login just issued plus
-// workspace management (see `renderLoginComplete`) instead of the full hosted dashboard.
+// Yorishiro admin dashboard -- a deliberately framework-free SPA.
+//
+// Minimal by design, and meant to stay that way. Scope is first-run setup, login, member
+// management, workspace management (create/list/delete plus a summary detail view --
+// entity/relation/schema counts, not their content), and basic read/browse/edit access to
+// schemas and entities (list + detail views, single-field data edits). It is not a full
+// entity/schema/relation editor (no create/delete of schemas or entities, no relation
+// management) -- that's what the REST API + Swagger UI (`/docs`) and the MCP tools are for.
+//
+// This is the administration surface for someone running their own deployment, who already has
+// the API. Every route here talks to this server's own `/api/*`; a screen that would need an
+// endpoint this server does not serve does not belong in this file.
 
 const SESSION_KEY = "yorishiro_session";
 
@@ -94,14 +96,12 @@ async function login({ email, password, workspaceId }) {
   return response.json();
 }
 
-async function fetchTenantOverview(apiKey) {
-  const response = await fetch("/hosted/tenant/overview", {
+async function listMembers(apiKey) {
+  const response = await fetch(`${apiBase()}/api/members`, {
     headers: { authorization: `Bearer ${apiKey}` },
   });
   if (!response.ok) {
-    const error = new Error(await parseErrorMessage(response));
-    error.status = response.status;
-    throw error;
+    throw new Error(await parseErrorMessage(response));
   }
   return response.json();
 }
@@ -231,8 +231,8 @@ async function deleteTemplateLibraryItem(apiKey, id) {
   }
 }
 
-// -- Entity/schema browsing (community edition: read/browse plus simple edit; no
-// create/delete UI here -- use the REST API/MCP for that, see /docs). --
+// -- Entity/schema browsing (read/browse plus simple edit; no create/delete UI here --
+// use the REST API/MCP for that, see /docs). --
 
 async function listSchemas(apiKey) {
   const response = await fetch(`${apiBase()}/api/schemas`, {
@@ -390,8 +390,8 @@ function renderSetupComplete(result) {
 }
 
 // `workspace_id` is only asked for when the account has access to more than one workspace --
-// the server reports that with a 422, which is when `needsWorkspaceId` flips to true. Every
-// community-edition deployment has exactly one workspace by default, so the common case never
+// the server reports that with a 422, which is when `needsWorkspaceId` flips to true. A
+// deployment has exactly one workspace by default, so the common case never
 // shows this field at all.
 function renderLogin(errorMessage, needsWorkspaceId = false) {
   const view = el(`
@@ -483,12 +483,11 @@ function renderTemplateLibraryTable(templates) {
   `;
 }
 
-// The community edition has no `/hosted/tenant/overview` dashboard, so this is what
-// `renderDashboard` falls back to: the just-issued API key, plus workspace management
-// (create/list/select -- see `renderWorkspaceDetail` for delete) since a self-hosted deployment
-// otherwise has no way to see or manage workspaces beyond the one `/setup` created. Also hosts
-// the tenant's DB-backed template library (distinct from the built-in `/api/templates` offered
-// during setup) since there is no other admin surface for it in the community edition.
+// Shown right after login: the just-issued API key, plus workspace management (create/list/
+// select -- see `renderWorkspaceDetail` for delete) since a self-hosted deployment otherwise has
+// no way to see or manage workspaces beyond the one `/setup` created. Also hosts the tenant's
+// DB-backed template library (distinct from the built-in `/api/templates` offered during setup)
+// since there is no other admin surface for it.
 async function renderLoginComplete(session, createError, templateError) {
   let workspaces;
   try {
@@ -1103,23 +1102,15 @@ function renderMembersTable(members) {
   `;
 }
 
-function renderDashboardShell(overview, addMemberError) {
+function renderDashboardShell(members, addMemberError) {
   const view = el(`
     <div>
       <div class="top-bar">
-        <h1>Tenant Dashboard</h1>
+        <h1>Members</h1>
         <button class="secondary" id="logout-button">Sign out</button>
       </div>
-      <p class="hint">Tenant ${esc(overview.tenant_id)} &middot; plan: ${esc(overview.plan ?? "self-hosted / unmetered")}</p>
 
-      <div class="stat-grid">
-        <div class="stat"><div class="value">${overview.usage.workspace_count}</div><div class="label">workspaces${overview.max_workspaces != null ? ` / ${overview.max_workspaces}` : ""}</div></div>
-        <div class="stat"><div class="value">${overview.usage.member_count}</div><div class="label">members</div></div>
-        <div class="stat"><div class="value">${overview.usage.entity_count}</div><div class="label">entities</div></div>
-      </div>
-
-      <h2>Members</h2>
-      ${renderMembersTable(overview.members)}
+      ${renderMembersTable(members)}
 
       <h2>Add a member</h2>
       <p class="hint">The person must already have an account (created via /auth/signup from an invite).</p>
@@ -1157,7 +1148,7 @@ function renderDashboardShell(overview, addMemberError) {
       });
       await renderDashboard();
     } catch (err) {
-      mount(renderDashboardShell(overview, err.message));
+      mount(renderDashboardShell(members, err.message));
     }
   });
 
@@ -1173,16 +1164,8 @@ async function renderDashboard() {
 
   mount(el(`<p>Loading…</p>`));
   try {
-    const overview = await fetchTenantOverview(session.apiKey);
-    mount(renderDashboardShell(overview));
+    mount(renderDashboardShell(await listMembers(session.apiKey)));
   } catch (err) {
-    if (err.status === 404) {
-      // Not a session failure -- this deployment is yorishiro-server (community edition),
-      // which has no /hosted/tenant/overview endpoint. The session (and the API key login
-      // just issued) is still valid.
-      mount(await renderLoginComplete(session));
-      return;
-    }
     clearSession();
     mount(renderLogin(`session expired: ${err.message}`));
   }
