@@ -70,6 +70,36 @@ The read endpoints only require a valid API key for the tenant (no tenant-member
 
 A fork is an independent copy that only records which template it came from, so deleting a template that others were forked from succeeds -- the forks themselves stay intact and usable, and just lose the pointer back to the deleted original.
 
+### Template marketplace
+
+Tenants share templates with each other. `identity.templates` already carries `visibility` (`tenant` | `community`) and `fork_of`; the marketplace adds what makes a shared template safe to consume -- published versions, and what other tenants thought of them.
+
+| Endpoint | Scope | Purpose |
+|---|---|---|
+| `GET /api/marketplace` | any valid API key | Community-visible templates across every tenant, with the latest stable version and review aggregates |
+| `GET /api/marketplace/{id}/versions` | any valid API key | Published versions, newest first. Your own drafts are included only for templates your tenant owns |
+| `POST /api/marketplace/{id}/versions` | any valid API key | Publish the next version of your own template (`definition`, optional `changelog`, `status` of `draft`/`pre`/`stable`) |
+| `GET /api/marketplace/{id}/reviews` | any valid API key | Reviews of a template you can see |
+| `POST /api/marketplace/{id}/reviews` | any valid API key | Leave or replace your tenant's review (`rating` 1-5, optional `comment`) |
+| `POST /api/marketplace/{id}/fork?version=N` | any valid API key | Copy a published version into your own library. Omitting `version` takes the latest `stable` |
+| `PUT /api/marketplace/{id}/visibility` | any valid API key | List your own template in the marketplace, or take it back down |
+
+A version number is assigned by the server, incrementing per template. Letting a client choose it invites gaps and collisions in a sequence other tenants read as history.
+
+**A draft is visible only to the tenant that owns it**, is never forkable, and keeps a template out of the listing entirely until something non-draft is published -- a marketplace entry that 404s on install is worse than a shorter list. A forked copy lands **private** in your own library: republishing someone else's work under your name is a decision, not a default.
+
+Acting on a template your tenant does not own answers `404`, not `403`. A caller that cannot act on a template should not be able to confirm it exists from the difference.
+
+A fork is a template, not yet a schema. Apply it with `POST /api/schemas` and its UUID as `template_id`, exactly as a built-in id is applied.
+
+#### Official listings
+
+The built-in templates are published here too, by `yorishiro-server admin seed-official-templates`. They are ordinary listings -- forkable and reviewable like any other -- attributed to the author `Yorishiro`.
+
+Their publisher is a tenant row with **no members and no workspaces**: `identity.templates.tenant_id` is `NOT NULL` and the marketplace scopes ownership by it, so official listings need an owner. Nobody can log into that tenant, because there is no membership to log in through.
+
+The command is idempotent and meant to run on every deployment: a template already published at the same definition is left alone, and one whose definition changed in a new release publishes a *new version* rather than editing the one tenants already installed.
+
 ### Auth & member management
 
 `/auth/signup` and `/auth/login` take no bearer token — their entire purpose is to hand one out. `/setup`/`/setup/status` (see [setup.md](setup.md#first-run-setup)) and the liveness/readiness checks `/up`/`/health` are also unauthenticated. Of those, the four that accept input (`/auth/signup`, `/auth/login`, `/setup`, `/setup/status`) are rate-limited by client IP (`429 Too Many Requests` past the limit; see `YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS` in [configuration.md](configuration.md)) -- the health probes `/up`/`/health` are not. See [setup.md](setup.md#signup-login-member-and-workspace-management) for the full invite → signup → login flow.
