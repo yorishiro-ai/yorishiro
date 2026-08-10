@@ -7,7 +7,9 @@ use uuid::Uuid;
 use yorishiro_core::repositories::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::ApiKeyScope;
 
-use commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key};
+use commands::{
+    create_api_key, create_tenant_api_key, list_api_keys, resync_embeddings, revoke_api_key,
+};
 
 /// Subcommands under `yorishiro-server admin`. API keys are stored only as SHA-256 hashes and
 /// user passwords only as argon2 hashes, so neither can be provisioned by hand in SQL — this
@@ -74,6 +76,18 @@ pub enum AdminCommand {
         /// Attribute the key to a specific user (see `admin list-members <tenant-id>`). The
         /// requested scope is capped by that user's tenant role (owner/admin: schema,
         /// member: write, viewer: read); omit for an unattributed service key.
+        #[arg(long)]
+        user: Option<Uuid>,
+    },
+    /// Issue a tenant-scoped API key: one key that can act on any workspace in the tenant,
+    /// naming the workspace per request with the `X-Workspace-Id` header. Prefer
+    /// `create-api-key` when the client only ever works in one workspace -- a key bound to one
+    /// workspace reaches less if it leaks.
+    CreateTenantApiKey {
+        tenant_id: Uuid,
+        scope: ScopeArg,
+        /// Attribute the key to a specific user (see `admin list-members <tenant-id>`). The
+        /// requested scope is capped by that user's tenant role, as with `create-api-key`.
         #[arg(long)]
         user: Option<Uuid>,
     },
@@ -308,7 +322,32 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             println!("api key created (the plaintext key is shown ONLY once — store it now)");
             println!("  key:          {}", created.plaintext);
             println!("  key id:       {}", created.id);
-            println!("  workspace id: {}", created.workspace_id);
+            println!("  tenant id:    {}", created.tenant_id);
+            match created.workspace_id {
+                Some(workspace_id) => println!("  workspace id: {workspace_id}"),
+                None => {
+                    println!("  workspace id: (tenant-scoped -- send X-Workspace-Id per request)")
+                }
+            }
+            println!("  scope:        {scope:?}");
+            if let Some(user_id) = created.user_id {
+                println!("  user id:      {user_id}");
+            }
+        }
+        AdminCommand::CreateTenantApiKey {
+            tenant_id,
+            scope,
+            user,
+        } => {
+            let scope = ApiKeyScope::from(scope);
+            let created = create_tenant_api_key(pool, tenant_id, scope, user).await?;
+            println!(
+                "tenant-scoped api key created (the plaintext key is shown ONLY once — store it now)"
+            );
+            println!("  key:          {}", created.plaintext);
+            println!("  key id:       {}", created.id);
+            println!("  tenant id:    {}", created.tenant_id);
+            println!("  workspace id: (send X-Workspace-Id on each request)");
             println!("  scope:        {scope:?}");
             if let Some(user_id) = created.user_id {
                 println!("  user id:      {user_id}");
@@ -321,9 +360,17 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             }
             for key in keys {
                 println!(
-                    "{}  {:<8} prefix={}  user={}  created={}  last_used={}",
+                    "{}  {:<8} {:<14} prefix={}  user={}  created={}  last_used={}",
                     key.id,
                     key.scope,
+                    // A tenant-scoped key is listed here because it can act on this workspace,
+                    // not because it is bound to it -- say which, or an operator reading the
+                    // list cannot tell what revoking the key would affect.
+                    if key.workspace_id.is_some() {
+                        "workspace"
+                    } else {
+                        "tenant-scoped"
+                    },
                     key.key_prefix,
                     key.user_id
                         .map(|id| id.to_string())

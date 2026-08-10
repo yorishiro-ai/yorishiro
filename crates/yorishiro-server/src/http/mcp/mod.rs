@@ -74,6 +74,24 @@ pub(super) enum AuthzOutcome {
     ScopeDenied(CallToolResult),
 }
 
+/// Reads `X-Workspace-Id` for a tenant-scoped key. A present-but-unparseable value is an error
+/// rather than an omission, matching the REST adapter (see `auth::requested_workspace`).
+fn extract_requested_workspace(parts: &Parts) -> Result<Option<uuid::Uuid>, ErrorData> {
+    match auth::requested_workspace(
+        parts
+            .headers
+            .get(auth::WORKSPACE_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    ) {
+        auth::RequestedWorkspace::Absent => Ok(None),
+        auth::RequestedWorkspace::Present(id) => Ok(Some(id)),
+        auth::RequestedWorkspace::Malformed => Err(ErrorData::invalid_request(
+            format!("{} is not a valid UUID", auth::WORKSPACE_HEADER),
+            None,
+        )),
+    }
+}
+
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     auth::bearer_credential(
         parts
@@ -96,8 +114,16 @@ pub(super) async fn authorize(
     required: ApiKeyScope,
 ) -> Result<AuthzOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
+    let requested_workspace = extract_requested_workspace(parts)?;
 
-    match auth::authorize(&state.tenant_db, presented_key, required).await {
+    match auth::authorize(
+        &state.tenant_db,
+        presented_key,
+        required,
+        requested_workspace,
+    )
+    .await
+    {
         Ok((ctx, conn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, conn })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
@@ -125,8 +151,16 @@ pub(super) async fn authorize_scope_only(
     required: ApiKeyScope,
 ) -> Result<ScopeOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
+    let requested_workspace = extract_requested_workspace(parts)?;
 
-    match auth::authorize_scope(&state.tenant_db, presented_key, required).await {
+    match auth::authorize_scope(
+        &state.tenant_db,
+        presented_key,
+        required,
+        requested_workspace,
+    )
+    .await
+    {
         Ok(ctx) => Ok(ScopeOutcome::Verified(ctx)),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(ScopeOutcome::ScopeDenied(err_to_tool_result(err)))

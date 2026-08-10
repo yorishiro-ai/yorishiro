@@ -1,5 +1,6 @@
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
+use uuid::Uuid;
 
 use crate::db::TenantDb;
 use crate::error::{ResultExt, YorishiroError};
@@ -27,12 +28,16 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
 /// satisfies the required scope, and returns a connection with the RLS context already set.
 /// REST and MCP adapters have no way to obtain a `&mut PgConnection` except through this
 /// function, which structurally prevents a scope check from being forgotten.
+/// `requested_workspace` is the caller's `X-Workspace-Id`, needed only by a tenant-scoped key
+/// (see [`authenticate`]). Adapters that have no way to carry the header -- and callers using a
+/// workspace-scoped key -- pass `None`.
 pub async fn authorize(
     tenant_db: &TenantDb,
     presented_key: &str,
     required: ApiKeyScope,
+    requested_workspace: Option<Uuid>,
 ) -> Result<(AuthContext, PoolConnection<Postgres>), YorishiroError> {
-    let ctx = authenticate(tenant_db.pool(), presented_key).await?;
+    let ctx = authenticate(tenant_db.pool(), presented_key, requested_workspace).await?;
     require_scope(&ctx, required)?;
 
     let mut conn = tenant_db
@@ -40,7 +45,7 @@ pub async fn authorize(
         .await
         .internal()?;
 
-    if let Err(err) = touch_last_used(&mut conn, ctx.workspace_id, ctx.api_key_id).await {
+    if let Err(err) = touch_last_used(&mut conn, ctx.api_key_id).await {
         tracing::warn!(error = %err, "failed to update api key last_used_at");
     }
 
@@ -58,8 +63,9 @@ pub async fn authorize_scope(
     tenant_db: &TenantDb,
     presented_key: &str,
     required: ApiKeyScope,
+    requested_workspace: Option<Uuid>,
 ) -> Result<AuthContext, YorishiroError> {
-    let ctx = authenticate(tenant_db.pool(), presented_key).await?;
+    let ctx = authenticate(tenant_db.pool(), presented_key, requested_workspace).await?;
     require_scope(&ctx, required)?;
 
     match tenant_db
@@ -67,7 +73,7 @@ pub async fn authorize_scope(
         .await
     {
         Ok(mut conn) => {
-            if let Err(err) = touch_last_used(&mut conn, ctx.workspace_id, ctx.api_key_id).await {
+            if let Err(err) = touch_last_used(&mut conn, ctx.api_key_id).await {
                 tracing::warn!(error = %err, "failed to update api key last_used_at");
             }
         }

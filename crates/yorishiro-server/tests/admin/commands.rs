@@ -31,12 +31,14 @@ async fn creates_workspace_and_issues_a_usable_key(pool: PgPool) {
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
-    assert_eq!(created.workspace_id, workspace_id);
+    assert_eq!(created.workspace_id, Some(workspace_id));
     assert!(created.plaintext.starts_with("ysr_"));
     assert_eq!(created.user_id, None);
 
     // Confirm the issued key actually authenticates, not just that creation returned Ok.
-    let ctx = auth::authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = auth::authenticate(&pool, &created.plaintext, None)
+        .await
+        .unwrap();
     assert_eq!(ctx.workspace_id, workspace_id);
     assert_eq!(ctx.scope, ApiKeyScope::Write);
 }
@@ -104,7 +106,9 @@ async fn revoked_key_no_longer_authenticates(pool: PgPool) {
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
-    auth::authenticate(&pool, &created.plaintext).await.unwrap();
+    auth::authenticate(&pool, &created.plaintext, None)
+        .await
+        .unwrap();
 
     let listed = list_api_keys(&pool, workspace_id).await.unwrap();
     assert_eq!(listed.len(), 1);
@@ -112,7 +116,7 @@ async fn revoked_key_no_longer_authenticates(pool: PgPool) {
 
     revoke_api_key(&pool, created.id).await.unwrap();
 
-    let result = auth::authenticate(&pool, &created.plaintext).await;
+    let result = auth::authenticate(&pool, &created.plaintext, None).await;
     assert!(matches!(
         result,
         Err(yorishiro_core::YorishiroError::Unauthenticated)

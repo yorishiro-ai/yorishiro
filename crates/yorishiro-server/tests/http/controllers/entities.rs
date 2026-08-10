@@ -70,9 +70,15 @@ async fn rest_create_entity_rejects_insufficient_scope(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, tenant_id, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id_tenant,
+        Some(tenant_id),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
     let app = build_app(
@@ -103,12 +109,24 @@ async fn rest_entity_crud_round_trip(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
-        .await
-        .unwrap();
-    let write_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Write, None)
-        .await
-        .unwrap();
+    let schema_key = create_api_key(
+        &mut conn,
+        tenant_id_tenant,
+        Some(tenant_id),
+        ApiKeyScope::Schema,
+        None,
+    )
+    .await
+    .unwrap();
+    let write_key = create_api_key(
+        &mut conn,
+        tenant_id_tenant,
+        Some(tenant_id),
+        ApiKeyScope::Write,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
     let app = build_app(
@@ -211,12 +229,24 @@ async fn rest_created_entity_becomes_searchable(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
-        .await
-        .unwrap();
-    let write_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Write, None)
-        .await
-        .unwrap();
+    let schema_key = create_api_key(
+        &mut conn,
+        tenant_id_tenant,
+        Some(tenant_id),
+        ApiKeyScope::Schema,
+        None,
+    )
+    .await
+    .unwrap();
+    let write_key = create_api_key(
+        &mut conn,
+        tenant_id_tenant,
+        Some(tenant_id),
+        ApiKeyScope::Write,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
     let app = build_app(
@@ -297,21 +327,39 @@ async fn rest_enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_a_tenant, tenant_a)
         .await
         .unwrap();
-    let schema_key_a = create_api_key(&mut conn_a, tenant_a, ApiKeyScope::Schema, None)
-        .await
-        .unwrap();
-    let write_key_a = create_api_key(&mut conn_a, tenant_a, ApiKeyScope::Write, None)
-        .await
-        .unwrap();
+    let schema_key_a = create_api_key(
+        &mut conn_a,
+        tenant_a_tenant,
+        Some(tenant_a),
+        ApiKeyScope::Schema,
+        None,
+    )
+    .await
+    .unwrap();
+    let write_key_a = create_api_key(
+        &mut conn_a,
+        tenant_a_tenant,
+        Some(tenant_a),
+        ApiKeyScope::Write,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn_a);
 
     let mut conn_b = db
         .acquire_for_workspace(tenant_b_tenant, tenant_b)
         .await
         .unwrap();
-    let read_key_b = create_api_key(&mut conn_b, tenant_b, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
+    let read_key_b = create_api_key(
+        &mut conn_b,
+        tenant_b_tenant,
+        Some(tenant_b),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn_b);
 
     let app = build_app(

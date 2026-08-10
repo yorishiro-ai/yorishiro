@@ -34,11 +34,17 @@ async fn authenticates_a_freshly_created_key(pool: PgPool) {
         .await
         .unwrap();
 
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, None)
-        .await
-        .unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id,
+        Some(workspace_id),
+        ApiKeyScope::Write,
+        None,
+    )
+    .await
+    .unwrap();
 
-    let ctx = authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = authenticate(&pool, &created.plaintext, None).await.unwrap();
 
     assert_eq!(ctx.tenant_id, tenant_id);
     assert_eq!(ctx.workspace_id, workspace_id);
@@ -66,17 +72,23 @@ async fn resolves_the_attributed_user(pool: PgPool) {
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, Some(user_id))
-        .await
-        .unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id,
+        Some(workspace_id),
+        ApiKeyScope::Write,
+        Some(user_id),
+    )
+    .await
+    .unwrap();
 
-    let ctx = authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = authenticate(&pool, &created.plaintext, None).await.unwrap();
     assert_eq!(ctx.user_id, Some(user_id));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn rejects_an_unknown_key(pool: PgPool) {
-    let err = authenticate(&pool, "ysr_does_not_exist_at_all")
+    let err = authenticate(&pool, "ysr_does_not_exist_at_all", None)
         .await
         .unwrap_err();
 
@@ -93,20 +105,32 @@ async fn resolves_the_correct_workspace_among_several(pool: PgPool) {
         .acquire_for_workspace(tenant_a, workspace_a)
         .await
         .unwrap();
-    let key_a = create_api_key(&mut conn_a, workspace_a, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
+    let key_a = create_api_key(
+        &mut conn_a,
+        tenant_a,
+        Some(workspace_a),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
 
     let mut conn_b = db
         .acquire_for_workspace(tenant_b, workspace_b)
         .await
         .unwrap();
-    let key_b = create_api_key(&mut conn_b, workspace_b, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
+    let key_b = create_api_key(
+        &mut conn_b,
+        tenant_b,
+        Some(workspace_b),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
 
-    let ctx_a = authenticate(&pool, &key_a.plaintext).await.unwrap();
-    let ctx_b = authenticate(&pool, &key_b.plaintext).await.unwrap();
+    let ctx_a = authenticate(&pool, &key_a.plaintext, None).await.unwrap();
+    let ctx_b = authenticate(&pool, &key_b.plaintext, None).await.unwrap();
 
     assert_eq!(ctx_a.workspace_id, workspace_a);
     assert_eq!(ctx_b.workspace_id, workspace_b);
@@ -129,10 +153,16 @@ async fn require_scope_rejects_insufficient_scope(pool: PgPool) {
         .await
         .unwrap();
 
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
-    let ctx = authenticate(&pool, &created.plaintext).await.unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id,
+        Some(workspace_id),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
+    let ctx = authenticate(&pool, &created.plaintext, None).await.unwrap();
 
     let err = require_scope(&ctx, ApiKeyScope::Write).unwrap_err();
     assert!(matches!(err, YorishiroError::ScopeInsufficient { .. }));
@@ -150,9 +180,15 @@ async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id,
+        Some(workspace_id),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
 
     let restricted_pool = PgPoolOptions::new()
         .max_connections(1)
@@ -170,12 +206,67 @@ async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
         .await
         .unwrap();
 
-    let ctx = authenticate(&restricted_pool, &created.plaintext)
+    let ctx = authenticate(&restricted_pool, &created.plaintext, None)
         .await
         .unwrap();
 
     assert_eq!(ctx.tenant_id, tenant_id);
     assert_eq!(ctx.workspace_id, workspace_id);
+}
+
+/// A tenant-scoped key's own row has a NULL `workspace_id`, so the RLS policy has to admit it
+/// on `tenant_id` instead. If it does not, the row is invisible to the very session the key
+/// authenticated, and `touch_last_used` updates nothing -- silently, since it is best-effort.
+///
+/// This has to run over a pool that `SET ROLE yorishiro_app`s, like production does: the
+/// migration role behind `sqlx::test` bypasses RLS entirely (even under `FORCE ROW LEVEL
+/// SECURITY`, which does not apply to a superuser), so a policy bug is invisible through it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_tenant_key_records_its_own_last_used_at(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let mut conn = pool.acquire().await.unwrap();
+    let created = create_api_key(&mut conn, tenant_id, None, ApiKeyScope::Read, None)
+        .await
+        .unwrap();
+    drop(conn);
+
+    let restricted_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET ROLE yorishiro_app")
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect_with(pool.connect_options().as_ref().clone())
+        .await
+        .unwrap();
+    let db = TenantDb::new(restricted_pool);
+
+    // Goes through the full authorize path, which is what touches last_used_at.
+    let (ctx, conn) = authorize(
+        &db,
+        &created.plaintext,
+        ApiKeyScope::Read,
+        Some(workspace_id),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ctx.workspace_id, workspace_id);
+    drop(conn);
+
+    let (last_used,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT last_used_at FROM identity.api_keys WHERE id = $1")
+            .bind(created.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        last_used.is_some(),
+        "a tenant-scoped key's last_used_at was never recorded -- its own row is hidden from it"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -186,12 +277,18 @@ async fn authorize_returns_a_usable_connection_for_a_sufficient_scope(pool: PgPo
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, None)
-        .await
-        .unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id,
+        Some(workspace_id),
+        ApiKeyScope::Write,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
-    let (ctx, mut conn) = authorize(&db, &created.plaintext, ApiKeyScope::Read)
+    let (ctx, mut conn) = authorize(&db, &created.plaintext, ApiKeyScope::Read, None)
         .await
         .unwrap();
 
@@ -218,12 +315,18 @@ async fn authorize_rejects_insufficient_scope_without_acquiring_a_connection(poo
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
-        .await
-        .unwrap();
+    let created = create_api_key(
+        &mut conn,
+        tenant_id,
+        Some(workspace_id),
+        ApiKeyScope::Read,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
-    let err = authorize(&db, &created.plaintext, ApiKeyScope::Write)
+    let err = authorize(&db, &created.plaintext, ApiKeyScope::Write, None)
         .await
         .unwrap_err();
 
@@ -234,7 +337,7 @@ async fn authorize_rejects_insufficient_scope_without_acquiring_a_connection(poo
 async fn authorize_rejects_an_unknown_key(pool: PgPool) {
     let db = TenantDb::new(pool);
 
-    let err = authorize(&db, "ysr_does_not_exist_at_all", ApiKeyScope::Read)
+    let err = authorize(&db, "ysr_does_not_exist_at_all", ApiKeyScope::Read, None)
         .await
         .unwrap_err();
 

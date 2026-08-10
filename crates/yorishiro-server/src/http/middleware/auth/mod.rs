@@ -27,6 +27,60 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
     tracing::warn!(client = %client, path = %parts.uri.path(), error = %err, "request rejected during authentication");
 }
 
+/// Reads `X-Workspace-Id`, rejecting a value that is present but unparseable.
+fn extract_requested_workspace(parts: &Parts) -> Result<Option<uuid::Uuid>, ApiError> {
+    match auth::requested_workspace(
+        parts
+            .headers
+            .get(auth::WORKSPACE_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    ) {
+        auth::RequestedWorkspace::Absent => Ok(None),
+        auth::RequestedWorkspace::Present(id) => Ok(Some(id)),
+        auth::RequestedWorkspace::Malformed => {
+            let err = YorishiroError::ValidationFailed {
+                message: format!("{} is not a valid UUID", auth::WORKSPACE_HEADER),
+                details: Vec::new(),
+                hint: "send the workspace's UUID, or omit the header to use a workspace-scoped key"
+                    .into(),
+            };
+            log_auth_rejection(parts, &err);
+            Err(ApiError(err))
+        }
+    }
+}
+
+/// Rejects an `X-Workspace-Id` that names a workspace the resolved context is not for.
+///
+/// This only ever fires for a **workspace-scoped** key, which ignores the header: for a
+/// tenant-scoped key the workspace was resolved *from* the header, so the two always agree.
+/// Proceeding instead would silently act on the key's own workspace -- a write landing in a
+/// workspace the client did not name, answered with a 2xx.
+fn reject_workspace_mismatch(
+    parts: &Parts,
+    requested: Option<uuid::Uuid>,
+    resolved: uuid::Uuid,
+) -> Result<(), ApiError> {
+    let Some(requested) = requested else {
+        return Ok(());
+    };
+    if requested == resolved {
+        return Ok(());
+    }
+    let err = YorishiroError::ValidationFailed {
+        message: format!(
+            "{} names a workspace this key cannot act on",
+            auth::WORKSPACE_HEADER
+        ),
+        details: Vec::new(),
+        hint: "this key is scoped to a single workspace; omit the header, or use a tenant-scoped \
+               key to choose a workspace per request"
+            .into(),
+    };
+    log_auth_rejection(parts, &err);
+    Err(ApiError(err))
+}
+
 /// Shared by both the `AuthContext` and `Authorized<R>` extractors.
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
     auth::bearer_credential(
@@ -57,11 +111,14 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
+        let requested_workspace = extract_requested_workspace(parts)?;
 
         let db = TenantDb::from_ref(state);
-        let ctx = auth::authenticate(db.pool(), presented_key)
+        let ctx = auth::authenticate(db.pool(), presented_key, requested_workspace)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
+
+        reject_workspace_mismatch(parts, requested_workspace, ctx.workspace_id)?;
 
         // Updating last_used_at is best-effort and doesn't affect the auth result;
         // the request proceeds even if it fails.
@@ -70,9 +127,7 @@ where
             .await
         {
             Ok(mut conn) => {
-                if let Err(err) =
-                    auth::touch_last_used(&mut conn, ctx.workspace_id, ctx.api_key_id).await
-                {
+                if let Err(err) = auth::touch_last_used(&mut conn, ctx.api_key_id).await {
                     tracing::warn!(error = %err, "failed to update api key last_used_at");
                 }
             }
@@ -134,11 +189,14 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
+        let requested_workspace = extract_requested_workspace(parts)?;
 
         let db = TenantDb::from_ref(state);
-        let (ctx, conn) = auth::authorize(&db, presented_key, R::SCOPE)
+        let (ctx, conn) = auth::authorize(&db, presented_key, R::SCOPE, requested_workspace)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
+
+        reject_workspace_mismatch(parts, requested_workspace, ctx.workspace_id)?;
 
         Ok(Authorized {
             ctx,
@@ -168,11 +226,14 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
+        let requested_workspace = extract_requested_workspace(parts)?;
 
         let db = TenantDb::from_ref(state);
-        let ctx = auth::authorize_scope(&db, presented_key, R::SCOPE)
+        let ctx = auth::authorize_scope(&db, presented_key, R::SCOPE, requested_workspace)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
+
+        reject_workspace_mismatch(parts, requested_workspace, ctx.workspace_id)?;
 
         Ok(Verified {
             ctx,
