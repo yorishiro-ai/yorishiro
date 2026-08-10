@@ -326,6 +326,9 @@ pub async fn list(
     if let Some(filter) = query.filter {
         builder.and_where(Expr::col(Entities::Data).contains(filter));
     }
+    if let Some(schema_version) = query.schema_version {
+        builder.and_where(Expr::col(Entities::SchemaVersion).eq(schema_version));
+    }
     builder
         .order_by(Entities::CreatedAt, Order::Desc)
         .limit(limit as u64)

@@ -46,6 +46,8 @@ pub struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
     pub filter: Option<Value>,
+    /// Restricts results to entities created against this schema version.
+    pub schema_version: Option<i32>,
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
@@ -140,6 +142,7 @@ impl YorishiroMcpServer {
         let query = entities::ListEntitiesQuery {
             entity_type: args.entity_type,
             filter: args.filter,
+            schema_version: args.schema_version,
             limit: args.limit.unwrap_or(default.limit),
             offset: args.offset.unwrap_or(default.offset),
         };

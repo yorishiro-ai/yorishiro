@@ -34,7 +34,9 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
-`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`), and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`.
+`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`) and a `schema_version` query parameter, and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`.
+
+`schema_version` restricts results to entities created against that version of the schema. An entity records the version it was written against and keeps it when a newer version is created, so this returns the entities a given version produced -- not the entities that would validate against it today.
 
 All request bodies are capped at 2 MiB (`413 Payload Too Large` beyond that) -- relevant to `POST /api/import.jsonl` for a large export.
 
@@ -115,7 +117,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `get_schema_by_id` | read | Fetch a specific schema version |
 | `get_entity_type_json_schema` | read | Project an entity_type as a JSON Schema |
 | `create_entity` / `get_entity` / `update_entity` / `delete_entity` | write/read | Entity CRUD |
-| `list_entities` | read | List entities, optionally filtered by `entity_type` and/or a `filter` JSONB containment match |
+| `list_entities` | read | List entities, optionally filtered by `entity_type`, a `filter` JSONB containment match, and/or `schema_version` |
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | Relation CRUD |
 | `search_entities` | read | Vector similarity search over a natural-language query, optionally narrowed by `entity_type`/`filter`; entities without an embedding can still surface via trigram fuzzy matching |
 | `recall_context` | read | Fetch an entity plus its relations and connected neighbors in one call |

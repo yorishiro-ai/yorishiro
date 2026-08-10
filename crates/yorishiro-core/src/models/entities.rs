@@ -37,6 +37,10 @@ pub struct ListEntitiesQuery {
     pub entity_type: Option<String>,
     /// JSONB containment filter (`data @> filter`), e.g. `{"status": "active"}`.
     pub filter: Option<Value>,
+    /// Restricts results to entities created against this schema version. Entities keep the
+    /// version they were written against, so this selects the entities a given version
+    /// produced rather than the ones that would validate against it today.
+    pub schema_version: Option<i32>,
     pub limit: i64,
     pub offset: i64,
 }
@@ -46,6 +50,7 @@ impl Default for ListEntitiesQuery {
         Self {
             entity_type: None,
             filter: None,
+            schema_version: None,
             limit: DEFAULT_LIST_LIMIT,
             offset: 0,
         }

@@ -314,6 +314,7 @@ async fn list_filters_by_entity_type(pool: PgPool) {
         ListEntitiesQuery {
             entity_type: Some("task".into()),
             filter: None,
+            schema_version: None,
             limit: 10,
             offset: 0,
         },
@@ -361,6 +362,7 @@ async fn list_filters_by_data_field_value(pool: PgPool) {
         ListEntitiesQuery {
             entity_type: None,
             filter: Some(json!({ "status": "active" })),
+            schema_version: None,
             limit: 10,
             offset: 0,
         },
@@ -369,4 +371,94 @@ async fn list_filters_by_data_field_value(pool: PgPool) {
     .unwrap();
     assert_eq!(active.len(), 2);
     assert!(active.iter().all(|e| e.data["status"] == "active"));
+}
+
+/// Entities record the schema version they were written against and keep it when a newer
+/// version is created, so filtering by version selects what a given version actually produced.
+/// The distinction only shows up once two versions exist and each has entities of its own.
+#[sqlx::test(migrations = "../../migrations")]
+async fn list_filters_by_schema_version(pool: PgPool) {
+    let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(workspace_id_tenant, workspace_id)
+        .await
+        .unwrap();
+
+    let (v1, _) = schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+        .await
+        .unwrap();
+    entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "written against v1" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // A second version of the same schema. The entity above keeps schema_version = 1.
+    let (v2, _) = schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+        .await
+        .unwrap();
+    assert_eq!(v2.version, v1.version + 1);
+
+    for title in ["first against v2", "second against v2"] {
+        entities::create(
+            &mut conn,
+            workspace_id,
+            CreateEntityInput {
+                schema_name: "task-management".into(),
+                entity_type: "task".into(),
+                data: json!({ "title": title }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    let from_v1 = entities::list(
+        &mut conn,
+        workspace_id,
+        ListEntitiesQuery {
+            schema_version: Some(v1.version),
+            limit: 10,
+            ..ListEntitiesQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(from_v1.len(), 1);
+    assert_eq!(from_v1[0].data["title"], "written against v1");
+
+    let from_v2 = entities::list(
+        &mut conn,
+        workspace_id,
+        ListEntitiesQuery {
+            schema_version: Some(v2.version),
+            limit: 10,
+            ..ListEntitiesQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(from_v2.len(), 2);
+
+    // Without the filter, every version's entities come back.
+    let all = entities::list(
+        &mut conn,
+        workspace_id,
+        ListEntitiesQuery {
+            limit: 10,
+            ..ListEntitiesQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(all.len(), 3);
 }
