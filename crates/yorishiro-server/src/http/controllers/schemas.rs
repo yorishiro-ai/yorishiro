@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -8,10 +8,12 @@ use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
 use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary};
+use yorishiro_core::repositories::tenancy;
 use yorishiro_core::templates::{self, TemplateSummary};
 
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, ReadScope, SchemaScope};
+use crate::state::AppState;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CreateSchemaResponse {
@@ -79,9 +81,16 @@ pub async fn get_schema_by_id(
     Ok(Json(record))
 }
 
-/// Either an inline schema definition, or a reference to a built-in template's ID (see
-/// `GET /api/templates`). Untagged so existing clients posting a flat `MetaSchemaDefinition`
-/// body keep working unchanged.
+/// Either an inline schema definition, or a reference to a template.
+///
+/// `template_id` accepts both kinds of template, because a caller holding an id should not have
+/// to know which kind it is:
+///   * a built-in id (`"task-management"`, see `GET /api/templates`), served from the binary
+///   * a UUID from the tenant's template library (`GET /api/template-library`), which is where
+///     a template copied from another tenant lands
+///
+/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working
+/// unchanged.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum CreateSchemaRequest {
@@ -104,15 +113,29 @@ pub enum CreateSchemaRequest {
     tag = "schemas",
 )]
 pub async fn create_schema(
+    State(state): State<AppState>,
     mut authorized: Authorized<SchemaScope>,
     Json(body): Json<CreateSchemaRequest>,
 ) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
+    let tenant_id = authorized.ctx.tenant_id;
+
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,
-        CreateSchemaRequest::Template { template_id } => templates::get_template(&template_id)?,
+        CreateSchemaRequest::Template { template_id } => {
+            // A UUID can only mean the library; anything else can only mean a built-in. Parsing
+            // decides which, so neither lookup runs against an id that could not name it, and a
+            // library miss reports the library's own not-found rather than the built-in one.
+            match Uuid::parse_str(&template_id) {
+                Ok(id) => {
+                    tenancy::get_template(&state.identity_pool, tenant_id, id)
+                        .await?
+                        .definition
+                }
+                Err(_) => templates::get_template(&template_id)?,
+            }
+        }
     };
 
-    let tenant_id = authorized.ctx.tenant_id;
     let (schema, diff) = schemas::create_schema(authorized.conn(), tenant_id, definition).await?;
     Ok((
         StatusCode::CREATED,

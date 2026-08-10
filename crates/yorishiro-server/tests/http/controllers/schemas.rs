@@ -196,3 +196,140 @@ async fn rest_creates_a_schema_from_a_built_in_template(pool: PgPool) {
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// A template from the tenant's library becomes a schema by its UUID.
+///
+/// This is what makes the library worth having: a template copied into it from anywhere else
+/// is otherwise a row nothing can act on.
+#[sqlx::test(migrations = "../../migrations")]
+async fn rest_creates_a_schema_from_a_library_template(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let schema_key = create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+        .await
+        .unwrap();
+    drop(conn);
+
+    let definition = yorishiro_core::templates::get_template("worldbuilding").unwrap();
+    let template = yorishiro_core::repositories::tenancy::create_template(
+        &pool,
+        tenant_id,
+        None,
+        yorishiro_core::models::tenancy::CreateTemplateInput {
+            name: "my-worldbuilding".into(),
+            description: Some("copied into this tenant's library".into()),
+            definition,
+            tags: Vec::new(),
+            locale: None,
+            author: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let app = build_app(
+        AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
+        None,
+    );
+    let schema_auth = format!("Bearer {}", schema_key.plaintext);
+
+    let response = rest_request(
+        &app,
+        "POST",
+        "/api/schemas",
+        Some(&schema_auth),
+        Some(serde_json::json!({ "template_id": template.id.to_string() })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = rest_json_body(response).await;
+    // Named after the definition, not the library row: the schema is the definition's, and the
+    // library name is just what this tenant filed it under.
+    assert_eq!(created["schema"]["version"], 1);
+    assert!(created["schema"]["definition"]["entity_types"]["character"].is_object());
+}
+
+/// A library template belonging to someone else is not reachable by guessing its id.
+#[sqlx::test(migrations = "../../migrations")]
+async fn rest_cannot_create_a_schema_from_another_tenants_template(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let schema_key = create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+        .await
+        .unwrap();
+    drop(conn);
+
+    // A second tenant, with a private template of its own.
+    let other = yorishiro_core::repositories::tenancy::create_tenant(&pool, "other-tenant", None)
+        .await
+        .unwrap();
+    let definition = yorishiro_core::templates::get_template("worldbuilding").unwrap();
+    let theirs = yorishiro_core::repositories::tenancy::create_template(
+        &pool,
+        other.id,
+        None,
+        yorishiro_core::models::tenancy::CreateTemplateInput {
+            name: "theirs".into(),
+            description: None,
+            definition,
+            tags: Vec::new(),
+            locale: None,
+            author: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let app = build_app(
+        AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
+        None,
+    );
+
+    let response = rest_request(
+        &app,
+        "POST",
+        "/api/schemas",
+        Some(&format!("Bearer {}", schema_key.plaintext)),
+        Some(serde_json::json!({ "template_id": theirs.id.to_string() })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A UUID that names nothing is a not-found, not a fallback to the built-in lookup.
+#[sqlx::test(migrations = "../../migrations")]
+async fn rest_rejects_an_unknown_library_template_id(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let schema_key = create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+        .await
+        .unwrap();
+    drop(conn);
+
+    let app = build_app(
+        AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
+        None,
+    );
+
+    let response = rest_request(
+        &app,
+        "POST",
+        "/api/schemas",
+        Some(&format!("Bearer {}", schema_key.plaintext)),
+        Some(serde_json::json!({ "template_id": uuid::Uuid::new_v4().to_string() })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
