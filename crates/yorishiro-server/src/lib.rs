@@ -381,10 +381,16 @@ pub(crate) mod test_support {
             .acquire_for_workspace(tenant_id, workspace_id)
             .await
             .unwrap();
-        create_api_key(&mut conn, workspace_id, role.max_scope(), Some(user_id))
-            .await
-            .unwrap()
-            .plaintext
+        create_api_key(
+            &mut conn,
+            tenant_id,
+            Some(workspace_id),
+            role.max_scope(),
+            Some(user_id),
+        )
+        .await
+        .unwrap()
+        .plaintext
     }
 }
 

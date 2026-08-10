@@ -90,6 +90,35 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace. `DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
 
+### Tenant-scoped API keys
+
+An API key is normally bound to one workspace, and every request it makes acts on that workspace. A **tenant-scoped** key is instead bound to a tenant, and names the workspace per request with the `X-Workspace-Id` header -- one key for a client that works across several workspaces, instead of one key per workspace to hold and swap between.
+
+```console
+# Issue one (admin CLI; there is no REST endpoint for key issuance)
+$ yorishiro-server admin create-tenant-api-key <tenant-id> write
+
+# Every request then names its workspace
+$ curl localhost:8080/api/entities -H "Authorization: Bearer $YSR_KEY" \
+    -H "X-Workspace-Id: <workspace-id>"
+```
+
+The header is honoured over both REST and MCP.
+
+| Key | `X-Workspace-Id` | Result |
+|---|---|---|
+| workspace-scoped | omitted | Acts on the key's own workspace |
+| workspace-scoped | matches the key's workspace | Same as omitting it |
+| workspace-scoped | names a different workspace | `422` -- the key cannot act there, and silently using its own workspace instead would put the write somewhere the client did not name |
+| tenant-scoped | omitted | `401` -- there is no workspace to fall back on |
+| tenant-scoped | a workspace in the key's tenant | Acts on that workspace |
+| tenant-scoped | a workspace in another tenant | `401`, indistinguishable from an unknown key |
+| either | not a UUID | `422` |
+
+**A tenant-scoped key never reaches outside its own tenant.** The requested workspace is resolved only when it belongs to the key's tenant, and that check runs during authentication, before any row is read.
+
+Scope works exactly as it does for a workspace-scoped key (`read` < `write` < `schema`, capped by the attributed user's tenant role) -- it just applies across every workspace in the tenant. Prefer a workspace-scoped key when a client only ever works in one workspace: it reaches less if it leaks.
+
 ## Unmatched paths (web UI fallback)
 
 Any request path that isn't one of the API routes above falls through to the web UI's static file server, and its behavior depends on whether the path *looks like* a file:

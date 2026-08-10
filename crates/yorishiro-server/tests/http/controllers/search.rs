@@ -63,7 +63,7 @@ async fn app_with_key(
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, scope, None)
+    let created = create_api_key(&mut conn, tenant_id, Some(workspace_id), scope, None)
         .await
         .unwrap();
     drop(conn);
@@ -206,9 +206,15 @@ async fn a_search_never_returns_another_workspaces_entities(pool: PgPool) {
             .await
             .unwrap();
         seed_embedded_entity(&mut conn, tenant_id, workspace_id, owner).await;
-        let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
-            .await
-            .unwrap();
+        let created = create_api_key(
+            &mut conn,
+            tenant_id,
+            Some(workspace_id),
+            ApiKeyScope::Read,
+            None,
+        )
+        .await
+        .unwrap();
         drop(conn);
         keys.push((owner, created.plaintext));
     }

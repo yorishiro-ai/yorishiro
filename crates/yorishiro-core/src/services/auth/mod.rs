@@ -18,6 +18,7 @@ pub use keys::*;
 pub enum ApiKeys {
     Table,
     Id,
+    TenantId,
     WorkspaceId,
     KeyHash,
     KeyPrefix,
@@ -95,7 +96,9 @@ pub struct AuthContext {
 
 pub struct CreatedApiKey {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    pub tenant_id: Uuid,
+    /// `None` for a tenant-scoped key, which names its workspace per request.
+    pub workspace_id: Option<Uuid>,
     pub scope: ApiKeyScope,
     pub user_id: Option<Uuid>,
     /// The raw API key string. Only its hash is stored in the DB, so this return value is
@@ -117,6 +120,39 @@ pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
     header_value
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|token| !token.is_empty())
+}
+
+/// The header naming which workspace a tenant-scoped API key should act on.
+pub const WORKSPACE_HEADER: &str = "x-workspace-id";
+
+/// The outcome of reading `X-Workspace-Id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestedWorkspace {
+    /// No header was sent. Only a workspace-scoped key can authenticate.
+    Absent,
+    Present(Uuid),
+    /// A header was sent but is not a UUID.
+    Malformed,
+}
+
+/// Parses the `X-Workspace-Id` header value.
+///
+/// Takes the header's string value rather than a `HeaderMap` for the same reason
+/// [`bearer_credential`] does, and exists here for the same reason: every adapter that reads
+/// this header has to answer the same request identically.
+///
+/// Surrounding whitespace is tolerated. Anything else that is not a UUID is
+/// [`RequestedWorkspace::Malformed`] rather than `Absent`, and the two must not be treated
+/// alike -- ignoring an unparseable value would send a request meant for one workspace to
+/// whichever workspace the presented key happens to carry.
+pub fn requested_workspace(header_value: Option<&str>) -> RequestedWorkspace {
+    match header_value {
+        None => RequestedWorkspace::Absent,
+        Some(value) => match Uuid::parse_str(value.trim()) {
+            Ok(id) => RequestedWorkspace::Present(id),
+            Err(_) => RequestedWorkspace::Malformed,
+        },
+    }
 }
 
 /// Lowercase-hex-encodes `bytes`, two characters per byte (e.g. `[0xab, 0x01]` -> `"ab01"`).
