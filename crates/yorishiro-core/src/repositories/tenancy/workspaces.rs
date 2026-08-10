@@ -205,3 +205,32 @@ pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), Y
 #[cfg(test)]
 #[path = "../../../tests/repositories/tenancy/workspaces.rs"]
 mod tests;
+
+/// Points a workspace at the schema it uses.
+///
+/// A schema is created against a workspace, so the workspace already exists by the time there
+/// is a schema to link -- this closes the loop the other way round. Applying a template runs
+/// both halves: create the schema for the workspace, then set it as the workspace's own.
+pub async fn set_workspace_schema(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let (sql, values) = Query::update()
+        .table((Alias::new("identity"), Workspaces::Table))
+        .value(Workspaces::SchemaId, schema_id)
+        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
+        .build_sqlx(PostgresQueryBuilder);
+
+    let result = sqlx::query_with(&sql, values)
+        .execute(pool)
+        .await
+        .internal()?;
+
+    if result.rows_affected() == 0 {
+        return Err(YorishiroError::not_found(format!(
+            "workspace '{workspace_id}' was not found"
+        )));
+    }
+    Ok(())
+}

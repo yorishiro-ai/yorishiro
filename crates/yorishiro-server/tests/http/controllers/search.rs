@@ -89,7 +89,7 @@ async fn seed_embedded_entity(
         }
     }))
     .unwrap();
-    yorishiro_core::repositories::schemas::create_schema(conn, tenant_id, definition)
+    yorishiro_core::repositories::schemas::create_schema(conn, tenant_id, workspace_id, definition)
         .await
         .unwrap();
 

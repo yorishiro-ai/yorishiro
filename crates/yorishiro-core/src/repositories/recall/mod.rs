@@ -9,7 +9,6 @@ use crate::models::entities::EntityRecord;
 use crate::repositories::entities;
 use crate::repositories::relations;
 use crate::repositories::schemas::{self, SchemaRecord};
-use crate::repositories::tenancy::resolve_tenant_id;
 
 pub use crate::models::recall::*;
 
@@ -66,7 +65,6 @@ pub async fn recall_context(
     // Resolved once and reused for every neighbor's `shallow_copy` below, instead of each
     // neighbor re-resolving its own workspace's tenant_id (always the same value: `neighbors`
     // never crosses a workspace boundary).
-    let tenant_id = resolve_tenant_id(conn, workspace_id).await?;
     let mut schema_cache: HashMap<Uuid, SchemaRecord> = HashMap::new();
 
     // BFS outward from entity_id. `visited` tracks every entity already seen (the root plus
@@ -110,7 +108,7 @@ pub async fn recall_context(
                     let schema = match schema_cache.get(&schema_id) {
                         Some(schema) => schema,
                         None => {
-                            let schema = schemas::get_by_id(conn, tenant_id, schema_id).await?;
+                            let schema = schemas::get_by_id(conn, workspace_id, schema_id).await?;
                             schema_cache.entry(schema_id).or_insert(schema)
                         }
                     };

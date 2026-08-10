@@ -70,7 +70,7 @@ pub async fn import_jsonl(
             ExportRecord::Schema(schema) => {
                 let old_id = schema.id;
                 let name = schema.definition.name.clone();
-                schemas::create_schema(&mut tx, tenant_id, schema.definition)
+                schemas::create_schema(&mut tx, tenant_id, workspace_id, schema.definition)
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 schema_name_by_old_id.insert(old_id, name);
@@ -88,7 +88,7 @@ pub async fn import_jsonl(
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {
-                        schemas::get_by_id(&mut tx, tenant_id, entity.schema_id)
+                        schemas::get_by_id(&mut tx, workspace_id, entity.schema_id)
                             .await
                             .map_err(|err| annotate_line(line_no, err))?
                             .name

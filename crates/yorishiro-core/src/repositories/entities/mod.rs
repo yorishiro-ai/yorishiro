@@ -8,7 +8,6 @@ use uuid::Uuid;
 use crate::error::{ResultExt, ValidationDetail, YorishiroError};
 use crate::metaschema;
 use crate::repositories::schemas;
-use crate::repositories::tenancy::resolve_tenant_id;
 
 pub use crate::models::entities::*;
 
@@ -182,7 +181,6 @@ pub async fn create(
     input: CreateEntityInput,
     created_by: Option<Uuid>,
 ) -> Result<EntityRecord, YorishiroError> {
-    let tenant_id = resolve_tenant_id(&mut *conn, workspace_id).await?;
     let mut tx = conn.begin().await.internal()?;
 
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
@@ -192,7 +190,7 @@ pub async fn create(
         .internal()?;
 
     check_entity_quota(&mut tx, workspace_id).await?;
-    let schema = schemas::get_active_schema(&mut tx, tenant_id, &input.schema_name).await?;
+    let schema = schemas::get_active_schema(&mut tx, workspace_id, &input.schema_name).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 
@@ -260,8 +258,7 @@ pub async fn update(
     updated_by: Option<Uuid>,
 ) -> Result<EntityRecord, YorishiroError> {
     let existing = get(conn, workspace_id, id).await?;
-    let tenant_id = resolve_tenant_id(&mut *conn, workspace_id).await?;
-    let schema = schemas::get_by_id(conn, tenant_id, existing.schema_id).await?;
+    let schema = schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
     validate_data(entity_type_def, &data)?;
 

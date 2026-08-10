@@ -36,7 +36,7 @@ async fn seed_task_and_project(
     tenant_id: Uuid,
     workspace_id: Uuid,
 ) -> (entities::EntityRecord, entities::EntityRecord) {
-    schemas::create_schema(conn, tenant_id, project_task_schema())
+    schemas::create_schema(conn, tenant_id, workspace_id, project_task_schema())
         .await
         .unwrap();
 
@@ -543,9 +543,14 @@ async fn neighbors_batch_applies_limit_per_pivot_not_across_the_whole_batch(pool
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        project_task_schema(),
+    )
+    .await
+    .unwrap();
 
     // Two tasks, each linked to two of their own projects: if `limit` were applied across the
     // whole batch instead of per pivot, one task's neighbors would starve the other's.
@@ -612,9 +617,14 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        project_task_schema(),
+    )
+    .await
+    .unwrap();
 
     let task = entities::create(
         &mut conn,

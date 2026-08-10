@@ -11,6 +11,15 @@ use crate::metaschema::MetaSchemaDefinition;
 pub struct SchemaRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
+    /// The workspace that owns this schema. Schemas are per workspace: applying a template
+    /// gives a workspace its own copy, so a sibling workspace's edits do not reach it.
+    ///
+    /// `default` on deserialize because this type is also the JSONL export record, and an
+    /// export taken before schemas became workspace-scoped carries no such field. Import
+    /// assigns the destination workspace regardless — it remaps every id it reads — so the
+    /// value in the file is never the one that lands.
+    #[serde(default)]
+    pub workspace_id: Uuid,
     pub name: String,
     pub version: i32,
     pub definition: MetaSchemaDefinition,
