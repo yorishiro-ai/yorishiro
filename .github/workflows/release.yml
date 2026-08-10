@@ -144,11 +144,20 @@ jobs:
             echo "Resuming: $TAG already points at the release commit, not re-bumping."
           else
             git add Cargo.toml Cargo.lock
-            git commit -m "Bump version to ${TAG}"
-            git tag "$TAG"
-            # Atomic: master and the tag land together, or neither does -- avoids a bumped
-            # master with no matching tag if the second of two separate pushes failed.
-            git push --atomic origin HEAD:master "$TAG"
+            if git diff --quiet --cached; then
+              # Nothing to commit: the version is already what was asked for, because a PR
+              # already carried the bump. Tag the commit that brought it in rather than
+              # failing on an empty commit.
+              echo "::notice::Cargo.toml is already at ${TAG}; tagging without a bump commit."
+              git tag "$TAG"
+              git push origin "$TAG"
+            else
+              git commit -m "Bump version to ${TAG}"
+              git tag "$TAG"
+              # Atomic: master and the tag land together, or neither does -- avoids a bumped
+              # master with no matching tag if the second of two separate pushes failed.
+              git push --atomic origin HEAD:master "$TAG"
+            fi
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
@@ -313,11 +322,6 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-          persist-credentials: false
-
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
