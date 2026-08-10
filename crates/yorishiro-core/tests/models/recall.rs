@@ -12,10 +12,10 @@ fn the_default_recall_query_is_a_single_hop() {
     assert!(!query.full);
 }
 
-/// The clamp bound is public because callers validate against it before issuing a query; it must
-/// stay a sane range rather than silently allowing an unbounded traversal.
-#[test]
-fn the_depth_bound_is_a_usable_range() {
-    assert!(std::hint::black_box(MAX_RECALL_DEPTH) >= DEFAULT_RECALL_DEPTH);
-    assert!(std::hint::black_box(MAX_RECALL_DEPTH) <= 3);
-}
+// `MAX_RECALL_DEPTH` is deliberately not asserted here. Its value only reaches behaviour through
+// the clamp in `recall_context`, and `depth_beyond_the_maximum_is_clamped_not_rejected` in
+// `tests/repositories/recall/mod.rs` walks that against a real graph. An assertion on the
+// constant's range would restate the number without proving anything that test does not.
+//
+// The `black_box` that used to sit here was the tell: it existed only to stop clippy's
+// `assertions_on_constants` from pointing out that the assertion could not fail.
