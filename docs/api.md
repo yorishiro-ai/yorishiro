@@ -90,6 +90,38 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace. `DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
 
+### Workspace schema forks
+
+A schema belongs to a tenant, and every workspace under it shares the same rows -- so editing a schema reaches every workspace at once, and one workspace cannot add a field without imposing it on the others. A workspace may instead **fork** its tenant's schema: the fork is a copy it owns and can edit, and a later edit to the tenant's schema does not reach it.
+
+A workspace that never forks behaves exactly as it always did.
+
+| Endpoint | Scope | Purpose |
+|---|---|---|
+| `GET /api/workspace-schema` | read | This workspace's fork (`null` if it has none), plus `upstream_version` when the tenant's schema has moved past the version the fork was taken from |
+| `POST /api/workspace-schema` | schema | Fork the tenant's active schema of the given `schema_name` into this workspace |
+| `PUT /api/workspace-schema` | schema | Replace the fork's definition; marks it `customized` |
+| `POST /api/workspace-schema/follow` | schema | Replace the fork with the tenant's current active schema |
+| `DELETE /api/workspace-schema` | schema | Drop the fork; the workspace uses its tenant's schema again |
+
+```console
+# Fork, then edit only this workspace's copy
+$ curl -X POST localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/json" -d '{"schema_name":"task-management"}'
+$ curl -X PUT localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/json" -d @my-definition.json
+
+# Take the tenant's newer schema, discarding this workspace's edits
+$ curl -X POST localhost:8080/api/workspace-schema/follow -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/json" -d '{"force":true}'
+```
+
+**Following will not silently discard local edits.** Once a fork is `customized`, `follow` is rejected with `409 Conflict` unless `force` is set. An untouched fork needs no `force` -- there is nothing to lose.
+
+Forking is a `409` if the workspace already has a fork, and editing, following, or dropping without one is a `404` rather than an implicit fork -- creating a fork as a side effect of an edit would hide which workspaces have diverged.
+
+Entities keep referencing `content.schemas`. A fork copies its source's definition, so the version an entity was validated against still exists and its `schema_version` still means what it meant.
+
 ### Tenant-scoped API keys
 
 An API key is normally bound to one workspace, and every request it makes acts on that workspace. A **tenant-scoped** key is instead bound to a tenant, and names the workspace per request with the `X-Workspace-Id` header -- one key for a client that works across several workspaces, instead of one key per workspace to hold and swap between.
