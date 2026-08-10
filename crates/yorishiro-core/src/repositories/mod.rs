@@ -10,4 +10,3 @@ pub mod relations;
 pub mod schemas;
 pub mod search;
 pub mod tenancy;
-pub mod workspace_schemas;

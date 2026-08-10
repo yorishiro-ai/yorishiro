@@ -8,6 +8,7 @@ use uuid::Uuid;
 use yorishiro_core::ResultExt;
 use yorishiro_core::db::TenantDb;
 use yorishiro_core::repositories::entities::EntityRecord;
+use yorishiro_core::services::auth::{Authenticator, default_authenticator};
 use yorishiro_core::services::embedding::EmbeddingProvider;
 use yorishiro_core::services::embedding::sync as embedding_sync;
 
@@ -33,6 +34,13 @@ pub struct AppState {
     /// keep using `tenant_db` instead: this pool bypasses RLS entirely.
     pub identity_pool: PgPool,
     pub embedding_provider: Arc<dyn EmbeddingProvider>,
+    /// How a presented API key becomes an `AuthContext`. Every REST extractor and every MCP
+    /// handler resolves through this one value, so replacing it changes authentication for the
+    /// whole process rather than for the paths that remembered to ask.
+    ///
+    /// Defaults to `DefaultAuthenticator` -- this crate's own rule -- via [`AppState::new`].
+    /// Use [`AppState::with_authenticator`] to supply another.
+    pub authenticator: Arc<dyn Authenticator>,
     embedding_sync_permits: Arc<Semaphore>,
     embedding_tasks: TaskTracker,
 }
@@ -47,9 +55,17 @@ impl AppState {
             tenant_db,
             identity_pool,
             embedding_provider,
+            authenticator: default_authenticator(),
             embedding_sync_permits: Arc::new(Semaphore::new(EMBEDDING_SYNC_MAX_CONCURRENCY)),
             embedding_tasks: TaskTracker::new(),
         }
+    }
+
+    /// Replaces how this process authenticates. See [`Authenticator`] for the contract an
+    /// implementation must hold to.
+    pub fn with_authenticator(mut self, authenticator: Arc<dyn Authenticator>) -> Self {
+        self.authenticator = authenticator;
+        self
     }
 
     /// Tracker used to wait for in-flight embedding syncs during graceful shutdown.

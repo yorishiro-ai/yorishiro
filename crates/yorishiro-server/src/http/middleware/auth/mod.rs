@@ -7,11 +7,11 @@ use axum::http::request::Parts;
 use sqlx::PgConnection;
 use sqlx::pool::PoolConnection;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::db::TenantDb;
 use yorishiro_core::services::auth;
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use crate::error::ApiError;
+use crate::state::AppState;
 
 /// Emits a `warn` for a request rejected before it reaches a handler (bad/missing key, or
 /// insufficient scope). The access log only records these as anonymous 401/403s, so this is
@@ -27,58 +27,22 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
     tracing::warn!(client = %client, path = %parts.uri.path(), error = %err, "request rejected during authentication");
 }
 
-/// Reads `X-Workspace-Id`, rejecting a value that is present but unparseable.
-fn extract_requested_workspace(parts: &Parts) -> Result<Option<uuid::Uuid>, ApiError> {
-    match auth::requested_workspace(
-        parts
-            .headers
-            .get(auth::WORKSPACE_HEADER)
-            .and_then(|value| value.to_str().ok()),
-    ) {
-        auth::RequestedWorkspace::Absent => Ok(None),
-        auth::RequestedWorkspace::Present(id) => Ok(Some(id)),
-        auth::RequestedWorkspace::Malformed => {
-            let err = YorishiroError::ValidationFailed {
-                message: format!("{} is not a valid UUID", auth::WORKSPACE_HEADER),
-                details: Vec::new(),
-                hint: "send the workspace's UUID, or omit the header to use a workspace-scoped key"
-                    .into(),
-            };
-            log_auth_rejection(parts, &err);
-            Err(ApiError(err))
-        }
-    }
-}
-
-/// Rejects an `X-Workspace-Id` that names a workspace the resolved context is not for.
+/// Copies the request's headers into the shape [`auth::Authenticator`] takes.
 ///
-/// This only ever fires for a **workspace-scoped** key, which ignores the header: for a
-/// tenant-scoped key the workspace was resolved *from* the header, so the two always agree.
-/// Proceeding instead would silently act on the key's own workspace -- a write landing in a
-/// workspace the client did not name, answered with a 2xx.
-fn reject_workspace_mismatch(
-    parts: &Parts,
-    requested: Option<uuid::Uuid>,
-    resolved: uuid::Uuid,
-) -> Result<(), ApiError> {
-    let Some(requested) = requested else {
-        return Ok(());
-    };
-    if requested == resolved {
-        return Ok(());
-    }
-    let err = YorishiroError::ValidationFailed {
-        message: format!(
-            "{} names a workspace this key cannot act on",
-            auth::WORKSPACE_HEADER
-        ),
-        details: Vec::new(),
-        hint: "this key is scoped to a single workspace; omit the header, or use a tenant-scoped \
-               key to choose a workspace per request"
-            .into(),
-    };
-    log_auth_rejection(parts, &err);
-    Err(ApiError(err))
+/// Headers a value cannot be read as UTF-8 are dropped rather than failing the request: an
+/// authenticator asks for the ones it knows, and a malformed unrelated header is not this
+/// layer's business to reject.
+fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
+    parts
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect()
 }
 
 /// Shared by both the `AuthContext` and `Authorized<R>` extractors.
@@ -104,21 +68,22 @@ pub struct AuthContext(pub auth::AuthContext);
 
 impl<S> FromRequestParts<S> for AuthContext
 where
-    TenantDb: FromRef<S>,
+    AppState: FromRef<S>,
     S: Send + Sync,
 {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let requested_workspace = extract_requested_workspace(parts)?;
+        let headers = header_pairs(parts);
 
-        let db = TenantDb::from_ref(state);
-        let ctx = auth::authenticate(db.pool(), presented_key, requested_workspace)
+        let app_state = AppState::from_ref(state);
+        let db = app_state.tenant_db.clone();
+        let ctx = app_state
+            .authenticator
+            .authenticate(db.pool(), presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
-
-        reject_workspace_mismatch(parts, requested_workspace, ctx.workspace_id)?;
 
         // Updating last_used_at is best-effort and doesn't affect the auth result;
         // the request proceeds even if it fails.
@@ -181,7 +146,7 @@ impl<R> Authorized<R> {
 
 impl<S, R> FromRequestParts<S> for Authorized<R>
 where
-    TenantDb: FromRef<S>,
+    AppState: FromRef<S>,
     S: Send + Sync,
     R: RequiredScope,
 {
@@ -189,14 +154,18 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let requested_workspace = extract_requested_workspace(parts)?;
+        let headers = header_pairs(parts);
 
-        let db = TenantDb::from_ref(state);
-        let (ctx, conn) = auth::authorize(&db, presented_key, R::SCOPE, requested_workspace)
-            .await
-            .inspect_err(|err| log_auth_rejection(parts, err))?;
-
-        reject_workspace_mismatch(parts, requested_workspace, ctx.workspace_id)?;
+        let app_state = AppState::from_ref(state);
+        let (ctx, conn) = auth::authorize(
+            &app_state.tenant_db,
+            app_state.authenticator.as_ref(),
+            presented_key,
+            R::SCOPE,
+            &headers,
+        )
+        .await
+        .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Authorized {
             ctx,
@@ -218,7 +187,7 @@ pub struct Verified<R> {
 
 impl<S, R> FromRequestParts<S> for Verified<R>
 where
-    TenantDb: FromRef<S>,
+    AppState: FromRef<S>,
     S: Send + Sync,
     R: RequiredScope,
 {
@@ -226,14 +195,18 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let requested_workspace = extract_requested_workspace(parts)?;
+        let headers = header_pairs(parts);
 
-        let db = TenantDb::from_ref(state);
-        let ctx = auth::authorize_scope(&db, presented_key, R::SCOPE, requested_workspace)
-            .await
-            .inspect_err(|err| log_auth_rejection(parts, err))?;
-
-        reject_workspace_mismatch(parts, requested_workspace, ctx.workspace_id)?;
+        let app_state = AppState::from_ref(state);
+        let ctx = auth::authorize_scope(
+            &app_state.tenant_db,
+            app_state.authenticator.as_ref(),
+            presented_key,
+            R::SCOPE,
+            &headers,
+        )
+        .await
+        .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Verified {
             ctx,

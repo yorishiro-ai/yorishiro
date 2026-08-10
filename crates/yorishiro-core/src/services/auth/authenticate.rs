@@ -17,20 +17,12 @@ use super::{ApiKeyScope, ApiKeys, AuthContext, hash_key};
 /// verification purposes only, and limits the columns it returns to
 /// id/workspace_id/tenant_id/scope (never the `key_hash` itself).
 ///
-/// `requested_workspace` carries the caller's `X-Workspace-Id`, and is only consulted for a
-/// **tenant-scoped** key (one stored with a NULL `workspace_id`). For such a key the workspace
-/// must be named per request, and the SQL function resolves it only when it belongs to the
-/// key's own tenant -- so a tenant-scoped key cannot reach another tenant's workspace. A key
-/// that carries its own workspace ignores the header entirely; the caller
-/// (`AuthContext::from_request_parts`) rejects a mismatch before getting here, so a client bug
-/// cannot quietly write to a workspace it did not mean to.
-///
-/// Presenting a tenant-scoped key with no workspace, or with one outside its tenant, resolves
-/// no row and is reported as `Unauthenticated` -- indistinguishable from an unknown key.
+/// This is the rule this crate itself applies: a key resolves to the one workspace recorded on
+/// it. A deployment needing a different rule supplies its own [`super::Authenticator`] rather
+/// than changing this function.
 pub async fn authenticate(
     pool: &PgPool,
     presented_key: &str,
-    requested_workspace: Option<Uuid>,
 ) -> Result<AuthContext, YorishiroError> {
     let key_hash = hash_key(presented_key);
 
@@ -40,11 +32,9 @@ pub async fn authenticate(
     // than actually building the query). This stays raw SQL for the same reason the session
     // commands in `db.rs` do.
     let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT id, workspace_id, tenant_id, scope, user_id \
-         FROM identity.authenticate_api_key($1, $2)",
+        "SELECT id, workspace_id, tenant_id, scope, user_id FROM identity.authenticate_api_key($1)",
     )
     .bind(key_hash)
-    .bind(requested_workspace)
     .fetch_optional(pool)
     .await
     .internal()?;
@@ -69,10 +59,9 @@ pub async fn authenticate(
 /// Records the API key's last-used timestamp. This is a best-effort update that doesn't
 /// affect authentication outcomes, so callers don't need to fail the whole request if it errors.
 ///
-/// Keyed on the API key's own id alone. A tenant-scoped key has a NULL `workspace_id`, so also
-/// filtering on the request's workspace would match no row and silently stop recording use for
-/// exactly the keys that span workspaces. The id is already unique, and the caller only holds
-/// one because `authenticate` just verified the key.
+/// Keyed on the API key's own id alone. The id is already unique, so also filtering on a
+/// workspace only narrows the match -- and would miss any key whose stored workspace is not the
+/// one the request resolved to.
 pub async fn touch_last_used(
     conn: &mut PgConnection,
     api_key_id: Uuid,

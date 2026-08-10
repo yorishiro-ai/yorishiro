@@ -110,15 +110,9 @@ async fn mcp_tool_call_with_insufficient_scope_returns_a_tool_error(pool: PgPool
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let created = create_api_key(
-        &mut conn,
-        tenant_id_tenant,
-        Some(tenant_id),
-        ApiKeyScope::Read,
-        None,
-    )
-    .await
-    .unwrap();
+    let created = create_api_key(&mut conn, tenant_id, ApiKeyScope::Read, None)
+        .await
+        .unwrap();
     drop(conn);
 
     let app = build_app(
@@ -164,15 +158,9 @@ async fn mcp_tool_call_with_sufficient_scope_succeeds(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let created = create_api_key(
-        &mut conn,
-        tenant_id_tenant,
-        Some(tenant_id),
-        ApiKeyScope::Read,
-        None,
-    )
-    .await
-    .unwrap();
+    let created = create_api_key(&mut conn, tenant_id, ApiKeyScope::Read, None)
+        .await
+        .unwrap();
     drop(conn);
 
     let app = build_app(

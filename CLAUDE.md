@@ -42,6 +42,13 @@
   deleting a `pub` item or narrowing its visibility.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the
   distinction is visible in the code, not something a reviewer has to remember.
+- `Authenticator` (`services/auth`) is a seam, not an internal detail. Every
+  authenticated path -- the `AuthContext`/`Authorized<R>`/`Verified<R>`
+  extractors and both MCP entry points -- resolves through the one
+  `AppState::authenticator`. **A new authenticated entry point must resolve
+  through it too**: one that calls `authenticate` directly would keep this
+  crate's rule while every other path honours a replacement, so a REST route
+  and an MCP tool would disagree about who the caller is.
 
 ## Module structure
 

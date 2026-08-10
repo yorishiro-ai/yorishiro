@@ -190,21 +190,13 @@ pub async fn login(
         })?;
 
     let mut conn = state.identity_pool.acquire().await.internal()?;
-    // Login issues a workspace-scoped key: the caller just named the workspace it wants, so
-    // there is nothing for a tenant-scoped key to add here.
-    let created = auth::create_api_key(
-        &mut conn,
-        workspace.tenant_id,
-        Some(workspace.id),
-        role.max_scope(),
-        Some(user.id),
-    )
-    .await?;
+    let created =
+        auth::create_api_key(&mut conn, workspace.id, role.max_scope(), Some(user.id)).await?;
 
     Ok(Json(LoginResponse {
         api_key: created.plaintext,
         api_key_id: created.id,
-        workspace_id: workspace.id,
+        workspace_id: created.workspace_id,
         scope: created.scope,
         user_id: user.id,
     }))
