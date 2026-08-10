@@ -55,7 +55,12 @@ pub enum ApiKeyScope {
 }
 
 impl ApiKeyScope {
-    fn as_db_str(self) -> &'static str {
+    /// The `identity.api_keys.scope` value for this scope.
+    ///
+    /// `pub` for the same reason as [`hash_key`]: an [`Authenticator`] implementation outside
+    /// this crate reads and writes that column itself, and cannot round-trip the value without
+    /// this pair.
+    pub fn as_db_str(self) -> &'static str {
         match self {
             ApiKeyScope::Read => "read",
             ApiKeyScope::Write => "write",
@@ -63,7 +68,9 @@ impl ApiKeyScope {
         }
     }
 
-    fn from_db_str(s: &str) -> Option<Self> {
+    /// Parses an `identity.api_keys.scope` value. `None` for anything this crate does not
+    /// define, which the caller should treat as a corrupt row rather than a missing scope.
+    pub fn from_db_str(s: &str) -> Option<Self> {
         match s {
             "read" => Some(ApiKeyScope::Read),
             "write" => Some(ApiKeyScope::Write),
