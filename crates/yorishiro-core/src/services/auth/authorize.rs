@@ -1,12 +1,10 @@
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
-use uuid::Uuid;
 
 use crate::db::TenantDb;
 use crate::error::{ResultExt, YorishiroError};
 
-use super::authenticate::authenticate;
-use super::{ApiKeyScope, AuthContext, touch_last_used};
+use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used};
 
 /// Enforces that an authenticated context satisfies the required scope, returning
 /// `YorishiroError::ScopeInsufficient` when it doesn't.
@@ -28,16 +26,20 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
 /// satisfies the required scope, and returns a connection with the RLS context already set.
 /// REST and MCP adapters have no way to obtain a `&mut PgConnection` except through this
 /// function, which structurally prevents a scope check from being forgotten.
-/// `requested_workspace` is the caller's `X-Workspace-Id`, needed only by a tenant-scoped key
-/// (see [`authenticate`]). Adapters that have no way to carry the header -- and callers using a
-/// workspace-scoped key -- pass `None`.
+/// The key is resolved through `authenticator` rather than by this function directly, so a
+/// deployment that replaces the rule (see [`Authenticator`]) is honoured on every path that
+/// authorizes -- REST and MCP alike -- rather than only where it remembered to look.
+/// `headers` is passed through untouched for an implementation that reads them.
 pub async fn authorize(
     tenant_db: &TenantDb,
+    authenticator: &dyn Authenticator,
     presented_key: &str,
     required: ApiKeyScope,
-    requested_workspace: Option<Uuid>,
+    headers: &[(String, String)],
 ) -> Result<(AuthContext, PoolConnection<Postgres>), YorishiroError> {
-    let ctx = authenticate(tenant_db.pool(), presented_key, requested_workspace).await?;
+    let ctx = authenticator
+        .authenticate(tenant_db.pool(), presented_key, headers)
+        .await?;
     require_scope(&ctx, required)?;
 
     let mut conn = tenant_db
@@ -61,11 +63,14 @@ pub async fn authorize(
 /// connection that's returned immediately.
 pub async fn authorize_scope(
     tenant_db: &TenantDb,
+    authenticator: &dyn Authenticator,
     presented_key: &str,
     required: ApiKeyScope,
-    requested_workspace: Option<Uuid>,
+    headers: &[(String, String)],
 ) -> Result<AuthContext, YorishiroError> {
-    let ctx = authenticate(tenant_db.pool(), presented_key, requested_workspace).await?;
+    let ctx = authenticator
+        .authenticate(tenant_db.pool(), presented_key, headers)
+        .await?;
     require_scope(&ctx, required)?;
 
     match tenant_db

@@ -90,66 +90,18 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace. `DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
 
-### Workspace schema forks
+### Replacing how authentication resolves a key
 
-A schema belongs to a tenant, and every workspace under it shares the same rows -- so editing a schema reaches every workspace at once, and one workspace cannot add a field without imposing it on the others. A workspace may instead **fork** its tenant's schema: the fork is a copy it owns and can edit, and a later edit to the tenant's schema does not reach it.
+`authenticate` is this crate's own rule: a presented key resolves to the one workspace recorded on it, and the request's headers do not affect the outcome. A deployment that needs a different rule — a key naming its workspace per request, a key issued by an external identity system, a key carrying a claim this crate has never heard of — implements `yorishiro_core::services::auth::Authenticator` and installs it with `AppState::with_authenticator`.
 
-A workspace that never forks behaves exactly as it always did.
+Every authenticated path resolves through that one value: the `AuthContext`, `Authorized<R>` and `Verified<R>` extractors, and both MCP entry points. Replacing it therefore changes authentication for the whole process rather than for the paths that remembered to ask — a REST route and an MCP tool cannot end up disagreeing about who the caller is.
 
-| Endpoint | Scope | Purpose |
-|---|---|---|
-| `GET /api/workspace-schema` | read | This workspace's fork (`null` if it has none), plus `upstream_version` when the tenant's schema has moved past the version the fork was taken from |
-| `POST /api/workspace-schema` | schema | Fork the tenant's active schema of the given `schema_name` into this workspace |
-| `PUT /api/workspace-schema` | schema | Replace the fork's definition; marks it `customized` |
-| `POST /api/workspace-schema/follow` | schema | Replace the fork with the tenant's current active schema |
-| `DELETE /api/workspace-schema` | schema | Drop the fork; the workspace uses its tenant's schema again |
+The implementation receives the request's headers verbatim, so it can read whatever the key itself does not carry. Two obligations it must hold to, because the rest of the system assumes them:
 
-```console
-# Fork, then edit only this workspace's copy
-$ curl -X POST localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
-    -H "Content-Type: application/json" -d '{"schema_name":"task-management"}'
-$ curl -X PUT localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
-    -H "Content-Type: application/json" -d @my-definition.json
+- reject a key it cannot verify with `YorishiroError::Unauthenticated`, rather than returning a context for it
+- return a context whose `tenant_id` owns its `workspace_id` — the RLS session variables are set from both, and a mismatched pair produces a session that reads one tenant's workspace under another tenant's policies
 
-# Take the tenant's newer schema, discarding this workspace's edits
-$ curl -X POST localhost:8080/api/workspace-schema/follow -H "Authorization: Bearer $YSR_KEY" \
-    -H "Content-Type: application/json" -d '{"force":true}'
-```
-
-**Following will not silently discard local edits.** Once a fork is `customized`, `follow` is rejected with `409 Conflict` unless `force` is set. An untouched fork needs no `force` -- there is nothing to lose.
-
-Forking is a `409` if the workspace already has a fork, and editing, following, or dropping without one is a `404` rather than an implicit fork -- creating a fork as a side effect of an edit would hide which workspaces have diverged.
-
-Entities keep referencing `content.schemas`. A fork copies its source's definition, so the version an entity was validated against still exists and its `schema_version` still means what it meant.
-
-### Tenant-scoped API keys
-
-An API key is normally bound to one workspace, and every request it makes acts on that workspace. A **tenant-scoped** key is instead bound to a tenant, and names the workspace per request with the `X-Workspace-Id` header -- one key for a client that works across several workspaces, instead of one key per workspace to hold and swap between.
-
-```console
-# Issue one (admin CLI; there is no REST endpoint for key issuance)
-$ yorishiro-server admin create-tenant-api-key <tenant-id> write
-
-# Every request then names its workspace
-$ curl localhost:8080/api/entities -H "Authorization: Bearer $YSR_KEY" \
-    -H "X-Workspace-Id: <workspace-id>"
-```
-
-The header is honoured over both REST and MCP.
-
-| Key | `X-Workspace-Id` | Result |
-|---|---|---|
-| workspace-scoped | omitted | Acts on the key's own workspace |
-| workspace-scoped | matches the key's workspace | Same as omitting it |
-| workspace-scoped | names a different workspace | `422` -- the key cannot act there, and silently using its own workspace instead would put the write somewhere the client did not name |
-| tenant-scoped | omitted | `401` -- there is no workspace to fall back on |
-| tenant-scoped | a workspace in the key's tenant | Acts on that workspace |
-| tenant-scoped | a workspace in another tenant | `401`, indistinguishable from an unknown key |
-| either | not a UUID | `422` |
-
-**A tenant-scoped key never reaches outside its own tenant.** The requested workspace is resolved only when it belongs to the key's tenant, and that check runs during authentication, before any row is read.
-
-Scope works exactly as it does for a workspace-scoped key (`read` < `write` < `schema`, capped by the attributed user's tenant role) -- it just applies across every workspace in the tenant. Prefer a workspace-scoped key when a client only ever works in one workspace: it reaches less if it leaks.
+Scope is still enforced against whatever context is returned, so replacing authentication is not a way past authorization.
 
 ## Unmatched paths (web UI fallback)
 

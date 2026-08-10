@@ -17,7 +17,6 @@ enum Workspaces {
 enum ApiKeys {
     Table,
     Id,
-    TenantId,
     WorkspaceId,
     Scope,
     KeyPrefix,
@@ -32,46 +31,6 @@ enum Entities {
     Id,
     WorkspaceId,
     Embedding,
-}
-
-/// Issues a tenant-scoped key: usable against any workspace in `tenant_id`, chosen per request
-/// with `X-Workspace-Id`. The role cap is the same one `create_api_key` applies, since the
-/// scope means the same thing -- it just applies across more workspaces.
-pub async fn create_tenant_api_key(
-    pool: &PgPool,
-    tenant_id: Uuid,
-    scope: ApiKeyScope,
-    user_id: Option<Uuid>,
-) -> Result<CreatedApiKey> {
-    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM identity.tenants WHERE id = $1")
-        .bind(tenant_id)
-        .fetch_optional(pool)
-        .await?;
-    if exists.is_none() {
-        bail!("tenant '{tenant_id}' does not exist (see `admin list-tenants`)");
-    }
-
-    if let Some(user_id) = user_id {
-        let Some(role) = tenancy::get_membership_role(pool, tenant_id, user_id).await? else {
-            bail!(
-                "user '{user_id}' is not a member of tenant '{tenant_id}' \
-                 (see `admin add-member`)"
-            );
-        };
-        let max_scope = role.max_scope();
-        if scope > max_scope {
-            bail!(
-                "user '{user_id}' has role {role:?} in this tenant, which permits at most \
-                 {max_scope:?} scope keys (requested {scope:?})"
-            );
-        }
-    }
-
-    let mut conn = pool.acquire().await?;
-    let created = auth::create_api_key(&mut conn, tenant_id, None, scope, user_id)
-        .await
-        .context("failed to create tenant-scoped api key")?;
-    Ok(created)
 }
 
 pub async fn create_api_key(
@@ -113,7 +72,7 @@ pub async fn create_api_key(
     }
 
     let mut conn = pool.acquire().await?;
-    let created = auth::create_api_key(&mut conn, tenant_id, Some(workspace_id), scope, user_id)
+    let created = auth::create_api_key(&mut conn, workspace_id, scope, user_id)
         .await
         .context("failed to create api key")?;
     Ok(created)
@@ -122,8 +81,6 @@ pub async fn create_api_key(
 #[derive(sqlx::FromRow)]
 pub struct ApiKeySummary {
     pub id: Uuid,
-    /// `None` for a tenant-scoped key, which can act on any workspace in its tenant.
-    pub workspace_id: Option<Uuid>,
     pub scope: String,
     pub key_prefix: String,
     pub user_id: Option<Uuid>,
@@ -131,15 +88,10 @@ pub struct ApiKeySummary {
     pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Lists the keys that can act on a workspace: the ones bound to it, plus its tenant's
-/// tenant-scoped keys, which can act on it too. Filtering on `workspace_id` alone would hide
-/// the latter from the operator asking "what can reach this workspace" -- the question the
-/// command exists to answer.
 pub async fn list_api_keys(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<ApiKeySummary>> {
     let (sql, values) = Query::select()
         .columns([
             ApiKeys::Id,
-            ApiKeys::WorkspaceId,
             ApiKeys::Scope,
             ApiKeys::KeyPrefix,
             ApiKeys::UserId,
@@ -147,19 +99,7 @@ pub async fn list_api_keys(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<ApiK
             ApiKeys::LastUsedAt,
         ])
         .from((Alias::new("identity"), ApiKeys::Table))
-        .and_where(
-            Expr::col(ApiKeys::WorkspaceId)
-                .eq(workspace_id)
-                .or(Expr::col(ApiKeys::WorkspaceId).is_null().and(
-                    Expr::col(ApiKeys::TenantId).in_subquery(
-                        Query::select()
-                            .column(Workspaces::TenantId)
-                            .from((Alias::new("identity"), Workspaces::Table))
-                            .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
-                            .take(),
-                    ),
-                )),
-        )
+        .and_where(Expr::col(ApiKeys::WorkspaceId).eq(workspace_id))
         .order_by(ApiKeys::CreatedAt, Order::Asc)
         .build_sqlx(PostgresQueryBuilder);
     let rows: Vec<ApiKeySummary> = sqlx::query_as_with(&sql, values).fetch_all(pool).await?;

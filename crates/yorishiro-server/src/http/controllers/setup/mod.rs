@@ -129,8 +129,7 @@ pub async fn setup(
 
     let created = auth::create_api_key(
         &mut conn,
-        tenant.id,
-        Some(workspace.id),
+        workspace.id,
         MembershipRole::Owner.max_scope(),
         Some(user.id),
     )

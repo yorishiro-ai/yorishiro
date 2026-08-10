@@ -74,22 +74,19 @@ pub(super) enum AuthzOutcome {
     ScopeDenied(CallToolResult),
 }
 
-/// Reads `X-Workspace-Id` for a tenant-scoped key. A present-but-unparseable value is an error
-/// rather than an omission, matching the REST adapter (see `auth::requested_workspace`).
-fn extract_requested_workspace(parts: &Parts) -> Result<Option<uuid::Uuid>, ErrorData> {
-    match auth::requested_workspace(
-        parts
-            .headers
-            .get(auth::WORKSPACE_HEADER)
-            .and_then(|value| value.to_str().ok()),
-    ) {
-        auth::RequestedWorkspace::Absent => Ok(None),
-        auth::RequestedWorkspace::Present(id) => Ok(Some(id)),
-        auth::RequestedWorkspace::Malformed => Err(ErrorData::invalid_request(
-            format!("{} is not a valid UUID", auth::WORKSPACE_HEADER),
-            None,
-        )),
-    }
+/// Copies the request's headers into the shape `auth::Authenticator` takes -- the same thing the
+/// REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
+fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
+    parts
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect()
 }
 
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
@@ -114,13 +111,14 @@ pub(super) async fn authorize(
     required: ApiKeyScope,
 ) -> Result<AuthzOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
-    let requested_workspace = extract_requested_workspace(parts)?;
+    let headers = header_pairs(parts);
 
     match auth::authorize(
         &state.tenant_db,
+        state.authenticator.as_ref(),
         presented_key,
         required,
-        requested_workspace,
+        &headers,
     )
     .await
     {
@@ -151,13 +149,14 @@ pub(super) async fn authorize_scope_only(
     required: ApiKeyScope,
 ) -> Result<ScopeOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
-    let requested_workspace = extract_requested_workspace(parts)?;
+    let headers = header_pairs(parts);
 
     match auth::authorize_scope(
         &state.tenant_db,
+        state.authenticator.as_ref(),
         presented_key,
         required,
-        requested_workspace,
+        &headers,
     )
     .await
     {

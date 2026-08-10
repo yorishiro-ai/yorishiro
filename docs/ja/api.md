@@ -90,66 +90,18 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 `GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
 
-### ワークスペースのスキーマfork
+### 認証によるキー解決の差し替え
 
-スキーマはテナントに属し、配下の全ワークスペースが同じ行を共有します。そのためスキーマを編集すると全ワークスペースに同時に波及し、1つのワークスペースが自分のためにフィールドを追加すると他のワークスペースにも押し付けることになります。ワークスペースはテナントのスキーマを**fork**できます。forkはそのワークスペースが所有・編集できるコピーであり、以降のテナント側の編集はforkに届きません。
+`authenticate`はこのクレート自身の規則です。提示されたキーは、そのキーに記録された1つのワークスペースへ解決され、リクエストのヘッダは結果に影響しません。別の規則を必要とするデプロイ——ワークスペースをリクエストごとに指定するキー、外部のID基盤が発行したキー、このクレートが知らないクレームを持つキー——は`yorishiro_core::services::auth::Authenticator`を実装し、`AppState::with_authenticator`で差し込みます。
 
-forkしていないワークスペースの挙動は従来と同一です。
+認証を要する全経路がこの1つの値を経由します。`AuthContext`・`Authorized<R>`・`Verified<R>`の各抽出子と、MCPの2つの入口です。したがって差し替えはプロセス全体の認証を変更するのであって、「参照することを覚えていた経路」だけが変わるのではありません。RESTのルートとMCPのツールが呼び出し元の identity について食い違うことは起こりません。
 
-| エンドポイント | scope | 内容 |
-|---|---|---|
-| `GET /api/workspace-schema` | read | このワークスペースのfork(無ければ`null`)。テナントのスキーマがfork時点のバージョンより進んでいる場合は`upstream_version`も返す |
-| `POST /api/workspace-schema` | schema | 指定した`schema_name`のアクティブなテナントスキーマをこのワークスペースにforkする |
-| `PUT /api/workspace-schema` | schema | forkの定義を置き換える。`customized`になる |
-| `POST /api/workspace-schema/follow` | schema | forkをテナントの現在のアクティブなスキーマで置き換える |
-| `DELETE /api/workspace-schema` | schema | forkを削除し、テナントのスキーマを使う状態に戻す |
+実装はリクエストのヘッダをそのまま受け取るため、キー自体が持たない情報を読めます。以下2点は残りの仕組みが前提とするため、実装が必ず守る必要があります。
 
-```console
-# forkして、このワークスペースのコピーだけを編集する
-$ curl -X POST localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
-    -H "Content-Type: application/json" -d '{"schema_name":"task-management"}'
-$ curl -X PUT localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
-    -H "Content-Type: application/json" -d @my-definition.json
+- 検証できないキーは、コンテキストを返さず`YorishiroError::Unauthenticated`で拒否する
+- 返すコンテキストの`tenant_id`がその`workspace_id`を所有していること。RLSのセッション変数は両方から設定されるため、不整合な組は「あるテナントのワークスペースを別テナントのポリシー下で読むセッション」を生む
 
-# このワークスペースの編集を破棄して、テナントの新しいスキーマに追従する
-$ curl -X POST localhost:8080/api/workspace-schema/follow -H "Authorization: Bearer $YSR_KEY" \
-    -H "Content-Type: application/json" -d '{"force":true}'
-```
-
-**追従がローカルの編集を無言で破棄することはありません。** forkが`customized`になった後は、`force`を指定しない限り`follow`は`409 Conflict`で拒否されます。未編集のforkには`force`は不要です(失うものが無いため)。
-
-既にforkがある状態でのforkは`409`。forkが無い状態での編集・追従・削除は、暗黙のforkではなく`404`とします。編集の副作用でforkが作られると、どのワークスペースが分岐しているのかが分からなくなるためです。
-
-エンティティは引き続き`content.schemas`を参照します。forkはfork元の定義をコピーするため、エンティティが検証された時点のバージョンは`content.schemas`に残り続け、`schema_version`の意味も変わりません。
-
-### テナントスコープAPIキー
-
-APIキーは通常1つのワークスペースに紐づき、そのキーによる全リクエストはそのワークスペースに対して行われます。**テナントスコープ**のキーは代わりにテナントに紐づき、対象ワークスペースを`X-Workspace-Id`ヘッダでリクエストごとに指定します。複数ワークスペースをまたぐクライアントが、ワークスペースごとのキーを保持して切り替える代わりに、1本のキーで済ませるためのものです。
-
-```console
-# 発行(admin CLI。キー発行のRESTエンドポイントは存在しません)
-$ yorishiro-server admin create-tenant-api-key <tenant-id> write
-
-# 各リクエストで対象ワークスペースを指定する
-$ curl localhost:8080/api/entities -H "Authorization: Bearer $YSR_KEY" \
-    -H "X-Workspace-Id: <workspace-id>"
-```
-
-このヘッダはREST・MCPの両方で有効です。
-
-| キー | `X-Workspace-Id` | 結果 |
-|---|---|---|
-| ワークスペーススコープ | 省略 | キー自身のワークスペースに対して実行 |
-| ワークスペーススコープ | キー自身のワークスペースと一致 | 省略時と同じ |
-| ワークスペーススコープ | 別のワークスペースを指定 | `422`。そのキーでは実行できず、黙ってキー自身のワークスペースで実行すると、クライアントが指定していない場所に書き込むことになるため |
-| テナントスコープ | 省略 | `401`。フォールバック先のワークスペースが無いため |
-| テナントスコープ | 自テナント配下のワークスペース | そのワークスペースに対して実行 |
-| テナントスコープ | 他テナントのワークスペース | `401`。未知のキーと区別がつかない |
-| いずれも | UUIDでない値 | `422` |
-
-**テナントスコープのキーが自テナントの外に到達することはありません。** 指定されたワークスペースは、そのキーのテナント配下にある場合にのみ解決され、この判定は認証時、いずれの行を読むよりも前に行われます。
-
-scopeの扱いはワークスペーススコープのキーと同一です(`read` < `write` < `schema`。紐づくユーザーのテナントroleが上限)。適用範囲がテナント配下の全ワークスペースになるだけです。単一ワークスペースしか扱わないクライアントには、ワークスペーススコープのキーを推奨します。漏洩時の到達範囲が狭いためです。
+返されたコンテキストに対してscope判定は引き続き行われるため、認証の差し替えが認可の回避手段になることはありません。
 
 ## 未マッチのパス(Web UIのフォールバック)
 

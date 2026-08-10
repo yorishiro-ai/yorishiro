@@ -15,24 +15,12 @@ async fn rest_schema_endpoints_round_trip(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(
-        &mut conn,
-        tenant_id_tenant,
-        Some(tenant_id),
-        ApiKeyScope::Schema,
-        None,
-    )
-    .await
-    .unwrap();
-    let write_key = create_api_key(
-        &mut conn,
-        tenant_id_tenant,
-        Some(tenant_id),
-        ApiKeyScope::Write,
-        None,
-    )
-    .await
-    .unwrap();
+    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+        .await
+        .unwrap();
+    let write_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Write, None)
+        .await
+        .unwrap();
     drop(conn);
 
     let app = build_app(
@@ -168,15 +156,9 @@ async fn rest_creates_a_schema_from_a_built_in_template(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(
-        &mut conn,
-        tenant_id_tenant,
-        Some(tenant_id),
-        ApiKeyScope::Schema,
-        None,
-    )
-    .await
-    .unwrap();
+    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+        .await
+        .unwrap();
     drop(conn);
 
     let app = build_app(
