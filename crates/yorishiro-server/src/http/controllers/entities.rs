@@ -32,6 +32,8 @@ pub struct ListEntitiesParams {
     pub entity_type: Option<String>,
     /// JSON-encoded containment filter, e.g. `{"status":"active"}`.
     pub filter: Option<String>,
+    /// Restricts results to entities created against this schema version.
+    pub schema_version: Option<i32>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -155,6 +157,7 @@ pub async fn list_entities(
     let query = entities::ListEntitiesQuery {
         entity_type: params.entity_type,
         filter: crate::http::controllers::parse_filter_param(params.filter)?,
+        schema_version: params.schema_version,
         limit: params.limit.unwrap_or(default.limit),
         offset: params.offset.unwrap_or(default.offset),
     };

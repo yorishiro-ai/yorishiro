@@ -34,7 +34,9 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
-`GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)も受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を渡すことで、`GET /api/templates`で一覧取得できる組み込みテンプレートからスキーマを登録できます。
+`GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)と`schema_version`クエリパラメータも受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を渡すことで、`GET /api/templates`で一覧取得できる組み込みテンプレートからスキーマを登録できます。
+
+`schema_version`は、そのバージョンのスキーマに対して作成されたエンティティのみを返します。エンティティは作成時のスキーマバージョンを記録し、新しいバージョンが作成された後もその値を保持するため、これは「そのバージョンが生成したエンティティ」を返します。「現在そのバージョンで検証を通るエンティティ」ではありません。
 
 リクエストボディはすべて2 MiB上限です(超えると`413 Payload Too Large`)。大きめのエクスポートを`POST /api/import.jsonl`で取り込む際に関係します。
 
@@ -115,7 +117,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `get_schema_by_id` | read | 特定バージョンのスキーマ取得 |
 | `get_entity_type_json_schema` | read | entity_typeのJSON Schema投影 |
 | `create_entity` / `get_entity` / `update_entity` / `delete_entity` | write/read | エンティティCRUD |
-| `list_entities` | read | エンティティ一覧。`entity_type`および/または`filter`(JSONB包含マッチ)で絞り込み可能 |
+| `list_entities` | read | エンティティ一覧。`entity_type`、`filter`(JSONB包含マッチ)、`schema_version`で絞り込み可能 |
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | リレーションCRUD |
 | `search_entities` | read | 自然文クエリによるベクトル類似検索。`entity_type`/`filter`で絞り込み可能。埋め込みを持たないエンティティも trigram によるあいまい検索でヒットし得る |
 | `recall_context` | read | エンティティとそのリレーション・隣接エンティティを一括取得 |
