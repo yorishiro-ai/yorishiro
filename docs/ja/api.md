@@ -90,6 +90,38 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 `GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
 
+### ワークスペースのスキーマfork
+
+スキーマはテナントに属し、配下の全ワークスペースが同じ行を共有します。そのためスキーマを編集すると全ワークスペースに同時に波及し、1つのワークスペースが自分のためにフィールドを追加すると他のワークスペースにも押し付けることになります。ワークスペースはテナントのスキーマを**fork**できます。forkはそのワークスペースが所有・編集できるコピーであり、以降のテナント側の編集はforkに届きません。
+
+forkしていないワークスペースの挙動は従来と同一です。
+
+| エンドポイント | scope | 内容 |
+|---|---|---|
+| `GET /api/workspace-schema` | read | このワークスペースのfork(無ければ`null`)。テナントのスキーマがfork時点のバージョンより進んでいる場合は`upstream_version`も返す |
+| `POST /api/workspace-schema` | schema | 指定した`schema_name`のアクティブなテナントスキーマをこのワークスペースにforkする |
+| `PUT /api/workspace-schema` | schema | forkの定義を置き換える。`customized`になる |
+| `POST /api/workspace-schema/follow` | schema | forkをテナントの現在のアクティブなスキーマで置き換える |
+| `DELETE /api/workspace-schema` | schema | forkを削除し、テナントのスキーマを使う状態に戻す |
+
+```console
+# forkして、このワークスペースのコピーだけを編集する
+$ curl -X POST localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/json" -d '{"schema_name":"task-management"}'
+$ curl -X PUT localhost:8080/api/workspace-schema -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/json" -d @my-definition.json
+
+# このワークスペースの編集を破棄して、テナントの新しいスキーマに追従する
+$ curl -X POST localhost:8080/api/workspace-schema/follow -H "Authorization: Bearer $YSR_KEY" \
+    -H "Content-Type: application/json" -d '{"force":true}'
+```
+
+**追従がローカルの編集を無言で破棄することはありません。** forkが`customized`になった後は、`force`を指定しない限り`follow`は`409 Conflict`で拒否されます。未編集のforkには`force`は不要です(失うものが無いため)。
+
+既にforkがある状態でのforkは`409`。forkが無い状態での編集・追従・削除は、暗黙のforkではなく`404`とします。編集の副作用でforkが作られると、どのワークスペースが分岐しているのかが分からなくなるためです。
+
+エンティティは引き続き`content.schemas`を参照します。forkはfork元の定義をコピーするため、エンティティが検証された時点のバージョンは`content.schemas`に残り続け、`schema_version`の意味も変わりません。
+
 ### テナントスコープAPIキー
 
 APIキーは通常1つのワークスペースに紐づき、そのキーによる全リクエストはそのワークスペースに対して行われます。**テナントスコープ**のキーは代わりにテナントに紐づき、対象ワークスペースを`X-Workspace-Id`ヘッダでリクエストごとに指定します。複数ワークスペースをまたぐクライアントが、ワークスペースごとのキーを保持して切り替える代わりに、1本のキーで済ませるためのものです。

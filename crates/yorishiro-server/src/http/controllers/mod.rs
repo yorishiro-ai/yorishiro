@@ -10,6 +10,7 @@ mod search;
 mod setup;
 mod template_library;
 pub(crate) mod whoami;
+mod workspace_schemas;
 mod workspaces;
 
 use axum::Router;
@@ -104,6 +105,11 @@ impl Modify for SecurityAddon {
         schemas::get_entity_type_json_schema,
         schemas::list_templates,
         schemas::get_template,
+        workspace_schemas::get_workspace_schema,
+        workspace_schemas::fork_schema,
+        workspace_schemas::update_workspace_schema,
+        workspace_schemas::follow_upstream,
+        workspace_schemas::unfork_schema,
         search::search_entities,
         export::export_jsonl,
         import::import_jsonl,
@@ -237,6 +243,17 @@ pub fn router(
             get(schemas::get_entity_type_json_schema),
         )
         .route("/api/schemas/{schema_id}", get(schemas::get_schema_by_id))
+        .route(
+            "/api/workspace-schema",
+            get(workspace_schemas::get_workspace_schema)
+                .post(workspace_schemas::fork_schema)
+                .put(workspace_schemas::update_workspace_schema)
+                .delete(workspace_schemas::unfork_schema),
+        )
+        .route(
+            "/api/workspace-schema/follow",
+            post(workspace_schemas::follow_upstream),
+        )
         .route("/api/templates", get(schemas::list_templates))
         .route("/api/templates/{id}", get(schemas::get_template))
         .route(
