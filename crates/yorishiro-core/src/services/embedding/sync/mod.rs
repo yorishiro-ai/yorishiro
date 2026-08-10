@@ -9,7 +9,6 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::EntityTypeDef;
 use crate::models::entities::EntityRecord;
 use crate::repositories::schemas;
-use crate::repositories::tenancy::resolve_tenant_id;
 use crate::services::embedding::EmbeddingProvider;
 
 /// `pub` (rather than private) only so the crate-root integration test in `tests/` can build
@@ -122,8 +121,7 @@ pub async fn sync_embedding_for_record(
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
 ) -> Result<(), YorishiroError> {
-    let tenant_id = resolve_tenant_id(conn, workspace_id).await?;
-    let schema = schemas::get_by_id(conn, tenant_id, record.schema_id).await?;
+    let schema = schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
     let entity_type_def = schema
         .definition
         .entity_types

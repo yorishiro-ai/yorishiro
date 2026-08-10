@@ -63,7 +63,7 @@ async fn creates_and_fetches_entity(pool: PgPool) {
         .await
         .unwrap();
 
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
         .await
         .unwrap();
 
@@ -97,7 +97,7 @@ async fn rejects_invalid_data(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
         .await
         .unwrap();
 
@@ -125,7 +125,7 @@ async fn rejects_unknown_entity_type(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
         .await
         .unwrap();
 
@@ -155,7 +155,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_a_tenant, tenant_a)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn_a, tenant_a_tenant, task_schema())
+    schemas::create_schema(&mut conn_a, tenant_a_tenant, tenant_a, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -188,7 +188,7 @@ async fn update_validates_against_creation_time_schema_version(pool: PgPool) {
         .await
         .unwrap();
 
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -216,7 +216,7 @@ async fn update_validates_against_creation_time_schema_version(pool: PgPool) {
         }
     }))
     .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, v2)
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, v2)
         .await
         .unwrap();
 
@@ -241,7 +241,7 @@ async fn delete_removes_entity(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
         .await
         .unwrap();
     let entity = entities::create(
@@ -277,6 +277,7 @@ async fn list_filters_by_entity_type(pool: PgPool) {
     schemas::create_schema(
         &mut conn,
         workspace_id_tenant,
+        workspace_id,
         serde_json::from_value(json!({
             "name": "task-management",
             "entity_types": {
@@ -333,7 +334,7 @@ async fn list_filters_by_data_field_value(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
+    schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
         .await
         .unwrap();
 
@@ -385,9 +386,10 @@ async fn list_filters_by_schema_version(pool: PgPool) {
         .await
         .unwrap();
 
-    let (v1, _) = schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
-        .await
-        .unwrap();
+    let (v1, _) =
+        schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
+            .await
+            .unwrap();
     entities::create(
         &mut conn,
         workspace_id,
@@ -402,9 +404,10 @@ async fn list_filters_by_schema_version(pool: PgPool) {
     .unwrap();
 
     // A second version of the same schema. The entity above keeps schema_version = 1.
-    let (v2, _) = schemas::create_schema(&mut conn, workspace_id_tenant, task_schema())
-        .await
-        .unwrap();
+    let (v2, _) =
+        schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
+            .await
+            .unwrap();
     assert_eq!(v2.version, v1.version + 1);
 
     for title in ["first against v2", "second against v2"] {

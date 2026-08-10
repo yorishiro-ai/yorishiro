@@ -155,19 +155,29 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
 
             if let Some(template_id) = template {
                 let definition = yorishiro_core::templates::get_template(&template_id)?;
+
+                // Workspace first, then its schema. A schema belongs to a workspace, so the
+                // workspace has to exist to own it; the workspace's own `schema_id` is linked
+                // afterwards, once there is a schema to point at.
+                let workspace =
+                    tenancy::create_workspace(pool, tenant.id, "default", None, None).await?;
+
                 let mut conn = pool.acquire().await.context("acquire connection")?;
                 let (schema, _diff) = yorishiro_core::repositories::schemas::create_schema(
-                    &mut conn, tenant.id, definition,
+                    &mut conn,
+                    tenant.id,
+                    workspace.id,
+                    definition,
                 )
                 .await?;
+                drop(conn);
+                tenancy::set_workspace_schema(pool, workspace.id, schema.id).await?;
+
                 println!("schema created (from template '{template_id}')");
                 println!("  id:      {}", schema.id);
                 println!("  name:    {}", schema.name);
                 println!("  version: {}", schema.version);
 
-                let workspace =
-                    tenancy::create_workspace(pool, tenant.id, "default", None, Some(schema.id))
-                        .await?;
                 println!("default workspace created");
                 println!("  id:        {}", workspace.id);
                 println!("  name:      {}", workspace.name);

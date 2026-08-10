@@ -153,6 +153,7 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
     yorishiro_core::repositories::schemas::create_schema(
         &mut conn,
         workspace_id_tenant,
+        workspace_id,
         definition,
     )
     .await

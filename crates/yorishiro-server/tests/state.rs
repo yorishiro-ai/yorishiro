@@ -78,10 +78,14 @@ async fn seed_embeddable(
     .unwrap();
 
     let mut conn = pool.acquire().await.unwrap();
-    let (schema, _) =
-        yorishiro_core::repositories::schemas::create_schema(&mut conn, tenant_id, definition)
-            .await
-            .unwrap();
+    let (schema, _) = yorishiro_core::repositories::schemas::create_schema(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        definition,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
     let record = yorishiro_core::models::entities::EntityRecord {

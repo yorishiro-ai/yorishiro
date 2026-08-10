@@ -67,9 +67,14 @@ async fn returns_entity_with_shallow_neighbors_by_default(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        project_task_schema(),
+    )
+    .await
+    .unwrap();
 
     let project = entities::create(
         &mut conn,
@@ -140,9 +145,14 @@ async fn full_flag_returns_the_neighbors_entire_data(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        project_task_schema(),
+    )
+    .await
+    .unwrap();
 
     let project = entities::create(
         &mut conn,
@@ -206,9 +216,14 @@ async fn sets_truncated_when_more_neighbors_exist_than_the_limit(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        project_task_schema(),
+    )
+    .await
+    .unwrap();
 
     let task = entities::create(
         &mut conn,
@@ -302,9 +317,14 @@ async fn depth_two_reaches_the_second_hop_neighbor(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_project_team_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        task_project_team_schema(),
+    )
+    .await
+    .unwrap();
 
     let team = entities::create(
         &mut conn,
@@ -426,9 +446,14 @@ async fn depth_beyond_the_maximum_is_clamped_not_rejected(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, project_task_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        project_task_schema(),
+    )
+    .await
+    .unwrap();
 
     let project = entities::create(
         &mut conn,
@@ -497,9 +522,14 @@ async fn depth_two_expands_every_node_in_a_multi_node_frontier(pool: PgPool) {
         .acquire_for_workspace(workspace_id_tenant, workspace_id)
         .await
         .unwrap();
-    schemas::create_schema(&mut conn, workspace_id_tenant, task_project_team_schema())
-        .await
-        .unwrap();
+    schemas::create_schema(
+        &mut conn,
+        workspace_id_tenant,
+        workspace_id,
+        task_project_team_schema(),
+    )
+    .await
+    .unwrap();
 
     let task = entities::create(
         &mut conn,

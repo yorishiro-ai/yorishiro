@@ -41,6 +41,7 @@ fn a_schema_record_round_trips_with_its_parsed_definition() {
     let record = SchemaRecord {
         id: uuid::Uuid::nil(),
         tenant_id: uuid::Uuid::nil(),
+        workspace_id: uuid::Uuid::nil(),
         name: "task-management".into(),
         version: 1,
         definition,
