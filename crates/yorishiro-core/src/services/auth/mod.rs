@@ -148,7 +148,12 @@ pub(crate) fn random_hex(byte_len: usize) -> String {
     hex_encode(&bytes)
 }
 
-pub(crate) fn hash_key(raw: &str) -> Vec<u8> {
+/// Hashes a presented key into the form stored in `identity.api_keys.key_hash`.
+///
+/// `pub` because an [`Authenticator`] implementation outside this crate has to look a key up the
+/// same way this crate does -- without it the seam is only half a seam, since a replacement can
+/// be installed but cannot resolve the key it was handed.
+pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }
 
