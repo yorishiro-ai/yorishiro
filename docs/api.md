@@ -34,7 +34,16 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
-`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`) and a `schema_version` query parameter, and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}` to register one of the built-in templates listed at `GET /api/templates`.
+`GET /api/entities` also accepts a `filter` query parameter (a JSON object matched with JSONB containment, e.g. `filter={"status":"active"}`) and a `schema_version` query parameter, and `POST /api/schemas` accepts either an inline definition or `{"template_id": "..."}`.
+
+`template_id` takes both kinds of template, so a caller holding an id does not have to know which kind it is:
+
+| Form | Resolves against | Listed by |
+|---|---|---|
+| `"task-management"` | The built-in templates compiled into the binary | `GET /api/templates` |
+| A UUID | The tenant's own template library | `GET /api/template-library` |
+
+Parsing decides which: a UUID is looked up only in the library, anything else only among the built-ins. A library template belonging to another tenant answers `404` -- the same answer as one that does not exist, so a caller cannot confirm it exists from the difference.
 
 `schema_version` restricts results to entities created against that version of the schema. An entity records the version it was written against and keeps it when a newer version is created, so this returns the entities a given version produced -- not the entities that would validate against it today.
 
@@ -124,7 +133,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | Tool | Scope | Description |
 |---|---|---|
 | `create_schema` | schema | Register a meta-schema (adds a new version), from an inline `definition` or a `template_id` |
-| `list_templates` | read | List built-in schema templates usable as `create_schema`'s `template_id` |
+| `list_templates` | read | List built-in schema templates usable as `create_schema`'s `template_id` (a template-library UUID works there too) |
 | `list_schemas` | read | List a summary of registered schemas (for discovery) |
 | `get_active_schema` | read | Fetch the active schema definition |
 | `get_schema_by_id` | read | Fetch a specific schema version |

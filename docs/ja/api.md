@@ -34,7 +34,16 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
-`GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)と`schema_version`クエリパラメータも受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を渡すことで、`GET /api/templates`で一覧取得できる組み込みテンプレートからスキーマを登録できます。
+`GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)と`schema_version`クエリパラメータも受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を受け付けます。
+
+`template_id`は2種類のテンプレートをどちらも受け付けます。呼び出し側はidがどちらの種類かを知る必要がありません。
+
+| 形式 | 解決先 | 一覧取得 |
+|---|---|---|
+| `"task-management"` | バイナリに同梱された組み込みテンプレート | `GET /api/templates` |
+| UUID | そのテナント自身のテンプレートライブラリ | `GET /api/template-library` |
+
+どちらを引くかはパース結果で決まります。UUIDはライブラリのみ、それ以外は組み込みのみを検索します。他テナントのライブラリテンプレートは`404`を返します。存在しない場合と同じ応答であり、差分から存在を確認できません。
 
 `schema_version`は、そのバージョンのスキーマに対して作成されたエンティティのみを返します。エンティティは作成時のスキーマバージョンを記録し、新しいバージョンが作成された後もその値を保持するため、これは「そのバージョンが生成したエンティティ」を返します。「現在そのバージョンで検証を通るエンティティ」ではありません。
 
@@ -124,7 +133,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | ツール | scope | 内容 |
 |---|---|---|
 | `create_schema` | schema | メタスキーマの登録(新バージョン追加)。インラインの`definition`または`template_id`から作成可能 |
-| `list_templates` | read | `create_schema`の`template_id`に指定できる組み込みスキーマテンプレートの一覧 |
+| `list_templates` | read | `create_schema`の`template_id`に指定できる組み込みスキーマテンプレートの一覧(テンプレートライブラリのUUIDも指定可能) |
 | `list_schemas` | read | 登録済みスキーマのサマリ一覧(発見用) |
 | `get_active_schema` | read | アクティブなスキーマ定義の取得 |
 | `get_schema_by_id` | read | 特定バージョンのスキーマ取得 |
