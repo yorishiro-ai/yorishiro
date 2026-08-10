@@ -70,6 +70,36 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
 
 フォークは元のテンプレートを記録するだけの独立したコピーなので、フォーク元のテンプレートを削除しても成功します — フォーク自体はそのまま有効なまま残り、削除された元テンプレートへの参照だけが失われます。
 
+### テンプレートマーケットプレイス
+
+テンプレートをテナント間で共有します。`identity.templates` は既に `visibility`(`tenant` | `community`)と `fork_of` を持っており、マーケットプレイスはその上に「共有されたテンプレートを安全に使うための情報」——公開済みバージョンと、他テナントの評価——を載せます。
+
+| エンドポイント | scope | 内容 |
+|---|---|---|
+| `GET /api/marketplace` | 有効なAPIキー | 全テナント横断の公開テンプレート一覧。最新stableバージョンとレビュー集計を含む |
+| `GET /api/marketplace/{id}/versions` | 有効なAPIキー | 公開済みバージョン(新しい順)。draftは自テナント所有のテンプレートのみ含む |
+| `POST /api/marketplace/{id}/versions` | 有効なAPIキー | 自テナントのテンプレートの次バージョンを公開(`definition`、任意の`changelog`、`status`は`draft`/`pre`/`stable`) |
+| `GET /api/marketplace/{id}/reviews` | 有効なAPIキー | 閲覧できるテンプレートのレビュー一覧 |
+| `POST /api/marketplace/{id}/reviews` | 有効なAPIキー | 自テナントのレビューを投稿・更新(`rating` 1-5、任意の`comment`) |
+| `POST /api/marketplace/{id}/fork?version=N` | 有効なAPIキー | 公開済みバージョンを自テナントのライブラリへコピー。`version`省略時は最新の`stable` |
+| `PUT /api/marketplace/{id}/visibility` | 有効なAPIキー | 自テナントのテンプレートを公開する/取り下げる |
+
+バージョン番号はサーバーがテンプレートごとに採番します。クライアントに選ばせると、他テナントが履歴として読む連番に欠番や衝突が生じるためです。
+
+**draftは所有テナントにのみ見え**、forkもできません。また非draftのバージョンが1つも無いテンプレートは一覧にも現れません。導入しようとすると404になるエントリが並ぶ一覧は、短い一覧より役に立たないためです。forkしたコピーは自テナントのライブラリに**非公開**で作成されます。他者の成果物を自分の名前で再公開するかどうかは、既定ではなく判断だからです。
+
+自テナントが所有しないテンプレートへの操作は`403`ではなく`404`を返します。操作できない呼び出し元が、レスポンスの違いからテンプレートの存在を確認できてはならないためです。
+
+**forkはテンプレートであって、まだスキーマではありません。** スキーマにするには `POST /api/schemas` に そのUUIDを `template_id` として渡します(組み込みidと同じ扱いです)。
+
+#### 公式listing
+
+組み込みテンプレートもここに公開されます。公開は `yorishiro-server admin seed-official-templates` が行います。これらは通常のlistingであり、他と同様にforkもレビューもできます。author は `Yorishiro` です。
+
+公開元は**メンバーもワークスペースも持たない**テナント行です。`identity.templates.tenant_id` は `NOT NULL` であり、マーケットプレイスは所有権をこの列で判定するため、公式listingにも所有者が必要になります。ログインの経路となるメンバーシップが存在しないため、このテナントにログインすることは誰にもできません。
+
+このコマンドは冪等であり、毎回のデプロイで実行することを想定しています。同じ定義で公開済みのテンプレートには何もせず、新しいリリースで定義が変わったものは**新しいバージョンとして公開**します。既にテナントが導入した版を書き換えることはありません。
+
 ### 認証・メンバー管理・ワークスペース管理
 
 `/auth/signup`と`/auth/login`はbearerトークンを必要としません。これらの目的自体がトークンを発行することだからです。`/setup`/`/setup/status`([setup.md](setup.md#初回セットアップ)参照)と、生存確認・準備確認用の`/up`/`/health`も同様に認証不要です。このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
