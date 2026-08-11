@@ -85,6 +85,10 @@ pub async fn create_workspace(
         &body.name,
         body.max_entities,
         body.schema_id,
+        Some((
+            &crate::embedding_model_name(),
+            state.embedding_provider.dimensions() as i32,
+        )),
     )
     .await?;
     Ok((StatusCode::CREATED, Json(workspace)))

@@ -7,7 +7,7 @@ use yorishiro_core::repositories::tenancy;
 #[sqlx::test(migrations = "../../migrations")]
 async fn owner_can_list_and_add_members(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None, None)
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
@@ -78,7 +78,7 @@ async fn owner_can_list_and_add_members(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn add_member_rejects_an_email_with_no_account(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None, None)
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
@@ -122,7 +122,7 @@ async fn add_member_rejects_an_email_with_no_account(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn member_role_cannot_manage_members(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None)
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None, None)
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();

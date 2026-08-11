@@ -19,18 +19,27 @@ enum Workspaces {
     MaxEntities,
     SchemaId,
     Status,
+    EmbeddingModel,
+    EmbeddingDimensions,
     CreatedAt,
 }
 
 /// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap. `NULL`
 /// means unlimited, which is the default so self-hosted deployments are never capped unless an
 /// operator explicitly sets a limit.
+///
+/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a
+/// later write produced by a different model can be refused where it happens rather than at
+/// query time -- mixing dimensions in one workspace makes its searches fail with
+/// `different vector dimensions`. `None` leaves the workspace on "whatever the deployment is
+/// configured for", which is what every workspace created before the stamp existed means.
 pub async fn create_workspace(
     pool: &PgPool,
     tenant_id: Uuid,
     name: &str,
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
+    embedding: Option<(&str, i32)>,
 ) -> Result<WorkspaceRecord, YorishiroError> {
     let mut conn = pool.acquire().await.internal()?;
     let tenant = get_tenant(&mut conn, tenant_id).await?;
@@ -63,6 +72,8 @@ pub async fn create_workspace(
             Workspaces::MaxEntities,
             Workspaces::SchemaId,
             Workspaces::Status,
+            Workspaces::EmbeddingModel,
+            Workspaces::EmbeddingDimensions,
         ])
         .values_panic([
             tenant_id.into(),
@@ -75,6 +86,8 @@ pub async fn create_workspace(
             } else {
                 WORKSPACE_STATUS_SCHEMA_PENDING.into()
             },
+            embedding.map(|(model, _)| model).into(),
+            embedding.map(|(_, dimensions)| dimensions).into(),
         ])
         .returning(Query::returning().columns(workspace_columns()))
         .build_sqlx(PostgresQueryBuilder);
@@ -85,7 +98,7 @@ pub async fn create_workspace(
         .internal()
 }
 
-fn workspace_columns() -> [Workspaces; 7] {
+fn workspace_columns() -> [Workspaces; 9] {
     [
         Workspaces::Id,
         Workspaces::TenantId,
@@ -93,6 +106,8 @@ fn workspace_columns() -> [Workspaces; 7] {
         Workspaces::MaxEntities,
         Workspaces::SchemaId,
         Workspaces::Status,
+        Workspaces::EmbeddingModel,
+        Workspaces::EmbeddingDimensions,
         Workspaces::CreatedAt,
     ]
 }
@@ -167,6 +182,8 @@ pub async fn list_workspaces_for_user(
             (Workspaces::Table, Workspaces::MaxEntities),
             (Workspaces::Table, Workspaces::SchemaId),
             (Workspaces::Table, Workspaces::Status),
+            (Workspaces::Table, Workspaces::EmbeddingModel),
+            (Workspaces::Table, Workspaces::EmbeddingDimensions),
             (Workspaces::Table, Workspaces::CreatedAt),
         ])
         .from((Alias::new("identity"), Workspaces::Table))

@@ -20,7 +20,7 @@ fn sample_definition(name: &str) -> serde_json::Value {
 /// gets `role.max_scope()` and the role is what varies between tests.
 async fn seed_member(pool: &PgPool, email: &str, role: tenancy::MembershipRole) -> (Uuid, String) {
     let tenant = tenancy::create_tenant(pool, "acme", None).await.unwrap();
-    let workspace = tenancy::create_workspace(pool, tenant.id, "main", None, None)
+    let workspace = tenancy::create_workspace(pool, tenant.id, "main", None, None, None)
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();

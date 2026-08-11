@@ -114,8 +114,18 @@ pub async fn setup(
     }
 
     let tenant = tenancy::create_tenant(&state.identity_pool, "default", None).await?;
-    let workspace =
-        tenancy::create_workspace(&state.identity_pool, tenant.id, "default", None, None).await?;
+    let workspace = tenancy::create_workspace(
+        &state.identity_pool,
+        tenant.id,
+        "default",
+        None,
+        None,
+        Some((
+            &crate::embedding_model_name(),
+            state.embedding_provider.dimensions() as i32,
+        )),
+    )
+    .await?;
 
     let mut conn = state.identity_pool.acquire().await.internal()?;
     let user = tenancy::create_user(

@@ -57,7 +57,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | Variable | Description |
 |---|---|
 | `YSR_EMBEDDING_PROVIDER` | `local` (default) or `openai` |
-| `YSR_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `1024`, the width of the default model). Must match the model's output dimension. All vectors in a deployment share this value — changing it after data exists requires re-embedding |
+| `YSR_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `1024`, the width of the default model). Must match the model's output dimension. A workspace is stamped with this value when it is created, and a later write produced by a different model is refused — see below |
 
 ### When `YSR_EMBEDDING_PROVIDER=local` (ONNX export, the default)
 
@@ -68,6 +68,25 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | `YSR_ONNX_MAX_SEQUENCE_LENGTH` | Maximum sequence length (default: `512`) |
 | `YSR_ONNX_POOLING` | How token embeddings are reduced to one vector: `mean` (default) or `last_token`. This is a property of the model, not a preference — sentence-transformers exports (bge-small, multilingual-e5, all-mpnet) want `mean`, the Qwen3-Embedding family wants `last_token`. Reading a model with the wrong one raises no error; the search results just get worse, so an unrecognized value fails startup rather than falling back |
 | `YSR_ONNX_QUERY_INSTRUCTION` | Instruction prefixed to search queries only. Qwen3-Embedding expects `Instruct: {task}\nQuery:{text}`; stored documents never get it. Unset or empty disables it (the default). Leave unset for symmetric models |
+
+### Changing the embedding model
+
+A workspace records the model and dimension count it was created under. A write whose vector is
+a different width is refused with `422`, naming both numbers.
+
+Without that check the write would succeed — the column is dimensionless — and the workspace's
+next search would fail with `different vector dimensions 384 and 1024`, naming neither the
+entity nor the write that caused it.
+
+To move a workspace to another model, point the deployment at it and re-embed:
+
+```console
+$ yorishiro-server admin resync-embeddings --workspace <id>
+```
+
+Workspaces created before this stamp existed carry none, and accept whatever the deployment
+produces — which is what they have always done.
+
 
 ### When `YSR_EMBEDDING_PROVIDER=openai` (e.g. Ollama, LM Studio, OpenAI)
 
