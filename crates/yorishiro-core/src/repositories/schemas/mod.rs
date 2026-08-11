@@ -228,12 +228,48 @@ pub async fn create_schema(
 /// Only a library template is passed: a built-in has no row to point at, and a definition
 /// posted inline came from nowhere. Both leave the origin unset, which is what `detached`
 /// means for them — never linked, rather than linked and since orphaned.
+///
+/// The merge base is taken to be the definition itself, which holds when the definition *is*
+/// the template's. A caller writing something else against a template — a copy with edits
+/// already applied — must state the template's own definition with
+/// [`create_schema_with_base`], or the base will claim the edits came from upstream and a
+/// later merge will remove them as an upstream deletion.
 pub async fn create_schema_from(
     conn: &mut PgConnection,
     tenant_id: Uuid,
     workspace_id: Uuid,
     definition: MetaSchemaDefinition,
     origin_template_id: Option<Uuid>,
+) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
+    // A fresh copy is its own merge base: nothing has diverged from it yet.
+    create_schema_with_base(
+        conn,
+        tenant_id,
+        workspace_id,
+        definition,
+        origin_template_id,
+        None,
+    )
+    .await
+}
+
+/// As [`create_schema_from`], stating the merge base rather than deriving it.
+///
+/// A copy's base is the copy itself, which is what [`create_schema_from`] records. A *merge*
+/// result's base is not: it is what upstream said at the moment of the merge. Recording the
+/// merged definition instead would leave the next merge reading this workspace's own edits as
+/// already present upstream, and dropping them as "unchanged here" — the exact failure the
+/// three-way base exists to prevent.
+///
+/// `origin_snapshot` is only consulted when there is an origin at all; without one there is
+/// nothing for a base to be an ancestor of.
+pub async fn create_schema_with_base(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    definition: MetaSchemaDefinition,
+    origin_template_id: Option<Uuid>,
+    origin_snapshot: Option<MetaSchemaDefinition>,
 ) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
     validate_definition(&definition)?;
 
@@ -262,10 +298,18 @@ pub async fn create_schema_from(
         .await
         .internal()?;
 
+    // Only the first version of a name mints a base from its own definition. Every later one
+    // inherits the base it already had, unless the caller states a new one: editing a schema
+    // does not change what the template said when it was copied, and resetting the base to the
+    // edit would record this workspace's own fields as upstream's -- after which the next merge
+    // reads them as "unchanged here" and follows an upstream removal by deleting them.
+    let mut inherited_snapshot = None;
+
     let (next_version, diff) = match previous_row {
         Some(row) => {
             let previous = row.into_record()?;
             let diff = metaschema::diff(&previous.definition, &definition);
+            inherited_snapshot = previous.origin_snapshot;
             (previous.version + 1, diff)
         }
         None => (
@@ -318,12 +362,18 @@ pub async fn create_schema_from(
             } else {
                 ORIGIN_STATUS_DETACHED.into()
             },
-            // The definition as copied, kept as the merge base. Only meaningful with an
-            // origin: without one there is nothing this could be an ancestor of.
-            if origin_template_id.is_some() {
-                definition_json.into()
-            } else {
-                sea_query::Value::Json(None).into()
+            // The merge base, in order of authority: what the caller states (a merge knows the
+            // base moved to upstream), then what the previous version carried (an edit does
+            // not move it), then this definition itself (the first copy is its own ancestor).
+            // Only meaningful with an origin -- without one there is nothing to be an ancestor
+            // of.
+            match (
+                origin_template_id,
+                origin_snapshot.as_ref().or(inherited_snapshot.as_ref()),
+            ) {
+                (None, _) => sea_query::Value::Json(None).into(),
+                (Some(_), Some(base)) => serde_json::to_value(base).internal()?.into(),
+                (Some(_), None) => definition_json.into(),
             },
         ])
         .returning(Query::returning().columns(schema_columns()))
@@ -415,6 +465,30 @@ pub async fn merge_preview(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<MergePlan, YorishiroError> {
+    let sides = merge_sides(conn, pool, tenant_id, workspace_id, schema_id).await?;
+    Ok(crate::metaschema::three_way(
+        &sides.base,
+        &sides.upstream,
+        &sides.local.definition,
+    ))
+}
+
+/// The three definitions a merge compares, resolved together because preview and apply need
+/// exactly the same set and must refuse on exactly the same grounds.
+struct MergeSides {
+    base: MetaSchemaDefinition,
+    upstream: MetaSchemaDefinition,
+    local: SchemaRecord,
+    template_id: Uuid,
+}
+
+async fn merge_sides(
+    conn: &mut PgConnection,
+    pool: &PgPool,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<MergeSides, YorishiroError> {
     let schema = get_by_id(conn, workspace_id, schema_id).await?;
 
     let Some(template_id) = schema.origin_template_id else {
@@ -439,9 +513,45 @@ pub async fn merge_preview(
 
     let template = crate::repositories::tenancy::get_template(pool, tenant_id, template_id).await?;
 
-    Ok(crate::metaschema::three_way(
-        &base,
-        &template.definition,
-        &schema.definition,
-    ))
+    Ok(MergeSides {
+        base,
+        upstream: template.definition,
+        local: schema,
+        template_id,
+    })
+}
+
+/// Follows the origin template: writes the merged definition as the schema's next version.
+///
+/// Refuses a merge with conflicts, for the reason [`crate::metaschema::apply_plan`] gives — a
+/// partially applied merge is a definition neither side asked for.
+///
+/// The result is a new version rather than an edit of the current one. Every schema write goes
+/// through the same path, and taking upstream's changes is a schema change: entities written
+/// against the previous definition keep validating against the definition they were written
+/// against, which is what makes following a template safe to do on a workspace with data in it.
+///
+/// The new version's merge base is what upstream says *now*, not the merged result. That is the
+/// point the next merge compares from.
+pub async fn merge_apply(
+    conn: &mut PgConnection,
+    pool: &PgPool,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
+    let sides = merge_sides(conn, pool, tenant_id, workspace_id, schema_id).await?;
+
+    let plan = crate::metaschema::three_way(&sides.base, &sides.upstream, &sides.local.definition);
+    let merged = crate::metaschema::apply_plan(&plan, &sides.upstream, &sides.local.definition)?;
+
+    create_schema_with_base(
+        conn,
+        tenant_id,
+        workspace_id,
+        merged,
+        Some(sides.template_id),
+        Some(sides.upstream),
+    )
+    .await
 }

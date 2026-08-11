@@ -109,6 +109,7 @@ impl Modify for SecurityAddon {
         schemas::create_schema,
         schemas::list_upstream_changes,
         schemas::merge_preview,
+        schemas::merge_apply,
         schemas::get_entity_type_json_schema,
         schemas::list_templates,
         schemas::get_template,
@@ -279,6 +280,7 @@ pub fn router(
             "/api/schemas/{schema_id}/merge-preview",
             get(schemas::merge_preview),
         )
+        .route("/api/schemas/{schema_id}/merge", post(schemas::merge_apply))
         .route(
             "/api/schemas/active/{name}",
             get(schemas::get_active_schema),

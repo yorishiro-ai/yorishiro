@@ -123,6 +123,10 @@ pub async fn create_schema(
     // Carried alongside the definition so the schema can record which library template it
     // came from. A built-in has no row to point at, so it stays None.
     let mut origin_template_id = None;
+    // What the template said, kept as the merge base. Only a template body has one: a
+    // definition posted inline is not a copy of anything, even when a template of the same
+    // name exists.
+    let mut origin_snapshot = None;
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => {
@@ -134,6 +138,7 @@ pub async fn create_schema(
                     let template =
                         tenancy::get_template(&state.identity_pool, tenant_id, id).await?;
                     origin_template_id = Some(template.id);
+                    origin_snapshot = Some(template.definition.clone());
                     template.definition
                 }
                 Err(_) => templates::get_template(&template_id)?,
@@ -142,12 +147,13 @@ pub async fn create_schema(
     };
 
     let workspace_id = authorized.ctx.workspace_id;
-    let (schema, diff) = schemas::create_schema_from(
+    let (schema, diff) = schemas::create_schema_with_base(
         authorized.conn(),
         tenant_id,
         workspace_id,
         definition,
         origin_template_id,
+        origin_snapshot,
     )
     .await?;
     Ok((
@@ -283,6 +289,41 @@ pub async fn merge_preview(
     )
     .await?;
     Ok(Json(plan))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/schemas/{schema_id}/merge",
+    params(("schema_id" = Uuid, Path, description = "Schema ID")),
+    responses(
+        (status = 201, description = "Merged definition written as the schema's next version", body = CreateSchemaResponse),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "The schema does not exist", body = crate::error::ApiErrorBody),
+        (status = 409, description = "Version conflict due to concurrent creation", body = crate::error::ApiErrorBody),
+        (status = 422, description = "The schema follows no template, has no recorded merge base, or the merge has conflicts", body = crate::error::ApiErrorBody),
+    ),
+    tag = "schemas",
+)]
+pub async fn merge_apply(
+    State(state): State<AppState>,
+    mut authorized: Authorized<SchemaScope>,
+    Path(schema_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
+    let tenant_id = authorized.ctx.tenant_id;
+    let workspace_id = authorized.ctx.workspace_id;
+    let (schema, diff) = schemas::merge_apply(
+        authorized.conn(),
+        &state.identity_pool,
+        tenant_id,
+        workspace_id,
+        schema_id,
+    )
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateSchemaResponse { schema, diff }),
+    ))
 }
 
 #[cfg(test)]

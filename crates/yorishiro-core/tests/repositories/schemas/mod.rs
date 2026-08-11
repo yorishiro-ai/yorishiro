@@ -6,8 +6,8 @@ use crate::YorishiroError;
 use crate::db::TenantDb;
 use crate::metaschema::MetaSchemaDefinition;
 use crate::repositories::schemas::{
-    create_schema, create_schema_from, get_active_schema, get_by_id, list_with_upstream_changes,
-    merge_preview,
+    create_schema, create_schema_from, create_schema_with_base, get_active_schema, get_by_id,
+    list_with_upstream_changes, merge_apply, merge_preview,
 };
 use crate::test_support;
 
@@ -545,4 +545,199 @@ async fn merge_preview_refuses_when_the_base_was_never_recorded(pool: PgPool) {
         matches!(err, YorishiroError::ValidationFailed { .. }),
         "got {err:?}"
     );
+}
+
+/// A schema with a field of its own, on top of the template's.
+fn task_schema_with_local_field() -> MetaSchemaDefinition {
+    serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": { "task": { "fields": {
+            "title": { "type": "string", "required": true },
+            "assignee": { "type": "string" }
+        } } }
+    }))
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn merge_apply_takes_upstream_and_keeps_local(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    // This workspace adds `assignee`; the template knows nothing about it.
+    create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_local_field(),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    // Upstream adds `priority`.
+    sqlx::query("UPDATE identity.templates SET definition = $2 WHERE id = $1")
+        .bind(template_id)
+        .bind(serde_json::to_value(task_schema(true)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+    let (merged, _) = merge_apply(&mut conn, &pool, tenant_id, workspace_id, active.id)
+        .await
+        .unwrap();
+
+    let fields = &merged.definition.entity_types["task"].fields;
+    assert!(
+        fields.contains_key("priority"),
+        "upstream's addition is taken"
+    );
+    assert!(
+        fields.contains_key("assignee"),
+        "the local addition survives"
+    );
+    assert_eq!(merged.version, active.version + 1);
+    assert_eq!(merged.status, "active");
+    // Superseded, not deleted: entities written against it still validate against it.
+    let previous = get_by_id(&mut conn, workspace_id, active.id).await.unwrap();
+    assert_eq!(previous.status, "archived");
+    assert_eq!(schema.version, 1);
+}
+
+/// The property the whole three-way apparatus rests on. After a merge the base must be what
+/// upstream said, not what the merge produced -- otherwise the *next* merge reads this
+/// workspace's own fields as upstream's, sees them "unchanged here", and follows a later
+/// upstream removal by deleting them.
+#[sqlx::test(migrations = "../../migrations")]
+async fn merge_apply_advances_the_base_to_upstream(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    // The copy already carries a field of its own, so it must say what the template said --
+    // otherwise the base would claim `assignee` came from upstream.
+    create_schema_with_base(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_local_field(),
+        Some(template_id),
+        Some(task_schema(false)),
+    )
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE identity.templates SET definition = $2 WHERE id = $1")
+        .bind(template_id)
+        .bind(serde_json::to_value(task_schema(true)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+    let (merged, _) = merge_apply(&mut conn, &pool, tenant_id, workspace_id, active.id)
+        .await
+        .unwrap();
+
+    let base = merged.origin_snapshot.expect("a merge records its base");
+    // By serialised form, as `merge::same` compares: unknown `x-` attributes ride in a
+    // flattened map that a field-by-field comparison would not see.
+    assert_eq!(
+        serde_json::to_value(&base).unwrap(),
+        serde_json::to_value(task_schema(true)).unwrap(),
+        "the base is upstream at merge time, not the merged result"
+    );
+
+    // And so the next merge still sees `assignee` as this workspace's own.
+    let plan = merge_preview(&mut conn, &pool, tenant_id, workspace_id, merged.id)
+        .await
+        .unwrap();
+    let assignee = plan
+        .fields
+        .iter()
+        .find(|f| f.field == "assignee")
+        .expect("the local field is still local");
+    assert_eq!(assignee.verdict, crate::metaschema::MergeVerdict::KeepLocal);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn merge_apply_refuses_a_conflict(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    // Both sides add `priority`, with different types.
+    let local: MetaSchemaDefinition = serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": { "task": { "fields": {
+            "title": { "type": "string", "required": true },
+            "priority": { "type": "string" }
+        } } }
+    }))
+    .unwrap();
+    create_schema_from(&mut conn, tenant_id, workspace_id, local, Some(template_id))
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE identity.templates SET definition = $2 WHERE id = $1")
+        .bind(template_id)
+        .bind(serde_json::to_value(task_schema(true)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+    let err = merge_apply(&mut conn, &pool, tenant_id, workspace_id, active.id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, YorishiroError::ValidationFailed { .. }),
+        "got {err:?}"
+    );
+
+    // Nothing written: the active version is the one that was active before.
+    let still = get_active_schema(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+    assert_eq!(still.id, active.id);
 }
