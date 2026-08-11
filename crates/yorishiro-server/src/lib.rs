@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use yorishiro_core::services::embedding::onnx::{LocalOnnxConfig, LocalOnnxProvider};
+use yorishiro_core::services::embedding::onnx::{LocalOnnxConfig, LocalOnnxProvider, Pooling};
 use yorishiro_core::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
 };
@@ -460,11 +460,18 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
                 std::env::var("YSR_ONNX_MODEL_PATH").unwrap_or_else(|_| "models/model.onnx".into());
             let tokenizer_path = std::env::var("YSR_ONNX_TOKENIZER_PATH")
                 .unwrap_or_else(|_| "models/tokenizer.json".into());
+            // Rejected rather than defaulted on an unknown value: reading a model with the
+            // wrong pooling does not fail, it just returns worse vectors.
+            let pooling = match std::env::var("YSR_ONNX_POOLING") {
+                Ok(value) => Pooling::parse(&value)?,
+                Err(_) => Pooling::default(),
+            };
             let provider = LocalOnnxProvider::load(LocalOnnxConfig {
                 model_path: model_path.clone().into(),
                 tokenizer_path: tokenizer_path.clone().into(),
                 dimensions,
                 max_sequence_length,
+                pooling,
             })
             .map_err(|err| {
                 anyhow::anyhow!(
@@ -476,7 +483,7 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
                      endpoint instead (see docs/embedding-providers.md)."
                 )
             })?;
-            tracing::info!(provider = "local", %model_path, dimensions, "embedding provider configured");
+            tracing::info!(provider = "local", %model_path, dimensions, ?pooling, "embedding provider configured");
             Ok(Arc::new(provider))
         }
         other => {

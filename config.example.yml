@@ -30,6 +30,7 @@
 #   onnx_model_path: models/model.onnx                                  # YSR_ONNX_MODEL_PATH
 #   onnx_tokenizer_path: models/tokenizer.json                          # YSR_ONNX_TOKENIZER_PATH
 #   onnx_max_sequence_length: 512                                       # YSR_ONNX_MAX_SEQUENCE_LENGTH
+#   onnx_pooling: mean                                                  # YSR_ONNX_POOLING (mean | last_token)
 #   # --- when provider: openai (e.g. Ollama, LM Studio, OpenAI) ---
 #   base_url: http://localhost:11434/v1                                 # YSR_EMBEDDING_BASE_URL
 #   model: nomic-embed-text                                             # YSR_EMBEDDING_MODEL

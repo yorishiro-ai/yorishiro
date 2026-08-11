@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use crate::services::embedding::EmbeddingProvider;
-use crate::services::embedding::onnx::{LocalOnnxConfig, LocalOnnxProvider, mean_pool_normalized};
+use crate::services::embedding::onnx::{
+    LocalOnnxConfig, LocalOnnxProvider, Pooling, last_token_pool_normalized, mean_pool_normalized,
+};
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
@@ -28,6 +30,7 @@ fn load_rejects_too_small_max_sequence_length() {
         tokenizer_path: "/nonexistent/tokenizer.json".into(),
         dimensions: 768,
         max_sequence_length: 1,
+        pooling: Default::default(),
     });
     let Err(err) = result else {
         panic!("load should fail for too small max_sequence_length");
@@ -42,6 +45,7 @@ fn load_reports_missing_files_clearly() {
         tokenizer_path: "/nonexistent/tokenizer.json".into(),
         dimensions: 768,
         max_sequence_length: 512,
+        pooling: Default::default(),
     });
     let Err(err) = result else {
         panic!("load should fail for missing files");
@@ -69,6 +73,7 @@ async fn embeds_texts_with_a_real_model() {
         tokenizer_path: tokenizer_path.into(),
         dimensions: 768,
         max_sequence_length: 512,
+        pooling: Default::default(),
     })
     .unwrap();
     assert_eq!(provider.dimensions(), 768);
@@ -95,5 +100,68 @@ async fn embeds_texts_with_a_real_model() {
     assert!(
         same_topic > different_topic,
         "similar sentences should be closer: {same_topic} vs {different_topic}"
+    );
+}
+
+#[test]
+fn last_token_pooling_takes_the_final_unmasked_position() {
+    // Three positions, two dimensions. The third is padding, so the second is the last real
+    // token and the one whose embedding should come back.
+    let embeddings = vec![
+        1.0, 0.0, // t0
+        0.0, 2.0, // t1  <- last unmasked
+        9.0, 9.0, // t2  (padding)
+    ];
+    let mask = vec![1, 1, 0];
+
+    let pooled = last_token_pool_normalized(&embeddings, &mask, 3, 2);
+
+    // t1 normalized: (0, 2) -> (0, 1). The padding row must not contribute.
+    assert!((pooled[0] - 0.0).abs() < 1e-6, "got {pooled:?}");
+    assert!((pooled[1] - 1.0).abs() < 1e-6, "got {pooled:?}");
+}
+
+/// The two poolings must actually differ, otherwise selecting one would be meaningless.
+#[test]
+fn mean_and_last_token_pooling_disagree() {
+    let embeddings = vec![1.0, 0.0, 0.0, 1.0];
+    let mask = vec![1, 1];
+
+    let mean = mean_pool_normalized(&embeddings, &mask, 2, 2);
+    let last = last_token_pool_normalized(&embeddings, &mask, 2, 2);
+
+    assert!(
+        (mean[0] - last[0]).abs() > 0.1,
+        "mean {mean:?} and last-token {last:?} should not coincide"
+    );
+}
+
+#[test]
+fn last_token_pooling_survives_an_all_masked_row() {
+    let embeddings = vec![3.0, 4.0];
+    let mask = vec![0];
+
+    // Falls back to position 0 rather than panicking on an empty iterator.
+    let pooled = last_token_pool_normalized(&embeddings, &mask, 1, 2);
+    assert!((pooled[0] - 0.6).abs() < 1e-6, "got {pooled:?}");
+}
+
+#[test]
+fn pooling_parses_its_accepted_spellings() {
+    assert_eq!(Pooling::parse("mean").unwrap(), Pooling::Mean);
+    assert_eq!(Pooling::parse("last_token").unwrap(), Pooling::LastToken);
+    assert_eq!(Pooling::parse("  LAST-TOKEN ").unwrap(), Pooling::LastToken);
+    assert_eq!(Pooling::default(), Pooling::Mean);
+}
+
+/// An unknown value must fail rather than fall back to the default: silently pooling a
+/// last-token model with the mean is the failure this setting exists to prevent, and it
+/// produces no error of its own.
+#[test]
+fn pooling_rejects_an_unknown_value() {
+    let err = Pooling::parse("cls").unwrap_err();
+    assert!(
+        format!("{err}").contains("expected 'mean' or 'last_token'"),
+        "got {err}"
     );
 }
