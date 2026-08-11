@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
-use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary};
+use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary, UpstreamChange};
 use yorishiro_core::repositories::tenancy;
 use yorishiro_core::templates::{self, TemplateSummary};
 
@@ -228,6 +228,27 @@ pub async fn get_entity_type_json_schema(
     Ok(Json(metaschema::entity_type_to_json_schema(
         entity_type_def,
     )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/schemas/upstream-changes",
+    responses(
+        (status = 200, description = "Schemas whose origin template has changed since the copy was taken", body = Vec<UpstreamChange>),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+    ),
+    tag = "schemas",
+)]
+pub async fn list_upstream_changes(
+    State(state): State<AppState>,
+    authorized: Authorized<ReadScope>,
+) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    // The control-plane pool: this joins identity.templates, which the request role cannot
+    // read.
+    let changes = schemas::list_with_upstream_changes(&state.identity_pool, workspace_id).await?;
+    Ok(Json(changes))
 }
 
 #[cfg(test)]

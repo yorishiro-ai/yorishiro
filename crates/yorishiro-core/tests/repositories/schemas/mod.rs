@@ -6,7 +6,7 @@ use crate::YorishiroError;
 use crate::db::TenantDb;
 use crate::metaschema::MetaSchemaDefinition;
 use crate::repositories::schemas::{
-    create_schema, create_schema_from, get_active_schema, get_by_id,
+    create_schema, create_schema_from, get_active_schema, get_by_id, list_with_upstream_changes,
 };
 use crate::test_support;
 
@@ -256,4 +256,116 @@ async fn seed_template(pool: &PgPool, tenant_id: Uuid) -> Uuid {
     .await
     .unwrap();
     id
+}
+
+/// The signal: a template edited after the copy was taken shows up as available.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_edited_template_is_reported_as_an_upstream_change(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    // Nothing has changed upstream yet.
+    let changes = list_with_upstream_changes(&pool, workspace_id)
+        .await
+        .unwrap();
+    assert!(changes.is_empty(), "an untouched template is not a change");
+
+    // The tenant admin edits the template.
+    sqlx::query(
+        "UPDATE identity.templates SET updated_at = now() + interval '1 second' WHERE id = $1",
+    )
+    .bind(template_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let changes = list_with_upstream_changes(&pool, workspace_id)
+        .await
+        .unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].template_id, template_id);
+    assert_eq!(changes[0].schema_name, "task-management");
+}
+
+/// A schema written by hand follows nothing, so it can never be reported.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_detached_schema_is_never_an_upstream_change(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    create_schema(&mut conn, tenant_id, workspace_id, task_schema(false))
+        .await
+        .unwrap();
+
+    let changes = list_with_upstream_changes(&pool, workspace_id)
+        .await
+        .unwrap();
+    assert!(changes.is_empty());
+}
+
+/// Once the template is deleted there is no update left to take, so a yanked schema drops out
+/// of the report rather than sitting in it forever.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_yanked_schema_stops_being_reported(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE identity.templates SET updated_at = now() + interval '1 second' WHERE id = $1",
+    )
+    .bind(template_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        list_with_upstream_changes(&pool, workspace_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    sqlx::query("DELETE FROM identity.templates WHERE id = $1")
+        .bind(template_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let changes = list_with_upstream_changes(&pool, workspace_id)
+        .await
+        .unwrap();
+    assert!(changes.is_empty(), "a yanked schema has no update to take");
 }
