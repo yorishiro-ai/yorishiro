@@ -119,3 +119,39 @@ fn unknown_key_is_a_hard_error() {
 
     assert!(err.to_string().contains("failed to parse config file"));
 }
+
+/// `config.example.yml` offers both of these, and `FileConfig` is `deny_unknown_fields` — so a
+/// key documented there but missing from the struct does not silently do nothing, it refuses to
+/// start. Covering them here keeps the example file and the loader from drifting apart.
+#[test]
+fn search_and_snapshot_settings_are_applied_and_overridable() {
+    let _guard = EnvGuard::new(vec![
+        "YSR_CONFIG_PATH",
+        "YSR_SEARCH_TOKENS_PER_MINUTE",
+        "YSR_SNAPSHOT_RETENTION_DAYS",
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_config(
+        dir.path(),
+        "search_tokens_per_minute: 5000\nsnapshot_retention_days: 7\n",
+    );
+    // SAFETY: serialized by ENV_LOCK via EnvGuard.
+    unsafe {
+        std::env::set_var("YSR_CONFIG_PATH", &path);
+        // Set one of the two, so this asserts both directions in one run.
+        std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", "90");
+    }
+
+    unsafe { load_and_apply_env_overrides() }.unwrap();
+
+    assert_eq!(
+        std::env::var("YSR_SEARCH_TOKENS_PER_MINUTE").unwrap(),
+        "5000",
+        "the yaml value is applied when the environment says nothing"
+    );
+    assert_eq!(
+        std::env::var("YSR_SNAPSHOT_RETENTION_DAYS").unwrap(),
+        "90",
+        "the environment still wins over the file"
+    );
+}

@@ -793,7 +793,12 @@ pub async fn fill_defaults(
 /// this many days.** Past that its images are gone and `undo_job` answers `NotFound`, the same as
 /// for a job that never ran — an expired window is indistinguishable from no window, and that is
 /// what the setting means rather than a fault to guard against.
-fn snapshot_retention_days() -> i64 {
+/// Read as `i32` because that is what `make_interval(days => …)` takes. A wider parse would let
+/// a value above `i32::MAX` wrap negative, and a negative interval puts the cutoff in the
+/// *future* — the sweep would then delete the images it exists to keep. Anything unparseable,
+/// out of range included, falls back to the default rather than being clamped: a retention of
+/// six million years is a typo, and honouring the nearest legal value would hide it.
+fn snapshot_retention_days() -> i32 {
     std::env::var("YSR_SNAPSHOT_RETENTION_DAYS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -821,7 +826,7 @@ async fn prune_snapshots(
          WHERE workspace_id = $1 AND created_at < now() - make_interval(days => $2)",
     )
     .bind(workspace_id)
-    .bind(days as i32)
+    .bind(days)
     .execute(&mut **tx)
     .await
     .internal()?;

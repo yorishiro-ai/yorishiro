@@ -1270,3 +1270,38 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
         "undoing past the window reports the job as gone, got {err:?}"
     );
 }
+
+/// A retention value that does not fit `make_interval(days => …)` must not reach it. Parsed as
+/// `i64` and cast, `2147483648` wraps negative — `now() - a negative interval` puts the cutoff in
+/// the *future*, and the sweep would delete the images it exists to preserve.
+#[test]
+fn an_out_of_range_retention_falls_back_to_the_default() {
+    // Serialized against the other env-reading tests in this crate is not needed: this reads a
+    // key nothing else touches, and reads it through the same function the sweep uses.
+    let restore = std::env::var_os("YSR_SNAPSHOT_RETENTION_DAYS");
+
+    for value in ["2147483648", "9999999999999999999", "not-a-number", ""] {
+        // SAFETY: single-threaded test, and no other test reads this key.
+        unsafe { std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", value) };
+        assert_eq!(
+            entities::snapshot_retention_days(),
+            30,
+            "'{value}' does not parse as i32 and must fall back, never wrap"
+        );
+    }
+
+    // A negative value does parse. It is not clamped or rejected -- `prune_snapshots` treats
+    // anything `<= 0` as "keep everything", so it lands with `0` rather than reaching
+    // `make_interval` and moving the cutoff into the future.
+    // SAFETY: as above.
+    unsafe { std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", "-1") };
+    assert!(entities::snapshot_retention_days() <= 0, "sweeping is off");
+
+    // SAFETY: as above.
+    unsafe {
+        match restore {
+            Some(v) => std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", v),
+            None => std::env::remove_var("YSR_SNAPSHOT_RETENTION_DAYS"),
+        }
+    }
+}
