@@ -122,9 +122,13 @@ impl RequiredScope for WriteScope {
 }
 
 pub struct SchemaScope;
-pub struct MigrationScope;
 impl RequiredScope for SchemaScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Schema;
+}
+
+pub struct MigrationScope;
+impl RequiredScope for MigrationScope {
+    const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
 
 /// An extractor that authenticates, verifies the required scope, and acquires a connection
