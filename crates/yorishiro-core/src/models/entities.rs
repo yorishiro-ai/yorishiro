@@ -156,3 +156,19 @@ pub struct UndoReport {
     /// deleted since is not a reason to refuse the rest.
     pub missing: i64,
 }
+
+/// What filling defaults did.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FillDefaultsReport {
+    /// Groups the snapshots taken, so this run can be undone as one.
+    pub job_id: Uuid,
+    pub schema_name: String,
+    /// Entities that gained at least one value.
+    pub filled: i64,
+    /// Entities that needed a value the active version defines no default for. Left untouched
+    /// and counted, because inventing one would be worse than leaving the field absent — a
+    /// value nobody chose is indistinguishable from one someone did.
+    pub skipped_no_default: i64,
+    /// The fields those entities still lack.
+    pub still_missing: Vec<String>,
+}

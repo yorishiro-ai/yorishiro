@@ -1003,3 +1003,197 @@ async fn a_deleted_entity_is_counted_rather_than_failing_the_undo(pool: PgPool) 
     assert_eq!(report.restored, 1);
     assert_eq!(report.missing, 1, "the deleted one is reported, not fatal");
 }
+
+fn task_schema_with_defaulted_field() -> MetaSchemaDefinition {
+    serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": {
+            "task": {
+                "fields": {
+                    "title":  { "type": "string", "required": true },
+                    "status": { "type": "string", "required": true, "default": "todo" }
+                }
+            }
+        }
+    }))
+    .unwrap()
+}
+
+/// Mode A: a field added later, with a default, is filled into the entities that predate it —
+/// and those entities keep their own version, because filling a value is not migrating between
+/// definitions.
+#[sqlx::test(migrations = "../../migrations")]
+async fn fill_defaults_fills_predating_entities_without_moving_their_version(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "written first" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let original_version = entity.schema_version;
+
+    schemas::create_schema(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_defaulted_field(),
+    )
+    .await
+    .unwrap();
+
+    let job_id = uuid::Uuid::nil();
+    let report = entities::fill_defaults(&mut conn, workspace_id, "task-management", job_id)
+        .await
+        .unwrap();
+
+    assert_eq!(report.filled, 1);
+    assert_eq!(report.skipped_no_default, 0);
+
+    let after = entities::get(&mut conn, workspace_id, entity.id)
+        .await
+        .unwrap();
+    assert_eq!(after.data["status"], "todo");
+    assert_eq!(
+        after.data["title"], "written first",
+        "existing data is kept"
+    );
+    assert_eq!(
+        after.schema_version, original_version,
+        "filling a value does not move the entity between versions"
+    );
+}
+
+/// A required field with no default is left alone and reported. Inventing a value would make
+/// it indistinguishable from one somebody chose.
+#[sqlx::test(migrations = "../../migrations")]
+async fn fill_defaults_leaves_fields_with_no_default_alone(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "written first" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // `category` is required and has no default.
+    schemas::create_schema(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_category(),
+    )
+    .await
+    .unwrap();
+
+    let report = entities::fill_defaults(
+        &mut conn,
+        workspace_id,
+        "task-management",
+        uuid::Uuid::nil(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.filled, 0);
+    assert_eq!(report.skipped_no_default, 1);
+    assert_eq!(report.still_missing, vec!["category"]);
+
+    let after = entities::get(&mut conn, workspace_id, entity.id)
+        .await
+        .unwrap();
+    assert!(
+        after.data.get("category").is_none(),
+        "no invented value: {:?}",
+        after.data
+    );
+}
+
+/// The run is undoable as one, which is what the job id is for.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_fill_can_be_undone_as_one_job(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    for title in ["one", "two"] {
+        entities::create(
+            &mut conn,
+            workspace_id,
+            CreateEntityInput {
+                schema_name: "task-management".into(),
+                entity_type: "task".into(),
+                data: json!({ "title": title }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    schemas::create_schema(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_defaulted_field(),
+    )
+    .await
+    .unwrap();
+
+    let job_id = uuid::Uuid::nil();
+    let report = entities::fill_defaults(&mut conn, workspace_id, "task-management", job_id)
+        .await
+        .unwrap();
+    assert_eq!(report.filled, 2);
+
+    let undo = entities::undo_job(&mut conn, workspace_id, job_id)
+        .await
+        .unwrap();
+    assert_eq!(undo.restored, 2);
+
+    let listed = entities::list(&mut conn, workspace_id, ListEntitiesQuery::default())
+        .await
+        .unwrap();
+    for entity in listed {
+        assert!(
+            entity.data.get("status").is_none(),
+            "the fill was put back: {:?}",
+            entity.data
+        );
+    }
+}

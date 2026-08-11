@@ -6,11 +6,13 @@ use serde::Deserialize;
 use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
-use yorishiro_core::repositories::entities::{self, EntityDrift, EntityRecord, MigrationDryRun};
+use yorishiro_core::repositories::entities::{
+    self, EntityDrift, EntityRecord, FillDefaultsReport, MigrationDryRun, UndoReport,
+};
 use yorishiro_core::repositories::recall::{self, RecallContext, RecallQuery};
 
 use crate::error::ApiError;
-use crate::http::middleware::auth::{Authorized, ReadScope, WriteScope};
+use crate::http::middleware::auth::{Authorized, ReadScope, SchemaScope, WriteScope};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -244,6 +246,51 @@ pub async fn migration_dry_run(
 ) -> Result<Json<MigrationDryRun>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let report = entities::migration_dry_run(authorized.conn(), workspace_id, &name).await?;
+    Ok(Json(report))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/schemas/active/{name}/fill-defaults",
+    params(("name" = String, Path, description = "Schema name")),
+    responses(
+        (status = 200, description = "What was filled", body = FillDefaultsReport),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "No active schema with that name", body = crate::error::ApiErrorBody),
+    ),
+    tag = "entities",
+)]
+pub async fn fill_defaults(
+    mut authorized: Authorized<SchemaScope>,
+    Path(name): Path<String>,
+) -> Result<Json<FillDefaultsReport>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    // The job id is minted here rather than taken from the caller: it is what the undo will
+    // name, and a caller choosing it could collide with a previous run's snapshots.
+    let job_id = Uuid::new_v4();
+    let report = entities::fill_defaults(authorized.conn(), workspace_id, &name, job_id).await?;
+    Ok(Json(report))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/migration-jobs/{job_id}/undo",
+    params(("job_id" = Uuid, Path, description = "Job id from a fill-defaults run")),
+    responses(
+        (status = 200, description = "What was put back", body = UndoReport),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "No snapshots for that job", body = crate::error::ApiErrorBody),
+    ),
+    tag = "entities",
+)]
+pub async fn undo_migration_job(
+    mut authorized: Authorized<SchemaScope>,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<UndoReport>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    let report = entities::undo_job(authorized.conn(), workspace_id, job_id).await?;
     Ok(Json(report))
 }
 

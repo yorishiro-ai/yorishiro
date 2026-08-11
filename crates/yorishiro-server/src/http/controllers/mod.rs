@@ -96,6 +96,8 @@ impl Modify for SecurityAddon {
         entities::get_entity_context,
         entities::get_entity_drift,
         entities::migration_dry_run,
+        entities::fill_defaults,
+        entities::undo_migration_job,
         relations::create_relation,
         relations::get_relation,
         relations::delete_relation,
@@ -148,6 +150,8 @@ impl Modify for SecurityAddon {
         yorishiro_core::repositories::entities::DriftField,
         yorishiro_core::repositories::entities::MigrationDryRun,
         yorishiro_core::repositories::entities::DryRunByType,
+        yorishiro_core::repositories::entities::FillDefaultsReport,
+        yorishiro_core::repositories::entities::UndoReport,
         yorishiro_core::repositories::schemas::UpstreamChange,
         yorishiro_core::metaschema::MergePlan,
         yorishiro_core::metaschema::FieldMerge,
@@ -242,6 +246,14 @@ pub fn router(
         .route(
             "/api/schemas/active/{name}/migration-dry-run",
             get(entities::migration_dry_run),
+        )
+        .route(
+            "/api/schemas/active/{name}/fill-defaults",
+            post(entities::fill_defaults),
+        )
+        .route(
+            "/api/migration-jobs/{job_id}/undo",
+            post(entities::undo_migration_job),
         )
         .route(
             "/api/relations",
