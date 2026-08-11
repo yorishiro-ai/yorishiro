@@ -182,6 +182,15 @@ pub async fn run(command: AdminCommand) -> Result<()> {
 
 /// Execute an admin command against a pool whose migrations have already been applied.
 pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
+    // What a workspace created here gets stamped with. Built from the environment rather than
+    // from a running provider: the admin commands do not start one, and loading a local ONNX
+    // model to read one number off it would make `create-tenant` wait on a model it never uses.
+    let embedding_stamp: Option<(String, i32)> = std::env::var("YSR_EMBEDDING_DIMENSIONS")
+        .ok()
+        .and_then(|d| d.parse::<i32>().ok())
+        .or(Some(1024))
+        .map(|dimensions| (crate::embedding_model_name(), dimensions));
+
     match command {
         AdminCommand::CreateTenant {
             name,
@@ -200,8 +209,15 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
                 // Workspace first, then its schema. A schema belongs to a workspace, so the
                 // workspace has to exist to own it; the workspace's own `schema_id` is linked
                 // afterwards, once there is a schema to point at.
-                let workspace =
-                    tenancy::create_workspace(pool, tenant.id, "default", None, None).await?;
+                let workspace = tenancy::create_workspace(
+                    pool,
+                    tenant.id,
+                    "default",
+                    None,
+                    None,
+                    embedding_stamp.as_ref().map(|(m, d)| (m.as_str(), *d)),
+                )
+                .await?;
 
                 let mut conn = pool.acquire().await.context("acquire connection")?;
                 let (schema, _diff) = yorishiro_core::repositories::schemas::create_schema(
@@ -253,10 +269,16 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             max_entities,
             schema_id,
         } => {
-            let workspace =
-                tenancy::create_workspace(pool, tenant_id, &name, max_entities, schema_id)
-                    .await
-                    .map_err(anyhow::Error::from)?;
+            let workspace = tenancy::create_workspace(
+                pool,
+                tenant_id,
+                &name,
+                max_entities,
+                schema_id,
+                embedding_stamp.as_ref().map(|(m, d)| (m.as_str(), *d)),
+            )
+            .await
+            .map_err(anyhow::Error::from)?;
             println!("workspace created");
             println!("  id:           {}", workspace.id);
             println!("  tenant id:    {}", workspace.tenant_id);

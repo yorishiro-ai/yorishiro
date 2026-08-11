@@ -23,6 +23,15 @@ pub struct WorkspaceRecord {
     /// `schema_pending` until the workspace's first schema exists, `active` from then on.
     /// Entity writes are refused while pending.
     pub status: String,
+    /// The embedding model this workspace's vectors were produced by, and their dimension
+    /// count. `None` on both means the deployment default -- what every workspace created
+    /// before the stamp existed means, and what a deployment that has never changed models
+    /// keeps meaning.
+    ///
+    /// Stamped at creation and not edited: changing the model means re-embedding every entity,
+    /// which is `admin resync-embeddings` rather than a column write.
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
     pub created_at: DateTime<Utc>,
 }
 

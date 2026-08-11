@@ -57,7 +57,7 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | 変数 | 内容 |
 |---|---|
 | `YSR_EMBEDDING_PROVIDER` | `local`(既定)または`openai` |
-| `YSR_EMBEDDING_DIMENSIONS` | 埋め込みベクトルの次元数(既定: `1024`。既定モデルの出力次元)。使用するモデルの出力次元と一致する必要があります。デプロイメント内の全ベクトルはこの値を共有します。データが存在する状態で変更する場合は再埋め込みが必要です |
+| `YSR_EMBEDDING_DIMENSIONS` | 埋め込みベクトルの次元数(既定: `1024`。既定モデルの出力次元)。使用するモデルの出力次元と一致する必要があります。**ワークスペースは作成時にこの値を記録し、異なるモデルによる書き込みは拒否されます**(下記) |
 
 ### `YSR_EMBEDDING_PROVIDER=local`の場合(ONNXエクスポート、既定)
 
@@ -68,6 +68,25 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | `YSR_ONNX_MAX_SEQUENCE_LENGTH` | 最大シーケンス長(既定: `512`) |
 | `YSR_ONNX_POOLING` | トークン埋め込みを1本のベクトルへ集約する方式: `mean`(既定)または`last_token`。**好みではなくモデルの性質**であり、sentence-transformers系(bge-small・multilingual-e5・all-mpnet)は`mean`、Qwen3-Embedding系は`last_token`を要求する。誤った方式で読んでもエラーにはならず検索品質だけが落ちるため、未知の値は起動失敗とし既定へフォールバックしない |
 | `YSR_ONNX_QUERY_INSTRUCTION` | 検索クエリにのみ前置する指示文。Qwen3-Embedding系は`Instruct: {task}\nQuery:{text}`を要求する。**保存する文書には付かない**。未設定または空文字列で無効(既定)。対称なモデルでは設定しない |
+
+### 埋め込みモデルを変更する
+
+ワークスペースは作成時のモデルと次元数を記録します。
+異なる次元のベクトルを書き込もうとすると、両方の数値を示して**422**で拒否されます。
+
+このチェックが無いと書き込み自体は成功し(列は次元を持たないため)、
+そのワークスペースの次の検索が `different vector dimensions 384 and 1024` で失敗します。
+**原因となったエンティティも書き込みも示されません。**
+
+別のモデルへ移す場合は、デプロイメントをそのモデルに向けたうえで再埋め込みします:
+
+```console
+$ yorishiro-server admin resync-embeddings --workspace <id>
+```
+
+この記録が導入される前に作られたワークスペースは記録を持たず、
+デプロイメントが生成するものをそのまま受け入れます(従来どおりの挙動)。
+
 
 ### `YSR_EMBEDDING_PROVIDER=openai`の場合(例: Ollama, LM Studio, OpenAI)
 

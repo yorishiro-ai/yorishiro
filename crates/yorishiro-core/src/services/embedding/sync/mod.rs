@@ -78,6 +78,31 @@ pub async fn sync_embedding(
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
+    // Refuse a vector that would not sit alongside what the workspace already holds.
+    //
+    // The column is dimensionless, so a mismatched write succeeds and the damage surfaces
+    // somewhere else entirely: the next search over that workspace fails with
+    // `different vector dimensions 384 and 1024`, naming neither the entity nor the write that
+    // caused it. Checking here turns a broken workspace into one refused write.
+    //
+    // A workspace with no stamp -- created before this existed -- takes whatever the deployment
+    // produces, which is what it has always done.
+    if let Some(expected) = workspace_embedding_dimensions(&mut *conn, workspace_id).await?
+        && vector.len() != expected as usize
+    {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "this workspace holds {expected}-dimensional vectors, but the configured \
+                 embedding provider produced {}",
+                vector.len()
+            ),
+            details: vec![],
+            hint: "point the deployment at the workspace's model, or re-embed the workspace \
+                   with `admin resync-embeddings`"
+                .into(),
+        });
+    }
+
     // Including the `updated_at` match as a write condition prevents a vector
     // computed from stale data from overwriting a newer one when consecutive
     // updates to the same entity complete out of order due to differing
@@ -143,6 +168,24 @@ pub async fn sync_embedding_for_record(
         provider,
     )
     .await
+}
+
+/// The dimension count a workspace's vectors are expected to have, or `None` when it was created
+/// before the stamp existed and therefore takes the deployment's.
+///
+/// Read on the request connection: `identity.workspaces` is readable by `yorishiro_app`
+/// (entity creation already reads `max_entities` from it), so this needs no second pool.
+async fn workspace_embedding_dimensions(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Option<i32>, YorishiroError> {
+    let row: Option<(Option<i32>,)> =
+        sqlx::query_as("SELECT embedding_dimensions FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .internal()?;
+    Ok(row.and_then(|(dimensions,)| dimensions))
 }
 
 #[cfg(test)]

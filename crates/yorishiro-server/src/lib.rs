@@ -427,6 +427,24 @@ pub async fn shutdown_signal() {
 /// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
 /// share the same dimension count (set via `YSR_EMBEDDING_DIMENSIONS`, default 1024 — the
 /// width of the default model, multilingual-e5-large).
+/// The model name this deployment is configured for, for stamping onto new workspaces.
+///
+/// Read from the environment rather than the provider: `EmbeddingProvider` exposes
+/// `dimensions()` because callers need it, and adding a `model()` for one caller would put a
+/// naming question ("what does a local ONNX file call itself?") into a trait every downstream
+/// implementation would have to answer.
+pub fn embedding_model_name() -> String {
+    match std::env::var("YSR_EMBEDDING_PROVIDER")
+        .unwrap_or_else(|_| "local".into())
+        .as_str()
+    {
+        "openai" => std::env::var("YSR_EMBEDDING_MODEL").unwrap_or_else(|_| "openai".into()),
+        _ => {
+            std::env::var("YSR_EMBEDDING_MODEL").unwrap_or_else(|_| "multilingual-e5-large".into())
+        }
+    }
+}
+
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YSR_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "1024".into())

@@ -410,3 +410,143 @@ async fn silently_succeeds_when_entity_no_longer_exists(pool: PgPool) {
 
     assert!(result.is_ok());
 }
+
+/// Sets the workspace's stamp, as `create_workspace` does for a new one.
+async fn stamp_dimensions(pool: &PgPool, workspace_id: Uuid, dimensions: i32) {
+    sqlx::query("UPDATE identity.workspaces SET embedding_dimensions = $2 WHERE id = $1")
+        .bind(workspace_id)
+        .bind(dimensions)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// A vector of the wrong width must be refused at the write.
+///
+/// The column is dimensionless, so the write itself would succeed — and the workspace's next
+/// search would then fail with `different vector dimensions`, naming neither the entity nor the
+/// write that caused it. One refused write is the better failure.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_vector_of_the_wrong_dimension_is_refused(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    stamp_dimensions(&pool, workspace_id, 1024).await;
+
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema_with_embed())
+        .await
+        .unwrap();
+
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "write report", "priority": 1 }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // The deployment now runs a 384-dimension model against a workspace holding 1024s.
+    let provider = FakeProvider::new(384);
+    let error = sync_embedding_for_record(&mut conn, workspace_id, &entity, &provider)
+        .await
+        .expect_err("a mismatched vector must not be written");
+
+    let (status, _) = error.into_http_parts();
+    assert_eq!(status, 422, "the caller's configuration is what is wrong");
+
+    let stored: Option<Option<pgvector::Vector>> =
+        sqlx::query_scalar("SELECT embedding FROM content.entities WHERE id = $1")
+            .bind(entity.id)
+            .fetch_optional(&mut *conn)
+            .await
+            .unwrap();
+    assert!(
+        stored.flatten().is_none(),
+        "nothing may be written when the dimension does not match"
+    );
+}
+
+/// The matching case still writes, so the guard is a check and not a wall.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_vector_of_the_stamped_dimension_is_written(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    stamp_dimensions(&pool, workspace_id, 768).await;
+
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema_with_embed())
+        .await
+        .unwrap();
+
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "write report", "priority": 1 }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let provider = FakeProvider::new(768);
+    sync_embedding_for_record(&mut conn, workspace_id, &entity, &provider)
+        .await
+        .unwrap();
+
+    let stored: Option<pgvector::Vector> =
+        sqlx::query_scalar("SELECT embedding FROM content.entities WHERE id = $1")
+            .bind(entity.id)
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert_eq!(stored.unwrap().as_slice().len(), 768);
+}
+
+/// A workspace created before the stamp existed has none, and takes whatever the deployment
+/// produces — which is what it has always done. Refusing those writes would break every
+/// existing deployment on upgrade.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_unstamped_workspace_accepts_any_dimension(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema_with_embed())
+        .await
+        .unwrap();
+
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "write report", "priority": 1 }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let provider = FakeProvider::new(384);
+    sync_embedding_for_record(&mut conn, workspace_id, &entity, &provider)
+        .await
+        .expect("a workspace with no stamp takes the deployment's dimension");
+}
