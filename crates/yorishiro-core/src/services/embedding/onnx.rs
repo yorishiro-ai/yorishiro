@@ -8,7 +8,7 @@ use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
-use super::EmbeddingProvider;
+use super::{EmbedKind, EmbeddingProvider};
 use crate::error::YorishiroError;
 
 /// Lower bound for `max_sequence_length`. tokenizers subtracts the number of
@@ -36,6 +36,10 @@ pub struct LocalOnnxConfig {
     /// How token embeddings are reduced to one vector. Must match what the model was trained
     /// with; see [`Pooling`].
     pub pooling: Pooling,
+    /// Instruction prefixed to search queries, and to queries only. Qwen3-Embedding expects
+    /// `Instruct: {task}\nQuery:{text}`; symmetric models want this unset. `None` embeds
+    /// queries exactly as documents.
+    pub query_instruction: Option<String>,
 }
 
 /// Provider that generates embeddings using a local ONNX model (BERT-family
@@ -70,6 +74,7 @@ struct Inner {
     needs_token_type_ids: bool,
     output_name: String,
     pooling: Pooling,
+    query_instruction: Option<String>,
 }
 
 fn internal(message: impl std::fmt::Display) -> YorishiroError {
@@ -133,6 +138,7 @@ impl LocalOnnxProvider {
             needs_token_type_ids,
             output_name,
             pooling: config.pooling,
+            query_instruction: config.query_instruction,
         };
 
         // Dimension mismatches must be caught here (at server startup). If
@@ -347,6 +353,18 @@ pub fn mean_pool_normalized(
 impl EmbeddingProvider for LocalOnnxProvider {
     fn dimensions(&self) -> usize {
         self.inner.dimensions
+    }
+
+    /// Prefixes the configured instruction to queries, and only to queries. With no instruction
+    /// configured this is exactly `embed`, which is what every symmetric model wants.
+    async fn embed_as(&self, kind: EmbedKind, text: &str) -> Result<Vec<f32>, YorishiroError> {
+        match (kind, self.inner.query_instruction.as_deref()) {
+            (EmbedKind::Query, Some(instruction)) => {
+                self.embed(&format!("Instruct: {instruction}\nQuery:{text}"))
+                    .await
+            }
+            _ => self.embed(text).await,
+        }
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {

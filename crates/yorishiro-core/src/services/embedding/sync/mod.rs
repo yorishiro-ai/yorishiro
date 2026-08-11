@@ -9,7 +9,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::EntityTypeDef;
 use crate::models::entities::EntityRecord;
 use crate::repositories::schemas;
-use crate::services::embedding::EmbeddingProvider;
+use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 /// `pub` (rather than private) only so the crate-root integration test in `tests/` can build
 /// its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
@@ -76,7 +76,7 @@ pub async fn sync_embedding(
         return Ok(());
     };
 
-    let vector = provider.embed(&text).await?;
+    let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
     // Including the `updated_at` match as a write condition prevents a vector
     // computed from stale data from overwriting a newer one when consecutive

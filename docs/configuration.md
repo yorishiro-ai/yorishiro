@@ -66,6 +66,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | `YSR_ONNX_TOKENIZER_PATH` | Path to the tokenizer (default: `models/tokenizer.json`) |
 | `YSR_ONNX_MAX_SEQUENCE_LENGTH` | Maximum sequence length (default: `512`) |
 | `YSR_ONNX_POOLING` | How token embeddings are reduced to one vector: `mean` (default) or `last_token`. This is a property of the model, not a preference — sentence-transformers exports (bge-small, multilingual-e5, all-mpnet) want `mean`, the Qwen3-Embedding family wants `last_token`. Reading a model with the wrong one raises no error; the search results just get worse, so an unrecognized value fails startup rather than falling back |
+| `YSR_ONNX_QUERY_INSTRUCTION` | Instruction prefixed to search queries only. Qwen3-Embedding expects `Instruct: {task}\nQuery:{text}`; stored documents never get it. Unset or empty disables it (the default). Leave unset for symmetric models |
 
 ### When `YSR_EMBEDDING_PROVIDER=openai` (e.g. Ollama, LM Studio, OpenAI)
 

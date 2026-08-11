@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::entities::EntityRecord;
-use crate::services::embedding::EmbeddingProvider;
+use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 pub use crate::models::search::*;
 
@@ -50,7 +50,7 @@ pub async fn embed_query(
     provider: &dyn EmbeddingProvider,
     query_text: &str,
 ) -> Result<Vec<f32>, YorishiroError> {
-    provider.embed(query_text).await
+    provider.embed_as(EmbedKind::Query, query_text).await
 }
 
 /// Returns entities ordered by cosine distance between the given embedding vector and the
