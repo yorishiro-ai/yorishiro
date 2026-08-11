@@ -5,6 +5,7 @@
 pub mod entities;
 pub mod export;
 pub mod import;
+pub mod maintenance;
 pub mod recall;
 pub mod relations;
 pub mod schemas;

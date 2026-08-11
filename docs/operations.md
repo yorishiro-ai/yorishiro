@@ -60,3 +60,35 @@ the `pg_trgm` fallback, so the window degrades results rather than emptying them
 
 Re-embedding is the whole corpus through the model, so time it against a batch write rather
 than a query.
+
+## Maintenance mode
+
+Two modes, both shared by every node in the deployment (the state is a row in the database, not
+a flag in the process — a flag would put one replica in maintenance while its siblings kept
+serving):
+
+| Mode | Reads | Writes | Status |
+|---|---|---|---|
+| `read-only` | served | refused | `423 Locked` |
+| `full-lock` | refused | refused | `503 Service Unavailable` |
+
+Both send `Retry-After`. Agents retry on the header rather than on the body, so a refusal
+without one invites the immediate retry the mode exists to prevent.
+
+```console
+$ yorishiro-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
+$ yorishiro-server admin maintenance-status
+$ yorishiro-server admin maintenance off
+```
+
+`--reason` is shown to callers in place of the generic message; an operator saying "restoring
+from backup, back by 09:00" answers the question a bare status code provokes.
+
+`/up` and `/health` answer in every mode. Refusing them would have an orchestrator restart a
+server that is deliberately paused, and a restart does not clear the state, so the loop would
+not converge.
+
+Read-only decides by HTTP method, so `POST /mcp` is treated as a write even when the tool
+called is a read: the middleware would have to consume the request body to know which tool it
+is, and a body consumed there is one the handler no longer has. It errs toward refusing a read
+rather than admitting a write.
