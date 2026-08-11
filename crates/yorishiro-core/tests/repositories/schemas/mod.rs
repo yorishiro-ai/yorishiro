@@ -5,7 +5,9 @@ use uuid::Uuid;
 use crate::YorishiroError;
 use crate::db::TenantDb;
 use crate::metaschema::MetaSchemaDefinition;
-use crate::repositories::schemas::{create_schema, get_active_schema, get_by_id};
+use crate::repositories::schemas::{
+    create_schema, create_schema_from, get_active_schema, get_by_id,
+};
 use crate::test_support;
 
 fn task_schema(with_priority: bool) -> MetaSchemaDefinition {
@@ -156,4 +158,102 @@ async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
         .unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, b.id);
+}
+
+/// A schema written by hand claims no origin. "detached" here means never linked, not
+/// orphaned — told apart by origin_template_id having never been set.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_hand_written_schema_has_no_origin(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema(&mut conn, tenant_id, workspace_id, task_schema(false))
+        .await
+        .unwrap();
+
+    assert!(schema.origin_template_id.is_none());
+    assert_eq!(schema.origin_status, "detached");
+}
+
+/// Created from a library template, the schema records which one and says it is following it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_schema_from_a_template_records_its_origin(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(schema.origin_template_id, Some(template_id));
+    assert_eq!(schema.origin_status, "linked");
+}
+
+/// The yank: deleting the template must not destroy the copy, and must stop it claiming to
+/// follow something that is no longer there. Enforced by a trigger, so a delete arriving from
+/// the admin CLI or a migration is covered too.
+#[sqlx::test(migrations = "../../migrations")]
+async fn deleting_the_template_detaches_the_schema_without_destroying_it(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    sqlx::query("DELETE FROM identity.templates WHERE id = $1")
+        .bind(template_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
+
+    // The definition survives -- this is the whole point of copying rather than referencing.
+    assert_eq!(after.definition.name, schema.definition.name);
+    // And it no longer claims to be following anything.
+    assert!(after.origin_template_id.is_none());
+    assert_eq!(
+        after.origin_status, "detached",
+        "a schema must not stay 'linked' with no template to link to"
+    );
+}
+
+async fn seed_template(pool: &PgPool, tenant_id: Uuid) -> Uuid {
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO identity.templates (tenant_id, name, definition) \
+         VALUES ($1, 'seeded', $2) RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(serde_json::to_value(task_schema(false)).unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    id
 }
