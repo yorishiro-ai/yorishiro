@@ -731,3 +731,120 @@ async fn drift_marks_an_optional_addition_as_not_required(pool: PgPool) {
         "an optional addition leaves the entity valid; required is what separates the two"
     );
 }
+
+/// The number an operator acts on: entities lacking a field the active version requires.
+/// Entities merely behind, but still valid, are counted separately — conflating them would
+/// inflate the work a migration appears to need.
+#[sqlx::test(migrations = "../../migrations")]
+async fn dry_run_separates_entities_that_need_values_from_ones_merely_behind(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    for title in ["one", "two"] {
+        entities::create(
+            &mut conn,
+            workspace_id,
+            CreateEntityInput {
+                schema_name: "task-management".into(),
+                entity_type: "task".into(),
+                data: json!({ "title": title }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    // An optional addition: the entities stay valid, only their version marker falls behind.
+    let optional_added: MetaSchemaDefinition = serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": {
+            "task": {
+                "fields": {
+                    "title": { "type": "string", "required": true },
+                    "tag":   { "type": "string" }
+                }
+            }
+        }
+    }))
+    .unwrap();
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, optional_added)
+        .await
+        .unwrap();
+
+    let report = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+
+    assert_eq!(report.total_entities, 2);
+    assert_eq!(report.behind_but_valid, 2, "an optional field is not work");
+    assert_eq!(report.needs_values, 0);
+
+    // Now a required addition: the same entities become work.
+    schemas::create_schema(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_category(),
+    )
+    .await
+    .unwrap();
+
+    let report = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+
+    assert_eq!(report.needs_values, 2);
+    assert_eq!(report.behind_but_valid, 0);
+    let by_type = &report.by_entity_type[0];
+    assert_eq!(by_type.entity_type, "task");
+    assert_eq!(
+        by_type.missing_required,
+        vec!["category"],
+        "the report names the work, not just its size"
+    );
+}
+
+/// Entities already on the active version are counted as current, and a workspace with
+/// nothing behind reports no work.
+#[sqlx::test(migrations = "../../migrations")]
+async fn dry_run_reports_nothing_to_do_when_everything_is_current(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "current" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let report = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+        .await
+        .unwrap();
+
+    assert_eq!(report.total_entities, 1);
+    assert_eq!(report.current, 1);
+    assert_eq!(report.needs_values, 0);
+    assert!(report.by_entity_type.is_empty());
+}

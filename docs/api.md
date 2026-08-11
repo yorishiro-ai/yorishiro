@@ -171,7 +171,7 @@ A path with no extension therefore never 404s through this fallback -- a typo'd 
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 24 tools. Example connection from Claude Code:
+Connecting to `/mcp` (Streamable HTTP) gives you access to 25 tools. Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -193,6 +193,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | Relation CRUD |
 | `set_relation_status` | write | Move a relation to `active`, `deprecated` or `archived`. Traversal follows `active` relations only, so this retires one without destroying the record that it existed |
 | `get_entity_drift` | read | Report how an entity stands against the active version of its schema — the fields it predates, and whether the active version requires them |
+| `migration_dry_run` | read | Count what migrating a schema's entities to its active version would face: how many are current, how many are behind but still valid, and how many lack a field the active version requires — the last being the work, named as well as counted |
 | `search_entities` | read | Vector similarity search over a natural-language query, optionally narrowed by `entity_type`/`filter`; entities without an embedding can still surface via trigram fuzzy matching |
 | `recall_context` | read | Fetch an entity plus its relations and connected neighbors in one call |
 | `import_jsonl` | schema | Bulk-import schemas/entities/relations from a JSON Lines document in the export format, as a single transaction |

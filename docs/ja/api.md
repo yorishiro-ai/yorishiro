@@ -171,7 +171,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると24のツールが使えます。Claude Codeでの接続例:
+`/mcp`(Streamable HTTP)に接続すると25のツールが使えます。Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -193,6 +193,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | リレーションCRUD |
 | `set_relation_status` | write | リレーションを `active` / `deprecated` / `archived` へ遷移させる。グラフ探索は `active` のみを辿るため、「存在した」という記録を残したまま関係を引退させられる |
 | `get_entity_drift` | read | エンティティが自分のスキーマのアクティブ版に対して欠いているフィールドと、それが必須かどうかを返す |
+| `migration_dry_run` | read | スキーマのエンティティをアクティブ版へ移行した場合に何が起きるかを数える。現行版・「版は古いが有効」・「必須フィールドを欠く」の3分類を返す。**最後の1つが実際の作業**であり、欠けているフィールド名も併せて返す |
 | `search_entities` | read | 自然文クエリによるベクトル類似検索。`entity_type`/`filter`で絞り込み可能。埋め込みを持たないエンティティも trigram によるあいまい検索でヒットし得る |
 | `recall_context` | read | エンティティとそのリレーション・隣接エンティティを一括取得 |
 | `import_jsonl` | schema | エクスポート形式のJSON Linesドキュメントからスキーマ/エンティティ/リレーションを一括インポート。単一トランザクションとして実行 |

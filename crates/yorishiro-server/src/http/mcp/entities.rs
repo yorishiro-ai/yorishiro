@@ -54,6 +54,12 @@ pub struct ListEntitiesArgs {
     pub offset: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MigrationDryRunArgs {
+    /// The schema name whose entities would be migrated.
+    pub name: String,
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_entities)]
 impl YorishiroMcpServer {
     #[tool(description = "Create a new entity (requires write scope)")]
@@ -169,6 +175,27 @@ impl YorishiroMcpServer {
         let workspace_id = authorized.ctx.workspace_id;
         let drift = mcp_try!(entities::drift(authorized.conn(), workspace_id, args.id).await);
         ok_json(drift)
+    }
+
+    #[tool(
+        description = "Count what migrating a schema's entities to its active version would \
+                           face, without doing it (requires read scope). Reports how many are \
+                           current, how many are behind but still valid, and how many lack a \
+                           field the active version requires — the last being the work a \
+                           migration would have to fill in."
+    )]
+    pub async fn migration_dry_run(
+        &self,
+        Parameters(args): Parameters<MigrationDryRunArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let report = mcp_try!(
+            entities::migration_dry_run(authorized.conn(), workspace_id, &args.name).await
+        );
+        ok_json(report)
     }
 }
 

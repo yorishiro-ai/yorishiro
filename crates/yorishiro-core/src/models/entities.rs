@@ -94,3 +94,39 @@ pub struct DriftField {
     /// under the current one.
     pub required: bool,
 }
+
+/// What a batch migration would find, without doing it.
+///
+/// Migration is lazy: an entity keeps validating against the version it was written with, so a
+/// workspace accumulates entities spread across versions. This counts them before anything is
+/// touched, because the useful question before a migration is how much of the corpus it would
+/// have to fill in — a number that decides whether defaults suffice or whether the work needs
+/// a person.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MigrationDryRun {
+    pub schema_name: String,
+    /// The version everything would be brought to.
+    pub active_version: i32,
+    pub total_entities: i64,
+    /// Already on the active version. Nothing to do for these.
+    pub current: i64,
+    /// On an older version, but missing no field the active version requires — they validate
+    /// as they stand and only their version marker is behind.
+    pub behind_but_valid: i64,
+    /// On an older version and missing at least one field the active version requires. These
+    /// are what a migration has to fill in, and what mode A's defaults or mode B's inference
+    /// would be for.
+    pub needs_values: i64,
+    /// Per entity type, so an operator can see whether the work is spread or concentrated.
+    pub by_entity_type: Vec<DryRunByType>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DryRunByType {
+    pub entity_type: String,
+    pub behind: i64,
+    pub needs_values: i64,
+    /// The required fields those entities lack, so the report names the work rather than only
+    /// counting it.
+    pub missing_required: Vec<String>,
+}
