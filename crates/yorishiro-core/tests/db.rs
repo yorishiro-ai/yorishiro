@@ -157,3 +157,76 @@ async fn the_storage_trait_exposes_the_unscoped_pool_for_the_control_plane(pool:
         .unwrap();
     assert_eq!(one, 1);
 }
+
+/// The lock has to actually exclude, not just execute. Two transactions take the same key;
+/// the second must wait for the first to commit rather than proceeding beside it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn lock_for_update_serializes_transactions_on_the_same_key(pool: PgPool) {
+    use sqlx::Acquire;
+
+    let mut first = pool.acquire().await.unwrap();
+    let mut first_tx = first.begin().await.unwrap();
+    crate::db::lock_for_update(&mut first_tx, "same-key")
+        .await
+        .unwrap();
+
+    // A second transaction wanting the same key cannot get it while the first holds it.
+    // Bounded by a timeout so a regression fails here instead of hanging the suite. The
+    // connection is dropped with the future: a timed-out attempt is still queued for the lock
+    // server-side, and reusing it would have the next attempt wait behind its own ghost.
+    {
+        let mut second = pool.acquire().await.unwrap();
+        let blocked = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            let mut second_tx = second.begin().await.unwrap();
+            crate::db::lock_for_update(&mut second_tx, "same-key")
+                .await
+                .unwrap();
+            second_tx.commit().await.unwrap();
+        })
+        .await;
+        assert!(
+            blocked.is_err(),
+            "the second transaction should have waited"
+        );
+    }
+
+    // Releasing the first lets a fresh attempt through, which is what makes this exclusion
+    // rather than a deadlock.
+    first_tx.commit().await.unwrap();
+    let mut third = pool.acquire().await.unwrap();
+    let proceeds = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut third_tx = third.begin().await.unwrap();
+        crate::db::lock_for_update(&mut third_tx, "same-key")
+            .await
+            .unwrap();
+        third_tx.commit().await.unwrap();
+    })
+    .await;
+    assert!(proceeds.is_ok(), "the lock should release on commit");
+}
+
+/// Different keys do not block each other -- otherwise the lock would serialize every
+/// workspace's writes against every other's.
+#[sqlx::test(migrations = "../../migrations")]
+async fn lock_for_update_does_not_serialize_different_keys(pool: PgPool) {
+    use sqlx::Acquire;
+
+    let mut first = pool.acquire().await.unwrap();
+    let mut first_tx = first.begin().await.unwrap();
+    crate::db::lock_for_update(&mut first_tx, "key-a")
+        .await
+        .unwrap();
+
+    let mut second = pool.acquire().await.unwrap();
+    let proceeds = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut second_tx = second.begin().await.unwrap();
+        crate::db::lock_for_update(&mut second_tx, "key-b")
+            .await
+            .unwrap();
+        second_tx.commit().await.unwrap();
+    })
+    .await;
+    assert!(proceeds.is_ok(), "a different key should not be blocked");
+
+    first_tx.commit().await.unwrap();
+}

@@ -183,9 +183,7 @@ pub async fn create(
 ) -> Result<EntityRecord, YorishiroError> {
     let mut tx = conn.begin().await.internal()?;
 
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(workspace_id.to_string())
-        .execute(&mut *tx)
+    crate::db::lock_for_update(&mut tx, &workspace_id.to_string())
         .await
         .internal()?;
 
