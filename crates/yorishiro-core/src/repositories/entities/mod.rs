@@ -535,3 +535,135 @@ pub async fn migration_dry_run(
         by_entity_type: by_type.into_values().collect(),
     })
 }
+
+/// Records what `entity_id` holds now, tagged with `job_id`.
+///
+/// Called before an overwrite. Taking the image from the row rather than from the caller means
+/// it is what the database actually holds, not what the caller believed it held.
+pub async fn snapshot(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    // One statement: reading then writing would leave a window in which a concurrent update
+    // slips between, and the image would be of a state that no longer existed when it was
+    // taken.
+    let affected = sqlx::query(
+        "INSERT INTO content.entity_snapshots \
+             (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
+         SELECT $3, workspace_id, id, schema_id, schema_version, data \
+         FROM content.entities \
+         WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(entity_id)
+    .bind(job_id)
+    .execute(&mut *conn)
+    .await
+    .internal()?
+    .rows_affected();
+
+    if affected == 0 {
+        return Err(YorishiroError::not_found(format!(
+            "entity '{entity_id}' was not found"
+        )));
+    }
+    Ok(())
+}
+
+/// The snapshots taken by one job, newest first.
+pub async fn snapshots_for_job(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<Vec<EntitySnapshot>, YorishiroError> {
+    sqlx::query_as::<_, EntitySnapshot>(
+        "SELECT id, job_id, entity_id, schema_id, schema_version, data, created_at \
+         FROM content.entity_snapshots \
+         WHERE workspace_id = $1 AND job_id = $2 \
+         ORDER BY created_at DESC",
+    )
+    .bind(workspace_id)
+    .bind(job_id)
+    .fetch_all(&mut *conn)
+    .await
+    .internal()
+}
+
+/// Puts every entity in `job_id` back to what it held before.
+///
+/// All in one transaction: a half-undone batch is a state nobody asked for, and worse than
+/// either end of it. An entity deleted since the snapshot is counted rather than failed —
+/// refusing the whole undo because one row is gone would leave the rest wrong.
+pub async fn undo_job(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<UndoReport, YorishiroError> {
+    let mut tx = conn.begin().await.internal()?;
+
+    let snapshots = sqlx::query_as::<_, EntitySnapshot>(
+        "SELECT id, job_id, entity_id, schema_id, schema_version, data, created_at \
+         FROM content.entity_snapshots \
+         WHERE workspace_id = $1 AND job_id = $2 \
+         ORDER BY created_at ASC",
+    )
+    .bind(workspace_id)
+    .bind(job_id)
+    .fetch_all(&mut *tx)
+    .await
+    .internal()?;
+
+    if snapshots.is_empty() {
+        return Err(YorishiroError::not_found(format!(
+            "no snapshots for job '{job_id}'"
+        )));
+    }
+
+    let mut restored = 0i64;
+    let mut missing = 0i64;
+
+    for snapshot in &snapshots {
+        // schema_id and schema_version go back too: an undo that restored the data but left
+        // the entity claiming a newer version would leave it validating against a definition
+        // its data no longer matches.
+        let affected = sqlx::query(
+            "UPDATE content.entities \
+             SET data = $3, schema_id = $4, schema_version = $5, updated_at = now() \
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(snapshot.entity_id)
+        .bind(&snapshot.data)
+        .bind(snapshot.schema_id)
+        .bind(snapshot.schema_version)
+        .execute(&mut *tx)
+        .await
+        .internal()?
+        .rows_affected();
+
+        if affected == 0 {
+            missing += 1;
+        } else {
+            restored += 1;
+        }
+    }
+
+    // The snapshots go with the undo. Keeping them would let the same job be undone twice,
+    // the second time restoring what the first already put back over whatever came after.
+    sqlx::query("DELETE FROM content.entity_snapshots WHERE workspace_id = $1 AND job_id = $2")
+        .bind(workspace_id)
+        .bind(job_id)
+        .execute(&mut *tx)
+        .await
+        .internal()?;
+
+    tx.commit().await.internal()?;
+
+    Ok(UndoReport {
+        job_id,
+        restored,
+        missing,
+    })
+}
