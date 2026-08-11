@@ -72,6 +72,7 @@ struct Inner {
     tokenizer: Tokenizer,
     dimensions: usize,
     needs_token_type_ids: bool,
+    needs_position_ids: bool,
     output_name: String,
     pooling: Pooling,
     query_instruction: Option<String>,
@@ -125,6 +126,12 @@ impl LocalOnnxProvider {
             .inputs()
             .iter()
             .any(|outlet| outlet.name() == "token_type_ids");
+        // Decoder-style exports (Qwen3-Embedding among them) declare position_ids and fail the
+        // whole inference without it, where encoder exports derive positions internally.
+        let needs_position_ids = session
+            .inputs()
+            .iter()
+            .any(|outlet| outlet.name() == "position_ids");
         let output_name = session
             .outputs()
             .first()
@@ -136,6 +143,7 @@ impl LocalOnnxProvider {
             tokenizer,
             dimensions: config.dimensions,
             needs_token_type_ids,
+            needs_position_ids,
             output_name,
             pooling: config.pooling,
             query_instruction: config.query_instruction,
@@ -194,6 +202,12 @@ impl Inner {
         ];
         if self.needs_token_type_ids {
             inputs.push(("token_type_ids".into(), to_tensor(token_type_ids)?.into()));
+        }
+        if self.needs_position_ids {
+            // 0..seq per row. Padding is right-side, so every real token sits at the position
+            // it would have unpadded and the trailing pad positions are never attended to.
+            let position_ids: Vec<i64> = (0..batch).flat_map(|_| 0..seq as i64).collect();
+            inputs.push(("position_ids".into(), to_tensor(position_ids)?.into()));
         }
 
         // Recovers from poisoning: even if a panic occurs while the lock is
