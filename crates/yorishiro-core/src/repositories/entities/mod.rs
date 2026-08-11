@@ -667,3 +667,136 @@ pub async fn undo_job(
         missing,
     })
 }
+
+/// Fills fields that the active schema version defines a `default` for, into entities written
+/// before those fields existed.
+///
+/// The entity keeps its own schema version. Filling a value is not a migration to the newer
+/// definition — it adds data the entity was always allowed to hold, validated against the
+/// version the entity already claims. Moving an entity between versions is a separate question
+/// and not this one.
+///
+/// Every entity touched is snapshotted under one `job_id` first, so the whole run can be put
+/// back with [`undo_job`].
+///
+/// Fields with no `default` are left alone and reported. Inventing a value would be worse than
+/// an absent field: once written, a value nobody chose looks exactly like one someone did.
+pub async fn fill_defaults(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    schema_name: &str,
+    job_id: Uuid,
+) -> Result<FillDefaultsReport, YorishiroError> {
+    let active = schemas::get_active_schema(conn, workspace_id, schema_name).await?;
+
+    let mut filled = 0i64;
+    let mut skipped = 0i64;
+    let mut still_missing: Vec<String> = Vec::new();
+
+    // One transaction: a half-filled run leaves a workspace in a state nobody asked for, and
+    // the snapshots would describe a rollback point that was never a whole state.
+    let mut tx = conn.begin().await.internal()?;
+
+    let rows: Vec<(Uuid, String, Value)> = sqlx::query_as(
+        "SELECT e.id, e.entity_type, e.data \
+         FROM content.entities e \
+         JOIN content.schemas s ON s.id = e.schema_id \
+         WHERE e.workspace_id = $1 AND s.name = $2 AND e.schema_id <> $3",
+    )
+    .bind(workspace_id)
+    .bind(schema_name)
+    .bind(active.id)
+    .fetch_all(&mut *tx)
+    .await
+    .internal()?;
+
+    for (entity_id, entity_type, data) in rows {
+        let Some(type_def) = active.definition.entity_types.get(&entity_type) else {
+            // The active version dropped this type. Nothing to fill against.
+            continue;
+        };
+        let Some(object) = data.as_object() else {
+            continue;
+        };
+
+        let mut updated = object.clone();
+        let mut changed = false;
+        let mut missing_here = Vec::new();
+
+        for (name, field) in &type_def.fields {
+            if object.contains_key(name) {
+                continue;
+            }
+            match &field.default {
+                Some(value) => {
+                    updated.insert(name.clone(), value.clone());
+                    changed = true;
+                }
+                None if field.required => missing_here.push(name.clone()),
+                None => {}
+            }
+        }
+
+        if changed {
+            snapshot_in(&mut tx, workspace_id, entity_id, job_id).await?;
+
+            let (sql, values) = Query::update()
+                .table((Alias::new("content"), Entities::Table))
+                .values([
+                    (Entities::Data, Value::Object(updated).into()),
+                    (Entities::UpdatedAt, Expr::current_timestamp().into()),
+                ])
+                .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
+                .and_where(Expr::col(Entities::Id).eq(entity_id))
+                .build_sqlx(PostgresQueryBuilder);
+            sqlx::query_with(&sql, values)
+                .execute(&mut *tx)
+                .await
+                .internal()?;
+            filled += 1;
+        }
+
+        if !missing_here.is_empty() {
+            skipped += 1;
+            for name in missing_here {
+                if !still_missing.contains(&name) {
+                    still_missing.push(name);
+                }
+            }
+        }
+    }
+
+    tx.commit().await.internal()?;
+
+    Ok(FillDefaultsReport {
+        job_id,
+        schema_name: schema_name.to_string(),
+        filled,
+        skipped_no_default: skipped,
+        still_missing,
+    })
+}
+
+/// [`snapshot`] against an open transaction, so the image and the write it protects commit or
+/// roll back together.
+async fn snapshot_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    sqlx::query(
+        "INSERT INTO content.entity_snapshots \
+             (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
+         SELECT $3, workspace_id, id, schema_id, schema_version, data \
+         FROM content.entities \
+         WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(entity_id)
+    .bind(job_id)
+    .execute(&mut **tx)
+    .await
+    .internal()?;
+    Ok(())
+}

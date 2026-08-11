@@ -92,3 +92,19 @@ Read-only decides by HTTP method, so `POST /mcp` is treated as a write even when
 called is a read: the middleware would have to consume the request body to know which tool it
 is, and a body consumed there is one the handler no longer has. It errs toward refusing a read
 rather than admitting a write.
+
+### Filling defaults
+
+`POST /api/schemas/active/{name}/fill-defaults` (schema scope) writes the active version's
+`default` values into entities written before those fields existed, and returns a `job_id`.
+
+Entities keep their own schema version. Filling a value is not a migration between definitions
+— it adds data the entity was always allowed to hold, validated against the version it already
+claims. What version an entity belongs to is a separate question.
+
+A required field with **no** default is left alone and reported in `still_missing`. A value
+nobody chose is indistinguishable from one somebody did, once written.
+
+`POST /api/migration-jobs/{job_id}/undo` puts the whole run back. The snapshots are consumed by
+the undo, so a job can only be undone once — a second undo would lay stale data over whatever
+came after the first.
