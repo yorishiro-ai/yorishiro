@@ -36,6 +36,13 @@ pub struct SchemaRecord {
     /// for every schema that never had one.
     #[serde(default = "default_origin_status")]
     pub origin_status: String,
+    /// The template's definition as it stood when this copy was taken — the common ancestor a
+    /// three-way merge compares against.
+    ///
+    /// `None` for a schema with no origin, and for one copied before this was recorded: what
+    /// the template said then is not recoverable, and a fabricated base is worse than none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_snapshot: Option<MetaSchemaDefinition>,
     pub created_at: DateTime<Utc>,
 }
 

@@ -369,3 +369,71 @@ async fn a_yanked_schema_stops_being_reported(pool: PgPool) {
         .unwrap();
     assert!(changes.is_empty(), "a yanked schema has no update to take");
 }
+
+/// The merge base. A copy keeps the definition it was made from, and that snapshot does not
+/// move when the template does — otherwise there would be nothing to compare the upstream
+/// edit against.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_copy_keeps_the_definition_it_was_made_from(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    let base = schema
+        .origin_snapshot
+        .as_ref()
+        .expect("a copy from a template has a merge base");
+    assert_eq!(base.name, "task-management");
+    assert!(
+        !base.entity_types["task"].fields.contains_key("priority"),
+        "the base is the definition as copied"
+    );
+
+    // The template moves on.
+    sqlx::query("UPDATE identity.templates SET definition = $2 WHERE id = $1")
+        .bind(template_id)
+        .bind(serde_json::to_value(task_schema(true)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The base does not. This is what lets a merge tell an upstream addition from a local one.
+    let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
+    let base = after.origin_snapshot.expect("still there");
+    assert!(
+        !base.entity_types["task"].fields.contains_key("priority"),
+        "the merge base must not follow the template"
+    );
+}
+
+/// No origin, no ancestor. A fabricated base would be worse than none, since a merge would
+/// treat every field as agreed-upon history.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_hand_written_schema_has_no_merge_base(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema(&mut conn, tenant_id, workspace_id, task_schema(false))
+        .await
+        .unwrap();
+
+    assert!(schema.origin_snapshot.is_none());
+}
