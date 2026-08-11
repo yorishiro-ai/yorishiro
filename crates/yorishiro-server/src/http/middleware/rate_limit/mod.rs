@@ -32,6 +32,19 @@ impl RateLimiter {
         }
     }
 
+    /// `YSR_SEARCH_TOKENS_PER_MINUTE` (default 100000) tokens per minute, per workspace.
+    ///
+    /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is
+    /// known and is the thing whose consumption matters. The default is high enough that
+    /// ordinary use never reaches it — it is there to bound a runaway agent, not to ration.
+    pub fn search_tokens_from_env() -> Self {
+        let max_tokens = std::env::var("YSR_SEARCH_TOKENS_PER_MINUTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100_000);
+        Self::new(max_tokens, Duration::from_secs(60))
+    }
+
     /// `YSR_AUTH_RATE_LIMIT_MAX` (default 10) requests per `YSR_AUTH_RATE_LIMIT_WINDOW_SECS`
     /// (default 60) seconds, per client IP.
     pub fn from_env() -> Self {
@@ -54,6 +67,19 @@ impl RateLimiter {
     /// which only see this crate's public API -- can exercise the bucket logic directly
     /// instead of only through `enforce`.
     pub fn allow(&self, key: &str) -> bool {
+        self.allow_cost(key, 1)
+    }
+
+    /// As [`Self::allow`], charging `cost` against the window instead of one.
+    ///
+    /// A quota counted in requests treats a one-word query and a paragraph alike, though the
+    /// second costs the embedding model proportionally more. Charging the token count instead
+    /// bounds the work rather than the call count.
+    ///
+    /// A single request larger than the whole window is still admitted, once: rejecting it
+    /// would make that query permanently impossible rather than merely expensive, and the
+    /// bucket is left exhausted so the next one waits.
+    pub fn allow_cost(&self, key: &str, cost: u32) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
 
@@ -69,8 +95,9 @@ impl RateLimiter {
         if now.duration_since(entry.0) >= self.window {
             *entry = (now, 0);
         }
-        entry.1 += 1;
-        entry.1 <= self.max_requests
+        let was_empty = entry.1 == 0;
+        entry.1 = entry.1.saturating_add(cost);
+        entry.1 <= self.max_requests || was_empty
     }
 }
 

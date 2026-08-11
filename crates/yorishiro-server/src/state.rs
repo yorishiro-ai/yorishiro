@@ -34,6 +34,11 @@ pub struct AppState {
     /// keep using `tenant_db` instead: this pool bypasses RLS entirely.
     pub identity_pool: PgPool,
     pub embedding_provider: Arc<dyn EmbeddingProvider>,
+    /// Per-workspace token budget for search. Search is metered in tokens rather than
+    /// requests because that is what it costs the embedding model, and because a query is
+    /// short enough that counting it is cheap — measured at 74µs, against 165ms for a large
+    /// entity body, which is why writes stay on request counts.
+    pub search_token_limiter: Arc<crate::http::middleware::rate_limit::RateLimiter>,
     /// How a presented API key becomes an `AuthContext`. Every REST extractor and every MCP
     /// handler resolves through this one value, so replacing it changes authentication for the
     /// whole process rather than for the paths that remembered to ask.
@@ -55,6 +60,11 @@ impl AppState {
             tenant_db,
             identity_pool,
             embedding_provider,
+            // Built here rather than passed in, so every existing caller of `new` keeps
+            // working and a downstream process gets the same quota without asking for it.
+            search_token_limiter: Arc::new(
+                crate::http::middleware::rate_limit::RateLimiter::search_tokens_from_env(),
+            ),
             authenticator: default_authenticator(),
             embedding_sync_permits: Arc::new(Semaphore::new(EMBEDDING_SYNC_MAX_CONCURRENCY)),
             embedding_tasks: TaskTracker::new(),

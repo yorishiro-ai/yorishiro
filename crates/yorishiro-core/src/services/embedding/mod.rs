@@ -29,6 +29,20 @@ pub enum EmbedKind {
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;
 
+    /// How many tokens `text` costs this provider, for quota purposes.
+    ///
+    /// The default is a byte-length estimate, and deliberately so: a provider without a
+    /// tokenizer in the process (an external API, where the model runs elsewhere) cannot count
+    /// exactly, and loading one purely to meter would mean shipping a tokenizer to a
+    /// deployment that chose not to run embeddings locally.
+    ///
+    /// Four bytes per token is the usual English rule of thumb and overestimates Japanese
+    /// text, which suits a quota: overcharging throttles a heavy caller early, while
+    /// undercharging lets it past the limit it was supposed to hit.
+    fn count_tokens(&self, text: &str) -> u32 {
+        u32::try_from(text.len().div_ceil(4)).unwrap_or(u32::MAX)
+    }
+
     /// Must return vectors in the same order and count as the input.
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError>;
 
