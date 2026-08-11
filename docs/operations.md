@@ -183,9 +183,10 @@ had already accepted.
 
 1. Construct `DrainingQueue::new(new, old)` and serve from it. Nothing upstream needs to know —
    it is a `Queue` like any other.
-2. `drain_old(timeout)` waits for the old queue's outstanding work. This is deliberately not
-   `drain()`: that one waits for *everything*, including work that has only just arrived on the
-   new queue, which is not the question a switchover is asking.
+2. `drain_old(timeout)` waits for the old queue's outstanding work and **returns whether it
+   finished**. `DrainOutcome::TimedOut` means something is still running — do not proceed.
+   This is deliberately not `drain()`: that one waits for *everything*, including work that has
+   only just arrived on the new queue, which is not the question a switchover is asking.
 3. Drop it and serve from the new queue directly.
 
 Nothing sent through the switchover reaches the old queue — otherwise step 2 would be chasing a

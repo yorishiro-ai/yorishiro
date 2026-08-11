@@ -35,7 +35,14 @@ pub trait Queue: Send + Sync {
     /// Called during shutdown. Dropping an accepted task would leave an entity written but
     /// never embedded — invisible to search until someone runs a resync, with nothing to say
     /// it happened.
-    fn drain(&self, timeout: std::time::Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+    ///
+    /// Returns whether it finished. `()` would leave a caller unable to tell an empty queue from
+    /// an expired timeout -- and a switchover removing the old queue needs exactly that
+    /// distinction, because work still outstanding is work that goes away with it.
+    fn drain(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Pin<Box<dyn Future<Output = DrainOutcome> + Send + '_>>;
 }
 
 /// Runs tasks on the current process's runtime, at most `concurrency` at a time.
@@ -76,14 +83,32 @@ impl Queue for LocalQueue {
         });
     }
 
-    fn drain(&self, timeout: std::time::Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    fn drain(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Pin<Box<dyn Future<Output = DrainOutcome> + Send + '_>> {
         Box::pin(async move {
             self.tasks.close();
             // A timeout rather than an unbounded wait: a task that hangs must not hold the
             // process open, and the work it was doing is recoverable by a resync.
-            let _ = tokio::time::timeout(timeout, self.tasks.wait()).await;
+            match tokio::time::timeout(timeout, self.tasks.wait()).await {
+                Ok(()) => DrainOutcome::Finished,
+                Err(_) => DrainOutcome::TimedOut,
+            }
         })
     }
+}
+
+/// Whether a drain ran to completion or ran out of time.
+///
+/// The difference decides whether the old queue may be removed: work still outstanding when the
+/// timeout expires is work that is lost if the queue goes away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainOutcome {
+    /// Nothing outstanding. Safe to remove.
+    Finished,
+    /// The timeout expired first. Something is still running, or something is stuck.
+    TimedOut,
 }
 
 /// Two queues during an infrastructure switchover (FR-7-3).
@@ -116,8 +141,12 @@ impl DrainingQueue {
     /// is "is the old queue finished, so it can be removed", and the other is "is *everything*
     /// finished, so the process can exit". A switchover that called the second would also wait
     /// for work that has only just arrived on the new queue, which is not what it is asking.
-    pub async fn drain_old(&self, timeout: std::time::Duration) {
-        self.old.drain(timeout).await;
+    ///
+    /// **Returns whether it actually finished.** Stage 3 removes the old queue, which must not
+    /// happen while work is still outstanding — so the answer has to reach the caller rather
+    /// than being swallowed the way an unreported timeout would be.
+    pub async fn drain_old(&self, timeout: std::time::Duration) -> DrainOutcome {
+        self.old.drain(timeout).await
     }
 }
 
@@ -126,11 +155,19 @@ impl Queue for DrainingQueue {
         self.new.enqueue(task);
     }
 
-    fn drain(&self, timeout: std::time::Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    fn drain(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Pin<Box<dyn Future<Output = DrainOutcome> + Send + '_>> {
         Box::pin(async move {
             // Both, concurrently rather than one after the other: at shutdown the timeout is a
             // bound on how long the process may take, and spending it twice would double it.
-            tokio::join!(self.new.drain(timeout), self.old.drain(timeout));
+            let (a, b) = tokio::join!(self.new.drain(timeout), self.old.drain(timeout));
+            // Finished only if both are: one queue still holding work is one queue too many.
+            match (a, b) {
+                (DrainOutcome::Finished, DrainOutcome::Finished) => DrainOutcome::Finished,
+                _ => DrainOutcome::TimedOut,
+            }
         })
     }
 }
