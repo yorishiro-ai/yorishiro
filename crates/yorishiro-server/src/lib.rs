@@ -247,6 +247,7 @@ pub(crate) mod test_support {
             }),
             "get_entity" => serde_json::json!({ "id": NIL_UUID }),
             "get_entity_drift" => serde_json::json!({ "id": NIL_UUID }),
+            "migration_dry_run" => serde_json::json!({ "name": "dummy" }),
             "update_entity" => serde_json::json!({ "id": NIL_UUID, "data": {} }),
             "delete_entity" => serde_json::json!({ "id": NIL_UUID }),
             "list_entities" => serde_json::json!({}),

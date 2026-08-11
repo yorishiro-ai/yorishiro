@@ -428,3 +428,110 @@ pub async fn drift(
         missing_fields,
     })
 }
+
+/// Counts what a batch migration to `schema_name`'s active version would face.
+///
+/// Reads only. The counting is done in one query per entity type rather than one per entity:
+/// a workspace can hold far more entities than it holds versions, and the answer is the same.
+pub async fn migration_dry_run(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    schema_name: &str,
+) -> Result<MigrationDryRun, YorishiroError> {
+    let active = schemas::get_active_schema(conn, workspace_id, schema_name).await?;
+
+    // (entity_type, schema_id, count) for everything under this schema name, whatever version.
+    // Grouping by schema_id is what keeps this proportional to the number of versions in use
+    // rather than to the number of entities.
+    let rows: Vec<(String, Uuid, i64)> = sqlx::query_as(
+        "SELECT e.entity_type, e.schema_id, count(*) \
+         FROM content.entities e \
+         JOIN content.schemas s ON s.id = e.schema_id \
+         WHERE e.workspace_id = $1 AND s.name = $2 \
+         GROUP BY e.entity_type, e.schema_id",
+    )
+    .bind(workspace_id)
+    .bind(schema_name)
+    .fetch_all(&mut *conn)
+    .await
+    .internal()?;
+
+    let mut total = 0i64;
+    let mut current = 0i64;
+    let mut behind_valid = 0i64;
+    let mut needs_values = 0i64;
+    let mut by_type: std::collections::BTreeMap<String, DryRunByType> =
+        std::collections::BTreeMap::new();
+
+    // Each distinct old version is fetched once, not once per entity.
+    let mut definitions: std::collections::HashMap<Uuid, crate::metaschema::MetaSchemaDefinition> =
+        std::collections::HashMap::new();
+
+    for (entity_type, schema_id, count) in rows {
+        total += count;
+
+        if schema_id == active.id {
+            current += count;
+            continue;
+        }
+
+        let old = match definitions.get(&schema_id) {
+            Some(def) => def.clone(),
+            None => {
+                let record = schemas::get_by_id(conn, workspace_id, schema_id).await?;
+                definitions.insert(schema_id, record.definition.clone());
+                record.definition
+            }
+        };
+
+        // Required in the active version, absent from the version these were written with.
+        // Optional additions are not counted: those entities are valid as they stand, and
+        // reporting them as work to do would inflate the number an operator acts on.
+        let missing: Vec<String> = match (
+            active.definition.entity_types.get(&entity_type),
+            old.entity_types.get(&entity_type),
+        ) {
+            (Some(active_type), Some(old_type)) => active_type
+                .fields
+                .iter()
+                .filter(|(name, def)| def.required && !old_type.fields.contains_key(*name))
+                .map(|(name, _)| name.clone())
+                .collect(),
+            // The type is gone from the active version, or was never in the old one. Neither
+            // is a field to fill in.
+            _ => Vec::new(),
+        };
+
+        let entry = by_type
+            .entry(entity_type.clone())
+            .or_insert_with(|| DryRunByType {
+                entity_type,
+                behind: 0,
+                needs_values: 0,
+                missing_required: Vec::new(),
+            });
+        entry.behind += count;
+
+        if missing.is_empty() {
+            behind_valid += count;
+        } else {
+            needs_values += count;
+            entry.needs_values += count;
+            for name in missing {
+                if !entry.missing_required.contains(&name) {
+                    entry.missing_required.push(name);
+                }
+            }
+        }
+    }
+
+    Ok(MigrationDryRun {
+        schema_name: schema_name.to_string(),
+        active_version: active.version,
+        total_entities: total,
+        current,
+        behind_but_valid: behind_valid,
+        needs_values,
+        by_entity_type: by_type.into_values().collect(),
+    })
+}

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
-use yorishiro_core::repositories::entities::{self, EntityDrift, EntityRecord};
+use yorishiro_core::repositories::entities::{self, EntityDrift, EntityRecord, MigrationDryRun};
 use yorishiro_core::repositories::recall::{self, RecallContext, RecallQuery};
 
 use crate::error::ApiError;
@@ -224,6 +224,27 @@ pub async fn get_entity_drift(
     let workspace_id = authorized.ctx.workspace_id;
     let drift = entities::drift(authorized.conn(), workspace_id, id).await?;
     Ok(Json(drift))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/schemas/active/{name}/migration-dry-run",
+    params(("name" = String, Path, description = "Schema name")),
+    responses(
+        (status = 200, description = "What a migration to the active version would face", body = MigrationDryRun),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "No active schema with that name", body = crate::error::ApiErrorBody),
+    ),
+    tag = "entities",
+)]
+pub async fn migration_dry_run(
+    mut authorized: Authorized<ReadScope>,
+    Path(name): Path<String>,
+) -> Result<Json<MigrationDryRun>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    let report = entities::migration_dry_run(authorized.conn(), workspace_id, &name).await?;
+    Ok(Json(report))
 }
 
 #[cfg(test)]
