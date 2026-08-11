@@ -6,7 +6,9 @@ use uuid::Uuid;
 use super::get_tenant;
 use super::memberships::TenantMemberships;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::tenancy::WorkspaceRecord;
+use crate::models::tenancy::{
+    WORKSPACE_STATUS_ACTIVE, WORKSPACE_STATUS_SCHEMA_PENDING, WorkspaceRecord,
+};
 
 #[derive(Iden)]
 enum Workspaces {
@@ -16,6 +18,7 @@ enum Workspaces {
     Name,
     MaxEntities,
     SchemaId,
+    Status,
     CreatedAt,
 }
 
@@ -59,12 +62,19 @@ pub async fn create_workspace(
             Workspaces::Name,
             Workspaces::MaxEntities,
             Workspaces::SchemaId,
+            Workspaces::Status,
         ])
         .values_panic([
             tenant_id.into(),
             name.into(),
             max_entities.into(),
             schema_id.into(),
+            // A workspace handed a schema at creation has nothing to wait for.
+            if schema_id.is_some() {
+                WORKSPACE_STATUS_ACTIVE.into()
+            } else {
+                WORKSPACE_STATUS_SCHEMA_PENDING.into()
+            },
         ])
         .returning(Query::returning().columns(workspace_columns()))
         .build_sqlx(PostgresQueryBuilder);
@@ -75,15 +85,54 @@ pub async fn create_workspace(
         .internal()
 }
 
-fn workspace_columns() -> [Workspaces; 6] {
+fn workspace_columns() -> [Workspaces; 7] {
     [
         Workspaces::Id,
         Workspaces::TenantId,
         Workspaces::Name,
         Workspaces::MaxEntities,
         Workspaces::SchemaId,
+        Workspaces::Status,
         Workspaces::CreatedAt,
     ]
+}
+
+/// Marks a workspace active once it owns a schema. Idempotent: an already-active workspace is
+/// left as it is, so the schema-creation path can call this unconditionally.
+pub async fn mark_active(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let (sql, values) = Query::update()
+        .table((Alias::new("identity"), Workspaces::Table))
+        .values([(Workspaces::Status, WORKSPACE_STATUS_ACTIVE.into())])
+        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
+        .build_sqlx(PostgresQueryBuilder);
+
+    sqlx::query_with(&sql, values)
+        .execute(&mut *conn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
+/// Whether the workspace is still waiting for its first schema.
+pub async fn is_schema_pending(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<bool, YorishiroError> {
+    let (sql, values) = Query::select()
+        .column(Workspaces::Status)
+        .from((Alias::new("identity"), Workspaces::Table))
+        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
+        .build_sqlx(PostgresQueryBuilder);
+
+    let status: Option<(String,)> = sqlx::query_as_with(&sql, values)
+        .fetch_optional(&mut *conn)
+        .await
+        .internal()?;
+
+    Ok(status.is_some_and(|(s,)| s == WORKSPACE_STATUS_SCHEMA_PENDING))
 }
 
 pub async fn list_workspaces(
@@ -117,6 +166,7 @@ pub async fn list_workspaces_for_user(
             (Workspaces::Table, Workspaces::Name),
             (Workspaces::Table, Workspaces::MaxEntities),
             (Workspaces::Table, Workspaces::SchemaId),
+            (Workspaces::Table, Workspaces::Status),
             (Workspaces::Table, Workspaces::CreatedAt),
         ])
         .from((Alias::new("identity"), Workspaces::Table))

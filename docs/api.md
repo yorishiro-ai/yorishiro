@@ -21,6 +21,10 @@ $ curl -X POST localhost:8080/api/entities \
 $ curl "localhost:8080/api/search?query_text=shopping&filter=%7B%22status%22%3A%22active%22%7D" \
     -H "Authorization: Bearer $YSR_KEY"
 
+# A new workspace has no schema yet, so entity writes are refused with a 422 until one exists
+# ("create a schema first: POST /api/schemas..."). Creating the first schema lifts this and
+# moves the workspace's `status` from schema_pending to active.
+
 # Retire a relation without deleting it: traversal stops following it, the record stays
 # (write scope). Statuses are active, deprecated and archived.
 $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \

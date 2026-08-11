@@ -20,8 +20,17 @@ pub struct WorkspaceRecord {
     pub name: String,
     pub max_entities: Option<i32>,
     pub schema_id: Option<Uuid>,
+    /// `schema_pending` until the workspace's first schema exists, `active` from then on.
+    /// Entity writes are refused while pending.
+    pub status: String,
     pub created_at: DateTime<Utc>,
 }
+
+/// A workspace with no schema yet. Entity writes are refused with a 422 that says so.
+pub const WORKSPACE_STATUS_SCHEMA_PENDING: &str = "schema_pending";
+
+/// A workspace that owns at least one schema.
+pub const WORKSPACE_STATUS_ACTIVE: &str = "active";
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct UserRecord {
