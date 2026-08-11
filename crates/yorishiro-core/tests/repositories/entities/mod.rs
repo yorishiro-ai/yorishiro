@@ -1197,3 +1197,76 @@ async fn a_fill_can_be_undone_as_one_job(pool: PgPool) {
         );
     }
 }
+
+/// Snapshots age out, so a workspace that migrates repeatedly does not accumulate before-images
+/// without bound. `YSR_SNAPSHOT_RETENTION_DAYS` defaults to 30; this backdates one past that and
+/// runs a second job, which is when the sweep happens.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "kept" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let old_job = uuid::Uuid::nil();
+    entities::snapshot(&mut conn, workspace_id, entity.id, old_job)
+        .await
+        .unwrap();
+
+    // Backdated rather than waited for: the sweep compares against `now()`, and a test cannot
+    // spend 31 days proving it.
+    sqlx::query(
+        "UPDATE content.entity_snapshots SET created_at = now() - INTERVAL '31 days' \
+         WHERE workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+
+    // Any migration job runs the sweep. This one finds nothing to fill, which is enough.
+    entities::fill_defaults(
+        &mut conn,
+        workspace_id,
+        "task-management",
+        uuid::Uuid::max(),
+    )
+    .await
+    .unwrap();
+
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM content.entity_snapshots WHERE workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert_eq!(remaining, 0, "the sweep took the aged-out image");
+
+    // An expired window answers the same way a job that never existed does -- which is what
+    // "undoable for N days" means once the days are up.
+    let err = entities::undo_job(&mut conn, workspace_id, old_job)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, YorishiroError::NotFound { .. }),
+        "undoing past the window reports the job as gone, got {err:?}"
+    );
+}

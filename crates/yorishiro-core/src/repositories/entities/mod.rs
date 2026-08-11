@@ -697,6 +697,11 @@ pub async fn fill_defaults(
     // the snapshots would describe a rollback point that was never a whole state.
     let mut tx = conn.begin().await.internal()?;
 
+    // Drop the images that have aged out before writing this job's. Here rather than on a timer
+    // because nothing in this crate runs on one -- a sweeper would be the first thing of its
+    // kind, and a workspace that never migrates has nothing to sweep.
+    prune_snapshots(&mut tx, workspace_id).await?;
+
     let rows: Vec<(Uuid, String, Value)> = sqlx::query_as(
         "SELECT e.id, e.entity_type, e.data \
          FROM content.entities e \
@@ -775,6 +780,53 @@ pub async fn fill_defaults(
         skipped_no_default: skipped,
         still_missing,
     })
+}
+
+/// How long a batch migration stays undoable.
+///
+/// `YSR_SNAPSHOT_RETENTION_DAYS` (default 30); `0` keeps every image forever. Left unbounded,
+/// a workspace that migrates repeatedly accumulates before-images faster than it holds
+/// entities -- every run writes one row per entity it touches, and only an undo takes them
+/// away again.
+///
+/// The guarantee this buys is stated in days, not in rows: **a batch migration can be undone for
+/// this many days.** Past that its images are gone and `undo_job` answers `NotFound`, the same as
+/// for a job that never ran — an expired window is indistinguishable from no window, and that is
+/// what the setting means rather than a fault to guard against.
+fn snapshot_retention_days() -> i64 {
+    std::env::var("YSR_SNAPSHOT_RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30)
+}
+
+/// Deletes this workspace's before-images older than the retention window.
+///
+/// Workspace-scoped so the delete stays inside RLS, and `yorishiro_app` already holds DELETE
+/// on the table. Runs once per job rather than once per entity: the sweep is the same work
+/// either way, and a thousand-entity migration should not pay for it a thousand times.
+async fn prune_snapshots(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let days = snapshot_retention_days();
+    if days <= 0 {
+        return Ok(());
+    }
+
+    // `make_interval` rather than a formatted string: the number reaches Postgres as a bound
+    // parameter, so a retention value out of the environment is never concatenated into SQL.
+    sqlx::query(
+        "DELETE FROM content.entity_snapshots \
+         WHERE workspace_id = $1 AND created_at < now() - make_interval(days => $2)",
+    )
+    .bind(workspace_id)
+    .bind(days as i32)
+    .execute(&mut **tx)
+    .await
+    .internal()?;
+
+    Ok(())
 }
 
 /// [`snapshot`] against an open transaction, so the image and the write it protects commit or
