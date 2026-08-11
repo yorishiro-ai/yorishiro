@@ -20,6 +20,8 @@ enum Schemas {
     Version,
     Definition,
     Status,
+    OriginTemplateId,
+    OriginStatus,
     CreatedAt,
 }
 
@@ -32,6 +34,8 @@ struct SchemaRow {
     version: i32,
     definition: Value,
     status: String,
+    origin_template_id: Option<Uuid>,
+    origin_status: String,
     created_at: DateTime<Utc>,
 }
 
@@ -46,6 +50,8 @@ impl SchemaRow {
             version: self.version,
             definition,
             status: self.status,
+            origin_template_id: self.origin_template_id,
+            origin_status: self.origin_status,
             created_at: self.created_at,
         })
     }
@@ -98,7 +104,7 @@ pub async fn count_active(
     Ok(count)
 }
 
-fn schema_columns() -> [Schemas; 8] {
+fn schema_columns() -> [Schemas; 10] {
     [
         Schemas::Id,
         Schemas::TenantId,
@@ -107,6 +113,8 @@ fn schema_columns() -> [Schemas; 8] {
         Schemas::Version,
         Schemas::Definition,
         Schemas::Status,
+        Schemas::OriginTemplateId,
+        Schemas::OriginStatus,
         Schemas::CreatedAt,
     ]
 }
@@ -202,6 +210,21 @@ pub async fn create_schema(
     workspace_id: Uuid,
     definition: MetaSchemaDefinition,
 ) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
+    create_schema_from(conn, tenant_id, workspace_id, definition, None).await
+}
+
+/// As [`create_schema`], recording which library template the definition came from.
+///
+/// Only a library template is passed: a built-in has no row to point at, and a definition
+/// posted inline came from nowhere. Both leave the origin unset, which is what `detached`
+/// means for them — never linked, rather than linked and since orphaned.
+pub async fn create_schema_from(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    definition: MetaSchemaDefinition,
+    origin_template_id: Option<Uuid>,
+) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
     validate_definition(&definition)?;
 
     let name = definition.name.clone();
@@ -267,6 +290,8 @@ pub async fn create_schema(
             Schemas::Version,
             Schemas::Definition,
             Schemas::Status,
+            Schemas::OriginTemplateId,
+            Schemas::OriginStatus,
         ])
         .values_panic([
             tenant_id.into(),
@@ -275,6 +300,13 @@ pub async fn create_schema(
             next_version.into(),
             definition_json.into(),
             "active".into(),
+            origin_template_id.into(),
+            // A schema with no origin is detached, not linked-to-nothing.
+            if origin_template_id.is_some() {
+                ORIGIN_STATUS_LINKED.into()
+            } else {
+                ORIGIN_STATUS_DETACHED.into()
+            },
         ])
         .returning(Query::returning().columns(schema_columns()))
         .build_sqlx(PostgresQueryBuilder);

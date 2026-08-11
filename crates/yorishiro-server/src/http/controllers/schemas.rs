@@ -119,6 +119,9 @@ pub async fn create_schema(
 ) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
     let tenant_id = authorized.ctx.tenant_id;
 
+    // Carried alongside the definition so the schema can record which library template it
+    // came from. A built-in has no row to point at, so it stays None.
+    let mut origin_template_id = None;
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => {
@@ -127,9 +130,10 @@ pub async fn create_schema(
             // library miss reports the library's own not-found rather than the built-in one.
             match Uuid::parse_str(&template_id) {
                 Ok(id) => {
-                    tenancy::get_template(&state.identity_pool, tenant_id, id)
-                        .await?
-                        .definition
+                    let template =
+                        tenancy::get_template(&state.identity_pool, tenant_id, id).await?;
+                    origin_template_id = Some(template.id);
+                    template.definition
                 }
                 Err(_) => templates::get_template(&template_id)?,
             }
@@ -137,8 +141,14 @@ pub async fn create_schema(
     };
 
     let workspace_id = authorized.ctx.workspace_id;
-    let (schema, diff) =
-        schemas::create_schema(authorized.conn(), tenant_id, workspace_id, definition).await?;
+    let (schema, diff) = schemas::create_schema_from(
+        authorized.conn(),
+        tenant_id,
+        workspace_id,
+        definition,
+        origin_template_id,
+    )
+    .await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateSchemaResponse { schema, diff }),

@@ -24,8 +24,32 @@ pub struct SchemaRecord {
     pub version: i32,
     pub definition: MetaSchemaDefinition,
     pub status: String,
+    /// The template this schema was created from, when it was created from one. `None` for a
+    /// schema written by hand, and `None` again once that template is deleted.
+    ///
+    /// `default` on deserialize for the same reason as `workspace_id`: this type doubles as
+    /// the JSONL export record, and an export taken before the column existed carries no
+    /// such field.
+    #[serde(default)]
+    pub origin_template_id: Option<Uuid>,
+    /// `linked` while the origin is still there to follow, `detached` otherwise — including
+    /// for every schema that never had one.
+    #[serde(default = "default_origin_status")]
+    pub origin_status: String,
     pub created_at: DateTime<Utc>,
 }
+
+fn default_origin_status() -> String {
+    ORIGIN_STATUS_DETACHED.to_string()
+}
+
+/// Following a template that still exists.
+pub const ORIGIN_STATUS_LINKED: &str = "linked";
+
+/// Not following anything: written by hand, or following a template that has since been
+/// deleted. The two are told apart by whether `origin_template_id` was ever set, which is
+/// what the notification path needs to know.
+pub const ORIGIN_STATUS_DETACHED: &str = "detached";
 
 /// A row in a schema listing. A lightweight summary that omits the `definition` body,
 /// used as the entry point for MCP clients (LLMs) to discover what schemas exist for a
