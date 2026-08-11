@@ -33,6 +33,9 @@ pub struct LocalOnnxConfig {
     pub dimensions: usize,
     /// Maximum sequence length for tokenization. Text longer than this is truncated.
     pub max_sequence_length: usize,
+    /// How token embeddings are reduced to one vector. Must match what the model was trained
+    /// with; see [`Pooling`].
+    pub pooling: Pooling,
 }
 
 /// Provider that generates embeddings using a local ONNX model (BERT-family
@@ -66,6 +69,7 @@ struct Inner {
     dimensions: usize,
     needs_token_type_ids: bool,
     output_name: String,
+    pooling: Pooling,
 }
 
 fn internal(message: impl std::fmt::Display) -> YorishiroError {
@@ -128,6 +132,7 @@ impl LocalOnnxProvider {
             dimensions: config.dimensions,
             needs_token_type_ids,
             output_name,
+            pooling: config.pooling,
         };
 
         // Dimension mismatches must be caught here (at server startup). If
@@ -217,7 +222,8 @@ impl Inner {
 
         let mut results = Vec::with_capacity(batch);
         for b in 0..batch {
-            results.push(mean_pool_normalized(
+            results.push(pool_normalized(
+                self.pooling,
                 &data[b * seq * hidden..(b + 1) * seq * hidden],
                 &attention_mask[b * seq..(b + 1) * seq],
                 seq,
@@ -235,6 +241,80 @@ impl Inner {
 /// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
 /// it directly; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
+/// How token embeddings are reduced to one sentence vector.
+///
+/// This is a property of the model, not a preference: a model trained with one and read with
+/// the other returns vectors that are still the right shape and still normalize, so nothing
+/// fails — the search results just quietly get worse. Sentence-transformers exports (BERT-style,
+/// bge-small, multilingual-e5) want `Mean`; the Qwen3-Embedding family wants `LastToken`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pooling {
+    /// Mean of the unmasked token embeddings.
+    #[default]
+    Mean,
+    /// The last unmasked token's embedding.
+    LastToken,
+}
+
+impl Pooling {
+    /// Parses the `YSR_ONNX_POOLING` value. Unknown values are rejected rather than defaulted:
+    /// silently falling back to `Mean` is exactly the quiet degradation this type exists to
+    /// prevent.
+    pub fn parse(value: &str) -> Result<Self, YorishiroError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mean" => Ok(Self::Mean),
+            "last_token" | "last-token" | "lasttoken" => Ok(Self::LastToken),
+            other => Err(internal(format!(
+                "unknown pooling '{other}': expected 'mean' or 'last_token'"
+            ))),
+        }
+    }
+}
+
+/// L2-normalizes in place so cosine distance is stable.
+fn l2_normalize(vector: &mut [f32]) {
+    let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in vector {
+            *value /= norm;
+        }
+    }
+}
+
+/// Takes the last unmasked token's embedding. Padding is right-side for these models, so the
+/// last unmasked position is the end of the actual text; falling back to position 0 for an
+/// all-masked row keeps the function total.
+pub fn last_token_pool_normalized(
+    token_embeddings: &[f32],
+    attention_mask: &[i64],
+    seq: usize,
+    hidden: usize,
+) -> Vec<f32> {
+    let last = (0..seq)
+        .rev()
+        .find(|&t| attention_mask[t] != 0)
+        .unwrap_or(0);
+    let mut pooled = token_embeddings[last * hidden..(last + 1) * hidden].to_vec();
+    l2_normalize(&mut pooled);
+    pooled
+}
+
+/// Reduces token embeddings to one vector using `pooling`.
+pub fn pool_normalized(
+    pooling: Pooling,
+    token_embeddings: &[f32],
+    attention_mask: &[i64],
+    seq: usize,
+    hidden: usize,
+) -> Vec<f32> {
+    match pooling {
+        Pooling::Mean => mean_pool_normalized(token_embeddings, attention_mask, seq, hidden),
+        Pooling::LastToken => {
+            last_token_pool_normalized(token_embeddings, attention_mask, seq, hidden)
+        }
+    }
+}
+
 pub fn mean_pool_normalized(
     token_embeddings: &[f32],
     attention_mask: &[i64],
@@ -259,12 +339,7 @@ pub fn mean_pool_normalized(
         }
     }
 
-    let norm = pooled.iter().map(|v| v * v).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        for value in &mut pooled {
-            *value /= norm;
-        }
-    }
+    l2_normalize(&mut pooled);
     pooled
 }
 
