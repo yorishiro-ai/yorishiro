@@ -25,7 +25,7 @@
 
 # embedding:
 #   provider: local                                                     # YSR_EMBEDDING_PROVIDER
-#   dimensions: 768                                                     # YSR_EMBEDDING_DIMENSIONS (must match model output)
+#   dimensions: 1024                                                    # YSR_EMBEDDING_DIMENSIONS (must match model output)
 #   # --- when provider: local (ONNX export, the default) ---
 #   onnx_model_path: models/model.onnx                                  # YSR_ONNX_MODEL_PATH
 #   onnx_tokenizer_path: models/tokenizer.json                          # YSR_ONNX_TOKENIZER_PATH

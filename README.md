@@ -63,9 +63,9 @@ See [docs/setup.md](docs/setup.md) for the full guide, including the prebuilt bi
    ```console
    $ mkdir -p models
    $ curl -L -o models/model.onnx \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/onnx/model_quantized.onnx
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
    $ curl -L -o models/tokenizer.json \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/tokenizer.json
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
    ```
 
 2. Start the server:

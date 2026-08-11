@@ -421,10 +421,11 @@ pub async fn shutdown_signal() {
 /// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
 /// operators already running something like Ollama/LM Studio). The `entities.embedding`
 /// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
-/// share the same dimension count (set via `YSR_EMBEDDING_DIMENSIONS`, default 768).
+/// share the same dimension count (set via `YSR_EMBEDDING_DIMENSIONS`, default 1024 — the
+/// width of the default model, multilingual-e5-large).
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YSR_EMBEDDING_DIMENSIONS")
-        .unwrap_or_else(|_| "768".into())
+        .unwrap_or_else(|_| "1024".into())
         .parse()?;
 
     let kind = std::env::var("YSR_EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".into());

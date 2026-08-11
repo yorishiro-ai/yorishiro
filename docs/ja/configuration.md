@@ -56,7 +56,7 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | 変数 | 内容 |
 |---|---|
 | `YSR_EMBEDDING_PROVIDER` | `local`(既定)または`openai` |
-| `YSR_EMBEDDING_DIMENSIONS` | 埋め込みベクトルの次元数(既定: `768`)。使用するモデルの出力次元と一致する必要があります。デプロイメント内の全ベクトルはこの値を共有します。データが存在する状態で変更する場合は再埋め込みが必要です |
+| `YSR_EMBEDDING_DIMENSIONS` | 埋め込みベクトルの次元数(既定: `1024`。既定モデルの出力次元)。使用するモデルの出力次元と一致する必要があります。デプロイメント内の全ベクトルはこの値を共有します。データが存在する状態で変更する場合は再埋め込みが必要です |
 
 ### `YSR_EMBEDDING_PROVIDER=local`の場合(ONNXエクスポート、既定)
 
@@ -77,4 +77,4 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | `YSR_EMBEDDING_API_KEY` | エンドポイントが要求する場合のAPIキー |
 | `YSR_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストボディに`dimensions`パラメータを含めるか。未設定時は既定で`true`。一度設定すると、小文字の文字列`true`と完全一致する場合のみ有効のまま — `false`・`False`・`FALSE`・`0`等それ以外の値はすべて無効(`false`)として扱われる |
 
-具体的な取得例(`https://huggingface.co/Xenova/all-mpnet-base-v2`の`onnx/model_quantized.onnx`と`tokenizer.json`)は[docs/ja/embedding-providers.md](embedding-providers.md)を参照してください。
+具体的な取得例(`https://huggingface.co/Xenova/multilingual-e5-large`の`onnx/model_quantized.onnx`と`tokenizer.json`)は[docs/ja/embedding-providers.md](embedding-providers.md)を参照してください。

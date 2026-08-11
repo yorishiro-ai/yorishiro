@@ -60,9 +60,9 @@ flowchart TD
    ```console
    $ mkdir -p models
    $ curl -L -o models/model.onnx \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/onnx/model_quantized.onnx
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
    $ curl -L -o models/tokenizer.json \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/tokenizer.json
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
    ```
 
 2. サーバを起動します。
