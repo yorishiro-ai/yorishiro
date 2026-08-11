@@ -1,0 +1,215 @@
+//! Three-way comparison of metaschema definitions.
+//!
+//! A workspace's schema is a copy of a template, and both sides can move after the copy is
+//! taken. Deciding what to do about that needs three definitions, not two: the template as it
+//! stood when copied (base), the template now (upstream), and the workspace's own (local).
+//!
+//! With only two, an upstream addition and a local one look identical — both are "present
+//! there, absent here" — and following the template would silently delete the workspace's own
+//! fields. The base is what tells them apart.
+//!
+//! This module classifies. It does not apply anything: a conflict is a question for a person,
+//! and answering it by picking a side would invalidate whichever entities were written against
+//! the losing definition.
+
+use std::collections::BTreeSet;
+
+use serde::Serialize;
+use utoipa::ToSchema;
+
+use super::{FieldDef, MetaSchemaDefinition};
+
+/// What should happen to one field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeVerdict {
+    /// Upstream added it and the workspace has nothing by that name. Safe to take: it is new
+    /// structure, and adding an optional field invalidates nothing already stored.
+    AutoAdd,
+    /// Upstream changed it and the workspace did not. Taking the change loses no local work,
+    /// since there is none to lose.
+    AutoUpdate,
+    /// The workspace's own, unknown upstream. Kept — following a template must not delete what
+    /// the workspace added on top of it.
+    KeepLocal,
+    /// Both sides changed it, differently. Nothing here decides which is right; a person does.
+    Conflict,
+}
+
+/// One field's classification.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FieldMerge {
+    pub entity_type: String,
+    pub field: String,
+    pub verdict: MergeVerdict,
+    /// What differs, in the terms the operator will judge it by.
+    pub detail: String,
+}
+
+/// The classification of every field that is not identical across the three.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MergePlan {
+    pub fields: Vec<FieldMerge>,
+}
+
+impl MergePlan {
+    /// Whether anything needs a person. A plan with no conflicts can be applied whole; one
+    /// with any cannot be applied at all, since a partial merge would leave the schema in a
+    /// state neither side asked for.
+    pub fn has_conflicts(&self) -> bool {
+        self.fields
+            .iter()
+            .any(|f| f.verdict == MergeVerdict::Conflict)
+    }
+
+    pub fn conflicts(&self) -> impl Iterator<Item = &FieldMerge> {
+        self.fields
+            .iter()
+            .filter(|f| f.verdict == MergeVerdict::Conflict)
+    }
+}
+
+/// Compares three definitions field by field.
+///
+/// `base` is the template as copied, `upstream` the template now, `local` the workspace's own.
+/// Fields identical in all three are omitted — a plan lists what to decide, not what exists.
+pub fn three_way(
+    base: &MetaSchemaDefinition,
+    upstream: &MetaSchemaDefinition,
+    local: &MetaSchemaDefinition,
+) -> MergePlan {
+    let mut fields = Vec::new();
+
+    // Every entity type named by any of the three. A type only upstream is as much a
+    // difference as a field only upstream.
+    let entity_types: BTreeSet<&String> = base
+        .entity_types
+        .keys()
+        .chain(upstream.entity_types.keys())
+        .chain(local.entity_types.keys())
+        .collect();
+
+    for entity_type in entity_types {
+        let base_fields = base.entity_types.get(entity_type).map(|t| &t.fields);
+        let upstream_fields = upstream.entity_types.get(entity_type).map(|t| &t.fields);
+        let local_fields = local.entity_types.get(entity_type).map(|t| &t.fields);
+
+        let names: BTreeSet<&String> = base_fields
+            .into_iter()
+            .flat_map(|f| f.keys())
+            .chain(upstream_fields.into_iter().flat_map(|f| f.keys()))
+            .chain(local_fields.into_iter().flat_map(|f| f.keys()))
+            .collect();
+
+        for name in names {
+            let in_base = base_fields.and_then(|f| f.get(name));
+            let in_upstream = upstream_fields.and_then(|f| f.get(name));
+            let in_local = local_fields.and_then(|f| f.get(name));
+
+            if let Some((verdict, detail)) = classify(in_base, in_upstream, in_local) {
+                fields.push(FieldMerge {
+                    entity_type: entity_type.clone(),
+                    field: name.clone(),
+                    verdict,
+                    detail,
+                });
+            }
+        }
+    }
+
+    MergePlan { fields }
+}
+
+/// One field's verdict, or `None` when the three agree and there is nothing to decide.
+fn classify(
+    base: Option<&FieldDef>,
+    upstream: Option<&FieldDef>,
+    local: Option<&FieldDef>,
+) -> Option<(MergeVerdict, String)> {
+    let upstream_moved = !same(base, upstream);
+    let local_moved = !same(base, local);
+
+    match (upstream_moved, local_moved) {
+        // Neither side moved, or both moved the same way. Nothing to decide either way: if
+        // they agree, the answer is already what both want.
+        (false, false) => None,
+        (true, false) => {
+            // Only upstream moved. Adding is distinguishable from changing, and the operator
+            // reads them differently even though both are taken automatically.
+            if base.is_none() {
+                Some((
+                    MergeVerdict::AutoAdd,
+                    "added upstream; absent here".to_string(),
+                ))
+            } else if upstream.is_none() {
+                Some((
+                    MergeVerdict::AutoUpdate,
+                    "removed upstream; unchanged here".to_string(),
+                ))
+            } else {
+                Some((
+                    MergeVerdict::AutoUpdate,
+                    "changed upstream; unchanged here".to_string(),
+                ))
+            }
+        }
+        (false, true) => {
+            if base.is_none() {
+                Some((
+                    MergeVerdict::KeepLocal,
+                    "added here; unknown upstream".to_string(),
+                ))
+            } else {
+                Some((
+                    MergeVerdict::KeepLocal,
+                    "changed here; unchanged upstream".to_string(),
+                ))
+            }
+        }
+        (true, true) => {
+            // Both moved. Identical moves are not a conflict -- two people adding the same
+            // field with the same type have agreed, not disagreed.
+            if same(upstream, local) {
+                None
+            } else {
+                Some((MergeVerdict::Conflict, describe_conflict(upstream, local)))
+            }
+        }
+    }
+}
+
+/// Whether two optional field definitions are the same. Compared by their serialised form:
+/// `FieldDef` carries unknown `x-` attributes in a flattened map, and a comparison that only
+/// looked at the named fields would call two definitions equal while an extension differed.
+fn same(a: Option<&FieldDef>, b: Option<&FieldDef>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => serde_json::to_value(a).ok() == serde_json::to_value(b).ok(),
+        _ => false,
+    }
+}
+
+fn describe_conflict(upstream: Option<&FieldDef>, local: Option<&FieldDef>) -> String {
+    match (upstream, local) {
+        (Some(u), Some(l)) if u.r#type != l.r#type => format!(
+            "type differs: upstream '{}', here '{}'",
+            type_name(u),
+            type_name(l)
+        ),
+        (Some(_), Some(_)) => "both changed, differently".to_string(),
+        (None, Some(_)) => "removed upstream, changed here".to_string(),
+        (Some(_), None) => "changed upstream, removed here".to_string(),
+        (None, None) => unreachable!("classify only reaches here when the two differ"),
+    }
+}
+
+fn type_name(field: &FieldDef) -> String {
+    serde_json::to_value(field.r#type)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(test)]
+#[path = "../../../tests/metaschema/merge/mod.rs"]
+mod tests;
