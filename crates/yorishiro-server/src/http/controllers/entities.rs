@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
-use yorishiro_core::repositories::entities::{self, EntityRecord};
+use yorishiro_core::repositories::entities::{self, EntityDrift, EntityRecord};
 use yorishiro_core::repositories::recall::{self, RecallContext, RecallQuery};
 
 use crate::error::ApiError;
@@ -203,6 +203,27 @@ pub async fn get_entity_context(
     };
     let context = recall::recall_context(authorized.conn(), workspace_id, id, query).await?;
     Ok(Json(context))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/entities/{id}/drift",
+    params(("id" = Uuid, Path, description = "Entity id")),
+    responses(
+        (status = 200, description = "How the entity stands against its schema's active version", body = EntityDrift),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "Entity not found", body = crate::error::ApiErrorBody),
+    ),
+    tag = "entities",
+)]
+pub async fn get_entity_drift(
+    mut authorized: Authorized<ReadScope>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<EntityDrift>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    let drift = entities::drift(authorized.conn(), workspace_id, id).await?;
+    Ok(Json(drift))
 }
 
 #[cfg(test)]

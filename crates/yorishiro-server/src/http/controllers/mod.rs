@@ -94,6 +94,7 @@ impl Modify for SecurityAddon {
         entities::delete_entity,
         entities::list_entities,
         entities::get_entity_context,
+        entities::get_entity_drift,
         relations::create_relation,
         relations::get_relation,
         relations::delete_relation,
@@ -140,6 +141,8 @@ impl Modify for SecurityAddon {
         yorishiro_core::repositories::tenancy::MembershipRole,
         yorishiro_core::repositories::tenancy::MembershipRecord,
         yorishiro_core::repositories::tenancy::WorkspaceRecord,
+        yorishiro_core::repositories::entities::EntityDrift,
+        yorishiro_core::repositories::entities::DriftField,
         yorishiro_core::services::auth::ApiKeyScope,
         entities::CreateEntityRequest,
         entities::UpdateEntityRequest,
@@ -226,6 +229,7 @@ pub fn router(
             "/api/entities/{id}/context",
             get(entities::get_entity_context),
         )
+        .route("/api/entities/{id}/drift", get(entities::get_entity_drift))
         .route(
             "/api/relations",
             post(relations::create_relation).get(relations::list_relations),

@@ -376,3 +376,57 @@ pub async fn export_all(
 #[cfg(test)]
 #[path = "../../../tests/repositories/entities/mod.rs"]
 mod tests;
+
+/// Reports how `entity_id` stands against the active version of its schema.
+///
+/// Lazy migration means an entity keeps validating against the version it was created with, so
+/// a field added later is simply absent from it. This distinguishes that from a field its
+/// author left blank: the entity's own definition is compared against the active one, and the
+/// fields only the active one defines are returned.
+///
+/// An entity already on the active version reports no missing fields, and neither does one
+/// whose newer version only altered fields it already carries.
+pub async fn drift(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+) -> Result<EntityDrift, YorishiroError> {
+    let entity = get(conn, workspace_id, entity_id).await?;
+    let own = schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
+    let active = schemas::get_active_schema(conn, workspace_id, &own.definition.name).await?;
+
+    // The entity's own type definition may be absent from the active version -- the type was
+    // dropped. Nothing is "missing" in that case; the whole type is, which the version numbers
+    // already say.
+    let own_fields = own
+        .definition
+        .entity_types
+        .get(&entity.entity_type)
+        .map(|def| &def.fields);
+    let active_fields = active
+        .definition
+        .entity_types
+        .get(&entity.entity_type)
+        .map(|def| &def.fields);
+
+    let missing_fields = match (own_fields, active_fields) {
+        (Some(own_fields), Some(active_fields)) => active_fields
+            .iter()
+            .filter(|(name, _)| !own_fields.contains_key(*name))
+            .map(|(name, def)| DriftField {
+                name: name.clone(),
+                r#type: def.r#type,
+                required: def.required,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(EntityDrift {
+        entity_id: entity.id,
+        entity_type: entity.entity_type,
+        schema_version: entity.schema_version,
+        active_schema_version: active.version,
+        missing_fields,
+    })
+}

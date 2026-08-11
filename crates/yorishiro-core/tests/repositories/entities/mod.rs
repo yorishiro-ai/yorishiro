@@ -568,3 +568,166 @@ async fn a_further_schema_version_leaves_the_workspace_active(pool: PgPool) {
             .unwrap()
     );
 }
+
+fn task_schema_with_category() -> MetaSchemaDefinition {
+    serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": {
+            "task": {
+                "fields": {
+                    "title": { "type": "string", "required": true },
+                    "category": { "type": "string", "required": true }
+                }
+            }
+        }
+    }))
+    .unwrap()
+}
+
+/// The case the endpoint exists for: an entity written before a field existed. Without this a
+/// reader cannot tell the field was never available from the field being left blank.
+#[sqlx::test(migrations = "../../migrations")]
+async fn drift_reports_fields_the_entity_predates(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "written before category existed" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Adding a required field is a breaking change, so this lands as a new version and the
+    // entity above stays on the old one.
+    schemas::create_schema(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema_with_category(),
+    )
+    .await
+    .unwrap();
+
+    let drift = entities::drift(&mut conn, workspace_id, entity.id)
+        .await
+        .unwrap();
+
+    assert_eq!(drift.schema_version, 1);
+    assert_eq!(drift.active_schema_version, 2);
+    let names: Vec<&str> = drift
+        .missing_fields
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["category"], "only the new field is missing");
+    assert!(
+        drift.missing_fields[0].required,
+        "required is what makes this worth reporting"
+    );
+}
+
+/// An entity on the active version has nothing to report, and says so with an empty list
+/// rather than by omitting the field.
+#[sqlx::test(migrations = "../../migrations")]
+async fn drift_is_empty_for_a_current_entity(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "current" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let drift = entities::drift(&mut conn, workspace_id, entity.id)
+        .await
+        .unwrap();
+
+    assert_eq!(drift.schema_version, drift.active_schema_version);
+    assert!(drift.missing_fields.is_empty());
+}
+
+/// Every create_schema call makes a new version, breaking or not, so an optional addition
+/// leaves earlier entities behind too. They are reported as missing but not required, which is
+/// the distinction a caller acts on: nothing is invalid, there is just newer structure
+/// available.
+#[sqlx::test(migrations = "../../migrations")]
+async fn drift_marks_an_optional_addition_as_not_required(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "before the optional field" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let optional_added: MetaSchemaDefinition = serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": {
+            "task": {
+                "fields": {
+                    "title": { "type": "string", "required": true },
+                    "tag":   { "type": "string" }
+                }
+            }
+        }
+    }))
+    .unwrap();
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, optional_added)
+        .await
+        .unwrap();
+
+    let drift = entities::drift(&mut conn, workspace_id, entity.id)
+        .await
+        .unwrap();
+
+    assert_eq!(drift.missing_fields.len(), 1);
+    assert_eq!(drift.missing_fields[0].name, "tag");
+    assert!(
+        !drift.missing_fields[0].required,
+        "an optional addition leaves the entity valid; required is what separates the two"
+    );
+}
