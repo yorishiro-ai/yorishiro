@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Subcommand, ValueEnum};
 use sqlx::PgPool;
 use uuid::Uuid;
+use yorishiro_core::repositories::maintenance::{self, MaintenanceMode};
 use yorishiro_core::repositories::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::ApiKeyScope;
 
@@ -89,6 +90,40 @@ pub enum AdminCommand {
     RevokeApiKey { key_id: Uuid },
     /// Re-sync embeddings for entities whose embedding is still missing.
     ResyncEmbeddings { workspace_id: Uuid },
+    /// Put the deployment into maintenance, or take it out.
+    ///
+    /// `read-only` refuses writes with 423; `full-lock` refuses everything with 503; `off`
+    /// serves normally. The state is shared by every node, and `/up`/`/health` keep answering
+    /// so an orchestrator does not restart a server that is deliberately paused.
+    Maintenance {
+        #[arg(value_enum)]
+        mode: MaintenanceArg,
+        /// Seconds for the Retry-After header.
+        #[arg(long, default_value_t = 300)]
+        retry_after: u32,
+        /// Shown to callers instead of the generic message.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Show the current maintenance state.
+    MaintenanceStatus,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum MaintenanceArg {
+    Off,
+    ReadOnly,
+    FullLock,
+}
+
+impl From<MaintenanceArg> for MaintenanceMode {
+    fn from(arg: MaintenanceArg) -> Self {
+        match arg {
+            MaintenanceArg::Off => Self::Off,
+            MaintenanceArg::ReadOnly => Self::ReadOnly,
+            MaintenanceArg::FullLock => Self::FullLock,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -376,6 +411,39 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
                 "resync finished: {} entities had no embedding, {} synced, {} failed \
                  (entities whose entity_type has no x-embed field stay without embedding)",
                 report.candidates, report.synced, report.failed,
+            );
+        }
+        AdminCommand::Maintenance {
+            mode,
+            retry_after,
+            reason,
+        } => {
+            let mode: MaintenanceMode = mode.into();
+            let state = maintenance::set(pool, mode, retry_after, reason).await?;
+            match state.mode {
+                MaintenanceMode::Off => println!("maintenance off; serving normally"),
+                MaintenanceMode::ReadOnly => println!(
+                    "maintenance read-only: writes refused with 423, Retry-After {}s",
+                    state.retry_after
+                ),
+                MaintenanceMode::FullLock => println!(
+                    "maintenance full lock: all requests refused with 503, Retry-After {}s \
+                     (/up and /health keep answering)",
+                    state.retry_after
+                ),
+            }
+            if let Some(reason) = state.reason {
+                println!("reason shown to callers: {reason}");
+            }
+        }
+        AdminCommand::MaintenanceStatus => {
+            let mut conn = pool.acquire().await?;
+            let state = maintenance::get(&mut conn).await?;
+            println!(
+                "mode={} retry_after={}s reason={}",
+                state.mode.as_db_str(),
+                state.retry_after,
+                state.reason.as_deref().unwrap_or("(none)")
             );
         }
     }

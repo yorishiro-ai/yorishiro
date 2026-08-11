@@ -80,6 +80,13 @@ pub fn build_app_with_rate_limiter(
         .merge(
             SwaggerUi::new("/docs").url("/api-docs/openapi.json", controllers::ApiDoc::openapi()),
         );
+    // Before with_state so the guard sees AppState, and inside build_app so every route this
+    // process serves is covered -- REST, MCP and the wizard alike. /up and /health opt out
+    // inside the guard itself.
+    let router = router.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::http::middleware::maintenance::maintenance_guard,
+    ));
     let router = apply_body_limit_layer(router).with_state(state);
 
     apply_observability_layers(router).fallback_service(yorishiro_web::fallback_service(web_dir))

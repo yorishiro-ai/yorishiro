@@ -25,6 +25,16 @@ pub enum YorishiroError {
     #[error("unauthenticated")]
     Unauthenticated,
 
+    /// The deployment is in maintenance. `read_only` refuses writes (423), `full_lock`
+    /// refuses everything (503); `retry_after` is seconds, and reaches the caller as a header
+    /// as well as in the body, since agents retry on the header.
+    #[error("maintenance: {message}")]
+    Maintenance {
+        message: String,
+        read_only: bool,
+        retry_after: u32,
+    },
+
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -67,6 +77,21 @@ impl YorishiroError {
             Self::Unauthenticated => (
                 401,
                 serde_json::json!({ "error": { "message": "authentication required" } }),
+            ),
+            Self::Maintenance {
+                message,
+                read_only,
+                retry_after,
+            } => (
+                // 423 says "this resource is locked, the server is fine"; 503 says "the server
+                // is not serving". Read-only is the first, full lock the second.
+                if read_only { 423 } else { 503 },
+                serde_json::json!({
+                    "error": {
+                        "message": message,
+                        "retry_after_seconds": retry_after,
+                    }
+                }),
             ),
             Self::Internal(err) => {
                 tracing::error!(error = %err, "internal error");
