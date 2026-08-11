@@ -35,3 +35,28 @@ Every request produces one JSON log line (method, path, status, latency) alongsi
 - `syslog` hands lines off to whatever the host's syslog daemon is already configured to do with them (forward, rotate, aggregate) -- Unix only; rejected at startup on other platforms.
 
 None of these targets rotate or prune on their own beyond what `daily`'s day-boundary split does. Pair `single`/`daily` with `logrotate` or an equivalent if disk usage needs to be bounded.
+
+## Changing the embedding model
+
+Vectors from two different models cannot share an HNSW index, and the server refuses to start
+when `YSR_EMBEDDING_DIMENSIONS` disagrees with the model it loaded — a mismatch stops the
+process rather than quietly returning bad search results.
+
+An existing deployment is unaffected by a change of default: the dimension is read from the
+environment, so one already running 768 keeps its model and its vectors. To move to a different
+model, re-embed:
+
+```console
+$ # 1. Stop the server, then replace models/model.onnx and models/tokenizer.json.
+$ # 2. Set YSR_EMBEDDING_DIMENSIONS to the new model's width.
+$ # 3. Clear the existing vectors -- they belong to the old model:
+$ psql "$DATABASE_URL" -c "UPDATE content.entities SET embedding = NULL"
+$ # 4. Start the server, then regenerate per workspace:
+$ yorishiro-server admin resync-embeddings <workspace-id>
+```
+
+Search still works between steps 3 and 4: entities without an embedding are reachable through
+the `pg_trgm` fallback, so the window degrades results rather than emptying them.
+
+Re-embedding is the whole corpus through the model, so time it against a batch write rather
+than a query.
