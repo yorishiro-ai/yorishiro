@@ -3,7 +3,9 @@ use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use sqlx::Row;
 
+use crate::db::{Storage, TenantDb};
 use crate::test_support;
+use uuid::Uuid;
 
 #[derive(Iden)]
 enum Workspaces {
@@ -102,4 +104,56 @@ async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: Pg
     let names: Vec<String> = rows.iter().map(|row| row.get("name")).collect();
 
     assert_eq!(names, vec!["schema-a".to_string()]);
+}
+
+/// The seam is only a seam if a caller can hold it without naming the implementation. This
+/// takes `&dyn Storage`, so it compiles against the trait alone -- an engine added later
+/// satisfies the same signature without touching this function.
+async fn count_through_the_seam(storage: &dyn Storage, tenant_id: Uuid, workspace_id: Uuid) -> i64 {
+    let mut conn = storage
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM content.entities")
+        .fetch_one(conn.as_mut())
+        .await
+        .unwrap();
+    count
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_storage_trait_scopes_a_connection_like_the_concrete_type(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+
+    // Through the trait object, not the struct.
+    let via_trait = count_through_the_seam(&db, tenant_id, workspace_id).await;
+
+    // And directly, for comparison. Both run with the same session variables set, so an
+    // implementation that forgot to scope the connection would differ here rather than
+    // silently returning another workspace's rows.
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (direct,): (i64,) = sqlx::query_as("SELECT count(*) FROM content.entities")
+        .fetch_one(conn.as_mut())
+        .await
+        .unwrap();
+
+    assert_eq!(via_trait, direct);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_storage_trait_exposes_the_unscoped_pool_for_the_control_plane(pool: PgPool) {
+    let db = TenantDb::new(pool);
+    let storage: &dyn Storage = &db;
+
+    // The control-plane paths need a pool that is not workspace-scoped; the trait has to keep
+    // offering one or signup and setup have nowhere to run.
+    let (one,): (i32,) = sqlx::query_as("SELECT 1")
+        .fetch_one(storage.pool())
+        .await
+        .unwrap();
+    assert_eq!(one, 1);
 }

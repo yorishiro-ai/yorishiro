@@ -1,6 +1,53 @@
+use async_trait::async_trait;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
+
+/// The connection a request runs on, already scoped to its tenant and workspace.
+pub type ScopedConnection = sqlx::pool::PoolConnection<sqlx::Postgres>;
+
+/// Where the deployment's data lives.
+///
+/// The seam between the application and its database engine sits here, at the layer that hands
+/// out connections — not around the repositories. Those take `&mut PgConnection` and compose
+/// their own transactions (advisory locks inside `create`, for one), so wrapping them would
+/// mean a second implementation of every one of the 59 functions under `repositories/`, while
+/// wrapping this means four methods.
+///
+/// The engines differ in more than dialect, and the difference this trait deliberately does
+/// **not** hide is isolation: [`Self::acquire_for_workspace`] sets the session variables that
+/// row-level security reads, and an engine without RLS cannot honour that by setting a
+/// variable. Such an engine is limited to one tenant per deployment rather than pretending,
+/// because a filter written in application code is one a single missed query silently defeats.
+#[async_trait]
+pub trait Storage: Send + Sync {
+    /// A connection scoped to `tenant_id`/`workspace_id`, such that row-level security (or
+    /// whatever the engine offers in its place) confines it to that workspace's rows.
+    async fn acquire_for_workspace(
+        &self,
+        tenant_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Result<ScopedConnection, sqlx::Error>;
+
+    /// The underlying pool, for the control-plane paths that connect as the migration role and
+    /// so must not be scoped — signup, setup, the admin CLI.
+    fn pool(&self) -> &PgPool;
+}
+
+#[async_trait]
+impl Storage for TenantDb {
+    async fn acquire_for_workspace(
+        &self,
+        tenant_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Result<ScopedConnection, sqlx::Error> {
+        TenantDb::acquire_for_workspace(self, tenant_id, workspace_id).await
+    }
+
+    fn pool(&self) -> &PgPool {
+        TenantDb::pool(self)
+    }
+}
 
 #[derive(Clone)]
 pub struct TenantDb {
