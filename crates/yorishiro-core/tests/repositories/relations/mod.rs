@@ -8,7 +8,7 @@ use crate::metaschema::MetaSchemaDefinition;
 use crate::repositories::entities;
 use crate::repositories::relations::{
     CreateRelationInput, DEFAULT_NEIGHBORS_LIMIT, ListRelationsQuery, create, delete, get, list,
-    neighbors, neighbors_batch,
+    neighbors, neighbors_batch, set_status,
 };
 use crate::repositories::schemas;
 use crate::test_support;
@@ -684,4 +684,202 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
         "gamma (newest) first"
     );
     assert_eq!(from_task[1].entity.id, project_ids[1], "beta second");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn relation_is_created_active(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
+
+    let created = create(
+        &mut conn,
+        workspace_id,
+        CreateRelationInput {
+            source_id: task.id,
+            target_id: project.id,
+            relation_type: "belongs_to".into(),
+            properties: Value::Null,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(created.status, "active");
+}
+
+/// The point of the status column: a deprecated relation stops being traversed, in both
+/// directions and through both the single and the batched path, while the row itself stays.
+#[sqlx::test(migrations = "../../migrations")]
+async fn traversal_skips_non_active_relations(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
+
+    let relation = create(
+        &mut conn,
+        workspace_id,
+        CreateRelationInput {
+            source_id: task.id,
+            target_id: project.id,
+            relation_type: "belongs_to".into(),
+            properties: Value::Null,
+        },
+    )
+    .await
+    .unwrap();
+
+    let out = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
+        .await
+        .unwrap();
+    assert_eq!(out.len(), 1, "active relation is traversed");
+
+    let updated = set_status(&mut conn, workspace_id, relation.id, "deprecated")
+        .await
+        .unwrap();
+    assert_eq!(updated.status, "deprecated");
+
+    // Outbound, from the source.
+    let out = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
+        .await
+        .unwrap();
+    assert!(out.is_empty(), "deprecated relation is not traversed");
+
+    // Inbound, from the target -- the 'in' branch of the union is a separate WHERE clause and
+    // would keep returning the relation if only the 'out' branch had been filtered.
+    let inbound = neighbors(&mut conn, workspace_id, project.id, DEFAULT_NEIGHBORS_LIMIT)
+        .await
+        .unwrap();
+    assert!(inbound.is_empty(), "not traversed from the target either");
+
+    // The batched path is a separate query and has to filter too.
+    let batch = neighbors_batch(&mut conn, workspace_id, &[task.id], DEFAULT_NEIGHBORS_LIMIT)
+        .await
+        .unwrap();
+    assert!(
+        batch.get(&task.id).is_none_or(|n| n.is_empty()),
+        "batched traversal filters as well"
+    );
+
+    // The record survives; this is what distinguishes deprecating from deleting.
+    let fetched = get(&mut conn, workspace_id, relation.id).await.unwrap();
+    assert_eq!(fetched.status, "deprecated");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn lists_by_status_and_defaults_to_every_state(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
+
+    let relation = create(
+        &mut conn,
+        workspace_id,
+        CreateRelationInput {
+            source_id: task.id,
+            target_id: project.id,
+            relation_type: "belongs_to".into(),
+            properties: Value::Null,
+        },
+    )
+    .await
+    .unwrap();
+    set_status(&mut conn, workspace_id, relation.id, "archived")
+        .await
+        .unwrap();
+
+    // No status filter: an archived relation is still listed, so a caller that predates the
+    // column does not silently lose rows.
+    let all = list(&mut conn, workspace_id, ListRelationsQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 1);
+
+    let archived = list(
+        &mut conn,
+        workspace_id,
+        ListRelationsQuery {
+            status: Some("archived".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(archived.len(), 1);
+
+    let active = list(
+        &mut conn,
+        workspace_id,
+        ListRelationsQuery {
+            status: Some("active".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(active.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn rejects_unknown_status(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
+
+    let relation = create(
+        &mut conn,
+        workspace_id,
+        CreateRelationInput {
+            source_id: task.id,
+            target_id: project.id,
+            relation_type: "belongs_to".into(),
+            properties: Value::Null,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Validated in Rust, so this is a 422 naming the field rather than the check constraint
+    // surfacing as an Internal.
+    let err = set_status(&mut conn, workspace_id, relation.id, "retired")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, YorishiroError::ValidationFailed { .. }),
+        "got {err:?}"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn set_status_on_missing_relation_is_not_found(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let err = set_status(&mut conn, workspace_id, Uuid::nil(), "archived")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, YorishiroError::NotFound { .. }),
+        "got {err:?}"
+    );
 }

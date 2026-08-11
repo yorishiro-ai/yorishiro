@@ -25,8 +25,16 @@ pub struct ListRelationsParams {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
+    /// Restricts the listing to one state. Omitted, every state is listed.
+    pub status: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SetRelationStatusRequest {
+    /// `active`, `deprecated` or `archived`.
+    pub status: String,
 }
 
 #[utoipa::path(
@@ -120,6 +128,7 @@ pub async fn list_relations(
         source_id: params.source_id,
         target_id: params.target_id,
         relation_type: params.relation_type,
+        status: params.status,
         limit: params.limit.unwrap_or(default.limit),
         offset: params.offset.unwrap_or(default.offset),
     };
@@ -127,6 +136,30 @@ pub async fn list_relations(
     let workspace_id = authorized.ctx.workspace_id;
     let records = relations::list(authorized.conn(), workspace_id, query).await?;
     Ok(Json(records))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/relations/{id}/status",
+    params(("id" = Uuid, Path, description = "Relation id")),
+    request_body = SetRelationStatusRequest,
+    responses(
+        (status = 200, description = "Status updated", body = RelationRecord),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "The relation does not exist", body = crate::error::ApiErrorBody),
+        (status = 422, description = "Not a relation status", body = crate::error::ApiErrorBody),
+    ),
+    tag = "relations",
+)]
+pub async fn set_relation_status(
+    mut authorized: Authorized<WriteScope>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetRelationStatusRequest>,
+) -> Result<Json<RelationRecord>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    let record = relations::set_status(authorized.conn(), workspace_id, id, &body.status).await?;
+    Ok(Json(record))
 }
 
 #[cfg(test)]

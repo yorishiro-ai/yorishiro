@@ -24,6 +24,7 @@ fn a_relation_record_round_trips_through_json() {
         target_id: uuid::Uuid::nil(),
         relation_type: "depends_on".into(),
         properties: serde_json::json!({ "weight": 3, "note": "manual" }),
+        status: "active".to_string(),
         created_at: chrono::Utc::now(),
     };
 

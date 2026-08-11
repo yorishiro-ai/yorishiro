@@ -35,6 +35,7 @@ fn a_record_round_trips_back_into_the_same_variant() {
         target_id: uuid::Uuid::nil(),
         relation_type: "blocks".into(),
         properties: serde_json::json!({}),
+        status: "active".to_string(),
         created_at: chrono::Utc::now(),
     });
 

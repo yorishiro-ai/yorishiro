@@ -20,10 +20,11 @@ enum Relations {
     TargetId,
     RelationType,
     Properties,
+    Status,
     CreatedAt,
 }
 
-fn relation_columns() -> [Relations; 7] {
+fn relation_columns() -> [Relations; 8] {
     [
         Relations::Id,
         Relations::WorkspaceId,
@@ -31,6 +32,7 @@ fn relation_columns() -> [Relations; 7] {
         Relations::TargetId,
         Relations::RelationType,
         Relations::Properties,
+        Relations::Status,
         Relations::CreatedAt,
     ]
 }
@@ -151,6 +153,43 @@ pub async fn get(
         .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
 }
 
+/// Moves a relation to another state. Retiring a relation this way keeps the record that it
+/// existed, which deleting it does not; traversal stops following it either way.
+pub async fn set_status(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    id: Uuid,
+    status: &str,
+) -> Result<RelationRecord, YorishiroError> {
+    if !is_valid_relation_status(status) {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("'{status}' is not a relation status"),
+            details: vec![crate::error::ValidationDetail {
+                field: "/status".to_string(),
+                problem: format!("expected one of {}", RELATION_STATUSES.join(", ")),
+            }],
+            hint: format!(
+                "use one of {} — traversal follows '{RELATION_STATUS_ACTIVE}' only",
+                RELATION_STATUSES.join(", ")
+            ),
+        });
+    }
+
+    let (sql, values) = Query::update()
+        .table((Alias::new("content"), Relations::Table))
+        .values([(Relations::Status, status.into())])
+        .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Relations::Id).eq(id))
+        .returning(Query::returning().columns(relation_columns()))
+        .build_sqlx(PostgresQueryBuilder);
+
+    sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
+        .fetch_optional(&mut *conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
+}
+
 pub async fn delete(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -197,6 +236,9 @@ pub async fn list(
     }
     if let Some(relation_type) = query.relation_type {
         builder.and_where(Expr::col(Relations::RelationType).eq(relation_type));
+    }
+    if let Some(status) = query.status {
+        builder.and_where(Expr::col(Relations::Status).eq(status));
     }
     builder
         .order_by(Relations::CreatedAt, Order::Desc)
@@ -361,14 +403,14 @@ pub async fn neighbors(
                 e.created_by AS entity_created_by, e.updated_by AS entity_updated_by \
          FROM content.relations r \
          JOIN content.entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-         WHERE r.workspace_id = $1 AND r.source_id = $2 \
+         WHERE r.workspace_id = $1 AND r.source_id = $2 AND r.status = 'active' \
          UNION ALL \
          SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
                 e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
                 e.created_at, e.updated_at, e.created_by, e.updated_by \
          FROM content.relations r \
          JOIN content.entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-         WHERE r.workspace_id = $1 AND r.target_id = $2 \
+         WHERE r.workspace_id = $1 AND r.target_id = $2 AND r.status = 'active' \
          ORDER BY relation_created_at DESC \
          LIMIT $3",
     )
@@ -434,14 +476,14 @@ pub async fn neighbors_batch(
                     e.updated_by AS entity_updated_by \
              FROM content.relations r \
              JOIN content.entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = $1 AND r.source_id = pivot.id \
+             WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = 'active' \
              UNION ALL \
              SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
                     e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
                     e.created_at, e.updated_at, e.created_by, e.updated_by \
              FROM content.relations r \
              JOIN content.entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
-             WHERE r.workspace_id = $1 AND r.target_id = pivot.id \
+             WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = 'active' \
              ORDER BY relation_created_at DESC \
              LIMIT $3 \
          ) AS n \

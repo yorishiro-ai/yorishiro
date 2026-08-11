@@ -39,17 +39,29 @@ pub struct ListRelationsArgs {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
+    /// Restricts the listing to one state ("active", "deprecated" or "archived").
+    /// Omitted, every state is listed.
+    pub status: Option<String>,
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
     pub offset: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetRelationStatusArgs {
+    pub id: Uuid,
+    /// "active", "deprecated" or "archived". Traversal follows "active" relations only.
+    pub status: String,
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_relations)]
 impl YorishiroMcpServer {
     #[tool(
         description = "Create a relation between two entities (requires write scope). \
-                           No update operation is provided; to change a relation, delete it and recreate it."
+                           Properties cannot be edited in place; to change them, delete the \
+                           relation and recreate it. To retire a relation without losing the \
+                           record that it existed, use set_relation_status instead of deleting."
     )]
     pub async fn create_relation(
         &self,
@@ -109,6 +121,7 @@ impl YorishiroMcpServer {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
+            status: args.status,
             limit: args.limit.unwrap_or(default.limit),
             offset: args.offset.unwrap_or(default.offset),
         };
@@ -116,6 +129,26 @@ impl YorishiroMcpServer {
         let workspace_id = authorized.ctx.workspace_id;
         let records = mcp_try!(relations::list(authorized.conn(), workspace_id, query).await);
         ok_json(records)
+    }
+
+    #[tool(
+        description = "Set a relation's status to active, deprecated or archived \
+                           (requires write scope). Retiring a relation this way keeps the record \
+                           that it existed, which delete_relation does not; graph traversal \
+                           follows active relations only."
+    )]
+    pub async fn set_relation_status(
+        &self,
+        Parameters(args): Parameters<SetRelationStatusArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Write);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let record = mcp_try!(
+            relations::set_status(authorized.conn(), workspace_id, args.id, &args.status).await
+        );
+        ok_json(record)
     }
 }
 
