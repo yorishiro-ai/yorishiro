@@ -121,6 +121,19 @@ impl TenantDb {
         workspace_id: Uuid,
     ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, sqlx::Error> {
         let mut conn = self.pool.acquire().await?;
+
+        // Under `cargo test` only, and only because `sqlx::test` hands out a pool that connects
+        // as the owner. Production pools take the role from `connect`'s `after_connect`; tests
+        // build theirs with `TenantDb::new`, so without this every test ran with privileges no
+        // request ever has, and a missing GRANT was invisible to all of them. That is how
+        // `create_schema` shipped answering 500 on every path with the suite green (#129).
+        //
+        // Redundant in production rather than wrong there -- `SET ROLE` to the role already
+        // held is a no-op -- but it costs a round trip, so it stays behind `cfg(test)`.
+        #[cfg(test)]
+        sqlx::query("SET ROLE yorishiro_app")
+            .execute(conn.as_mut())
+            .await?;
         // `set_config(...)` sets a session GUC for RLS to read via `current_setting(...)` --
         // it's a function call with no table operand, so it has no SELECT/INSERT/UPDATE/DELETE
         // form for sea-query to build; stays raw SQL like the session commands in `connect`.
