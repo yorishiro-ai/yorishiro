@@ -13,6 +13,12 @@ ALTER TABLE content.relations
 -- Traversal filters on status within a workspace, which is the access pattern the existing
 -- source/target indexes serve. Extending those two rather than adding a third keeps the index
 -- count where it was.
+--
+-- Rebuilt in place rather than CONCURRENTLY: the ADD COLUMN above already takes ACCESS
+-- EXCLUSIVE on the table, so building these online would not make the migration online. Doing
+-- it properly means splitting this into several non-transactional files, which is worth it once
+-- the table is large enough to notice -- a judgement this schema has not had to make yet, and
+-- no migration here has needed CONCURRENTLY so far.
 DROP INDEX content.relations_source_idx;
 DROP INDEX content.relations_target_idx;
 

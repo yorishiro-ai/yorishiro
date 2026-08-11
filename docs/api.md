@@ -162,7 +162,7 @@ A path with no extension therefore never 404s through this fallback -- a typo'd 
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 20 tools. Example connection from Claude Code:
+Connecting to `/mcp` (Streamable HTTP) gives you access to 21 tools. Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \

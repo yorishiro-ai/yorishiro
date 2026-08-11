@@ -59,7 +59,9 @@ pub struct SetRelationStatusArgs {
 impl YorishiroMcpServer {
     #[tool(
         description = "Create a relation between two entities (requires write scope). \
-                           No update operation is provided; to change a relation, delete it and recreate it."
+                           Properties cannot be edited in place; to change them, delete the \
+                           relation and recreate it. To retire a relation without losing the \
+                           record that it existed, use set_relation_status instead of deleting."
     )]
     pub async fn create_relation(
         &self,

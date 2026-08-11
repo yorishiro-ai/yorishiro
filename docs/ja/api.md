@@ -162,7 +162,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると20のツールが使えます。Claude Codeでの接続例:
+`/mcp`(Streamable HTTP)に接続すると21のツールが使えます。Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
