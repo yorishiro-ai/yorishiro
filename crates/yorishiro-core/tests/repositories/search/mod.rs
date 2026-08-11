@@ -417,3 +417,76 @@ async fn enforces_tenant_isolation(pool: PgPool) {
 
     assert!(hits.is_empty());
 }
+
+/// The vector half must reach the HNSW index.
+///
+/// This is what the two-query shape exists for. A single statement that ranks vector hits ahead
+/// of trigram-only ones needs `ORDER BY (embedding IS NULL), distance`, and that leading key
+/// takes the index out of play entirely — pgvector serves `ORDER BY embedding <=> $q LIMIT k`
+/// and nothing else. Measured before the split: a sequential scan over every row in the
+/// workspace, at any size.
+///
+/// Asserting on the plan rather than on timing: a wall-clock assertion at test-suite scale
+/// would pass either way, and the failure this guards against is a query plan, not a slow
+/// machine. `enable_seqscan = off` makes the planner state its preference rather than fall back
+/// to a scan that is genuinely cheaper on a few rows.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+    let (schema, _) =
+        schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema_with_embed())
+            .await
+            .unwrap();
+
+    // Enough rows that the planner has a reason to prefer an index over a scan.
+    sqlx::query(
+        "INSERT INTO content.entities \
+           (workspace_id, schema_id, schema_version, entity_type, data, embedding) \
+         SELECT $1, $2, $3, 'task', jsonb_build_object('title', g::text), \
+                (SELECT array_agg(random())::vector FROM generate_series(1, 768)) \
+         FROM generate_series(1, 2000) g",
+    )
+    .bind(workspace_id)
+    .bind(schema.id)
+    .bind(schema.version)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+
+    sqlx::query("ANALYZE content.entities")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query("SET enable_seqscan = off")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+
+    let plan: Vec<(String,)> = sqlx::query_as(
+        "EXPLAIN (COSTS OFF) \
+         SELECT id FROM content.entities \
+         WHERE workspace_id = $1 AND embedding IS NOT NULL \
+         ORDER BY embedding <=> $2 \
+         LIMIT 20",
+    )
+    .bind(workspace_id)
+    .bind(pgvector::Vector::from(unit_vector(0)))
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap();
+
+    let rendered: String = plan
+        .into_iter()
+        .map(|(line,)| line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("entities_embedding_hnsw"),
+        "the vector half must use the HNSW index, got:\n{rendered}"
+    );
+}
