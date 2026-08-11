@@ -57,29 +57,31 @@
 
 ## Tests
 
-- Tests live at the crate root, in `tests/`, as flat integration test files
-  (e.g. `crates/yorishiro-core/tests/repositories_schemas.rs`), never inline
-  in `src/` behind `#[cfg(test)]` and never in a `src/**/tests/` or
-  `src/**/tests.rs` module. Each file under `tests/` compiles as its own
-  integration-test binary against the crate's public API.
-- **Name a test file after the `src/` module path it covers, with `/` replaced
-  by `_`** — `src/services/auth.rs` is tested by `tests/services_auth.rs`,
-  `src/http/controllers/schemas.rs` by `tests/http_controllers_schemas.rs`.
-  The rule used to say "module/feature", and that "or feature" was enough
-  slack for `yorishiro-server` to end up with `schemas.rs` and
-  `http_middleware_auth.rs` side by side — two names for the same depth of
-  thing, so neither told you where to look. The mapping is now mechanical:
-  read the filename, you know the module; know the module, you know the
-  filename. A test genuinely spanning several modules is named for the
-  behaviour it covers (`http_routes_layers.rs`), not for one arbitrary member.
-- Because `tests/` compiles the crate as an ordinary external dependency
-  (no `cfg(test)`), test-only fixtures/helpers the crate wants to expose live
-  in a `pub` (not `pub(crate)`), `#[doc(hidden)]` module such as
-  `yorishiro_core::test_support` — see `crates/yorishiro-core/src/lib.rs` and
-  `crates/yorishiro-server/src/lib.rs`. Do not gate these helper modules with
-  `#[cfg(test)]`; that would make them invisible to `tests/`.
-- Do not add `exclude = ["src/**/tests/", ...]` to a crate's `Cargo.toml` —
-  once tests are migrated out of `src/`, no such exclude is needed.
+- `tests/` mirrors `src/` exactly: same directories, same filenames. The test
+  body lives in `tests/`, and the `src` module it covers ends with a bridge:
+
+  ```rust
+  #[cfg(test)]
+  #[path = "../../tests/repositories/schemas/mod.rs"]
+  mod tests;
+  ```
+
+  so it compiles as that module's own `mod tests` rather than as an external
+  integration test. Never inline a test body in `src/`. Two consequences
+  follow, and both matter:
+  - **Private items are testable.** `pub(crate)` and private functions are
+    reachable, so a test never needs visibility widened for its own sake.
+  - **`autotests = false` is required** in `Cargo.toml`. Without it cargo also
+    compiles each `tests/*.rs` as a standalone integration target, where
+    `use crate::` fails. This is also why the layout cannot be adopted one
+    file at a time — both crates are already on it, in ~77 places.
+- Test-only fixtures live in a `#[cfg(test)]`, `pub(crate)` `test_support`
+  module (`crates/yorishiro-core/src/lib.rs`). `tests/` reaches it as
+  `crate::test_support`. Do **not** widen it to `pub` or drop the
+  `#[cfg(test)]`: under the bridge neither is needed, and `pub` would put
+  fixtures on the crate's public surface for no reader outside these tests.
+- A `src` file with nothing to test (a `mod`-only re-export hub) gets no test
+  file and no bridge.
 
 ## Imports
 
