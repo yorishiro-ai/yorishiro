@@ -4,6 +4,7 @@
 
 pub mod auth;
 pub mod embedding;
+pub mod inference;
 pub mod marketplace;
 pub mod official_templates;
 pub mod queue;
