@@ -22,6 +22,7 @@ enum Schemas {
     Status,
     OriginTemplateId,
     OriginStatus,
+    OriginSnapshot,
     CreatedAt,
 }
 
@@ -36,6 +37,7 @@ struct SchemaRow {
     status: String,
     origin_template_id: Option<Uuid>,
     origin_status: String,
+    origin_snapshot: Option<Value>,
     created_at: DateTime<Utc>,
 }
 
@@ -52,6 +54,11 @@ impl SchemaRow {
             status: self.status,
             origin_template_id: self.origin_template_id,
             origin_status: self.origin_status,
+            origin_snapshot: self
+                .origin_snapshot
+                .map(serde_json::from_value)
+                .transpose()
+                .internal()?,
             created_at: self.created_at,
         })
     }
@@ -104,7 +111,7 @@ pub async fn count_active(
     Ok(count)
 }
 
-fn schema_columns() -> [Schemas; 10] {
+fn schema_columns() -> [Schemas; 11] {
     [
         Schemas::Id,
         Schemas::TenantId,
@@ -115,6 +122,7 @@ fn schema_columns() -> [Schemas; 10] {
         Schemas::Status,
         Schemas::OriginTemplateId,
         Schemas::OriginStatus,
+        Schemas::OriginSnapshot,
         Schemas::CreatedAt,
     ]
 }
@@ -292,13 +300,14 @@ pub async fn create_schema_from(
             Schemas::Status,
             Schemas::OriginTemplateId,
             Schemas::OriginStatus,
+            Schemas::OriginSnapshot,
         ])
         .values_panic([
             tenant_id.into(),
             workspace_id.into(),
             name.clone().into(),
             next_version.into(),
-            definition_json.into(),
+            definition_json.clone().into(),
             "active".into(),
             origin_template_id.into(),
             // A schema with no origin is detached, not linked-to-nothing.
@@ -306,6 +315,13 @@ pub async fn create_schema_from(
                 ORIGIN_STATUS_LINKED.into()
             } else {
                 ORIGIN_STATUS_DETACHED.into()
+            },
+            // The definition as copied, kept as the merge base. Only meaningful with an
+            // origin: without one there is nothing this could be an ancestor of.
+            if origin_template_id.is_some() {
+                definition_json.into()
+            } else {
+                sea_query::Value::Json(None).into()
             },
         ])
         .returning(Query::returning().columns(schema_columns()))

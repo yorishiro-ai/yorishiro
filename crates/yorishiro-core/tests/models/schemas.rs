@@ -48,6 +48,7 @@ fn a_schema_record_round_trips_with_its_parsed_definition() {
         status: "active".into(),
         origin_template_id: None,
         origin_status: "detached".to_string(),
+        origin_snapshot: None,
         created_at: chrono::Utc::now(),
     };
 
