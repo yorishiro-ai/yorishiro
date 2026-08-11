@@ -193,3 +193,28 @@ async fn shutdown_waits_for_in_flight_syncs(pool: PgPool) {
         "the sync never ran, so waiting for it proved nothing"
     );
 }
+
+/// The queue seam is reachable from AppState and drains what it accepted. Without this the
+/// trait would exist while nothing in the process could hand work to it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn app_state_runs_and_drains_queued_work(pool: PgPool) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let probe = Arc::new(ConcurrencyProbe::new());
+    let state = AppState::new(
+        yorishiro_core::db::TenantDb::new(pool.clone()),
+        pool,
+        Arc::clone(&probe) as Arc<dyn EmbeddingProvider>,
+    );
+    let ran = Arc::new(AtomicUsize::new(0));
+
+    for _ in 0..3 {
+        let ran = Arc::clone(&ran);
+        state.enqueue(Box::pin(async move {
+            ran.fetch_add(1, Ordering::SeqCst);
+        }));
+    }
+
+    state.drain_queue(std::time::Duration::from_secs(5)).await;
+    assert_eq!(ran.load(Ordering::SeqCst), 3);
+}

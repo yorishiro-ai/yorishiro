@@ -11,6 +11,7 @@ use yorishiro_core::repositories::entities::EntityRecord;
 use yorishiro_core::services::auth::{Authenticator, default_authenticator};
 use yorishiro_core::services::embedding::EmbeddingProvider;
 use yorishiro_core::services::embedding::sync as embedding_sync;
+use yorishiro_core::services::queue::{LocalQueue, Queue};
 
 /// Cap on concurrent background embedding syncs. Each sync task holds a pool connection for
 /// the duration of the embedding API call (up to tens of seconds), so spawning without limit
@@ -48,6 +49,10 @@ pub struct AppState {
     pub authenticator: Arc<dyn Authenticator>,
     embedding_sync_permits: Arc<Semaphore>,
     embedding_tasks: TaskTracker,
+    /// Where deferred work runs. Held as the trait so a deployment that needs tasks to
+    /// survive the process can supply a driver that outlives it, without every caller of
+    /// `spawn_embedding_sync` learning about queues.
+    queue: Arc<dyn Queue>,
 }
 
 impl AppState {
@@ -68,6 +73,7 @@ impl AppState {
             authenticator: default_authenticator(),
             embedding_sync_permits: Arc::new(Semaphore::new(EMBEDDING_SYNC_MAX_CONCURRENCY)),
             embedding_tasks: TaskTracker::new(),
+            queue: Arc::new(LocalQueue::new(EMBEDDING_SYNC_MAX_CONCURRENCY)),
         }
     }
 
@@ -89,6 +95,23 @@ impl AppState {
     /// made to wait for it, and a fresh connection is acquired from the pool instead of
     /// reusing the request's own connection (satisfying the no-same-transaction constraint
     /// documented on `sync_embedding`). Failures are only logged: embedding is an auxiliary
+    /// Hands deferred work to this process's queue.
+    ///
+    /// Where `spawn_embedding_sync` is the one deferred job this crate has and returns a
+    /// handle its callers await in tests, this is the general seam: a deployment that needs
+    /// work to survive the process supplies a driver that outlives it, and nothing at the call
+    /// site changes. The embedding sync keeps its own path until there is a second driver to
+    /// justify moving it — a refactor with no second implementation to prove it is a guess
+    /// about what the second one will need.
+    pub fn enqueue(&self, task: yorishiro_core::services::queue::Task) {
+        self.queue.enqueue(task);
+    }
+
+    /// Waits for queued work at shutdown. See [`Queue::drain`].
+    pub async fn drain_queue(&self, timeout: std::time::Duration) {
+        self.queue.drain(timeout).await;
+    }
+
     /// feature and must not affect whether the entity write itself succeeds.
     pub fn spawn_embedding_sync(
         &self,
