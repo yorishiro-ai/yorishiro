@@ -185,6 +185,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `list_schemas` | read | List a summary of registered schemas (for discovery) |
 | `list_upstream_changes` | read | Schemas whose origin template has been edited since the copy was taken. Reports only — the upstream edit is never applied on its own, since it could invalidate entities already stored |
 | `merge_preview` | read | What following the origin template would do: each differing field as `auto_add`, `auto_update`, `keep_local` or `conflict`. Nothing is written — a conflict is a question for a person, since picking a side would invalidate the entities written against the losing definition |
+| `merge_apply` | schema | Follow the origin template: write the merged definition as the schema's next version, taking upstream's changes to untouched fields and keeping this workspace's own. Refuses if any field conflicts |
 | `get_active_schema` | read | Fetch the active schema definition |
 | `get_schema_by_id` | read | Fetch a specific schema version |
 | `get_entity_type_json_schema` | read | Project an entity_type as a JSON Schema |

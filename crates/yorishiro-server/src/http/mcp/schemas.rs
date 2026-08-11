@@ -238,6 +238,35 @@ impl YorishiroMcpServer {
         );
         ok_json(plan)
     }
+
+    #[tool(
+        description = "Follow the origin template: write the merged definition as the schema's \
+                           next version (requires schema scope). Takes upstream's changes to \
+                           fields this workspace has not touched, and keeps this workspace's \
+                           own. Refuses if any field conflicts -- run merge_preview first and \
+                           resolve those by editing the schema."
+    )]
+    pub async fn merge_apply(
+        &self,
+        Parameters(args): Parameters<GetSchemaByIdArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Schema);
+
+        let tenant_id = authorized.ctx.tenant_id;
+        let workspace_id = authorized.ctx.workspace_id;
+        let (schema, diff) = mcp_try!(
+            schemas::merge_apply(
+                authorized.conn(),
+                &self.state.identity_pool,
+                tenant_id,
+                workspace_id,
+                args.schema_id,
+            )
+            .await
+        );
+        ok_json(serde_json::json!({ "schema": schema, "diff": diff }))
+    }
 }
 
 #[cfg(test)]
