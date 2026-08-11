@@ -848,3 +848,158 @@ async fn dry_run_reports_nothing_to_do_when_everything_is_current(pool: PgPool) 
     assert_eq!(report.needs_values, 0);
     assert!(report.by_entity_type.is_empty());
 }
+
+/// The point of a snapshot: what the row actually held, restorable afterwards. Entity updates
+/// are last-write-wins, so without this the previous data is simply gone.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "before" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let job_id = uuid::Uuid::nil();
+    entities::snapshot(&mut conn, workspace_id, entity.id, job_id)
+        .await
+        .unwrap();
+
+    entities::update(
+        &mut conn,
+        workspace_id,
+        entity.id,
+        json!({ "title": "after" }),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        entities::get(&mut conn, workspace_id, entity.id)
+            .await
+            .unwrap()
+            .data["title"],
+        "after"
+    );
+
+    let report = entities::undo_job(&mut conn, workspace_id, job_id)
+        .await
+        .unwrap();
+    assert_eq!(report.restored, 1);
+    assert_eq!(report.missing, 0);
+
+    assert_eq!(
+        entities::get(&mut conn, workspace_id, entity.id)
+            .await
+            .unwrap()
+            .data["title"],
+        "before",
+        "the entity holds what it held before the overwrite"
+    );
+}
+
+/// Undoing the same job twice would restore stale data over whatever came after, so the
+/// snapshots go with the undo and the second attempt finds nothing.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_job_cannot_be_undone_twice(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "original" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let job_id = uuid::Uuid::nil();
+    entities::snapshot(&mut conn, workspace_id, entity.id, job_id)
+        .await
+        .unwrap();
+    entities::undo_job(&mut conn, workspace_id, job_id)
+        .await
+        .unwrap();
+
+    let err = entities::undo_job(&mut conn, workspace_id, job_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, YorishiroError::NotFound { .. }),
+        "got {err:?}"
+    );
+}
+
+/// An entity deleted after its snapshot is counted, not fatal. Refusing the whole undo
+/// because one row is gone would leave every other entity in the job wrong.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deleted_entity_is_counted_rather_than_failing_the_undo(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let job_id = uuid::Uuid::nil();
+    let mut ids = Vec::new();
+    for title in ["kept", "deleted"] {
+        let e = entities::create(
+            &mut conn,
+            workspace_id,
+            CreateEntityInput {
+                schema_name: "task-management".into(),
+                entity_type: "task".into(),
+                data: json!({ "title": title }),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        entities::snapshot(&mut conn, workspace_id, e.id, job_id)
+            .await
+            .unwrap();
+        ids.push(e.id);
+    }
+
+    entities::delete(&mut conn, workspace_id, ids[1])
+        .await
+        .unwrap();
+
+    let report = entities::undo_job(&mut conn, workspace_id, job_id)
+        .await
+        .unwrap();
+    assert_eq!(report.restored, 1);
+    assert_eq!(report.missing, 1, "the deleted one is reported, not fatal");
+}

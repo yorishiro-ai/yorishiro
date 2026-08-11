@@ -130,3 +130,29 @@ pub struct DryRunByType {
     /// counting it.
     pub missing_required: Vec<String>,
 }
+
+/// An entity's data as it stood before something overwrote it.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, ToSchema)]
+pub struct EntitySnapshot {
+    pub id: Uuid,
+    /// Groups the snapshots taken by one operation, so a batch is undone as a batch.
+    pub job_id: Uuid,
+    pub entity_id: Uuid,
+    pub schema_id: Uuid,
+    pub schema_version: i32,
+    #[schema(value_type = Object)]
+    pub data: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// What undoing a job put back.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UndoReport {
+    pub job_id: Uuid,
+    /// Entities restored to the data they held before.
+    pub restored: i64,
+    /// Snapshots whose entity no longer exists. Counted rather than treated as an error: a
+    /// batch partially undone leaves a workspace in a state nobody chose, and an entity
+    /// deleted since is not a reason to refuse the rest.
+    pub missing: i64,
+}
