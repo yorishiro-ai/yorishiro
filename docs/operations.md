@@ -174,3 +174,19 @@ rest of what someone reviewed still lands.
 
 A job can only be confirmed once. The proposals are deleted when applied, so confirming again
 after an undo cannot write the same guesses back over what the undo restored.
+
+## Switching queue infrastructure
+
+`DrainingQueue` runs two queues at once while an infrastructure switchover is in progress. New
+work goes to the new queue from the moment it is installed; the old one keeps running what it
+had already accepted.
+
+1. Construct `DrainingQueue::new(new, old)` and serve from it. Nothing upstream needs to know —
+   it is a `Queue` like any other.
+2. `drain_old(timeout)` waits for the old queue's outstanding work. This is deliberately not
+   `drain()`: that one waits for *everything*, including work that has only just arrived on the
+   new queue, which is not the question a switchover is asking.
+3. Drop it and serve from the new queue directly.
+
+Nothing sent through the switchover reaches the old queue — otherwise step 2 would be chasing a
+target that keeps moving.

@@ -86,6 +86,55 @@ impl Queue for LocalQueue {
     }
 }
 
+/// Two queues during an infrastructure switchover (FR-7-3).
+///
+/// New work goes to the new queue from the moment this is installed; the old one keeps running
+/// what it already accepted until it is empty. That is the whole of the switchover — the three
+/// stages the spec describes (start sending to the new one, drain the old, remove it) are
+/// respectively constructing this, calling [`DrainingQueue::drain_old`], and dropping it.
+///
+/// It is a `Queue` itself, so nothing upstream knows a switchover is happening. `enqueue` never
+/// reaches the old queue: a task sent there during the drain is one more thing to wait for, and
+/// the point of the exercise is to reach zero.
+///
+/// **The two queues are any two `Queue`s.** The spec framed this as needing a second *driver*,
+/// but the seam does not care what is behind it — swapping a `LocalQueue` for another
+/// `LocalQueue` exercises the same paths, which is what the tests do.
+pub struct DrainingQueue {
+    new: Arc<dyn Queue>,
+    old: Arc<dyn Queue>,
+}
+
+impl DrainingQueue {
+    pub fn new(new: Arc<dyn Queue>, old: Arc<dyn Queue>) -> Self {
+        Self { new, old }
+    }
+
+    /// Waits for the old queue's accepted work, up to `timeout`.
+    ///
+    /// Stage 2. Separate from [`Queue::drain`] because they answer different questions: this one
+    /// is "is the old queue finished, so it can be removed", and the other is "is *everything*
+    /// finished, so the process can exit". A switchover that called the second would also wait
+    /// for work that has only just arrived on the new queue, which is not what it is asking.
+    pub async fn drain_old(&self, timeout: std::time::Duration) {
+        self.old.drain(timeout).await;
+    }
+}
+
+impl Queue for DrainingQueue {
+    fn enqueue(&self, task: Task) {
+        self.new.enqueue(task);
+    }
+
+    fn drain(&self, timeout: std::time::Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            // Both, concurrently rather than one after the other: at shutdown the timeout is a
+            // bound on how long the process may take, and spending it twice would double it.
+            tokio::join!(self.new.drain(timeout), self.old.drain(timeout));
+        })
+    }
+}
+
 #[cfg(test)]
 #[path = "../../tests/services/queue.rs"]
 mod tests;
