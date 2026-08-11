@@ -465,3 +465,106 @@ async fn list_filters_by_schema_version(pool: PgPool) {
     .unwrap();
     assert_eq!(all.len(), 3);
 }
+
+/// A workspace with no schema refuses entity writes, and says that is why. Before the status
+/// column this failed too, but as a 404 on the schema name -- which reads as a typo.
+#[sqlx::test(migrations = "../../migrations")]
+async fn refuses_entity_creation_while_the_workspace_has_no_schema(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let err = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "too early" }),
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        YorishiroError::ValidationFailed { hint, .. } => {
+            assert!(
+                hint.contains("create a schema first"),
+                "the hint should say what to do, got {hint:?}"
+            );
+        }
+        other => panic!("expected ValidationFailed, got {other:?}"),
+    }
+}
+
+/// The first schema lifts the block, and entities can be written from then on.
+#[sqlx::test(migrations = "../../migrations")]
+async fn creating_the_first_schema_activates_the_workspace(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    assert!(
+        crate::repositories::tenancy::is_schema_pending(&mut conn, workspace_id)
+            .await
+            .unwrap(),
+        "a fresh workspace starts pending"
+    );
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+
+    assert!(
+        !crate::repositories::tenancy::is_schema_pending(&mut conn, workspace_id)
+            .await
+            .unwrap(),
+        "the first schema activates it"
+    );
+
+    // And the write that was refused above now succeeds.
+    entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "now fine" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+}
+
+/// A second schema version must not flip the workspace back or otherwise disturb it -- the
+/// activation runs on every create_schema call, so it has to be idempotent.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_further_schema_version_leaves_the_workspace_active(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+
+    assert!(
+        !crate::repositories::tenancy::is_schema_pending(&mut conn, workspace_id)
+            .await
+            .unwrap()
+    );
+}

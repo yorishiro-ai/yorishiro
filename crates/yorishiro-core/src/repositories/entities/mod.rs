@@ -190,6 +190,23 @@ pub async fn create(
         .internal()?;
 
     check_entity_quota(&mut tx, workspace_id).await?;
+
+    // Before resolving the schema, so an empty workspace is told it is empty. Resolving first
+    // would report the schema name as not found, which reads as a typo rather than as "nothing
+    // has been defined here yet".
+    if crate::repositories::tenancy::is_schema_pending(&mut tx, workspace_id).await? {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "workspace '{workspace_id}' has no schema yet, so there is nothing to \
+                 validate this entity against"
+            ),
+            details: vec![],
+            hint: "create a schema first: POST /api/schemas, or the create_schema tool. \
+                   list_templates shows the built-in ones."
+                .to_string(),
+        });
+    }
+
     let schema = schemas::get_active_schema(&mut tx, workspace_id, &input.schema_name).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;

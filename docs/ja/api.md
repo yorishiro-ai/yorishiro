@@ -21,6 +21,10 @@ $ curl -X POST localhost:8080/api/entities \
 $ curl "localhost:8080/api/search?query_text=買い物&filter=%7B%22status%22%3A%22active%22%7D" \
     -H "Authorization: Bearer $YSR_KEY"
 
+# 新規ワークスペースはスキーマを持たないため、最初の1本ができるまでエンティティ作成は422で
+# 拒否される(「create a schema first: POST /api/schemas...」)。最初のスキーマ作成で解除され、
+# ワークスペースの`status`が schema_pending から active になる。
+
 # リレーションを削除せずに引退させる。探索は辿らなくなるが記録は残る(write scope)。
 # status は active / deprecated / archived の3値。
 $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
