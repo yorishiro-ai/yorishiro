@@ -98,6 +98,7 @@ impl Modify for SecurityAddon {
         relations::get_relation,
         relations::delete_relation,
         relations::list_relations,
+        relations::set_relation_status,
         schemas::list_schemas,
         schemas::get_active_schema,
         schemas::get_schema_by_id,
@@ -143,6 +144,7 @@ impl Modify for SecurityAddon {
         entities::CreateEntityRequest,
         entities::UpdateEntityRequest,
         relations::CreateRelationRequest,
+        relations::SetRelationStatusRequest,
         schemas::CreateSchemaResponse,
         schemas::CreateSchemaRequest,
         yorishiro_core::repositories::import::ImportResult,
@@ -231,6 +233,10 @@ pub fn router(
         .route(
             "/api/relations/{id}",
             get(relations::get_relation).delete(relations::delete_relation),
+        )
+        .route(
+            "/api/relations/{id}/status",
+            put(relations::set_relation_status),
         )
         .route(
             "/api/schemas",

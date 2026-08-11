@@ -71,8 +71,8 @@ async fn every_registered_tool_requires_an_authorization_header(pool: PgPool) {
         .collect();
     assert_eq!(
         tool_names.len(),
-        20,
-        "expected 20 registered tools, got {tool_names:?}"
+        21,
+        "expected 21 registered tools, got {tool_names:?}"
     );
 
     for (index, name) in tool_names.iter().enumerate() {

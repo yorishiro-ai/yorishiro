@@ -255,6 +255,7 @@ pub(crate) mod test_support {
             "get_relation" => serde_json::json!({ "id": NIL_UUID }),
             "delete_relation" => serde_json::json!({ "id": NIL_UUID }),
             "list_relations" => serde_json::json!({}),
+            "set_relation_status" => serde_json::json!({ "id": NIL_UUID, "status": "archived" }),
             "list_schemas" => serde_json::json!({}),
             "get_active_schema" => serde_json::json!({ "name": "dummy" }),
             "get_schema_by_id" => serde_json::json!({ "schema_id": NIL_UUID }),

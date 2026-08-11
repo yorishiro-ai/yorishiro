@@ -21,6 +21,15 @@ $ curl -X POST localhost:8080/api/entities \
 $ curl "localhost:8080/api/search?query_text=shopping&filter=%7B%22status%22%3A%22active%22%7D" \
     -H "Authorization: Bearer $YSR_KEY"
 
+# Retire a relation without deleting it: traversal stops following it, the record stays
+# (write scope). Statuses are active, deprecated and archived.
+$ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
+    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -d '{"status": "deprecated"}'
+
+# List only the relations in one state; omit `status` to list every state (read scope)
+$ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YSR_KEY"
+
 # Entity plus its relations and connected neighbors in one call (read scope)
 $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
 
@@ -171,6 +180,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_entity` / `get_entity` / `update_entity` / `delete_entity` | write/read | Entity CRUD |
 | `list_entities` | read | List entities, optionally filtered by `entity_type`, a `filter` JSONB containment match, and/or `schema_version` |
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | Relation CRUD |
+| `set_relation_status` | write | Move a relation to `active`, `deprecated` or `archived`. Traversal follows `active` relations only, so this retires one without destroying the record that it existed |
 | `search_entities` | read | Vector similarity search over a natural-language query, optionally narrowed by `entity_type`/`filter`; entities without an embedding can still surface via trigram fuzzy matching |
 | `recall_context` | read | Fetch an entity plus its relations and connected neighbors in one call |
 | `import_jsonl` | schema | Bulk-import schemas/entities/relations from a JSON Lines document in the export format, as a single transaction |
