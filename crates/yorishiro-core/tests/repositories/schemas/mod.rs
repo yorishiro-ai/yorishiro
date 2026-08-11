@@ -741,3 +741,80 @@ async fn merge_apply_refuses_a_conflict(pool: PgPool) {
         .unwrap();
     assert_eq!(still.id, active.id);
 }
+
+/// `identity.workspaces.schema_id` names the workspace's schema, and the workspace listing shows
+/// it. Creating a schema used to leave it NULL — the column was only ever written by the admin
+/// CLI — so a workspace provisioned over REST or MCP listed no schema at all.
+#[sqlx::test(migrations = "../../migrations")]
+async fn creating_a_schema_names_it_on_the_workspace(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let named: Option<Uuid> =
+        sqlx::query_scalar("SELECT schema_id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(named.is_none(), "a fresh workspace names no schema");
+
+    let (first, _) = create_schema(&mut conn, tenant_id, workspace_id, task_schema(false))
+        .await
+        .unwrap();
+
+    let named: Option<Uuid> =
+        sqlx::query_scalar("SELECT schema_id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(named, Some(first.id), "the first schema is the one named");
+
+    // A second version of the same schema, and then a differently-named one: neither takes the
+    // column. It means "this workspace's schema", not "the most recent one".
+    let (second, _) = create_schema(&mut conn, tenant_id, workspace_id, task_schema(true))
+        .await
+        .unwrap();
+    assert_ne!(second.id, first.id);
+
+    let named: Option<Uuid> =
+        sqlx::query_scalar("SELECT schema_id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        named,
+        Some(first.id),
+        "a later schema does not take the column from the first"
+    );
+}
+
+/// The request path runs as `yorishiro_app`, and creating a schema writes `identity.workspaces`.
+///
+/// Every other test here connects as the owner, where grants are implicit — which is why a
+/// missing `GRANT UPDATE` on that table shipped and made `POST /api/schemas` answer 500 on both
+/// editions while the whole suite stayed green. This one issues `SET ROLE` first, so it fails
+/// the way the server does.
+#[sqlx::test(migrations = "../../migrations")]
+async fn creating_a_schema_works_as_the_request_role(pool: PgPool) {
+    let (tenant_id, workspace_id) = seed_workspace(&pool).await;
+    let db = TenantDb::new(pool);
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    sqlx::query("SET ROLE yorishiro_app")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+
+    create_schema(&mut conn, tenant_id, workspace_id, task_schema(false))
+        .await
+        .expect("the request role can create a schema");
+}

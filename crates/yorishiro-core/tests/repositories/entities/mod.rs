@@ -1197,3 +1197,111 @@ async fn a_fill_can_be_undone_as_one_job(pool: PgPool) {
         );
     }
 }
+
+/// Snapshots age out, so a workspace that migrates repeatedly does not accumulate before-images
+/// without bound. `YSR_SNAPSHOT_RETENTION_DAYS` defaults to 30; this backdates one past that and
+/// runs a second job, which is when the sweep happens.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    schemas::create_schema(&mut conn, tenant_id, workspace_id, task_schema())
+        .await
+        .unwrap();
+    let entity = entities::create(
+        &mut conn,
+        workspace_id,
+        CreateEntityInput {
+            schema_name: "task-management".into(),
+            entity_type: "task".into(),
+            data: json!({ "title": "kept" }),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let old_job = uuid::Uuid::nil();
+    entities::snapshot(&mut conn, workspace_id, entity.id, old_job)
+        .await
+        .unwrap();
+
+    // Backdated rather than waited for: the sweep compares against `now()`, and a test cannot
+    // spend 31 days proving it.
+    sqlx::query(
+        "UPDATE content.entity_snapshots SET created_at = now() - INTERVAL '31 days' \
+         WHERE workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+
+    // Any migration job runs the sweep. This one finds nothing to fill, which is enough.
+    entities::fill_defaults(
+        &mut conn,
+        workspace_id,
+        "task-management",
+        uuid::Uuid::max(),
+    )
+    .await
+    .unwrap();
+
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM content.entity_snapshots WHERE workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert_eq!(remaining, 0, "the sweep took the aged-out image");
+
+    // An expired window answers the same way a job that never existed does -- which is what
+    // "undoable for N days" means once the days are up.
+    let err = entities::undo_job(&mut conn, workspace_id, old_job)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, YorishiroError::NotFound { .. }),
+        "undoing past the window reports the job as gone, got {err:?}"
+    );
+}
+
+/// A retention value that does not fit `make_interval(days => …)` must not reach it. Parsed as
+/// `i64` and cast, `2147483648` wraps negative — `now() - a negative interval` puts the cutoff in
+/// the *future*, and the sweep would delete the images it exists to preserve.
+#[test]
+fn an_out_of_range_retention_falls_back_to_the_default() {
+    // Serialized against the other env-reading tests in this crate is not needed: this reads a
+    // key nothing else touches, and reads it through the same function the sweep uses.
+    let restore = std::env::var_os("YSR_SNAPSHOT_RETENTION_DAYS");
+
+    for value in ["2147483648", "9999999999999999999", "not-a-number", ""] {
+        // SAFETY: single-threaded test, and no other test reads this key.
+        unsafe { std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", value) };
+        assert_eq!(
+            entities::snapshot_retention_days(),
+            30,
+            "'{value}' does not parse as i32 and must fall back, never wrap"
+        );
+    }
+
+    // A negative value does parse. It is not clamped or rejected -- `prune_snapshots` treats
+    // anything `<= 0` as "keep everything", so it lands with `0` rather than reaching
+    // `make_interval` and moving the cutoff into the future.
+    // SAFETY: as above.
+    unsafe { std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", "-1") };
+    assert!(entities::snapshot_retention_days() <= 0, "sweeping is off");
+
+    // SAFETY: as above.
+    unsafe {
+        match restore {
+            Some(v) => std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", v),
+            None => std::env::remove_var("YSR_SNAPSHOT_RETENTION_DAYS"),
+        }
+    }
+}

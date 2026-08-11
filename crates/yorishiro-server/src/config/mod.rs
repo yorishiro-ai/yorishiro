@@ -34,6 +34,8 @@ struct FileConfig {
     logging: LoggingConfig,
     #[serde(default)]
     auth_rate_limit: AuthRateLimitConfig,
+    search_tokens_per_minute: Option<u32>,
+    snapshot_retention_days: Option<i32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -159,6 +161,14 @@ pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
         apply_if_unset(
             "YSR_AUTH_RATE_LIMIT_WINDOW_SECS",
             config.auth_rate_limit.window_secs.map(|n| n.to_string()),
+        );
+        apply_if_unset(
+            "YSR_SEARCH_TOKENS_PER_MINUTE",
+            config.search_tokens_per_minute.map(|n| n.to_string()),
+        );
+        apply_if_unset(
+            "YSR_SNAPSHOT_RETENTION_DAYS",
+            config.snapshot_retention_days.map(|n| n.to_string()),
         );
     }
 

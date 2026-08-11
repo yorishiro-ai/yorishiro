@@ -23,6 +23,11 @@
 #   max: 10                                                             # YSR_AUTH_RATE_LIMIT_MAX
 #   window_secs: 60                                                     # YSR_AUTH_RATE_LIMIT_WINDOW_SECS
 
+# search_tokens_per_minute: 100000                                      # YSR_SEARCH_TOKENS_PER_MINUTE
+
+# Days a batch migration stays undoable; 0 keeps every before-image forever.
+# snapshot_retention_days: 30                                           # YSR_SNAPSHOT_RETENTION_DAYS
+
 # embedding:
 #   provider: local                                                     # YSR_EMBEDDING_PROVIDER
 #   dimensions: 1024                                                    # YSR_EMBEDDING_DIMENSIONS (must match model output)
