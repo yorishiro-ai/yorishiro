@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crate::services::queue::{LocalQueue, Queue};
+use crate::services::queue::{DrainOutcome, DrainingQueue, LocalQueue, Queue};
 
 #[tokio::test]
 async fn enqueued_work_runs() {
@@ -80,5 +80,114 @@ async fn drain_gives_up_rather_than_hanging() {
         start.elapsed() < Duration::from_secs(5),
         "drain should time out, took {:?}",
         start.elapsed()
+    );
+}
+
+/// The switchover's three stages (FR-7-3), in order: new work goes to the new queue, the old
+/// one finishes what it already had, and only then is it removable.
+#[tokio::test]
+async fn a_switchover_sends_new_work_on_and_lets_the_old_queue_finish() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    let old = Arc::new(LocalQueue::new(4));
+    let new = Arc::new(LocalQueue::new(4));
+
+    let old_ran = Arc::new(AtomicUsize::new(0));
+    let new_ran = Arc::new(AtomicUsize::new(0));
+
+    // Stage 0: work already accepted by the old queue, still running when the switch happens.
+    let counter = Arc::clone(&old_ran);
+    old.enqueue(Box::pin(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    // Stage 1: from here, everything goes to the new queue.
+    let switching = DrainingQueue::new(
+        Arc::clone(&new) as Arc<dyn Queue>,
+        Arc::clone(&old) as Arc<dyn Queue>,
+    );
+    let counter = Arc::clone(&new_ran);
+    switching.enqueue(Box::pin(async move {
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    // Stage 2: the old queue's outstanding work completes.
+    assert_eq!(
+        switching.drain_old(Duration::from_secs(5)).await,
+        DrainOutcome::Finished,
+        "the old queue emptied within the timeout"
+    );
+    assert_eq!(
+        old_ran.load(Ordering::SeqCst),
+        1,
+        "the old queue finished what it had accepted"
+    );
+
+    switching.drain(Duration::from_secs(5)).await;
+    assert_eq!(
+        new_ran.load(Ordering::SeqCst),
+        1,
+        "and the new queue ran what arrived after the switch"
+    );
+}
+
+/// Nothing sent through the switchover reaches the old queue — otherwise draining it would be
+/// chasing a target that keeps moving.
+#[tokio::test]
+async fn new_work_never_lands_on_the_old_queue() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    let old = Arc::new(LocalQueue::new(4));
+    let new = Arc::new(LocalQueue::new(4));
+    let old_ran = Arc::new(AtomicUsize::new(0));
+
+    let switching = DrainingQueue::new(
+        Arc::clone(&new) as Arc<dyn Queue>,
+        Arc::clone(&old) as Arc<dyn Queue>,
+    );
+
+    let counter = Arc::clone(&old_ran);
+    switching.enqueue(Box::pin(async move {
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    assert_eq!(
+        switching.drain_old(Duration::from_secs(2)).await,
+        DrainOutcome::Finished,
+        "an empty queue finishes immediately"
+    );
+    assert_eq!(
+        old_ran.load(Ordering::SeqCst),
+        0,
+        "the task went to the new queue, so draining the old one saw nothing"
+    );
+}
+
+/// The distinction stage 3 depends on: a queue that ran out of time is not an empty queue, and
+/// removing it would drop the work still running on it.
+#[tokio::test]
+async fn a_drain_that_runs_out_of_time_says_so() {
+    use std::time::Duration;
+
+    let old = Arc::new(LocalQueue::new(4));
+    let new = Arc::new(LocalQueue::new(4));
+
+    // Longer than the timeout it will be given.
+    old.enqueue(Box::pin(async {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    }));
+
+    let switching = DrainingQueue::new(
+        Arc::clone(&new) as Arc<dyn Queue>,
+        Arc::clone(&old) as Arc<dyn Queue>,
+    );
+
+    assert_eq!(
+        switching.drain_old(Duration::from_millis(100)).await,
+        DrainOutcome::TimedOut,
+        "still running, so the old queue must not be removed"
     );
 }
