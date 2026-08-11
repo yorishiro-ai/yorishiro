@@ -136,6 +136,27 @@ impl TenantDb {
     }
 }
 
+/// Serializes a transaction against others naming the same `key`, until it commits.
+///
+/// A check-then-insert needs this: two transactions can both read "under the quota" and both
+/// insert, and neither the quota nor the uniqueness rule is expressible as a constraint the
+/// database would catch. The lock is transaction-scoped, so it releases on commit or rollback
+/// without an unlock call to forget.
+///
+/// Collected here rather than written at each call site because it is the one piece of the
+/// exclusion that is engine-specific: advisory locks are PostgreSQL's, and an engine without
+/// them needs something else — SQLite would serialize the whole database with `BEGIN
+/// IMMEDIATE`, which is coarser but sound for a deployment holding one tenant.
+pub async fn lock_for_update(conn: &mut sqlx::PgConnection, key: &str) -> Result<(), sqlx::Error> {
+    // `pg_advisory_xact_lock(...)` is a function call with no table operand, so sea-query has
+    // no form for it -- the same category as the session commands above.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(key)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "../tests/db.rs"]
 mod tests;

@@ -211,9 +211,7 @@ pub async fn create_schema(
     // `pg_advisory_xact_lock(...)` is a lock-acquisition function call, not a table operation --
     // no SELECT/INSERT/UPDATE/DELETE form exists for sea-query to build, same category as the
     // session commands in `db.rs`/`auth.rs`.
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("{workspace_id}:{name}"))
-        .execute(&mut *tx)
+    crate::db::lock_for_update(&mut tx, &format!("{workspace_id}:{name}"))
         .await
         .internal()?;
 
