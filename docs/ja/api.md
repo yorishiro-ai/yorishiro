@@ -171,7 +171,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると22のツールが使えます。Claude Codeでの接続例:
+`/mcp`(Streamable HTTP)に接続すると23のツールが使えます。Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -183,6 +183,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_schema` | schema | メタスキーマの登録(新バージョン追加)。インラインの`definition`または`template_id`から作成可能 |
 | `list_templates` | read | `create_schema`の`template_id`に指定できる組み込みスキーマテンプレートの一覧(テンプレートライブラリのUUIDも指定可能) |
 | `list_schemas` | read | 登録済みスキーマのサマリ一覧(発見用) |
+| `list_upstream_changes` | read | 出自テンプレートが複製後に編集されたスキーマを返す。**報告のみ**で、上流の変更が自動で適用されることはない(既存エンティティが検証を通らなくなりうるため) |
 | `get_active_schema` | read | アクティブなスキーマ定義の取得 |
 | `get_schema_by_id` | read | 特定バージョンのスキーマ取得 |
 | `get_entity_type_json_schema` | read | entity_typeのJSON Schema投影 |

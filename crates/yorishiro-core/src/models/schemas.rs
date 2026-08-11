@@ -51,6 +51,23 @@ pub const ORIGIN_STATUS_LINKED: &str = "linked";
 /// what the notification path needs to know.
 pub const ORIGIN_STATUS_DETACHED: &str = "detached";
 
+/// A schema whose origin template has been edited since the copy was taken.
+///
+/// The signal only — what changed and where — with no diff and no application. Whether to
+/// follow the upstream edit is the workspace's call, since applying it could invalidate
+/// entities already stored against the current definition.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UpstreamChange {
+    pub schema_id: Uuid,
+    pub schema_name: String,
+    /// The version of the schema currently in use here.
+    pub version: i32,
+    pub template_id: Uuid,
+    pub template_name: String,
+    /// When the template was last edited.
+    pub changed_at: DateTime<Utc>,
+}
+
 /// A row in a schema listing. A lightweight summary that omits the `definition` body,
 /// used as the entry point for MCP clients (LLMs) to discover what schemas exist for a
 /// tenant.

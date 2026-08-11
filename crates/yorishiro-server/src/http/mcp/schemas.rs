@@ -190,6 +190,25 @@ impl YorishiroMcpServer {
             )))),
         }
     }
+
+    #[tool(
+        description = "List schemas in this workspace whose origin template has been edited \
+                           since the copy was taken (requires read scope). Reports only; the \
+                           upstream edit is not applied, because doing so could invalidate \
+                           entities already stored against the current definition."
+    )]
+    pub async fn list_upstream_changes(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let changes = mcp_try!(
+            schemas::list_with_upstream_changes(&self.state.identity_pool, workspace_id).await
+        );
+        ok_json(changes)
+    }
 }
 
 #[cfg(test)]
