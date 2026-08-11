@@ -3,6 +3,7 @@ mod export;
 pub(crate) mod health;
 mod identity;
 mod import;
+mod inference;
 mod marketplace;
 mod members;
 mod relations;
@@ -98,6 +99,12 @@ impl Modify for SecurityAddon {
         entities::migration_dry_run,
         entities::fill_defaults,
         entities::undo_migration_job,
+        inference::set_llm_key,
+        inference::get_llm_key,
+        inference::delete_llm_key,
+        inference::infer_fill,
+        inference::list_proposals,
+        inference::confirm_proposals,
         relations::create_relation,
         relations::get_relation,
         relations::delete_relation,
@@ -255,6 +262,24 @@ pub fn router(
         .route(
             "/api/migration-jobs/{job_id}/undo",
             post(entities::undo_migration_job),
+        )
+        .route(
+            "/api/workspace/llm-key",
+            axum::routing::put(inference::set_llm_key)
+                .get(inference::get_llm_key)
+                .delete(inference::delete_llm_key),
+        )
+        .route(
+            "/api/schemas/active/{name}/infer-fill",
+            post(inference::infer_fill),
+        )
+        .route(
+            "/api/migration-jobs/{job_id}/proposals",
+            get(inference::list_proposals),
+        )
+        .route(
+            "/api/migration-jobs/{job_id}/confirm",
+            post(inference::confirm_proposals),
         )
         .route(
             "/api/relations",

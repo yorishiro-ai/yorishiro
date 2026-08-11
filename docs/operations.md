@@ -135,3 +135,42 @@ nobody chose is indistinguishable from one somebody did, once written.
 `POST /api/migration-jobs/{job_id}/undo` puts the whole run back. The snapshots are consumed by
 the undo, so a job can only be undone once — a second undo would lay stale data over whatever
 came after the first.
+
+### Inferring values
+
+Where `fill-defaults` reads a value out of the schema, `POST
+/api/schemas/active/{name}/infer-fill` (schema scope) asks a model to propose one from what the
+entity already holds. It is for fields that are missing and have no sensible default — a
+`category` that could be read off the text, not a `status` that starts at `draft`.
+
+**The deployment does not pay for this.** Configure the workspace's own credentials first:
+
+```console
+$ curl -X PUT localhost:8080/api/workspace/llm-key -H "Authorization: Bearer $YSR_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{"base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","api_key":"sk-..."}'
+```
+
+Any OpenAI-compatible chat-completions endpoint works, including Ollama and LM Studio. `GET`
+returns the endpoint and model so you can confirm what is set; **the key is never returned**.
+`DELETE` removes it, after which `infer-fill` refuses again.
+
+A workspace with no key configured gets `422` rather than falling back to defaults — a caller
+who asked for inference and received `default` values would have no way to tell that nothing
+was inferred.
+
+**A proposal is not a write.** `infer-fill` returns a `job_id` and stores what the model
+suggested; the entities are untouched:
+
+```console
+$ curl localhost:8080/api/migration-jobs/$JOB_ID/proposals -H "Authorization: Bearer $YSR_KEY"
+$ curl -X POST localhost:8080/api/migration-jobs/$JOB_ID/confirm -H "Authorization: Bearer $YSR_KEY"
+```
+
+Confirming snapshots each entity under the same `job_id` and applies the values, so
+`POST /api/migration-jobs/{job_id}/undo` reverses it exactly as it reverses a `fill-defaults`
+run. A guess the schema rejects is counted in `skipped` rather than failing the batch — the
+rest of what someone reviewed still lands.
+
+A job can only be confirmed once. The proposals are deleted when applied, so confirming again
+after an undo cannot write the same guesses back over what the undo restored.
