@@ -112,22 +112,34 @@ fn workspace_columns() -> [Workspaces; 9] {
     ]
 }
 
-/// Marks a workspace active once it owns a schema. Idempotent: an already-active workspace is
-/// left as it is, so the schema-creation path can call this unconditionally.
+/// Marks a workspace active once it owns a schema, and names that schema if none was named yet.
+///
+/// Idempotent, so the schema-creation path calls it unconditionally: a workspace already active
+/// stays active, and one that already names a schema keeps the one it names.
+///
+/// `schema_id` is only filled when it is NULL. The column names *the* schema of a workspace, from
+/// when a workspace had exactly one; a workspace may now hold several, and letting each new one
+/// claim the column would make it mean "the most recently created", which is not what anything
+/// reading it expects. Entity operations resolve by schema name and never consult it -- what does
+/// read it is the workspace listing, which is why leaving it stale showed the wrong schema there.
 pub async fn mark_active(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    let (sql, values) = Query::update()
-        .table((Alias::new("identity"), Workspaces::Table))
-        .values([(Workspaces::Status, WORKSPACE_STATUS_ACTIVE.into())])
-        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_with(&sql, values)
-        .execute(&mut *conn)
-        .await
-        .internal()?;
+    // One statement: reading the column and then writing it would let two concurrent
+    // schema creations both see NULL, and the second would overwrite the first.
+    sqlx::query(
+        "UPDATE identity.workspaces \
+         SET status = $2, schema_id = COALESCE(schema_id, $3) \
+         WHERE id = $1",
+    )
+    .bind(workspace_id)
+    .bind(WORKSPACE_STATUS_ACTIVE)
+    .bind(schema_id)
+    .execute(&mut *conn)
+    .await
+    .internal()?;
     Ok(())
 }
 
