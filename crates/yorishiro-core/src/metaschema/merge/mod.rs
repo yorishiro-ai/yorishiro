@@ -17,7 +17,8 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use super::{FieldDef, MetaSchemaDefinition};
+use super::{EntityTypeDef, FieldDef, MetaSchemaDefinition};
+use crate::error::YorishiroError;
 
 /// What should happen to one field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -208,6 +209,96 @@ fn type_name(field: &FieldDef) -> String {
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Produces the definition a plan describes: upstream's version of everything it changed
+/// alone, the workspace's version of everything it changed alone.
+///
+/// Refuses a plan with conflicts. There is no answer to apply for those — that is what a
+/// conflict means — and applying the rest would leave a definition that is neither what the
+/// merge produced nor what was there before, with no record of which fields were skipped.
+///
+/// The result is a definition, not a stored schema. Whether writing it mints a new version is
+/// a separate decision, and one this function deliberately does not make.
+pub fn apply_plan(
+    plan: &MergePlan,
+    upstream: &MetaSchemaDefinition,
+    local: &MetaSchemaDefinition,
+) -> Result<MetaSchemaDefinition, YorishiroError> {
+    if plan.has_conflicts() {
+        let fields: Vec<String> = plan
+            .conflicts()
+            .map(|f| format!("{}.{}", f.entity_type, f.field))
+            .collect();
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("the merge has {} unresolved conflict(s)", fields.len()),
+            details: plan
+                .conflicts()
+                .map(|f| crate::error::ValidationDetail {
+                    field: format!("/{}/{}", f.entity_type, f.field),
+                    problem: f.detail.clone(),
+                })
+                .collect(),
+            hint: format!(
+                "resolve {} before applying; a partially applied merge is a definition \
+                 neither side asked for",
+                fields.join(", ")
+            ),
+        });
+    }
+
+    // Start from the workspace's own definition: everything it holds stays unless the plan
+    // says upstream changed that field alone. Starting from upstream instead would silently
+    // drop every local addition, which is the failure the base exists to prevent.
+    let mut merged = local.clone();
+
+    for field in &plan.fields {
+        match field.verdict {
+            MergeVerdict::AutoAdd | MergeVerdict::AutoUpdate => {
+                let upstream_field = upstream
+                    .entity_types
+                    .get(&field.entity_type)
+                    .and_then(|t| t.fields.get(&field.field));
+
+                match upstream_field {
+                    Some(def) => {
+                        // The entity type may not exist locally yet -- an upstream addition of
+                        // a whole type arrives field by field.
+                        merged
+                            .entity_types
+                            .entry(field.entity_type.clone())
+                            .or_insert_with(|| {
+                                upstream
+                                    .entity_types
+                                    .get(&field.entity_type)
+                                    .map(|t| EntityTypeDef {
+                                        description: t.description.clone(),
+                                        fields: Default::default(),
+                                    })
+                                    .unwrap_or_else(|| EntityTypeDef {
+                                        description: None,
+                                        fields: Default::default(),
+                                    })
+                            })
+                            .fields
+                            .insert(field.field.clone(), def.clone());
+                    }
+                    None => {
+                        // Removed upstream, untouched locally: the plan calls that an update,
+                        // and the update is the removal.
+                        if let Some(entity_type) = merged.entity_types.get_mut(&field.entity_type) {
+                            entity_type.fields.remove(&field.field);
+                        }
+                    }
+                }
+            }
+            // Kept as it already is in `local`, which is what `merged` started from.
+            MergeVerdict::KeepLocal => {}
+            MergeVerdict::Conflict => unreachable!("refused above"),
+        }
+    }
+
+    Ok(merged)
 }
 
 #[cfg(test)]

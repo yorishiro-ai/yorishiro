@@ -1,6 +1,7 @@
 use serde_json::json;
 
-use crate::metaschema::{MergeVerdict, MetaSchemaDefinition, three_way};
+use crate::YorishiroError;
+use crate::metaschema::{MergeVerdict, MetaSchemaDefinition, apply_plan, three_way};
 
 /// Builds a definition with one entity type whose fields are given as JSON.
 fn def(fields: serde_json::Value) -> MetaSchemaDefinition {
@@ -152,4 +153,111 @@ fn identical_definitions_produce_an_empty_plan() {
     let plan = three_way(&d, &d, &d);
     assert!(plan.fields.is_empty());
     assert!(!plan.has_conflicts());
+}
+
+/// The whole point of three-way: upstream's addition arrives and the workspace's own survives.
+/// A two-way merge could not do both.
+#[test]
+fn applying_takes_upstream_additions_and_keeps_local_ones() {
+    let base = def(json!({ "title": { "type": "string" } }));
+    let upstream = def(json!({
+        "title": { "type": "string" },
+        "category": { "type": "string" }
+    }));
+    let local = def(json!({
+        "title": { "type": "string" },
+        "internal_ref": { "type": "string" }
+    }));
+
+    let plan = three_way(&base, &upstream, &local);
+    let merged = apply_plan(&plan, &upstream, &local).unwrap();
+
+    let fields = &merged.entity_types["task"].fields;
+    assert!(
+        fields.contains_key("category"),
+        "upstream's addition arrives"
+    );
+    assert!(
+        fields.contains_key("internal_ref"),
+        "the workspace's own survives"
+    );
+    assert!(fields.contains_key("title"));
+}
+
+/// An upstream change to an untouched field is taken.
+#[test]
+fn applying_takes_an_upstream_change_to_an_untouched_field() {
+    let base = def(json!({ "title": { "type": "string" } }));
+    let upstream = def(json!({ "title": { "type": "string", "maxLength": 200 } }));
+    let local = base.clone();
+
+    let plan = three_way(&base, &upstream, &local);
+    let merged = apply_plan(&plan, &upstream, &local).unwrap();
+
+    assert_eq!(
+        merged.entity_types["task"].fields["title"].max_length,
+        Some(200)
+    );
+}
+
+/// A conflicting plan is refused whole. Applying the rest would leave a definition neither
+/// side asked for, with nothing recording which fields were skipped.
+#[test]
+fn applying_refuses_a_plan_with_conflicts() {
+    let base = def(json!({ "priority": { "type": "string" } }));
+    let upstream = def(json!({
+        "priority": { "type": "integer" },
+        "category": { "type": "string" }
+    }));
+    let local = def(json!({ "priority": { "type": "boolean" } }));
+
+    let plan = three_way(&base, &upstream, &local);
+    let err = apply_plan(&plan, &upstream, &local).unwrap_err();
+
+    match err {
+        YorishiroError::ValidationFailed { details, .. } => {
+            assert!(
+                details.iter().any(|d| d.field.contains("priority")),
+                "the conflicting field is named: {details:?}"
+            );
+        }
+        other => panic!("expected ValidationFailed, got {other:?}"),
+    }
+}
+
+/// A whole entity type added upstream arrives, even though the workspace has no such type to
+/// merge into.
+#[test]
+fn applying_adds_an_entity_type_the_workspace_does_not_have() {
+    let base = def(json!({ "title": { "type": "string" } }));
+    let upstream: MetaSchemaDefinition = serde_json::from_value(json!({
+        "name": "task-management",
+        "entity_types": {
+            "task": { "fields": { "title": { "type": "string" } } },
+            "project": { "fields": { "name": { "type": "string" } } }
+        }
+    }))
+    .unwrap();
+    let local = base.clone();
+
+    let plan = three_way(&base, &upstream, &local);
+    let merged = apply_plan(&plan, &upstream, &local).unwrap();
+
+    assert!(
+        merged.entity_types.contains_key("project"),
+        "a type only upstream is created"
+    );
+    assert!(merged.entity_types["project"].fields.contains_key("name"));
+}
+
+/// Nothing to merge produces the workspace's definition unchanged, rather than a rebuild of it.
+#[test]
+fn applying_an_empty_plan_changes_nothing() {
+    let d = def(json!({ "title": { "type": "string" } }));
+    let plan = three_way(&d, &d, &d);
+    let merged = apply_plan(&plan, &d, &d).unwrap();
+    assert_eq!(
+        serde_json::to_value(&merged).unwrap(),
+        serde_json::to_value(&d).unwrap()
+    );
 }
