@@ -93,6 +93,33 @@ called is a read: the middleware would have to consume the request body to know 
 is, and a body consumed there is one the handler no longer has. It errs toward refusing a read
 rather than admitting a write.
 
+### Driving it from a monitor
+
+The mode is a row, so anything holding the migration role's credentials can set it — the CLI is
+one caller, not the only one. A monitor watching database load can shed writes on its own:
+
+```sql
+-- Sustained load: stop writes, tell callers when to come back.
+UPDATE identity.maintenance
+   SET mode = 'read_only', retry_after = 120,
+       reason = 'database under sustained load', updated_at = now();
+
+-- Recovered.
+UPDATE identity.maintenance
+   SET mode = 'off', reason = NULL, updated_at = now();
+```
+
+Every request already reads this row, so the change takes effect on the next request across
+every node — no restart, no deploy.
+
+**Pair the entry with an exit.** A monitor that switches to `read_only` and never switches back
+leaves the deployment refusing writes until somebody notices: an overnight spike becomes an
+outage that lasts until morning. Whatever rule turns it on is the rule that has to turn it off.
+
+The server does not watch load itself. A database's CPU usage is not available over SQL, so
+anything the process could measure on its own — its own connection pool, `pg_stat_database` —
+measures demand rather than the load the threshold is about.
+
 ### Filling defaults
 
 `POST /api/schemas/active/{name}/fill-defaults` (schema scope) writes the active version's
