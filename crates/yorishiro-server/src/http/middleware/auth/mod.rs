@@ -126,6 +126,11 @@ impl RequiredScope for SchemaScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Schema;
 }
 
+pub struct MigrationScope;
+impl RequiredScope for MigrationScope {
+    const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
+}
+
 /// An extractor that authenticates, verifies the required scope, and acquires a connection
 /// with the RLS context already set, all in one step. `R` (`ReadScope`/`WriteScope`/
 /// `SchemaScope`) doubles as the scope requirement declared in the handler signature. As

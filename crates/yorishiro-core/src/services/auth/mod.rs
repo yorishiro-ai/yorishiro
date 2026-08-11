@@ -52,6 +52,12 @@ pub enum ApiKeyScope {
     Read,
     Write,
     Schema,
+    /// Running a batch migration, and switching maintenance mode. Above `schema` because both
+    /// act on data already stored: a schema registration adds a version that nothing has been
+    /// written against yet, while a migration rewrites rows and a maintenance switch stops
+    /// every caller. `audit` is not defined here -- a scope over an audit log that does not
+    /// exist yet would read as though the log did.
+    Migration,
 }
 
 impl ApiKeyScope {
@@ -65,6 +71,7 @@ impl ApiKeyScope {
             ApiKeyScope::Read => "read",
             ApiKeyScope::Write => "write",
             ApiKeyScope::Schema => "schema",
+            ApiKeyScope::Migration => "migration",
         }
     }
 
@@ -75,6 +82,7 @@ impl ApiKeyScope {
             "read" => Some(ApiKeyScope::Read),
             "write" => Some(ApiKeyScope::Write),
             "schema" => Some(ApiKeyScope::Schema),
+            "migration" => Some(ApiKeyScope::Migration),
             _ => None,
         }
     }

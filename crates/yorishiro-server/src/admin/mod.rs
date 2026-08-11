@@ -131,6 +131,7 @@ pub enum ScopeArg {
     Read,
     Write,
     Schema,
+    Migration,
 }
 
 impl From<ScopeArg> for ApiKeyScope {
@@ -139,6 +140,7 @@ impl From<ScopeArg> for ApiKeyScope {
             ScopeArg::Read => ApiKeyScope::Read,
             ScopeArg::Write => ApiKeyScope::Write,
             ScopeArg::Schema => ApiKeyScope::Schema,
+            ScopeArg::Migration => ApiKeyScope::Migration,
         }
     }
 }

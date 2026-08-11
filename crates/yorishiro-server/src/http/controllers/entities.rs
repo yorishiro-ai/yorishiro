@@ -12,7 +12,7 @@ use yorishiro_core::repositories::entities::{
 use yorishiro_core::repositories::recall::{self, RecallContext, RecallQuery};
 
 use crate::error::ApiError;
-use crate::http::middleware::auth::{Authorized, ReadScope, SchemaScope, WriteScope};
+use crate::http::middleware::auth::{Authorized, MigrationScope, ReadScope, WriteScope};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -262,7 +262,7 @@ pub async fn migration_dry_run(
     tag = "entities",
 )]
 pub async fn fill_defaults(
-    mut authorized: Authorized<SchemaScope>,
+    mut authorized: Authorized<MigrationScope>,
     Path(name): Path<String>,
 ) -> Result<Json<FillDefaultsReport>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
@@ -286,7 +286,7 @@ pub async fn fill_defaults(
     tag = "entities",
 )]
 pub async fn undo_migration_job(
-    mut authorized: Authorized<SchemaScope>,
+    mut authorized: Authorized<MigrationScope>,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<UndoReport>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;

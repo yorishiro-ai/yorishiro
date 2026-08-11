@@ -85,7 +85,10 @@ impl MembershipRole {
     /// mirrors how a key's scope is otherwise fixed for its lifetime until revoked.
     pub fn max_scope(self) -> ApiKeyScope {
         match self {
-            MembershipRole::Owner | MembershipRole::Admin => ApiKeyScope::Schema,
+            // Both reach `migration`: an admin runs migrations and maintenance, and the spec's
+            // ceiling for an owner is `audit`, which does not exist yet. When it does, the owner
+            // arm moves up and this one stays.
+            MembershipRole::Owner | MembershipRole::Admin => ApiKeyScope::Migration,
             MembershipRole::Member => ApiKeyScope::Write,
             MembershipRole::Viewer => ApiKeyScope::Read,
         }
