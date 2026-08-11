@@ -369,6 +369,17 @@ impl EmbeddingProvider for LocalOnnxProvider {
         self.inner.dimensions
     }
 
+    /// Counted exactly: this provider already holds the tokenizer the model uses, so the
+    /// number is the one the model will actually see rather than an estimate of it.
+    fn count_tokens(&self, text: &str) -> u32 {
+        match self.inner.tokenizer.encode(text, false) {
+            Ok(encoding) => u32::try_from(encoding.len()).unwrap_or(u32::MAX),
+            // A text this tokenizer cannot encode is one the model could not embed either;
+            // the request is about to fail on its own, so fall back rather than decide here.
+            Err(_) => u32::try_from(text.len().div_ceil(4)).unwrap_or(u32::MAX),
+        }
+    }
+
     /// Prefixes the configured instruction to queries, and only to queries. With no instruction
     /// configured this is exactly `embed`, which is what every symmetric model wants.
     async fn embed_as(&self, kind: EmbedKind, text: &str) -> Result<Vec<f32>, YorishiroError> {

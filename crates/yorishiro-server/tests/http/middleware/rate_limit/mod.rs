@@ -218,3 +218,41 @@ fn the_limit_holds_when_calls_arrive_concurrently() {
         THREADS * CALLS_PER_THREAD
     );
 }
+
+/// Charging by cost rather than by call: three requests of ten tokens exhaust a thirty-token
+/// window, where a request-counted limiter would have let thirty through.
+#[test]
+fn a_cost_charged_window_counts_work_not_calls() {
+    let limiter = RateLimiter::new(30, Duration::from_secs(60));
+
+    assert!(limiter.allow_cost("ws", 10));
+    assert!(limiter.allow_cost("ws", 10));
+    assert!(limiter.allow_cost("ws", 10));
+    assert!(!limiter.allow_cost("ws", 1), "the budget is spent");
+}
+
+/// A single request larger than the whole window is admitted once. Rejecting it would make
+/// that query permanently impossible rather than merely expensive.
+#[test]
+fn one_oversized_request_is_admitted_then_the_window_is_spent() {
+    let limiter = RateLimiter::new(100, Duration::from_secs(60));
+
+    assert!(
+        limiter.allow_cost("ws", 5_000),
+        "an over-budget query still runs, once"
+    );
+    assert!(!limiter.allow_cost("ws", 1), "and leaves nothing behind it");
+}
+
+/// Budgets are per key, so one workspace cannot spend another's.
+#[test]
+fn cost_windows_are_per_key() {
+    let limiter = RateLimiter::new(10, Duration::from_secs(60));
+
+    assert!(limiter.allow_cost("ws-a", 10));
+    assert!(!limiter.allow_cost("ws-a", 1));
+    assert!(
+        limiter.allow_cost("ws-b", 10),
+        "a different workspace is unaffected"
+    );
+}

@@ -23,6 +23,7 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 | `YORISHIRO_MAX_TENANTS` | Deployment-wide cap on tenants `admin create-tenant` may create. Defaults to `1` (single-tenant). Set `0` for unlimited, or a higher number for that many. `POST /auth/signup` never creates a tenant (it just redeems an invite), so it's unaffected. Also gates the first-run setup wizard (see [setup.md](setup.md#first-run-setup)), enabled only when the cap isn't `0` |
 | `YSR_WEB_DIR` | The setup/login/workspace-management web UI's static files are compiled into the binary and served at `/` by default. Set this to serve them from a real directory on disk instead (e.g. to iterate on `web/` without rebuilding) |
 | `YSR_AUTH_RATE_LIMIT_MAX` / `YSR_AUTH_RATE_LIMIT_WINDOW_SECS` | Per-client-IP rate limit on `/auth/signup`, `/auth/login`, and `/setup` — the endpoints reachable without a bearer token, and therefore the only ones an unauthenticated caller can brute-force. Defaults: 10 requests per 60 seconds |
+| `YSR_SEARCH_TOKENS_PER_MINUTE` | Tokens a workspace may spend on search per minute (default: `100000`). Search is metered in tokens rather than requests because that is what it costs the embedding model; writes stay on request counts, since counting a large body costs more than the write. A query over budget still runs once and leaves the window spent, rather than being permanently impossible |
 | `RUST_LOG` | Log level (e.g. `info`) |
 
 ## Request correlation
