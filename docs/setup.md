@@ -194,13 +194,13 @@ Other admin commands:
 
 All APIs authenticate via `Authorization: Bearer <api-key>`. Keys are strings starting with `ysr_`, shown only once at issuance time (only a SHA-256 hash is stored in the database).
 
-Scopes form a three-level hierarchy: `read` < `write` < `schema`. A `write` key can also read, and a `schema` key can perform every operation, including schema registration.
+Scopes form a four-level hierarchy: `read` < `write` < `schema` < `migration`. Each subsumes the ones below it. `migration` is required to run a batch migration or undo one -- operations that rewrite rows already stored, where registering a schema only adds a version nothing has been written against yet.
 
 ### Attributing keys to users
 
 Every request, human or automated, is ultimately authenticated by an API key -- there's no cookie/session state on the server. But a key can be *attributed* to a human user, and multi-user access control works by tying that attribution to the user's tenant role rather than by a session.
 
-Passing `--user <user-id>` to `create-api-key` attributes the key to that member and caps the requested scope at `MembershipRole::max_scope()`: `owner`/`admin` may be issued up to `schema`, `member` up to `write`, and `viewer` up to `read`.
+Passing `--user <user-id>` to `create-api-key` attributes the key to that member and caps the requested scope at `MembershipRole::max_scope()`: `owner`/`admin` may be issued up to `migration`, `member` up to `write`, and `viewer` up to `read`.
 
 Requesting a scope above that cap, or attributing a key to someone who isn't a member of the workspace's tenant, is rejected at issuance time.
 
