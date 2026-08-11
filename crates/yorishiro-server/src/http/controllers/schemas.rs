@@ -6,6 +6,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
+use yorishiro_core::metaschema::MergePlan;
 use yorishiro_core::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
 use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary, UpstreamChange};
 use yorishiro_core::repositories::tenancy;
@@ -249,6 +250,39 @@ pub async fn list_upstream_changes(
     // read.
     let changes = schemas::list_with_upstream_changes(&state.identity_pool, workspace_id).await?;
     Ok(Json(changes))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/schemas/{schema_id}/merge-preview",
+    params(("schema_id" = Uuid, Path, description = "Schema ID")),
+    responses(
+        (status = 200, description = "What following the origin template would do", body = MergePlan),
+        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
+        (status = 404, description = "The schema does not exist", body = crate::error::ApiErrorBody),
+        (status = 422, description = "The schema follows no template, or has no recorded merge base", body = crate::error::ApiErrorBody),
+    ),
+    tag = "schemas",
+)]
+pub async fn merge_preview(
+    State(state): State<AppState>,
+    mut authorized: Authorized<ReadScope>,
+    Path(schema_id): Path<Uuid>,
+) -> Result<Json<MergePlan>, ApiError> {
+    let tenant_id = authorized.ctx.tenant_id;
+    let workspace_id = authorized.ctx.workspace_id;
+    // The template lives in identity, which the request role cannot read, so the lookup goes
+    // through the control-plane pool while the schema itself comes off this connection.
+    let plan = schemas::merge_preview(
+        authorized.conn(),
+        &state.identity_pool,
+        tenant_id,
+        workspace_id,
+        schema_id,
+    )
+    .await?;
+    Ok(Json(plan))
 }
 
 #[cfg(test)]

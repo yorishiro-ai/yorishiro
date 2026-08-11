@@ -6,7 +6,9 @@ use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff, validate_definition};
+use crate::metaschema::{
+    self, MergePlan, MetaSchemaDefinition, VersioningDiff, validate_definition,
+};
 
 pub use crate::models::schemas::*;
 
@@ -395,4 +397,51 @@ pub async fn list_with_upstream_changes(
             },
         )
         .collect())
+}
+
+/// What following the origin template would do to this schema.
+///
+/// Reads the three definitions — the snapshot taken when the copy was made, the template as it
+/// stands now, and this schema — and classifies every field that differs. Nothing is written.
+///
+/// Refuses rather than guesses when a piece is missing: a schema with no origin has nothing to
+/// follow, and one copied before snapshots were recorded has no ancestor. Substituting the
+/// current template for the missing base would read every local addition as a conflict, which
+/// is worse than saying so.
+pub async fn merge_preview(
+    conn: &mut PgConnection,
+    pool: &PgPool,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<MergePlan, YorishiroError> {
+    let schema = get_by_id(conn, workspace_id, schema_id).await?;
+
+    let Some(template_id) = schema.origin_template_id else {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("schema '{schema_id}' does not follow a template"),
+            details: vec![],
+            hint: "only a schema created from a template library entry can be merged; \
+                   create one with POST /api/schemas and a template_id"
+                .to_string(),
+        });
+    };
+
+    let Some(base) = schema.origin_snapshot.clone() else {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!("schema '{schema_id}' was copied before its merge base was recorded"),
+            details: vec![],
+            hint: "re-apply the template to this workspace to establish a base, or edit the \
+                   schema directly"
+                .to_string(),
+        });
+    };
+
+    let template = crate::repositories::tenancy::get_template(pool, tenant_id, template_id).await?;
+
+    Ok(crate::metaschema::three_way(
+        &base,
+        &template.definition,
+        &schema.definition,
+    ))
 }

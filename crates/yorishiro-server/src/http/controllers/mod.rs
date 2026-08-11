@@ -105,6 +105,7 @@ impl Modify for SecurityAddon {
         schemas::get_schema_by_id,
         schemas::create_schema,
         schemas::list_upstream_changes,
+        schemas::merge_preview,
         schemas::get_entity_type_json_schema,
         schemas::list_templates,
         schemas::get_template,
@@ -145,6 +146,9 @@ impl Modify for SecurityAddon {
         yorishiro_core::repositories::entities::EntityDrift,
         yorishiro_core::repositories::entities::DriftField,
         yorishiro_core::repositories::schemas::UpstreamChange,
+        yorishiro_core::metaschema::MergePlan,
+        yorishiro_core::metaschema::FieldMerge,
+        yorishiro_core::metaschema::MergeVerdict,
         yorishiro_core::services::auth::ApiKeyScope,
         entities::CreateEntityRequest,
         entities::UpdateEntityRequest,
@@ -251,6 +255,10 @@ pub fn router(
         .route(
             "/api/schemas/upstream-changes",
             get(schemas::list_upstream_changes),
+        )
+        .route(
+            "/api/schemas/{schema_id}/merge-preview",
+            get(schemas::merge_preview),
         )
         .route(
             "/api/schemas/active/{name}",
