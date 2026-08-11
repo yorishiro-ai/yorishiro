@@ -35,6 +35,14 @@ pub enum YorishiroError {
         retry_after: u32,
     },
 
+    /// An upstream provider asked to be tried again later, rather than refusing outright.
+    /// Carried separately from `Internal` so a caller can wait instead of discarding the work.
+    #[error("provider busy: {message}")]
+    ProviderBusy {
+        message: String,
+        retry_after: std::time::Duration,
+    },
+
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -90,6 +98,21 @@ impl YorishiroError {
                     "error": {
                         "message": message,
                         "retry_after_seconds": retry_after,
+                    }
+                }),
+            ),
+            // 503 rather than 500: the request may well succeed later, and the caller is told
+            // when. Reaching a client at all is the unusual case -- this normally surfaces in
+            // background embedding, where the retry happens without anyone seeing it.
+            Self::ProviderBusy {
+                message,
+                retry_after,
+            } => (
+                503,
+                serde_json::json!({
+                    "error": {
+                        "message": message,
+                        "retry_after_seconds": retry_after.as_secs(),
                     }
                 }),
             ),
