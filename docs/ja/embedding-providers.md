@@ -2,18 +2,18 @@
 
 [English](../embedding-providers.md) | **日本語**
 
-`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます。次元数は`YSR_EMBEDDING_DIMENSIONS`(既定768)で設定し、使用するモデルの出力次元と一致させる必要があります。埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
+`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます。次元数は`YSR_EMBEDDING_DIMENSIONS`(既定1024)で設定し、使用するモデルの出力次元と一致させる必要があります。埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
 
 ## `local` — ローカルONNXモデル(デフォルト)
 
-外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。BERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。デフォルトのモデル(all-mpnet-base-v2)は768次元のベクトルを出力します。
+外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。BERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。デフォルトのモデル(multilingual-e5-large)は1024次元のベクトルを出力し、100言語以上に対応します。日本語と英語で同じ内容を書いた文が互いに近い位置に来ます。
 
 ```console
 $ mkdir -p models
 $ curl -L -o models/model.onnx \
-    https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/onnx/model_quantized.onnx
+    https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
 $ curl -L -o models/tokenizer.json \
-    https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/tokenizer.json
+    https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
 ```
 
 この2ファイルをデフォルトのパスに置くだけでよく、環境変数は一切不要です。注意: 「外部サービス不要」は実行時の話で、**ビルド時**にはortクレートがonnxruntimeのプリビルドバイナリをダウンロードします(cdn.pyke.io)。ビルド環境まで閉域の場合は、事前に配置したonnxruntimeを`ORT_LIB_LOCATION`環境変数で指定してビルドしてください。

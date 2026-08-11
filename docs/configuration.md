@@ -56,7 +56,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | Variable | Description |
 |---|---|
 | `YSR_EMBEDDING_PROVIDER` | `local` (default) or `openai` |
-| `YSR_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `768`). Must match the model's output dimension. All vectors in a deployment share this value — changing it after data exists requires re-embedding |
+| `YSR_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `1024`, the width of the default model). Must match the model's output dimension. All vectors in a deployment share this value — changing it after data exists requires re-embedding |
 
 ### When `YSR_EMBEDDING_PROVIDER=local` (ONNX export, the default)
 
@@ -77,4 +77,4 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | `YSR_EMBEDDING_API_KEY` | API key, if required by the endpoint |
 | `YSR_EMBEDDING_SEND_DIMENSIONS_PARAM` | Whether to include a `dimensions` parameter in the request body. Defaults to `true` when unset. Once set, only the exact lowercase string `true` keeps it enabled -- every other value, including `false`, `False`, `FALSE`, and `0`, disables it |
 
-See [docs/embedding-providers.md](embedding-providers.md) for a worked example, e.g. `https://huggingface.co/Xenova/all-mpnet-base-v2` (`onnx/model_quantized.onnx` and `tokenizer.json`).
+See [docs/embedding-providers.md](embedding-providers.md) for a worked example, e.g. `https://huggingface.co/Xenova/multilingual-e5-large` (`onnx/model_quantized.onnx` and `tokenizer.json`).

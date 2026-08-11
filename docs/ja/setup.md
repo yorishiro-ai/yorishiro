@@ -6,14 +6,14 @@
 
 サーバの起動には埋め込みモデルが必要です。既定のローカルONNXプロバイダは、モデルファイル以外の外部サービスや設定を必要としません — ただしこの手順を省略した場合、機能が縮退した状態で起動するわけではなく、`models/model.onnx`/`models/tokenizer.json`が存在しなければ(リスナーがbindする前に)プロセスの起動自体が失敗します。リポジトリにもDockerイメージにもこれらのファイルは同梱されていません。
 
-1. 768次元のBERT系ONNXモデルを取得します。
+1. 既定のモデル(multilingual-e5-large、1024次元、100言語以上)を取得します。
 
    ```console
    $ mkdir -p models
    $ curl -L -o models/model.onnx \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/onnx/model_quantized.onnx
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
    $ curl -L -o models/tokenizer.json \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/tokenizer.json
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
    ```
 
 OpenAI互換エンドポイントを代わりに使う場合は[embedding-providers.md](embedding-providers.md)を参照してください。

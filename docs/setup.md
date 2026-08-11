@@ -6,14 +6,14 @@
 
 The server needs an embedding model to start. It defaults to the local ONNX provider, which needs no external service beyond the model files themselves -- but skipping this step isn't a degraded-mode startup: the process fails to start (before it even binds its listener) if `models/model.onnx`/`models/tokenizer.json` are missing, since neither the repository nor the Docker image bundles them.
 
-1. Fetch a 768-dimensional BERT-family model:
+1. Fetch the default model (multilingual-e5-large, 1024-dimensional, 100+ languages):
 
    ```console
    $ mkdir -p models
    $ curl -L -o models/model.onnx \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/onnx/model_quantized.onnx
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
    $ curl -L -o models/tokenizer.json \
-       https://huggingface.co/Xenova/all-mpnet-base-v2/resolve/main/tokenizer.json
+       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
    ```
 
 To use an OpenAI-compatible endpoint instead, see [embedding-providers.md](embedding-providers.md).
