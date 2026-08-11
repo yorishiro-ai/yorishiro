@@ -62,8 +62,10 @@ async fn get_membership_role_resolves_and_defaults_to_none(pool: PgPool) {
 
 #[test]
 fn max_scope_mirrors_role_privilege_order() {
-    assert_eq!(MembershipRole::Owner.max_scope(), ApiKeyScope::Schema);
-    assert_eq!(MembershipRole::Admin.max_scope(), ApiKeyScope::Schema);
+    // Both reach `migration`: the spec puts an owner at `audit`, which does not exist yet, so
+    // the two arms coincide until it does.
+    assert_eq!(MembershipRole::Owner.max_scope(), ApiKeyScope::Migration);
+    assert_eq!(MembershipRole::Admin.max_scope(), ApiKeyScope::Migration);
     assert_eq!(MembershipRole::Member.max_scope(), ApiKeyScope::Write);
     assert_eq!(MembershipRole::Viewer.max_scope(), ApiKeyScope::Read);
 }
