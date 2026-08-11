@@ -122,6 +122,7 @@ impl RequiredScope for WriteScope {
 }
 
 pub struct SchemaScope;
+pub struct MigrationScope;
 impl RequiredScope for SchemaScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Schema;
 }

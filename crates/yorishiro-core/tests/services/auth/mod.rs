@@ -338,3 +338,28 @@ fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
 fn bearer_credential_does_not_trim_the_token() {
     assert_eq!(bearer_credential(Some("Bearer  padded")), Some(" padded"));
 }
+
+/// `migration` sits above `schema`, and round-trips through the column.
+///
+/// The operations it guards -- running a batch migration, undoing one -- rewrite rows already
+/// stored, where registering a schema adds a version nothing has been written against yet. A
+/// `schema` key must not reach them.
+#[test]
+fn migration_outranks_schema_and_round_trips() {
+    assert!(ApiKeyScope::Migration > ApiKeyScope::Schema);
+    assert!(ApiKeyScope::Migration.satisfies(ApiKeyScope::Schema));
+    assert!(
+        !ApiKeyScope::Schema.satisfies(ApiKeyScope::Migration),
+        "a schema key must not run a migration"
+    );
+    assert_eq!(ApiKeyScope::Migration.as_db_str(), "migration");
+    assert_eq!(
+        ApiKeyScope::from_db_str("migration"),
+        Some(ApiKeyScope::Migration)
+    );
+    assert_eq!(
+        ApiKeyScope::from_db_str("audit"),
+        None,
+        "audit is not defined yet"
+    );
+}
