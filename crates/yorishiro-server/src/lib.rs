@@ -466,12 +466,18 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
                 Ok(value) => Pooling::parse(&value)?,
                 Err(_) => Pooling::default(),
             };
+            // Empty is treated as unset: an operator clearing the variable means "no prefix",
+            // not "prefix with nothing".
+            let query_instruction = std::env::var("YSR_ONNX_QUERY_INSTRUCTION")
+                .ok()
+                .filter(|value| !value.trim().is_empty());
             let provider = LocalOnnxProvider::load(LocalOnnxConfig {
                 model_path: model_path.clone().into(),
                 tokenizer_path: tokenizer_path.clone().into(),
                 dimensions,
                 max_sequence_length,
                 pooling,
+                query_instruction,
             })
             .map_err(|err| {
                 anyhow::anyhow!(

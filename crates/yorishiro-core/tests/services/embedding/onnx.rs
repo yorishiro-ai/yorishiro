@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use crate::services::embedding::EmbeddingProvider;
 use crate::services::embedding::onnx::{
     LocalOnnxConfig, LocalOnnxProvider, Pooling, last_token_pool_normalized, mean_pool_normalized,
 };
+use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
@@ -31,6 +31,7 @@ fn load_rejects_too_small_max_sequence_length() {
         dimensions: 768,
         max_sequence_length: 1,
         pooling: Default::default(),
+        query_instruction: None,
     });
     let Err(err) = result else {
         panic!("load should fail for too small max_sequence_length");
@@ -46,6 +47,7 @@ fn load_reports_missing_files_clearly() {
         dimensions: 768,
         max_sequence_length: 512,
         pooling: Default::default(),
+        query_instruction: None,
     });
     let Err(err) = result else {
         panic!("load should fail for missing files");
@@ -74,6 +76,7 @@ async fn embeds_texts_with_a_real_model() {
         dimensions: 768,
         max_sequence_length: 512,
         pooling: Default::default(),
+        query_instruction: None,
     })
     .unwrap();
     assert_eq!(provider.dimensions(), 768);
@@ -164,4 +167,72 @@ fn pooling_rejects_an_unknown_value() {
         format!("{err}").contains("expected 'mean' or 'last_token'"),
         "got {err}"
     );
+}
+
+/// With no instruction configured, a query and a document embed identically — this is the
+/// path every symmetric model takes, including the current default.
+#[tokio::test]
+async fn without_an_instruction_queries_and_documents_agree() {
+    let Some(provider) = real_model_provider(None) else {
+        return;
+    };
+
+    let as_query = provider
+        .embed_as(EmbedKind::Query, "shopping list")
+        .await
+        .unwrap();
+    let as_document = provider
+        .embed_as(EmbedKind::Document, "shopping list")
+        .await
+        .unwrap();
+
+    assert_eq!(as_query, as_document);
+}
+
+/// With one configured, the query diverges and the document does not. Asserting the document
+/// is untouched is the half that matters: prefixing stored text too would reintroduce the
+/// symmetry this exists to break.
+#[tokio::test]
+async fn an_instruction_changes_queries_only() {
+    let Some(provider) = real_model_provider(Some("Retrieve relevant documents")) else {
+        return;
+    };
+
+    let plain = provider.embed("shopping list").await.unwrap();
+    let as_document = provider
+        .embed_as(EmbedKind::Document, "shopping list")
+        .await
+        .unwrap();
+    let as_query = provider
+        .embed_as(EmbedKind::Query, "shopping list")
+        .await
+        .unwrap();
+
+    assert_eq!(as_document, plain, "documents are embedded verbatim");
+    assert!(
+        cosine(&as_query, &plain) < 0.999,
+        "the query should not embed identically to the bare text"
+    );
+}
+
+fn real_model_provider(instruction: Option<&str>) -> Option<LocalOnnxProvider> {
+    let model_path =
+        std::env::var("YSR_TEST_ONNX_MODEL").unwrap_or_else(|_| "../../models/model.onnx".into());
+    let tokenizer_path = std::env::var("YSR_TEST_ONNX_TOKENIZER")
+        .unwrap_or_else(|_| "../../models/tokenizer.json".into());
+    if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
+        eprintln!("skipping: model files not found");
+        return None;
+    }
+    Some(
+        LocalOnnxProvider::load(LocalOnnxConfig {
+            model_path: model_path.into(),
+            tokenizer_path: tokenizer_path.into(),
+            dimensions: 768,
+            max_sequence_length: 512,
+            pooling: Default::default(),
+            query_instruction: instruction.map(str::to_string),
+        })
+        .unwrap(),
+    )
 }

@@ -49,6 +49,7 @@ struct EmbeddingConfig {
     onnx_tokenizer_path: Option<String>,
     onnx_max_sequence_length: Option<u32>,
     onnx_pooling: Option<String>,
+    onnx_query_instruction: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -131,6 +132,10 @@ pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
         );
         apply_if_unset("YSR_ONNX_MODEL_PATH", config.embedding.onnx_model_path);
         apply_if_unset("YSR_ONNX_POOLING", config.embedding.onnx_pooling);
+        apply_if_unset(
+            "YSR_ONNX_QUERY_INSTRUCTION",
+            config.embedding.onnx_query_instruction,
+        );
         apply_if_unset(
             "YSR_ONNX_TOKENIZER_PATH",
             config.embedding.onnx_tokenizer_path,

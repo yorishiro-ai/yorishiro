@@ -66,6 +66,7 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 | `YSR_ONNX_TOKENIZER_PATH` | tokenizerのパス(既定: `models/tokenizer.json`) |
 | `YSR_ONNX_MAX_SEQUENCE_LENGTH` | 最大シーケンス長(既定: `512`) |
 | `YSR_ONNX_POOLING` | トークン埋め込みを1本のベクトルへ集約する方式: `mean`(既定)または`last_token`。**好みではなくモデルの性質**であり、sentence-transformers系(bge-small・multilingual-e5・all-mpnet)は`mean`、Qwen3-Embedding系は`last_token`を要求する。誤った方式で読んでもエラーにはならず検索品質だけが落ちるため、未知の値は起動失敗とし既定へフォールバックしない |
+| `YSR_ONNX_QUERY_INSTRUCTION` | 検索クエリにのみ前置する指示文。Qwen3-Embedding系は`Instruct: {task}\nQuery:{text}`を要求する。**保存する文書には付かない**。未設定または空文字列で無効(既定)。対称なモデルでは設定しない |
 
 ### `YSR_EMBEDDING_PROVIDER=openai`の場合(例: Ollama, LM Studio, OpenAI)
 
