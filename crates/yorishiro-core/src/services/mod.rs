@@ -6,3 +6,4 @@ pub mod auth;
 pub mod embedding;
 pub mod marketplace;
 pub mod official_templates;
+pub mod queue;
