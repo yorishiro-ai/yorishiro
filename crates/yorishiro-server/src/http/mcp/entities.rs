@@ -151,6 +151,25 @@ impl YorishiroMcpServer {
         let records = mcp_try!(entities::list(authorized.conn(), workspace_id, query).await);
         ok_json(records)
     }
+
+    #[tool(
+        description = "Report how an entity stands against the active version of its schema \
+                           (requires read scope). Entities are migrated lazily, so one written \
+                           against an older version simply lacks fields added since. Use this to \
+                           tell an absent field apart from an unfilled one before answering from \
+                           the entity's data."
+    )]
+    pub async fn get_entity_drift(
+        &self,
+        Parameters(args): Parameters<GetEntityArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let drift = mcp_try!(entities::drift(authorized.conn(), workspace_id, args.id).await);
+        ok_json(drift)
+    }
 }
 
 #[cfg(test)]

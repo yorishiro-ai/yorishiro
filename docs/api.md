@@ -34,6 +34,11 @@ $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
 # List only the relations in one state; omit `status` to list every state (read scope)
 $ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YSR_KEY"
 
+# How an entity stands against the active version of its schema (read scope). Entities are
+# migrated lazily, so one written earlier simply lacks fields added since -- this tells that
+# apart from a field its author left blank.
+$ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YSR_KEY"
+
 # Entity plus its relations and connected neighbors in one call (read scope)
 $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
 
@@ -166,7 +171,7 @@ A path with no extension therefore never 404s through this fallback -- a typo'd 
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 21 tools. Example connection from Claude Code:
+Connecting to `/mcp` (Streamable HTTP) gives you access to 22 tools. Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -185,6 +190,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `list_entities` | read | List entities, optionally filtered by `entity_type`, a `filter` JSONB containment match, and/or `schema_version` |
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | Relation CRUD |
 | `set_relation_status` | write | Move a relation to `active`, `deprecated` or `archived`. Traversal follows `active` relations only, so this retires one without destroying the record that it existed |
+| `get_entity_drift` | read | Report how an entity stands against the active version of its schema — the fields it predates, and whether the active version requires them |
 | `search_entities` | read | Vector similarity search over a natural-language query, optionally narrowed by `entity_type`/`filter`; entities without an embedding can still surface via trigram fuzzy matching |
 | `recall_context` | read | Fetch an entity plus its relations and connected neighbors in one call |
 | `import_jsonl` | schema | Bulk-import schemas/entities/relations from a JSON Lines document in the export format, as a single transaction |

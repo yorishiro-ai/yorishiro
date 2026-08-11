@@ -246,6 +246,7 @@ pub(crate) mod test_support {
                 "schema_name": "dummy", "entity_type": "dummy", "data": {},
             }),
             "get_entity" => serde_json::json!({ "id": NIL_UUID }),
+            "get_entity_drift" => serde_json::json!({ "id": NIL_UUID }),
             "update_entity" => serde_json::json!({ "id": NIL_UUID, "data": {} }),
             "delete_entity" => serde_json::json!({ "id": NIL_UUID }),
             "list_entities" => serde_json::json!({}),

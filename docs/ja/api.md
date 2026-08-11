@@ -34,6 +34,11 @@ $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
 # 特定の状態のリレーションのみを一覧する。`status`を省略すると全状態が対象(read scope)
 $ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YSR_KEY"
 
+# エンティティが自分のスキーマのアクティブ版に対してどう古いかを返す(read scope)。
+# 遅延移行のため、古い版で書かれたエンティティは後から追加されたフィールドを持たない。
+# 「未記入」と「そもそも無かった」を区別するための情報である。
+$ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YSR_KEY"
+
 # エンティティとそのリレーション・隣接エンティティを一括取得(read scope)
 $ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
 
@@ -166,7 +171,7 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると21のツールが使えます。Claude Codeでの接続例:
+`/mcp`(Streamable HTTP)に接続すると22のツールが使えます。Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -185,6 +190,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `list_entities` | read | エンティティ一覧。`entity_type`、`filter`(JSONB包含マッチ)、`schema_version`で絞り込み可能 |
 | `create_relation` / `get_relation` / `delete_relation` / `list_relations` | write/read | リレーションCRUD |
 | `set_relation_status` | write | リレーションを `active` / `deprecated` / `archived` へ遷移させる。グラフ探索は `active` のみを辿るため、「存在した」という記録を残したまま関係を引退させられる |
+| `get_entity_drift` | read | エンティティが自分のスキーマのアクティブ版に対して欠いているフィールドと、それが必須かどうかを返す |
 | `search_entities` | read | 自然文クエリによるベクトル類似検索。`entity_type`/`filter`で絞り込み可能。埋め込みを持たないエンティティも trigram によるあいまい検索でヒットし得る |
 | `recall_context` | read | エンティティとそのリレーション・隣接エンティティを一括取得 |
 | `import_jsonl` | schema | エクスポート形式のJSON Linesドキュメントからスキーマ/エンティティ/リレーションを一括インポート。単一トランザクションとして実行 |
