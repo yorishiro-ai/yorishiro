@@ -7,6 +7,7 @@ use crate::db::TenantDb;
 use crate::metaschema::MetaSchemaDefinition;
 use crate::repositories::schemas::{
     create_schema, create_schema_from, get_active_schema, get_by_id, list_with_upstream_changes,
+    merge_preview,
 };
 use crate::test_support;
 
@@ -436,4 +437,112 @@ async fn a_hand_written_schema_has_no_merge_base(pool: PgPool) {
         .unwrap();
 
     assert!(schema.origin_snapshot.is_none());
+}
+
+/// The whole point, end to end: a template that moved and a workspace that moved, told apart
+/// by the base rather than confused with each other.
+#[sqlx::test(migrations = "../../migrations")]
+async fn merge_preview_separates_upstream_changes_from_local_ones(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    // Copy the template as it stands.
+    let (schema, _) = create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    // Upstream adds `priority`.
+    sqlx::query("UPDATE identity.templates SET definition = $2 WHERE id = $1")
+        .bind(template_id)
+        .bind(serde_json::to_value(task_schema(true)).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let plan = merge_preview(&mut conn, &pool, tenant_id, workspace_id, schema.id)
+        .await
+        .unwrap();
+
+    let priority = plan
+        .fields
+        .iter()
+        .find(|f| f.field == "priority")
+        .expect("the upstream addition is reported");
+    assert_eq!(priority.verdict, crate::metaschema::MergeVerdict::AutoAdd);
+    assert!(!plan.has_conflicts());
+}
+
+/// A schema that follows nothing cannot be merged, and says so rather than comparing against
+/// something arbitrary.
+#[sqlx::test(migrations = "../../migrations")]
+async fn merge_preview_refuses_a_schema_with_no_origin(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema(&mut conn, tenant_id, workspace_id, task_schema(false))
+        .await
+        .unwrap();
+
+    let err = merge_preview(&mut conn, &pool, tenant_id, workspace_id, schema.id)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, YorishiroError::ValidationFailed { .. }),
+        "got {err:?}"
+    );
+}
+
+/// Copied before snapshots existed: no ancestor, so no merge. Substituting the current
+/// template would read every local field as a conflict, which is worse than refusing.
+#[sqlx::test(migrations = "../../migrations")]
+async fn merge_preview_refuses_when_the_base_was_never_recorded(pool: PgPool) {
+    let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
+    let template_id = seed_template(&pool, tenant_id).await;
+    let db = TenantDb::new(pool.clone());
+    let mut conn = db
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+        .unwrap();
+
+    let (schema, _) = create_schema_from(
+        &mut conn,
+        tenant_id,
+        workspace_id,
+        task_schema(false),
+        Some(template_id),
+    )
+    .await
+    .unwrap();
+
+    // A row as it would look if copied before the snapshot column existed.
+    sqlx::query("UPDATE content.schemas SET origin_snapshot = NULL WHERE id = $1")
+        .bind(schema.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let err = merge_preview(&mut conn, &pool, tenant_id, workspace_id, schema.id)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, YorishiroError::ValidationFailed { .. }),
+        "got {err:?}"
+    );
 }

@@ -209,6 +209,35 @@ impl YorishiroMcpServer {
         );
         ok_json(changes)
     }
+
+    #[tool(
+        description = "Show what following the origin template would do to a schema \
+                           (requires read scope). Compares the definition as copied, the \
+                           template now, and this schema, and reports each differing field as \
+                           auto_add, auto_update, keep_local or conflict. Nothing is written; \
+                           a conflict is a question for a person."
+    )]
+    pub async fn merge_preview(
+        &self,
+        Parameters(args): Parameters<GetSchemaByIdArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Read);
+
+        let tenant_id = authorized.ctx.tenant_id;
+        let workspace_id = authorized.ctx.workspace_id;
+        let plan = mcp_try!(
+            schemas::merge_preview(
+                authorized.conn(),
+                &self.state.identity_pool,
+                tenant_id,
+                workspace_id,
+                args.schema_id,
+            )
+            .await
+        );
+        ok_json(plan)
+    }
 }
 
 #[cfg(test)]

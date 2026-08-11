@@ -171,7 +171,7 @@ A path with no extension therefore never 404s through this fallback -- a typo'd 
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 23 tools. Example connection from Claude Code:
+Connecting to `/mcp` (Streamable HTTP) gives you access to 24 tools. Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
@@ -184,6 +184,7 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `list_templates` | read | List built-in schema templates usable as `create_schema`'s `template_id` (a template-library UUID works there too) |
 | `list_schemas` | read | List a summary of registered schemas (for discovery) |
 | `list_upstream_changes` | read | Schemas whose origin template has been edited since the copy was taken. Reports only — the upstream edit is never applied on its own, since it could invalidate entities already stored |
+| `merge_preview` | read | What following the origin template would do: each differing field as `auto_add`, `auto_update`, `keep_local` or `conflict`. Nothing is written — a conflict is a question for a person, since picking a side would invalidate the entities written against the losing definition |
 | `get_active_schema` | read | Fetch the active schema definition |
 | `get_schema_by_id` | read | Fetch a specific schema version |
 | `get_entity_type_json_schema` | read | Project an entity_type as a JSON Schema |
