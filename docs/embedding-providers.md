@@ -29,3 +29,17 @@ YSR_EMBEDDING_PROVIDER=openai
 YSR_EMBEDDING_BASE_URL=http://localhost:11434/v1
 YSR_EMBEDDING_MODEL=nomic-embed-text
 ```
+
+### When the provider is busy
+
+A `429` or `503` from the provider is a request to come back, not a rejection. The embedding
+sync waits the `Retry-After` the provider asked for — capped at 60 seconds, and defaulting to
+a short wait when the header is absent — and retries up to three times before giving up and
+leaving the entity to `admin resync-embeddings`.
+
+Anything else (a `400`, say) is a request the provider will never accept, and is not retried:
+spending the attempts on it would not help, and the error says so in the log.
+
+This matters because embedding happens after the response. An entity whose embedding is lost
+to a rate limit is written and durable, but absent from semantic search until a resync — the
+retry is what keeps a busy minute at the provider from quietly costing you that.

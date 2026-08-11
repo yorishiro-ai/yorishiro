@@ -126,3 +126,97 @@ async fn rejects_non_success_status() {
     let err = provider.embed_batch(&["hello"]).await.unwrap_err();
     assert!(matches!(err, YorishiroError::Internal(_)));
 }
+
+/// A rate-limited provider is telling the caller to come back, not that the request is wrong.
+/// Reported as its own variant so the embedding sync waits instead of dropping the work — an
+/// embedding lost to a 429 leaves the entity out of search until someone runs a resync.
+#[tokio::test]
+async fn a_rate_limited_provider_is_reported_as_busy_with_its_own_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "7")
+                .set_body_string("slow down"),
+        )
+        .mount(&server)
+        .await;
+
+    let err = provider(server.uri()).embed("anything").await.unwrap_err();
+
+    match err {
+        YorishiroError::ProviderBusy { retry_after, .. } => {
+            assert_eq!(
+                retry_after.as_secs(),
+                7,
+                "the provider's own window is honoured"
+            );
+        }
+        other => panic!("expected ProviderBusy, got {other:?}"),
+    }
+}
+
+/// Without the header there is still no reason to hammer, so a default stands in.
+#[tokio::test]
+async fn a_busy_provider_without_a_header_still_gets_a_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    let err = provider(server.uri()).embed("anything").await.unwrap_err();
+
+    match err {
+        YorishiroError::ProviderBusy { retry_after, .. } => {
+            assert!(retry_after.as_secs() > 0);
+        }
+        other => panic!("expected ProviderBusy, got {other:?}"),
+    }
+}
+
+/// An hour-long Retry-After is capped. The work is recoverable by a resync; a task sleeping
+/// for an hour is not something to hold the process open for.
+#[tokio::test]
+async fn an_extravagant_retry_after_is_capped() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "3600"))
+        .mount(&server)
+        .await;
+
+    let err = provider(server.uri()).embed("anything").await.unwrap_err();
+
+    match err {
+        YorishiroError::ProviderBusy { retry_after, .. } => {
+            assert!(
+                retry_after.as_secs() <= 60,
+                "capped, got {}s",
+                retry_after.as_secs()
+            );
+        }
+        other => panic!("expected ProviderBusy, got {other:?}"),
+    }
+}
+
+/// A request the provider will never accept stays an internal error. Retrying a 400 would
+/// spend the budget on something that cannot succeed.
+#[tokio::test]
+async fn a_rejected_request_is_not_treated_as_busy() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .respond_with(ResponseTemplate::new(400).set_body_string("bad input"))
+        .mount(&server)
+        .await;
+
+    let err = provider(server.uri()).embed("anything").await.unwrap_err();
+
+    assert!(
+        matches!(err, YorishiroError::Internal(_)),
+        "a 400 is not a reason to come back: {err:?}"
+    );
+}

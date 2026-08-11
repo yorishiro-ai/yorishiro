@@ -5,13 +5,13 @@ use sqlx::PgPool;
 use tokio::sync::Semaphore;
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
-use yorishiro_core::ResultExt;
 use yorishiro_core::db::TenantDb;
 use yorishiro_core::repositories::entities::EntityRecord;
 use yorishiro_core::services::auth::{Authenticator, default_authenticator};
 use yorishiro_core::services::embedding::EmbeddingProvider;
 use yorishiro_core::services::embedding::sync as embedding_sync;
 use yorishiro_core::services::queue::{LocalQueue, Queue};
+use yorishiro_core::{ResultExt, YorishiroError};
 
 /// Cap on concurrent background embedding syncs. Each sync task holds a pool connection for
 /// the duration of the embedding API call (up to tens of seconds), so spawning without limit
@@ -19,6 +19,11 @@ use yorishiro_core::services::queue::{LocalQueue, Queue};
 /// write burst. Tasks beyond the cap aren't dropped — they wait on the semaphore without
 /// holding a connection.
 const EMBEDDING_SYNC_MAX_CONCURRENCY: usize = 4;
+
+/// How many times a busy provider is waited on before the task gives up and leaves the entity
+/// to `admin resync-embeddings`. Bounded so a provider in a long outage cannot accumulate
+/// tasks that each sleep indefinitely.
+const EMBEDDING_SYNC_MAX_RETRIES: u32 = 3;
 
 /// Application state shared by both the REST and MCP handlers. Using this struct as axum's
 /// `State` — rather than `TenantDb` alone — lets search handlers also reach the
@@ -133,20 +138,48 @@ impl AppState {
                 return;
             };
 
-            let result = async {
-                let mut conn = db
-                    .acquire_for_workspace(tenant_id, workspace_id)
+            // A provider asking to be tried again is worth waiting for: the alternative is
+            // losing this entity from search until someone runs a resync. Bounded attempts,
+            // because a provider that stays busy should not hold a task forever -- and the
+            // resync path is what covers the case where it does.
+            let mut attempt = 0;
+            let result = loop {
+                let outcome = async {
+                    let mut conn = db
+                        .acquire_for_workspace(tenant_id, workspace_id)
+                        .await
+                        .internal()?;
+                    embedding_sync::sync_embedding_for_record(
+                        &mut conn,
+                        workspace_id,
+                        &record,
+                        provider.as_ref(),
+                    )
                     .await
-                    .internal()?;
-                embedding_sync::sync_embedding_for_record(
-                    &mut conn,
-                    workspace_id,
-                    &record,
-                    provider.as_ref(),
-                )
-                .await
-            }
-            .await;
+                }
+                .await;
+
+                match outcome {
+                    Err(YorishiroError::ProviderBusy {
+                        ref message,
+                        retry_after,
+                    }) if attempt < EMBEDDING_SYNC_MAX_RETRIES => {
+                        attempt += 1;
+                        tracing::info!(
+                            entity_id = %record.id,
+                            attempt,
+                            retry_after_secs = retry_after.as_secs(),
+                            %message,
+                            "embedding provider busy; waiting before retry"
+                        );
+                        // The connection is released before sleeping -- it was dropped with
+                        // the block above. Holding one through the wait would spend the pool
+                        // on tasks that are doing nothing.
+                        tokio::time::sleep(retry_after).await;
+                    }
+                    other => break other,
+                }
+            };
 
             if let Err(err) = result {
                 tracing::warn!(entity_id = %record.id, error = %err, "embedding sync failed");

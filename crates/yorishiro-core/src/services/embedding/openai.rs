@@ -91,6 +91,18 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
 
         let status = response.status();
         if !status.is_success() {
+            // A provider saying "too many requests" or "temporarily unavailable" is saying to
+            // come back, which is different from a request it will never accept. Told apart
+            // here so the caller can wait instead of dropping the work: an embedding lost to a
+            // rate limit leaves the entity out of search until someone runs a resync, with
+            // nothing but a log line to say it happened.
+            if let Some(after) = retry_after(status.as_u16(), response.headers()) {
+                let body = response.text().await.unwrap_or_default();
+                return Err(YorishiroError::ProviderBusy {
+                    message: format!("embedding provider returned HTTP {status}: {body}"),
+                    retry_after: after,
+                });
+            }
             let body = response.text().await.unwrap_or_default();
             return Err(YorishiroError::Internal(anyhow::anyhow!(
                 "embedding provider returned HTTP {status}: {body}"
@@ -126,3 +138,23 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
 #[cfg(test)]
 #[path = "../../../tests/services/embedding/openai.rs"]
 mod tests;
+
+/// How long to wait before retrying, or `None` when the response is not a reason to retry.
+///
+/// 429 and 503 are the two the providers use for "later"; everything else is a request that
+/// will fail again the same way. `Retry-After` is honoured when the provider sends it, since
+/// the provider knows its own window, and a default stands in when it does not — a missing
+/// header is not a reason to hammer.
+fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    if status != 429 && status != 503 {
+        return None;
+    }
+    let from_header = headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        // A provider asking for an hour is a provider this process should not sit waiting on;
+        // the work is recoverable by a resync, an unbounded wait is not.
+        .map(|secs| Duration::from_secs(secs.min(60)));
+    Some(from_header.unwrap_or(Duration::from_secs(5)))
+}
