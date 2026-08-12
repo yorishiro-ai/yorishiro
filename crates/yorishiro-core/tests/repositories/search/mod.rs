@@ -433,7 +433,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool);
+    let db = TenantDb::new(pool.clone());
     let mut conn = db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
@@ -458,8 +458,12 @@ async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     .await
     .unwrap();
 
+    // On the pool, not on `conn`: the scoped connection runs as `yorishiro_app`, which cannot
+    // ANALYZE a table it does not own -- Postgres answers with a WARNING and skips it, so the
+    // statistics never update and the planner has no reason to prefer the index. Production
+    // analyses as the owner (autovacuum, or an operator), which is what this reproduces.
     sqlx::query("ANALYZE content.entities")
-        .execute(&mut *conn)
+        .execute(&pool)
         .await
         .unwrap();
     sqlx::query("SET enable_seqscan = off")
