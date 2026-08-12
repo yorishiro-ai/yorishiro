@@ -433,7 +433,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool);
+    let db = TenantDb::new(pool.clone());
     let mut conn = db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
