@@ -191,3 +191,16 @@ had already accepted.
 
 Nothing sent through the switchover reaches the old queue — otherwise step 2 would be chasing a
 target that keeps moving.
+
+## Chunked work
+
+Long work is split into pieces that are acknowledged one at a time
+(`yorishiro_core::services::chunking`), so a worker that dies mid-job loses one chunk rather
+than the job. `split` breaks at whitespace, never mid-word; `ChunkProgress` records which chunks
+were acknowledged and reports which were not.
+
+**Reassignment is not here.** Returning an unacknowledged chunk to the pool is a visibility
+timeout, a property of a queue that ships work between processes. `LocalQueue` runs tasks on
+this runtime, where a lost chunk and a lost process are the same event. A distributed driver
+brings its own timeout and reuses everything above — `outstanding()` is exactly the list it
+hands back.
