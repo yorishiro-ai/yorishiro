@@ -4,7 +4,6 @@ pub(crate) mod health;
 mod identity;
 mod import;
 mod inference;
-mod marketplace;
 mod members;
 mod relations;
 mod schemas;
@@ -127,13 +126,6 @@ impl Modify for SecurityAddon {
         workspaces::create_workspace,
         workspaces::get_workspace,
         workspaces::delete_workspace,
-        marketplace::list_marketplace,
-        marketplace::list_versions,
-        marketplace::publish_version,
-        marketplace::list_reviews,
-        marketplace::submit_review,
-        marketplace::fork_template,
-        marketplace::set_visibility,
         template_library::list_templates,
         template_library::get_template,
         template_library::create_template,
@@ -330,23 +322,6 @@ pub fn router(
         .route(
             "/api/template-library/{id}/fork",
             post(template_library::fork_template),
-        )
-        .route("/api/marketplace", get(marketplace::list_marketplace))
-        .route(
-            "/api/marketplace/{id}/versions",
-            get(marketplace::list_versions).post(marketplace::publish_version),
-        )
-        .route(
-            "/api/marketplace/{id}/reviews",
-            get(marketplace::list_reviews).post(marketplace::submit_review),
-        )
-        .route(
-            "/api/marketplace/{id}/fork",
-            post(marketplace::fork_template),
-        )
-        .route(
-            "/api/marketplace/{id}/visibility",
-            put(marketplace::set_visibility),
         )
         .route("/api/search", get(search::search_entities))
         .route("/api/export.jsonl", get(export::export_jsonl))

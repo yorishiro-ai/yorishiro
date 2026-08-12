@@ -57,12 +57,6 @@ pub enum AdminCommand {
     },
     /// List a tenant's members.
     ListMembers { tenant_id: Uuid },
-    /// Publish the built-in templates as official marketplace listings.
-    ///
-    /// Idempotent: a template already published at the same definition is left alone, and one
-    /// whose definition changed gets a new version rather than an edit in place. Safe to run on
-    /// every deployment.
-    SeedOfficialTemplates,
     /// Create an invite token for an email to join a tenant with a given role. Signup is
     /// invite-only; there is no self-service, unauthenticated account creation.
     CreateInvite {
@@ -345,19 +339,6 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             }
             for member in members {
                 println!("{}  {:<8?} {}", member.user_id, member.role, member.email);
-            }
-        }
-        AdminCommand::SeedOfficialTemplates => {
-            let outcome =
-                yorishiro_core::services::official_templates::seed_official_templates(pool).await?;
-            println!(
-                "official templates: {} published, {} updated, {} unchanged",
-                outcome.published.len(),
-                outcome.updated.len(),
-                outcome.unchanged.len()
-            );
-            for name in outcome.published.iter().chain(outcome.updated.iter()) {
-                println!("  {name}");
             }
         }
         AdminCommand::CreateInvite {
