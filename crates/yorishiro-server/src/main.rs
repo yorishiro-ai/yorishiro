@@ -77,6 +77,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     let tenant_db = TenantDb::connect(&database_url, 20).await?;
     let embedding_provider = build_embedding_provider()?;
+    // Cloned before the pool is moved into AppState; the load guard below outlives this scope.
+    let guard_pool = identity_pool.clone();
     let state = AppState::new(tenant_db, identity_pool, embedding_provider);
     let embedding_tasks = state.embedding_tasks().clone();
     // Unset by default: the setup/login SPA is compiled into the binary (see
@@ -84,6 +86,23 @@ async fn run(cli: Cli) -> Result<()> {
     // iterate on `web/`'s contents without rebuilding.
     let web_dir = std::env::var("YSR_WEB_DIR").ok();
     let app = build_app(state, web_dir);
+
+    // Off unless YSR_DB_LOAD_THRESHOLD is set: dropping a deployment to read-only without
+    // being asked is a large thing to do on a default, and the right threshold depends on
+    // max_connections, which this crate does not choose.
+    //
+    // On identity_pool rather than the tenant pool: this reads pg_stat_activity and writes the
+    // maintenance row, neither of which is workspace-scoped, and the tenant pool has been
+    // moved into AppState by here anyway.
+    if let Some(guard) = yorishiro_core::services::db_load_guard::LoadGuardConfig::from_env() {
+        tracing::info!(
+            threshold = guard.threshold,
+            "db load guard enabled: read-only above this many active connections"
+        );
+        tokio::spawn(yorishiro_core::services::db_load_guard::run(
+            guard_pool, guard,
+        ));
+    }
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     tracing::info!("listening on {bind_addr}");
