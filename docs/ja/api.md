@@ -153,9 +153,6 @@ $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
 | `create_schema` | schema | メタスキーマの登録(新バージョン追加)。インラインの`definition`または`template_id`から作成可能 |
 | `list_templates` | read | `create_schema`の`template_id`に指定できる組み込みスキーマテンプレートの一覧(テンプレートライブラリのUUIDも指定可能) |
 | `list_schemas` | read | 登録済みスキーマのサマリ一覧(発見用) |
-| `list_upstream_changes` | read | 出自テンプレートが複製後に編集されたスキーマを返す。**報告のみ**で、上流の変更が自動で適用されることはない(既存エンティティが検証を通らなくなりうるため) |
-| `merge_preview` | read | 出自テンプレートに追従した場合の影響を返す。差異のある各フィールドを`auto_add`／`auto_update`／`keep_local`／`conflict`に分類する。**書き込みは行わない**——衝突は人間が判断する事柄であり、機械が片方を選ぶと負けた定義で書かれたエンティティが検証を通らなくなる |
-| `merge_apply` | schema | 出自テンプレートに追従し、マージ結果をスキーマの次バージョンとして書き込む。このワークスペースが触れていないフィールドは上流の変更を取り込み、独自に加えたものはそのまま残す。衝突が1件でもあれば拒否する |
 | `get_active_schema` | read | アクティブなスキーマ定義の取得 |
 | `get_schema_by_id` | read | 特定バージョンのスキーマ取得 |
 | `get_entity_type_json_schema` | read | entity_typeのJSON Schema投影 |

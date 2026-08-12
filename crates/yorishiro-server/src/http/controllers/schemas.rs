@@ -6,9 +6,8 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::metaschema::MergePlan;
 use yorishiro_core::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
-use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary, UpstreamChange};
+use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary};
 use yorishiro_core::repositories::tenancy;
 use yorishiro_core::templates::{self, TemplateSummary};
 
@@ -235,95 +234,6 @@ pub async fn get_entity_type_json_schema(
     Ok(Json(metaschema::entity_type_to_json_schema(
         entity_type_def,
     )))
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/schemas/upstream-changes",
-    responses(
-        (status = 200, description = "Schemas whose origin template has changed since the copy was taken", body = Vec<UpstreamChange>),
-        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
-        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
-    ),
-    tag = "schemas",
-)]
-pub async fn list_upstream_changes(
-    State(state): State<AppState>,
-    authorized: Authorized<ReadScope>,
-) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
-    let workspace_id = authorized.ctx.workspace_id;
-    // The control-plane pool: this joins identity.templates, which the request role cannot
-    // read.
-    let changes = schemas::list_with_upstream_changes(&state.identity_pool, workspace_id).await?;
-    Ok(Json(changes))
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/schemas/{schema_id}/merge-preview",
-    params(("schema_id" = Uuid, Path, description = "Schema ID")),
-    responses(
-        (status = 200, description = "What following the origin template would do", body = MergePlan),
-        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
-        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
-        (status = 404, description = "The schema does not exist", body = crate::error::ApiErrorBody),
-        (status = 422, description = "The schema follows no template, or has no recorded merge base", body = crate::error::ApiErrorBody),
-    ),
-    tag = "schemas",
-)]
-pub async fn merge_preview(
-    State(state): State<AppState>,
-    mut authorized: Authorized<ReadScope>,
-    Path(schema_id): Path<Uuid>,
-) -> Result<Json<MergePlan>, ApiError> {
-    let tenant_id = authorized.ctx.tenant_id;
-    let workspace_id = authorized.ctx.workspace_id;
-    // The template lives in identity, which the request role cannot read, so the lookup goes
-    // through the control-plane pool while the schema itself comes off this connection.
-    let plan = schemas::merge_preview(
-        authorized.conn(),
-        &state.identity_pool,
-        tenant_id,
-        workspace_id,
-        schema_id,
-    )
-    .await?;
-    Ok(Json(plan))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/schemas/{schema_id}/merge",
-    params(("schema_id" = Uuid, Path, description = "Schema ID")),
-    responses(
-        (status = 201, description = "Merged definition written as the schema's next version", body = CreateSchemaResponse),
-        (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
-        (status = 403, description = "Insufficient scope", body = crate::error::ApiErrorBody),
-        (status = 404, description = "The schema does not exist", body = crate::error::ApiErrorBody),
-        (status = 409, description = "Version conflict due to concurrent creation", body = crate::error::ApiErrorBody),
-        (status = 422, description = "The schema follows no template, has no recorded merge base, or the merge has conflicts", body = crate::error::ApiErrorBody),
-    ),
-    tag = "schemas",
-)]
-pub async fn merge_apply(
-    State(state): State<AppState>,
-    mut authorized: Authorized<SchemaScope>,
-    Path(schema_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
-    let tenant_id = authorized.ctx.tenant_id;
-    let workspace_id = authorized.ctx.workspace_id;
-    let (schema, diff) = schemas::merge_apply(
-        authorized.conn(),
-        &state.identity_pool,
-        tenant_id,
-        workspace_id,
-        schema_id,
-    )
-    .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateSchemaResponse { schema, diff }),
-    ))
 }
 
 #[cfg(test)]

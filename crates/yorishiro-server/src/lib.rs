@@ -259,10 +259,8 @@ pub(crate) mod test_support {
             "list_relations" => serde_json::json!({}),
             "set_relation_status" => serde_json::json!({ "id": NIL_UUID, "status": "archived" }),
             "list_schemas" => serde_json::json!({}),
-            "list_upstream_changes" => serde_json::json!({}),
             "get_active_schema" => serde_json::json!({ "name": "dummy" }),
             "get_schema_by_id" => serde_json::json!({ "schema_id": NIL_UUID }),
-            "merge_preview" | "merge_apply" => serde_json::json!({ "schema_id": NIL_UUID }),
             "create_schema" => serde_json::json!({ "definition": {} }),
             "get_entity_type_json_schema" => serde_json::json!({
                 "schema_name": "dummy", "entity_type": "dummy",
