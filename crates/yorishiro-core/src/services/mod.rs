@@ -3,6 +3,7 @@
 //! sync job that keeps `entities.embedding` current).
 
 pub mod auth;
+pub mod chunking;
 pub mod db_load_guard;
 pub mod embedding;
 pub mod inference;
