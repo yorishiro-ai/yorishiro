@@ -7,6 +7,4 @@ pub mod chunking;
 pub mod db_load_guard;
 pub mod embedding;
 pub mod inference;
-pub mod marketplace;
-pub mod official_templates;
 pub mod queue;
