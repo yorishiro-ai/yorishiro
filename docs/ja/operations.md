@@ -139,44 +139,14 @@ undoで消費されるため**同じjobは1度しか戻せません**——2度�
 
 ### 値の推測
 
-`fill-defaults`がスキーマから値を読むのに対し、
-`POST /api/schemas/active/{name}/infer-fill`(schemaスコープ)は
-エンティティが既に持つ内容からモデルに値を提案させます。
-対象は「欠けていて、かつ妥当な既定値を持たない」フィールドです——
-本文から読み取れる`category`であって、`draft`から始まる`status`ではありません。
+言語モデルによる値の推測は、このエディションでは提供しません。`fill-defaults`が書くのは
+スキーマ自身が述べている値だけで、既定値を持たない必須フィールドは`still_missing`に
+報告され、そのまま残ります。
 
-**この推論のコストはデプロイメントが負担しません。** 先にワークスペース自身の
-資格情報を設定してください:
-
-```console
-$ curl -X PUT localhost:8080/api/workspace/llm-key -H "Authorization: Bearer $YSR_KEY" \
-    -H 'Content-Type: application/json' \
-    -d '{"base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","api_key":"sk-..."}'
-```
-
-OpenAI互換のchat-completionsエンドポイントであれば何でも使えます(Ollama・LM Studioを含む)。
-`GET`は設定内容の確認のためエンドポイントとモデルを返しますが、**キーは返しません**。
-`DELETE`で削除でき、以後`infer-fill`は再び拒否します。
-
-キー未設定のワークスペースは既定値へフォールバックせず**422**を返します——
-推測を頼んだ利用者が`default`値を受け取ると、
-「推測が行われなかった」ことを知る手段がありません。
-
-**提案は書き込みではありません。** `infer-fill`は`job_id`を返してモデルの提案を保存し、
-エンティティには触れません:
-
-```console
-$ curl localhost:8080/api/migration-jobs/$JOB_ID/proposals -H "Authorization: Bearer $YSR_KEY"
-$ curl -X POST localhost:8080/api/migration-jobs/$JOB_ID/confirm -H "Authorization: Bearer $YSR_KEY"
-```
-
-確定すると同じ`job_id`で各エンティティのスナップショットを取ってから適用するため、
-`POST /api/migration-jobs/{job_id}/undo`が`fill-defaults`と同じように戻せます。
-スキーマが拒否する提案はバッチ全体を失敗させず`skipped`に数えます——
-確認済みの残りはそのまま適用されます。
-
-**同じjobは1度しか確定できません。** 適用時に提案を削除するため、
-undo後に再度確定してundoが戻した内容を上書きすることはできません。
+このエディションは、誰が費用を負担するかに関わらず、外部へのchat-completions呼び出しを
+行いません。埋め込みプロバイダはその例外ではありません——embeddingsエンドポイントは
+chat completionではなく、ローカルONNXプロバイダに至ってはネットワーク呼び出し自体が
+ありません。推論によるフィルはホステッドエディションに属します。
 
 ## キュー基盤の切り替え
 

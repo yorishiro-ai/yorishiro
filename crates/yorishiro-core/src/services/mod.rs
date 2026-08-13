@@ -6,5 +6,4 @@ pub mod auth;
 pub mod chunking;
 pub mod db_load_guard;
 pub mod embedding;
-pub mod inference;
 pub mod queue;
