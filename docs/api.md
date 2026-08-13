@@ -157,7 +157,7 @@ A dotfile-style path (e.g. `/.env`) is also treated as extension-less and falls 
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 25 tools.
+Connecting to `/mcp` (Streamable HTTP) gives you access to 23 tools.
 Example connection from Claude Code:
 
 ```console

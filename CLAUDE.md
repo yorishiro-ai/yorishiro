@@ -43,7 +43,11 @@
 - `tests/` mirrors `src/` exactly: same directories, same filenames.
   The test body lives in `tests/`, and the `src` module it covers ends with a bridge:
 
-  ```rust #[cfg(test)] #[path = "../../tests/repositories/schemas/mod.rs"] mod tests; ```
+  ```rust
+  #[cfg(test)]
+  #[path = "../../tests/repositories/schemas/mod.rs"]
+  mod tests;
+  ```
 
   so it compiles as that module's own `mod tests` rather than as an external integration test.
   Never inline a test body in `src/`.

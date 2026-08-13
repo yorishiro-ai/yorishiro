@@ -168,7 +168,7 @@ RESTのルートとMCPのツールが呼び出し元の identity について食
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると25のツールが使えます。
+`/mcp`(Streamable HTTP)に接続すると23のツールが使えます。
 Claude Codeでの接続例:
 
 ```console
