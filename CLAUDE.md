@@ -2,24 +2,37 @@
 
 ## Error handling
 
-- Use `yorishiro_core::ResultExt` (`.internal()`) for any fallible call that produces a non-`YorishiroError` error. Never write `map_err(|e| YorishiroError::Internal(e.into()))` by hand. `.internal()` only converts an existing error (`E: Into<anyhow::Error>`) and cannot attach a message, so it does not cover raising an `Internal` from a formatted string with no source error. `services/embedding/onnx.rs` has a private `fn internal(message: impl Display)` for exactly that case — a local helper like it is the sanctioned pattern when a module needs it repeatedly. Do not promote one to a shared API until a second module actually wants it.
+- Use `yorishiro_core::ResultExt` (`.internal()`) for any fallible call that produces a non-`YorishiroError` error.
+  Never write `map_err(|e| YorishiroError::Internal(e.into()))` by hand.
+  `.internal()` only converts an existing error (`E: Into<anyhow::Error>`) and cannot attach a message, so it does not cover raising an `Internal` from a formatted string with no source error.
+  `services/embedding/onnx.rs` has a private `fn internal(message: impl Display)` for exactly that case — a local helper like it is the sanctioned pattern when a module needs it repeatedly.
+  Do not promote one to a shared API until a second module actually wants it.
 - Use `YorishiroError::not_found(msg)` for NotFound construction instead of building the struct literal directly.
-- The `into_response` mapping from `YorishiroError` to HTTP status+body lives in `YorishiroError::into_http_parts()` (in `yorishiro_core::error`). `ApiError` calls it, and so must any other axum error wrapper built on `YorishiroError` — never duplicate the match block.
+- The `into_response` mapping from `YorishiroError` to HTTP status+body lives in `YorishiroError::into_http_parts()` (in `yorishiro_core::error`).
+  `ApiError` calls it, and so must any other axum error wrapper built on `YorishiroError` — never duplicate the match block.
 
 ## MCP handlers (yorishiro-server)
 
-- Use the `authorized!` / `verified!` macros for every MCP handler that needs auth. Do not inline the `authorize().await? + match AuthzOutcome` pattern.
-- Use the `mcp_try!` macro to wrap fallible repository/service calls that should return a tool-level error on failure. Do not hand-roll `match call.await { Ok(x) => ..., Err(e) => Ok(err_to_tool_result(e)) }`.
+- Use the `authorized!` / `verified!` macros for every MCP handler that needs auth.
+  Do not inline the `authorize().await? + match AuthzOutcome` pattern.
+- Use the `mcp_try!` macro to wrap fallible repository/service calls that should return a tool-level error on failure.
+  Do not hand-roll `match call.await { Ok(x) => ..., Err(e) => Ok(err_to_tool_result(e)) }`.
 
 ## Repository column lists (yorishiro-core)
 
-- When a repository queries/returns/inserts the same set of columns in multiple places, extract a `fn <table>_columns() -> [<Iden>; N]` helper (see `schema_columns()` in `repositories/schemas/mod.rs` for the pattern). All `.columns(...)` call sites use this helper. Adding a column means updating one place.
+- When a repository queries/returns/inserts the same set of columns in multiple places, extract a `fn <table>_columns() -> [<Iden>; N]` helper (see `schema_columns()` in `repositories/schemas/mod.rs` for the pattern).
+  All `.columns(...)` call sites use this helper.
+  Adding a column means updating one place.
 
 ## Visibility and dead code (yorishiro-core)
 
-- `yorishiro-core`'s `pub` API has consumers outside this repository. **"No caller in this workspace" does not mean unused** -- a repo-wide grep can only prove that *this* repo doesn't call it. Check the downstream consumers before deleting a `pub` item or narrowing its visibility.
+- `yorishiro-core`'s `pub` API has consumers outside this repository.
+  **"No caller in this workspace" does not mean unused** -- a repo-wide grep can only prove that *this* repo doesn't call it.
+  Check the downstream consumers before deleting a `pub` item or narrowing its visibility.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
-- `Authenticator` (`services/auth`) is a seam, not an internal detail. Every authenticated path -- the `AuthContext`/`Authorized<R>`/`Verified<R>` extractors and both MCP entry points -- resolves through the one `AppState::authenticator`. **A new authenticated entry point must resolve through it too**: one that calls `authenticate` directly would keep this crate's rule while every other path honours a replacement, so a REST route and an MCP tool would disagree about who the caller is.
+- `Authenticator` (`services/auth`) is a seam, not an internal detail.
+  Every authenticated path -- the `AuthContext`/`Authorized<R>`/`Verified<R>` extractors and both MCP entry points -- resolves through the one `AppState::authenticator`.
+  **A new authenticated entry point must resolve through it too**: one that calls `authenticate` directly would keep this crate's rule while every other path honours a replacement, so a REST route and an MCP tool would disagree about who the caller is.
 
 ## Module structure
 
@@ -27,29 +40,40 @@
 
 ## Tests
 
-- `tests/` mirrors `src/` exactly: same directories, same filenames. The test body lives in `tests/`, and the `src` module it covers ends with a bridge:
+- `tests/` mirrors `src/` exactly: same directories, same filenames.
+  The test body lives in `tests/`, and the `src` module it covers ends with a bridge:
 
   ```rust #[cfg(test)] #[path = "../../tests/repositories/schemas/mod.rs"] mod tests; ```
 
-  so it compiles as that module's own `mod tests` rather than as an external integration test. Never inline a test body in `src/`. Two consequences follow, and both matter:
+  so it compiles as that module's own `mod tests` rather than as an external integration test.
+  Never inline a test body in `src/`.
+  Two consequences follow, and both matter:
   - **Private items are testable.** `pub(crate)` and private functions are reachable, so a test never needs visibility widened for its own sake.
-  - **`autotests = false` is required** in `Cargo.toml`. Without it cargo also compiles each `tests/*.rs` as a standalone integration target, where `use crate::` fails. This is also why the layout cannot be adopted one file at a time — both crates are already on it, in ~77 places.
-- Test-only fixtures live in a `#[cfg(test)]`, `pub(crate)` `test_support` module (`crates/yorishiro-core/src/lib.rs`). `tests/` reaches it as `crate::test_support`. Do **not** widen it to `pub` or drop the `#[cfg(test)]`: under the bridge neither is needed, and `pub` would put fixtures on the crate's public surface for no reader outside these tests.
+  - **`autotests = false` is required** in `Cargo.toml`.
+    Without it cargo also compiles each `tests/*.rs` as a standalone integration target, where `use crate::` fails.
+    This is also why the layout cannot be adopted one file at a time — both crates are already on it, in ~77 places.
+- Test-only fixtures live in a `#[cfg(test)]`, `pub(crate)` `test_support` module (`crates/yorishiro-core/src/lib.rs`).
+  `tests/` reaches it as `crate::test_support`.
+  Do **not** widen it to `pub` or drop the `#[cfg(test)]`: under the bridge neither is needed, and `pub` would put fixtures on the crate's public surface for no reader outside these tests.
 - A `src` file with nothing to test (a `mod`-only re-export hub) gets no test file and no bridge.
 
 ## Imports
 
 - Always `use axum::http::StatusCode;` — never use the fully-qualified `axum::http::StatusCode` inline in function signatures or bodies.
-- Group imports: std → external crates → workspace crates → crate-internal. `cargo fmt` handles ordering within groups.
+- Group imports: std → external crates → workspace crates → crate-internal.
+  `cargo fmt` handles ordering within groups.
 
 ## Naming
 
-- The newtype wrapper over `YorishiroError` for axum is `ApiError` (`yorishiro-server`). The name is fixed — do not rename.
-- Avoid naming collisions across layers. If a type name already exists in `yorishiro-core`, the server-layer type that wraps/extends it should have a distinct name (e.g. core's `AuthContext` vs. server's auth extractor).
+- The newtype wrapper over `YorishiroError` for axum is `ApiError` (`yorishiro-server`).
+  The name is fixed — do not rename.
+- Avoid naming collisions across layers.
+  If a type name already exists in `yorishiro-core`, the server-layer type that wraps/extends it should have a distinct name (e.g. core's `AuthContext` vs. server's auth extractor).
 
 ## Git workflow
 
-- **Never push directly to master.** All changes go through a PR.
+- **Never push directly to master.**
+  All changes go through a PR.
 - Branch naming: `feat/<name>`, `fix/<name>`, `docs/<name>`, `refactor/<name>`
 - **Before creating a PR branch**, always:
   1. `git fetch origin master`
@@ -63,11 +87,14 @@
   2. If the branch is behind master, rebase first: `git fetch origin master && git rebase origin/master`
 - Every PR must pass CI (check + security) before merge.
 - Squash merge is the default merge strategy.
-- Every PR that changes source code must also update docs (English + Japanese). The `doc-check` workflow warns automatically if this is missing.
+- Every PR that changes source code must also update docs (English + Japanese).
+  The `doc-check` workflow warns automatically if this is missing.
 - Every PR that adds/changes config must update `.env.example`, `config.example.yml`, and `docs/configuration.md` (English + Japanese).
 
 ## Versioning
 
 - `workspace.package.version` in the root `Cargo.toml` is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
-- Tag format: `v{version}` (e.g. `v0.8.1`). Releases are cut by running the `Release` workflow (`workflow_dispatch` with a `version` input) from the Actions tab or `gh workflow run release.yml -f version=X.Y.Z` -- it bumps `Cargo.toml`/`Cargo.lock`, commits, and creates the tag itself. Do not hand-edit the version or create the tag locally.
+- Tag format: `v{version}` (e.g. `v0.8.1`).
+  Releases are cut by running the `Release` workflow (`workflow_dispatch` with a `version` input) from the Actions tab or `gh workflow run release.yml -f version=X.Y.Z` -- it bumps `Cargo.toml`/`Cargo.lock`, commits, and creates the tag itself.
+  Do not hand-edit the version or create the tag locally.

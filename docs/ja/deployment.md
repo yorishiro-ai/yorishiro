@@ -2,7 +2,8 @@
 
 [English](../deployment.md) | **日本語**
 
-起動そのものの手順(Docker・ビルド済みバイナリ・ソースから)は[setup.md](setup.md)を参照してください。このガイドはバックグラウンド起動、リリースの切り方、シングルテナント構成をカバーします。
+起動そのものの手順(Docker・ビルド済みバイナリ・ソースから)は[setup.md](setup.md)を参照してください。
+このガイドはバックグラウンド起動、リリースの切り方、シングルテナント構成をカバーします。
 
 ## バックグラウンドで起動する
 
@@ -15,7 +16,9 @@ $ docker logs -f yorishiro      # ログ追跡
 $ docker stop yorishiro         # graceful shutdown
 ```
 
-マイグレーションはバイナリに埋め込まれており起動時に自動適用されます(複数レプリカの同時起動もadvisory lockで安全)。SIGTERM/Ctrl-Cでgraceful shutdownし、処理中のリクエストとバックグラウンドのembedding同期の完了(最大30秒)を待ってから終了します。それでもembedding同期が失われた場合は`admin resync-embeddings`で回復できます。
+マイグレーションはバイナリに埋め込まれており起動時に自動適用されます(複数レプリカの同時起動もadvisory lockで安全)。
+SIGTERM/Ctrl-Cでgraceful shutdownし、処理中のリクエストとバックグラウンドのembedding同期の完了(最大30秒)を待ってから終了します。
+それでもembedding同期が失われた場合は`admin resync-embeddings`で回復できます。
 
 管理CLIは同じイメージで実行できます。
 
@@ -31,7 +34,8 @@ $ docker build -t yorishiro .
 
 ### systemd(ビルド済みバイナリ)
 
-[setup.md](setup.md#ビルド済みバイナリで動かす)で起動したプロセスを、systemdユニットで再起動をまたいで維持し、異常終了時も自動再起動できます。プレーンなシェルと異なり、systemdの`EnvironmentFile=`は`.env`を直接読み込むため、`source`/`set -a`は不要です。
+[setup.md](setup.md#ビルド済みバイナリで動かす)で起動したプロセスを、systemdユニットで再起動をまたいで維持し、異常終了時も自動再起動できます。
+プレーンなシェルと異なり、systemdの`EnvironmentFile=`は`.env`を直接読み込むため、`source`/`set -a`は不要です。
 
 ```ini
 # /etc/systemd/system/yorishiro.service
@@ -57,26 +61,31 @@ $ journalctl -u yorishiro -f
 
 ## リリース
 
-リリースはワークフローの起動1回で完結します。`.github/workflows/release.yml`が、バージョン更新・タグ作成・全成果物のビルド・公開イメージの起動確認・GitHub Releaseの作成までを行います。
+リリースはワークフローの起動1回で完結します。
+`.github/workflows/release.yml`が、バージョン更新・タグ作成・全成果物のビルド・公開イメージの起動確認・GitHub Releaseの作成までを行います。
 
 ```console
 $ gh workflow run release.yml -f version=X.Y.Z
 ```
 
-Actionsタブからも実行できます(`Release`ワークフローを選択 →「Run workflow」→ 先頭の`v`を除いたバージョンを入力)。**`master`から起動する必要があります** — チェックアウトした内容をそのままpushするため、他のrefからの起動はワークフロー側で拒否します。
+Actionsタブからも実行できます(`Release`ワークフローを選択 →「Run workflow」→ 先頭の`v`を除いたバージョンを入力)。
+**`master`から起動する必要があります** — チェックアウトした内容をそのままpushするため、他のrefからの起動はワークフロー側で拒否します。
 
 実行内容は以下の順です。
 
 1. バージョンが先頭ゼロなしの`x.y.z`形式か検証し、新規リリースか再開かを判定します(後述)。
 2. ルート`Cargo.toml`の`workspace.package.version`を更新し、`cargo update -w`を実行した上で、bumpコミットと`vX.Y.Z`タグを**まとめて(atomicに)**`master`へpushします。
-3. `yorishiro-server`を`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`)向けにビルドします。どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせQEMUを使わずネイティブビルドします。
+3. `yorishiro-server`を`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`)向けにビルドします。
+   どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせQEMUを使わずネイティブビルドします。
 4. マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`および`:latest`としてビルド・pushします。
-5. **公開したイメージを実際にpullし、本物のPostgreSQLに対して起動**します。`/up`が応答しなければリリースを失敗させます。
+5. **公開したイメージを実際にpullし、本物のPostgreSQLに対して起動**します。
+   `/up`が応答しなければリリースを失敗させます。
 6. バイナリを添付したGitHub Releaseを作成します。
 
 ### 失敗したリリースからの復旧
 
-手順2でタグはbumpコミットとまとめて確定するため、手順3〜5で失敗すると**タグはあるがGitHub Releaseが無い**状態になります。この場合は**同じバージョンでもう一度実行してください。** ワークフローはタグの有無ではなく**GitHub Releaseの有無**で状態を判定します。
+手順2でタグはbumpコミットとまとめて確定するため、手順3〜5で失敗すると**タグはあるがGitHub Releaseが無い**状態になります。
+この場合は**同じバージョンでもう一度実行してください。** ワークフローはタグの有無ではなく**GitHub Releaseの有無**で状態を判定します。
 
 | 状態 | 実行時の挙動 |
 |---|---|
@@ -84,8 +93,11 @@ Actionsタブからも実行できます(`Release`ワークフローを選択 �
 | タグあり・Releaseなし | 再開。bumpを飛ばし、既存タグから公開をやり直す |
 | タグあり・Releaseあり | 明示的に失敗。そのバージョンは公開済み |
 
-GitHub Releaseは全成果物のpushとスモークテスト通過の**後**に作成されるため、「このバージョンは出荷済み」の目印として信頼できます。リモートタグを手で削除したり、パッチ番号を1つ飛ばしたりする必要はありません。
+GitHub Releaseは全成果物のpushとスモークテスト通過の**後**に作成されるため、「このバージョンは出荷済み」の目印として信頼できます。
+リモートタグを手で削除したり、パッチ番号を1つ飛ばしたりする必要はありません。
 
 ## シングルテナント構成
 
-`YORISHIRO_MAX_TENANTS=1`・`YSR_EMBEDDING_PROVIDER=local`(いずれも[configuration.md](configuration.md)参照)は共に既定値です。これらを未設定のままにしたデプロイはそのまま[`web/`](../crates/yorishiro-web/web)のSPA(バイナリに組み込み済み)を配信し、そのセットアップウィザード([setup.md](setup.md#初回セットアップ)参照)だけでデプロイの唯一のテナントをオンボードでき、埋め込みにはローカルONNXモデルを使います。テナント上限を外すには`YORISHIRO_MAX_TENANTS=0`を設定してください。
+`YORISHIRO_MAX_TENANTS=1`・`YSR_EMBEDDING_PROVIDER=local`(いずれも[configuration.md](configuration.md)参照)は共に既定値です。
+これらを未設定のままにしたデプロイはそのまま[`web/`](../crates/yorishiro-web/web)のSPA(バイナリに組み込み済み)を配信し、そのセットアップウィザード([setup.md](setup.md#初回セットアップ)参照)だけでデプロイの唯一のテナントをオンボードでき、埋め込みにはローカルONNXモデルを使います。
+テナント上限を外すには`YORISHIRO_MAX_TENANTS=0`を設定してください。

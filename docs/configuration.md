@@ -2,13 +2,19 @@
 
 **English** | [日本語](ja/configuration.md)
 
-The full list of variables, with comments, lives in [`.env.example`](../.env.example). Variables are passed to the server **as process environment variables** -- there is no mechanism that automatically reads a `.env` file. Set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or similar.
+The full list of variables, with comments, lives in [`.env.example`](../.env.example).
+Variables are passed to the server **as process environment variables** -- there is no mechanism that automatically reads a `.env` file.
+Set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or similar.
 
 ## config.yml
 
-Every setting below can also go in a `config.yml` file instead. See [`config.example.yml`](../config.example.yml) for the full key list (nested under `embedding:`, `logging:`, and `auth_rate_limit:` for those groups). By default the server looks for `config.yml` in its working directory; set `YSR_CONFIG_PATH` to point elsewhere.
+Every setting below can also go in a `config.yml` file instead.
+See [`config.example.yml`](../config.example.yml) for the full key list (nested under `embedding:`, `logging:`, and `auth_rate_limit:` for those groups).
+By default the server looks for `config.yml` in its working directory; set `YSR_CONFIG_PATH` to point elsewhere.
 
-A missing file, or a missing key within it, is not an error -- that setting just falls back to its usual default. **A set environment variable always wins over the equivalent `config.yml` key.** An *unknown* key (e.g. a typo) is rejected: the server fails to start rather than silently ignoring it.
+A missing file, or a missing key within it, is not an error -- that setting just falls back to its usual default.
+**A set environment variable always wins over the equivalent `config.yml` key.**
+An *unknown* key (e.g. a typo) is rejected: the server fails to start rather than silently ignoring it.
 
 This makes `config.yml` convenient as the base configuration for a deployment, with environment variables reserved for one-off overrides (e.g. a Docker `-e` flag for a single run) rather than the only way to configure anything.
 
@@ -29,13 +35,16 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 
 ## Request correlation
 
-Every response carries an `x-request-id` header -- a UUID the server generates if the request didn't already have one, otherwise the caller's own value is echoed back unchanged. The same value tags the tracing span for that request, so any `warn`/`error` line logged while handling it (an authentication rejection, a rate-limit hit, an internal error) carries the same `request_id` field as the access log line for that request. Useful for tying a specific failed request to its server-side log lines when following up on an incident report.
+Every response carries an `x-request-id` header -- a UUID the server generates if the request didn't already have one, otherwise the caller's own value is echoed back unchanged.
+The same value tags the tracing span for that request, so any `warn`/`error` line logged while handling it (an authentication rejection, a rate-limit hit, an internal error) carries the same `request_id` field as the access log line for that request.
+Useful for tying a specific failed request to its server-side log lines when following up on an incident report.
 
 Rejected requests (bad/missing API key, insufficient scope, rate limit exceeded) are logged at `warn` with the caller's IP and the request path, but never the presented credential -- previously these surfaced only as an anonymous 401/403/429 in the access log.
 
 ## Logging
 
-Every log line, including the HTTP access log (method, path, status, latency), is a JSON object. `YSR_LOG_TARGET` selects where those lines go:
+Every log line, including the HTTP access log (method, path, status, latency), is a JSON object.
+`YSR_LOG_TARGET` selects where those lines go:
 
 | Variable | Description |
 |---|---|
@@ -72,12 +81,10 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 
 ### Changing the embedding model
 
-A workspace records the model and dimension count it was created under. A write whose vector is
-a different width is refused with `422`, naming both numbers.
+A workspace records the model and dimension count it was created under.
+A write whose vector is a different width is refused with `422`, naming both numbers.
 
-Without that check the write would succeed — the column is dimensionless — and the workspace's
-next search would fail with `different vector dimensions 384 and 1024`, naming neither the
-entity nor the write that caused it.
+Without that check the write would succeed — the column is dimensionless — and the workspace's next search would fail with `different vector dimensions 384 and 1024`, naming neither the entity nor the write that caused it.
 
 To move a workspace to another model, point the deployment at it and re-embed:
 
@@ -85,8 +92,7 @@ To move a workspace to another model, point the deployment at it and re-embed:
 $ yorishiro-server admin resync-embeddings --workspace <id>
 ```
 
-Workspaces created before this stamp existed carry none, and accept whatever the deployment
-produces — which is what they have always done.
+Workspaces created before this stamp existed carry none, and accept whatever the deployment produces — which is what they have always done.
 
 
 ### When `YSR_EMBEDDING_PROVIDER=openai` (e.g. Ollama, LM Studio, OpenAI)

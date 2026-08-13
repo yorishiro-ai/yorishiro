@@ -52,24 +52,33 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
-`GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)と`schema_version`クエリパラメータも受け付けます。`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を受け付けます。
+`GET /api/entities`は`filter`クエリパラメータ(JSONBの包含条件でマッチするJSONオブジェクト、例: `filter={"status":"active"}`)と`schema_version`クエリパラメータも受け付けます。
+`POST /api/schemas`はインラインの定義に加えて`{"template_id": "..."}`を受け付けます。
 
-`template_id`は2種類のテンプレートをどちらも受け付けます。呼び出し側はidがどちらの種類かを知る必要がありません。
+`template_id`は2種類のテンプレートをどちらも受け付けます。
+呼び出し側はidがどちらの種類かを知る必要がありません。
 
 | 形式 | 解決先 | 一覧取得 |
 |---|---|---|
 | `"task-management"` | バイナリに同梱された組み込みテンプレート | `GET /api/templates` |
 | UUID | そのテナント自身のテンプレートライブラリ | `GET /api/template-library` |
 
-どちらを引くかはパース結果で決まります。UUIDはライブラリのみ、それ以外は組み込みのみを検索します。他テナントのライブラリテンプレートは`404`を返します。存在しない場合と同じ応答であり、差分から存在を確認できません。
+どちらを引くかはパース結果で決まります。
+UUIDはライブラリのみ、それ以外は組み込みのみを検索します。
+他テナントのライブラリテンプレートは`404`を返します。
+存在しない場合と同じ応答であり、差分から存在を確認できません。
 
-`schema_version`は、そのバージョンのスキーマに対して作成されたエンティティのみを返します。エンティティは作成時のスキーマバージョンを記録し、新しいバージョンが作成された後もその値を保持するため、これは「そのバージョンが生成したエンティティ」を返します。「現在そのバージョンで検証を通るエンティティ」ではありません。
+`schema_version`は、そのバージョンのスキーマに対して作成されたエンティティのみを返します。
+エンティティは作成時のスキーマバージョンを記録し、新しいバージョンが作成された後もその値を保持するため、これは「そのバージョンが生成したエンティティ」を返します。
+「現在そのバージョンで検証を通るエンティティ」ではありません。
 
-リクエストボディはすべて2 MiB上限です(超えると`413 Payload Too Large`)。大きめのエクスポートを`POST /api/import.jsonl`で取り込む際に関係します。
+リクエストボディはすべて2 MiB上限です(超えると`413 Payload Too Large`)。
+大きめのエクスポートを`POST /api/import.jsonl`で取り込む際に関係します。
 
 ### `GET /api/templates/{id}`
 
-組み込みテンプレートの完全な定義をIDで取得します(例: `general-notes`)。レスポンスは`MetaSchemaDefinition` JSONオブジェクト — `POST /api/schemas`が受け付けるのと同じ構造です。
+組み込みテンプレートの完全な定義をIDで取得します(例: `general-notes`)。
+レスポンスは`MetaSchemaDefinition` JSONオブジェクト — `POST /api/schemas`が受け付けるのと同じ構造です。
 
 ### テンプレートライブラリ
 
@@ -84,13 +93,19 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
 | `DELETE /api/template-library/{id}` | owner/admin | テンプレートを削除 |
 | `POST /api/template-library/{id}/fork` | owner/admin | 既存のテンプレートを新しいテンプレートとしてフォーク |
 
-読み取り系エンドポイントは当該テナントの有効なAPIキーであれば呼び出せます(それ以上のテナントメンバーシップチェックはありません)。メンバー/ワークスペース管理と同様、書き込み系エンドポイントはさらにキー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
+読み取り系エンドポイントは当該テナントの有効なAPIキーであれば呼び出せます(それ以上のテナントメンバーシップチェックはありません)。
+メンバー/ワークスペース管理と同様、書き込み系エンドポイントはさらにキー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
 
 フォークは元のテンプレートを記録するだけの独立したコピーなので、フォーク元のテンプレートを削除しても成功します — フォーク自体はそのまま有効なまま残り、削除された元テンプレートへの参照だけが失われます。
 
 ### 認証・メンバー管理・ワークスペース管理
 
-`/auth/signup`と`/auth/login`はbearerトークンを必要としません。これらの目的自体がトークンを発行することだからです。`/setup`/`/setup/status`([setup.md](setup.md#初回セットアップ)参照)と、生存確認・準備確認用の`/up`/`/health`も同様に認証不要です。このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
+`/auth/signup`と`/auth/login`はbearerトークンを必要としません。
+これらの目的自体がトークンを発行することだからです。
+`/setup`/`/setup/status`([setup.md](setup.md#初回セットアップ)参照)と、生存確認・準備確認用の`/up`/`/health`も同様に認証不要です。
+このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。
+[configuration.md](configuration.md)の`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。
+招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
 
 ```console
 # 招待(`admin create-invite`参照)を引き換えてアカウントを作成
@@ -113,35 +128,49 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
     -H "Content-Type: application/json" -d '{"name":"staging"}'
 ```
 
-`POST /api/members`は**既存の**アカウントを呼び出し元のテナントに追加するだけで、新規作成はしません(それはサインアップの役割です)。メンバー管理の両エンドポイントは、キー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。ワークスペース管理の`POST`/`DELETE`も同じ規則に従います(一覧取得と`GET /api/workspaces/{id}`による詳細取得はテナントの全メンバーに開放されています)。
+`POST /api/members`は**既存の**アカウントを呼び出し元のテナントに追加するだけで、新規作成はしません(それはサインアップの役割です)。
+メンバー管理の両エンドポイントは、キー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
+ワークスペース管理の`POST`/`DELETE`も同じ規則に従います(一覧取得と`GET /api/workspaces/{id}`による詳細取得はテナントの全メンバーに開放されています)。
 
-`GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
+`GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。
+テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
 
 ### 認証によるキー解決の差し替え
 
-`authenticate`はこのクレート自身の規則です。提示されたキーは、そのキーに記録された1つのワークスペースへ解決され、リクエストのヘッダは結果に影響しません。別の規則を必要とするデプロイ——ワークスペースをリクエストごとに指定するキー、外部のID基盤が発行したキー、このクレートが知らないクレームを持つキー——は`yorishiro_core::services::auth::Authenticator`を実装し、`AppState::with_authenticator`で差し込みます。
+`authenticate`はこのクレート自身の規則です。
+提示されたキーは、そのキーに記録された1つのワークスペースへ解決され、リクエストのヘッダは結果に影響しません。
+別の規則を必要とするデプロイ——ワークスペースをリクエストごとに指定するキー、外部のID基盤が発行したキー、このクレートが知らないクレームを持つキー——は`yorishiro_core::services::auth::Authenticator`を実装し、`AppState::with_authenticator`で差し込みます。
 
-認証を要する全経路がこの1つの値を経由します。`AuthContext`・`Authorized<R>`・`Verified<R>`の各抽出子と、MCPの2つの入口です。したがって差し替えはプロセス全体の認証を変更するのであって、「参照することを覚えていた経路」だけが変わるのではありません。RESTのルートとMCPのツールが呼び出し元の identity について食い違うことは起こりません。
+認証を要する全経路がこの1つの値を経由します。
+`AuthContext`・`Authorized<R>`・`Verified<R>`の各抽出子と、MCPの2つの入口です。
+したがって差し替えはプロセス全体の認証を変更するのであって、「参照することを覚えていた経路」だけが変わるのではありません。
+RESTのルートとMCPのツールが呼び出し元の identity について食い違うことは起こりません。
 
-実装はリクエストのヘッダをそのまま受け取るため、キー自体が持たない情報を読めます。以下2点は残りの仕組みが前提とするため、実装が必ず守る必要があります。
+実装はリクエストのヘッダをそのまま受け取るため、キー自体が持たない情報を読めます。
+以下2点は残りの仕組みが前提とするため、実装が必ず守る必要があります。
 
 - 検証できないキーは、コンテキストを返さず`YorishiroError::Unauthenticated`で拒否する
-- 返すコンテキストの`tenant_id`がその`workspace_id`を所有していること。RLSのセッション変数は両方から設定されるため、不整合な組は「あるテナントのワークスペースを別テナントのポリシー下で読むセッション」を生む
+- 返すコンテキストの`tenant_id`がその`workspace_id`を所有していること。
+  RLSのセッション変数は両方から設定されるため、不整合な組は「あるテナントのワークスペースを別テナントのポリシー下で読むセッション」を生む
 
 返されたコンテキストに対してscope判定は引き続き行われるため、認証の差し替えが認可の回避手段になることはありません。
 
 ## 未マッチのパス(Web UIのフォールバック)
 
-上記のAPIルートに一致しないリクエストパスは、すべてWeb UIの静的ファイルサーバーにフォールバックします。その挙動はパスが「ファイルらしく見えるか」によって変わります。
+上記のAPIルートに一致しないリクエストパスは、すべてWeb UIの静的ファイルサーバーにフォールバックします。
+その挙動はパスが「ファイルらしく見えるか」によって変わります。
 
-- 拡張子なし(例: `/foo`、`/dashboard`、`/schemas/abc`) — 常にSPAの`index.html`を`200 OK`で返します。これによりWeb UIのクライアントサイドルーティングが機能します — 認識できないパスは全て「存在しないリソース」ではなく「SPAのルート」とみなされます。
+- 拡張子なし(例: `/foo`、`/dashboard`、`/schemas/abc`) — 常にSPAの`index.html`を`200 OK`で返します。
+  これによりWeb UIのクライアントサイドルーティングが機能します — 認識できないパスは全て「存在しないリソース」ではなく「SPAのルート」とみなされます。
 - 拡張子あり(例: `/foo.js`、`/does-not-exist.txt`) — 該当ファイルが存在すれば返し(組み込み、または`YSR_WEB_DIR`設定時はそこから)、存在しなければSPAフォールバックなしの正真正銘の`404 Not Found`を返します。
 
-そのため、拡張子のないパスはこのフォールバックを通じて404になることが決してありません — タイプミスしたAPIルート(例: `GET /api/entitites`)は`404`のJSONエラーではなくSPAのHTMLを返すため、クライアント側のデバッグ時に混乱の原因になり得ます。ドットファイル形式のパス(例: `/.env`)も拡張子なし扱いとなり、単純な404ではなく`index.html`にフォールバックします — 先頭のドットは拡張子の区切りではなくファイル名の一部として扱われるため、`Path::extension()`(およびこのフォールバックロジック)からは拡張子なしに見えます。
+そのため、拡張子のないパスはこのフォールバックを通じて404になることが決してありません — タイプミスしたAPIルート(例: `GET /api/entitites`)は`404`のJSONエラーではなくSPAのHTMLを返すため、クライアント側のデバッグ時に混乱の原因になり得ます。
+ドットファイル形式のパス(例: `/.env`)も拡張子なし扱いとなり、単純な404ではなく`index.html`にフォールバックします — 先頭のドットは拡張子の区切りではなくファイル名の一部として扱われるため、`Path::extension()`(およびこのフォールバックロジック)からは拡張子なしに見えます。
 
 ## MCPツール
 
-`/mcp`(Streamable HTTP)に接続すると25のツールが使えます。Claude Codeでの接続例:
+`/mcp`(Streamable HTTP)に接続すると25のツールが使えます。
+Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \

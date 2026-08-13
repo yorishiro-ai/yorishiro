@@ -61,9 +61,11 @@ $ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KE
 | `"task-management"` | The built-in templates compiled into the binary | `GET /api/templates` |
 | A UUID | The tenant's own template library | `GET /api/template-library` |
 
-Parsing decides which: a UUID is looked up only in the library, anything else only among the built-ins. A library template belonging to another tenant answers `404` -- the same answer as one that does not exist, so a caller cannot confirm it exists from the difference.
+Parsing decides which: a UUID is looked up only in the library, anything else only among the built-ins.
+A library template belonging to another tenant answers `404` -- the same answer as one that does not exist, so a caller cannot confirm it exists from the difference.
 
-`schema_version` restricts results to entities created against that version of the schema. An entity records the version it was written against and keeps it when a newer version is created, so this returns the entities a given version produced -- not the entities that would validate against it today.
+`schema_version` restricts results to entities created against that version of the schema.
+An entity records the version it was written against and keeps it when a newer version is created, so this returns the entities a given version produced -- not the entities that would validate against it today.
 
 All request bodies are capped at 2 MiB (`413 Payload Too Large` beyond that) -- relevant to `POST /api/import.jsonl` for a large export.
 
@@ -84,13 +86,17 @@ Separate from the built-in templates above (`/api/templates`, read-only, bundled
 | `DELETE /api/template-library/{id}` | owner/admin | Delete a template |
 | `POST /api/template-library/{id}/fork` | owner/admin | Fork an existing template into a new one |
 
-The read endpoints only require a valid API key for the tenant (no tenant-membership check beyond that). As with member/workspace management, the write endpoints are additionally gated on the caller's tenant role (owner/admin), independent of their key's own scope.
+The read endpoints only require a valid API key for the tenant (no tenant-membership check beyond that).
+As with member/workspace management, the write endpoints are additionally gated on the caller's tenant role (owner/admin), independent of their key's own scope.
 
 A fork is an independent copy that only records which template it came from, so deleting a template that others were forked from succeeds -- the forks themselves stay intact and usable, and just lose the pointer back to the deleted original.
 
 ### Auth & member management
 
-`/auth/signup` and `/auth/login` take no bearer token — their entire purpose is to hand one out. `/setup`/`/setup/status` (see [setup.md](setup.md#first-run-setup)) and the liveness/readiness checks `/up`/`/health` are also unauthenticated. Of those, the four that accept input (`/auth/signup`, `/auth/login`, `/setup`, `/setup/status`) are rate-limited by client IP (`429 Too Many Requests` past the limit; see `YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS` in [configuration.md](configuration.md)) -- the health probes `/up`/`/health` are not. See [setup.md](setup.md#signup-login-member-and-workspace-management) for the full invite → signup → login flow.
+`/auth/signup` and `/auth/login` take no bearer token — their entire purpose is to hand one out.
+`/setup`/`/setup/status` (see [setup.md](setup.md#first-run-setup)) and the liveness/readiness checks `/up`/`/health` are also unauthenticated.
+Of those, the four that accept input (`/auth/signup`, `/auth/login`, `/setup`, `/setup/status`) are rate-limited by client IP (`429 Too Many Requests` past the limit; see `YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS` in [configuration.md](configuration.md)) -- the health probes `/up`/`/health` are not.
+See [setup.md](setup.md#signup-login-member-and-workspace-management) for the full invite → signup → login flow.
 
 ```console
 # Redeem an invite (see `admin create-invite`) to create an account
@@ -113,17 +119,25 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
     -H "Content-Type: application/json" -d '{"name":"staging"}'
 ```
 
-`POST /api/members` attaches an *existing* account to the caller's tenant. It never creates one -- that's what signup does. Both member-management endpoints are gated on the caller's tenant role (owner/admin), independent of their key's own scope.
+`POST /api/members` attaches an *existing* account to the caller's tenant.
+It never creates one -- that's what signup does.
+Both member-management endpoints are gated on the caller's tenant role (owner/admin), independent of their key's own scope.
 
-Workspace management follows the same rule for `POST`/`DELETE`. Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member. The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace. `DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
+Workspace management follows the same rule for `POST`/`DELETE`.
+Listing and fetching a single workspace's detail, at `GET /api/workspaces/{id}`, are open to any tenant member.
+The detail response includes a nullable `schema_id` (UUID) -- the schema linked to that workspace.
+`DELETE` on a tenant's last remaining workspace is rejected with `409 Conflict`.
 
 ### Replacing how authentication resolves a key
 
-`authenticate` is this crate's own rule: a presented key resolves to the one workspace recorded on it, and the request's headers do not affect the outcome. A deployment that needs a different rule — a key naming its workspace per request, a key issued by an external identity system, a key carrying a claim this crate has never heard of — implements `yorishiro_core::services::auth::Authenticator` and installs it with `AppState::with_authenticator`.
+`authenticate` is this crate's own rule: a presented key resolves to the one workspace recorded on it, and the request's headers do not affect the outcome.
+A deployment that needs a different rule — a key naming its workspace per request, a key issued by an external identity system, a key carrying a claim this crate has never heard of — implements `yorishiro_core::services::auth::Authenticator` and installs it with `AppState::with_authenticator`.
 
-Every authenticated path resolves through that one value: the `AuthContext`, `Authorized<R>` and `Verified<R>` extractors, and both MCP entry points. Replacing it therefore changes authentication for the whole process rather than for the paths that remembered to ask — a REST route and an MCP tool cannot end up disagreeing about who the caller is.
+Every authenticated path resolves through that one value: the `AuthContext`, `Authorized<R>` and `Verified<R>` extractors, and both MCP entry points.
+Replacing it therefore changes authentication for the whole process rather than for the paths that remembered to ask — a REST route and an MCP tool cannot end up disagreeing about who the caller is.
 
-The implementation receives the request's headers verbatim, so it can read whatever the key itself does not carry. Two obligations it must hold to, because the rest of the system assumes them:
+The implementation receives the request's headers verbatim, so it can read whatever the key itself does not carry.
+Two obligations it must hold to, because the rest of the system assumes them:
 
 - reject a key it cannot verify with `YorishiroError::Unauthenticated`, rather than returning a context for it
 - return a context whose `tenant_id` owns its `workspace_id` — the RLS session variables are set from both, and a mismatched pair produces a session that reads one tenant's workspace under another tenant's policies
@@ -134,14 +148,17 @@ Scope is still enforced against whatever context is returned, so replacing authe
 
 Any request path that isn't one of the API routes above falls through to the web UI's static file server, and its behavior depends on whether the path *looks like* a file:
 
-- No file extension (e.g. `/foo`, `/dashboard`, `/schemas/abc`) -- always serves the SPA's `index.html`, `200 OK`. This is what makes the web UI's client-side routing work: any unrecognized path is assumed to be a SPA route, not a missing resource.
+- No file extension (e.g. `/foo`, `/dashboard`, `/schemas/abc`) -- always serves the SPA's `index.html`, `200 OK`.
+  This is what makes the web UI's client-side routing work: any unrecognized path is assumed to be a SPA route, not a missing resource.
 - Has a file extension (e.g. `/foo.js`, `/does-not-exist.txt`) -- serves that file if it exists (compiled in, or from `YSR_WEB_DIR` if set), otherwise a real `404 Not Found` with no SPA fallback.
 
-A path with no extension therefore never 404s through this fallback -- a typo'd API route (e.g. `GET /api/entitites`) returns the SPA's HTML instead of a `404` JSON error, which can be surprising when debugging a client. A dotfile-style path (e.g. `/.env`) is also treated as extension-less and falls through to `index.html`, not a straight 404 -- the leading dot is treated as part of the filename, not an extension marker, so `Path::extension()` (and this fallback logic with it) sees no extension at all.
+A path with no extension therefore never 404s through this fallback -- a typo'd API route (e.g. `GET /api/entitites`) returns the SPA's HTML instead of a `404` JSON error, which can be surprising when debugging a client.
+A dotfile-style path (e.g. `/.env`) is also treated as extension-less and falls through to `index.html`, not a straight 404 -- the leading dot is treated as part of the filename, not an extension marker, so `Path::extension()` (and this fallback logic with it) sees no extension at all.
 
 ## MCP Tools
 
-Connecting to `/mcp` (Streamable HTTP) gives you access to 25 tools. Example connection from Claude Code:
+Connecting to `/mcp` (Streamable HTTP) gives you access to 25 tools.
+Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \

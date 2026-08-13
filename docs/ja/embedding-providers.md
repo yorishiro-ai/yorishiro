@@ -2,11 +2,17 @@
 
 [English](../embedding-providers.md) | **日本語**
 
-`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます。次元数は`YSR_EMBEDDING_DIMENSIONS`(既定1024)で設定し、使用するモデルの出力次元と一致させる必要があります。埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
+`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます。
+次元数は`YSR_EMBEDDING_DIMENSIONS`(既定1024)で設定し、使用するモデルの出力次元と一致させる必要があります。
+埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
 
 ## `local` — ローカルONNXモデル(デフォルト)
 
-外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。BERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。デフォルトのモデル(multilingual-e5-large)は1024次元のベクトルを出力し、100言語以上に対応します。日本語と英語で同じ内容を書いた文が互いに近い位置に来ます。
+外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。
+これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。
+BERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。
+デフォルトのモデル(multilingual-e5-large)は1024次元のベクトルを出力し、100言語以上に対応します。
+日本語と英語で同じ内容を書いた文が互いに近い位置に来ます。
 
 ```console
 $ mkdir -p models
@@ -16,11 +22,14 @@ $ curl -L -o models/tokenizer.json \
     https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
 ```
 
-この2ファイルをデフォルトのパスに置くだけでよく、環境変数は一切不要です。注意: 「外部サービス不要」は実行時の話で、**ビルド時**にはortクレートがonnxruntimeのプリビルドバイナリをダウンロードします(cdn.pyke.io)。ビルド環境まで閉域の場合は、事前に配置したonnxruntimeを`ORT_LIB_LOCATION`環境変数で指定してビルドしてください。
+この2ファイルをデフォルトのパスに置くだけでよく、環境変数は一切不要です。
+注意: 「外部サービス不要」は実行時の話で、**ビルド時**にはortクレートがonnxruntimeのプリビルドバイナリをダウンロードします(cdn.pyke.io)。
+ビルド環境まで閉域の場合は、事前に配置したonnxruntimeを`ORT_LIB_LOCATION`環境変数で指定してビルドしてください。
 
 ## `openai` — OpenAI互換API
 
-Ollama / LM Studio / OpenAIなどの`/v1/embeddings`互換エンドポイントを使います。ローカルONNXのデフォルトから切り替えるには`YSR_EMBEDDING_PROVIDER=openai`を明示的に設定します。
+Ollama / LM Studio / OpenAIなどの`/v1/embeddings`互換エンドポイントを使います。
+ローカルONNXのデフォルトから切り替えるには`YSR_EMBEDDING_PROVIDER=openai`を明示的に設定します。
 
 ```dotenv
 YSR_EMBEDDING_PROVIDER=openai
@@ -31,14 +40,13 @@ YSR_EMBEDDING_MODEL=nomic-embed-text
 ### プロバイダが混んでいるとき
 
 プロバイダからの`429`・`503`は拒否ではなく「後で来い」という応答です。
-埋め込み同期はプロバイダが指定した`Retry-After`だけ待って再試行します
-(上限60秒。ヘッダが無い場合は短い既定値)。3回まで再試行し、
-それでも駄目なら諦めて`admin resync-embeddings`に委ねます。
+埋め込み同期はプロバイダが指定した`Retry-After`だけ待って再試行します(上限60秒。
+ヘッダが無い場合は短い既定値)。
+3回まで再試行し、それでも駄目なら諦めて`admin resync-embeddings`に委ねます。
 
 それ以外(`400`など)は**プロバイダが決して受け付けない要求**であり再試行しません。
 再試行しても成功しないため、ログにその旨を残して終わります。
 
 これが要るのは、**埋め込みがレスポンス後に行われる**ためです。
-レート制限で埋め込みを失ったエンティティは、書き込み自体は成功していても
-**resyncするまで意味検索に出てきません**。再試行は、プロバイダが混んだ数分間が
-静かにその代償を生むのを防ぎます。
+レート制限で埋め込みを失ったエンティティは、書き込み自体は成功していても**resyncするまで意味検索に出てきません**。
+再試行は、プロバイダが混んだ数分間が静かにその代償を生むのを防ぎます。

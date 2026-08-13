@@ -4,7 +4,8 @@
 
 An MCP-native, multi-tenant knowledge store with user-defined schemas.
 
-Users define entity "types" (fields, constraints, relations) as JSON meta-schemas, and data validated against those schemas can be read and written through both a REST API and MCP (Model Context Protocol). Fields marked `x-embed` are automatically vector-embedded, enabling similarity search over natural-language queries.
+Users define entity "types" (fields, constraints, relations) as JSON meta-schemas, and data validated against those schemas can be read and written through both a REST API and MCP (Model Context Protocol).
+Fields marked `x-embed` are automatically vector-embedded, enabling similarity search over natural-language queries.
 
 ## Architecture
 
@@ -32,17 +33,20 @@ flowchart TD
   - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
   - Only `yorishiro-server` accesses the database directly.
 - Two-tier tenancy
-  - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer. A tenant owns one or more **workspaces**.
+  - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer.
+    A tenant owns one or more **workspaces**.
   - All content (schemas/entities/relations) and API keys belong to exactly one workspace, not the tenant directly.
   - This lets one organization run several isolated projects (e.g. prod/staging, or one workspace per team) without separate tenants, and lets several people share administrative access to the same tenant.
 - Isolation via RLS
   - PostgreSQL Row Level Security is applied to every table.
   - On each request, the workspace (and its owning tenant) are resolved from the API key.
   - Data can only be reached through a connection that has set the `app.current_tenant`/`app.current_workspace` session variables.
-  - The application runs as a dedicated role (`yorishiro_app`, without `BYPASSRLS`). Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all -- only the admin CLI, running as the migration role, can manage them.
+  - The application runs as a dedicated role (`yorishiro_app`, without `BYPASSRLS`).
+    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all -- only the admin CLI, running as the migration role, can manage them.
 - Quotas
   - A tenant's `max_workspaces` and a workspace's `max_entities` are enforced at creation time (workspace creation / entity creation, respectively).
-  - Both default to `NULL` (unlimited). An operator can set explicit caps per tenant/workspace.
+  - Both default to `NULL` (unlimited).
+    An operator can set explicit caps per tenant/workspace.
 - Schema versioning
   - Re-registering a schema with the same name adds a new version.
   - Breaking changes (removed fields, type changes, newly required fields, etc.) are reported as a diff.
@@ -56,7 +60,8 @@ flowchart TD
 
 ## Quick start
 
-See [docs/setup.md](docs/setup.md) for the full guide, including the prebuilt binary and background/systemd operation. The fastest path, with Docker:
+See [docs/setup.md](docs/setup.md) for the full guide, including the prebuilt binary and background/systemd operation.
+The fastest path, with Docker:
 
 1. Fetch the embedding model (the default local ONNX provider needs no external service):
 
@@ -114,4 +119,6 @@ Placing an ONNX model under `models/` enables embedding integration tests agains
 
 ## License
 
-Licensed under the [Business Source License 1.1](LICENSE). Self-hosting (including for internal/commercial use) is permitted; the only restriction is offering Yorishiro itself as a competing hosted/managed service. On 2030-07-14 this version automatically converts to the GNU General Public License, Version 2.0 or later.
+Licensed under the [Business Source License 1.1](LICENSE).
+Self-hosting (including for internal/commercial use) is permitted; the only restriction is offering Yorishiro itself as a competing hosted/managed service.
+On 2030-07-14 this version automatically converts to the GNU General Public License, Version 2.0 or later.
