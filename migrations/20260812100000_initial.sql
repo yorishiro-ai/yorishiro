@@ -16,9 +16,8 @@
 --   * `GRANT UPDATE (status, schema_id) ON identity.workspaces`, without which `create_schema`
 --     answered 500 on every path (#129).
 --
--- `identity.template_versions` / `template_reviews` are NOT here. The marketplace moved to the
--- enterprise edition, whose own migration creates them with `IF NOT EXISTS` — on a database
--- built from this file, that migration is their only source.
+-- `identity.template_versions` / `template_reviews` are NOT here. Template publishing and
+-- reviews are not part of Yorishiro; nothing in this repository reads those tables.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -160,10 +159,10 @@ CREATE TABLE identity.maintenance (
 
 INSERT INTO identity.maintenance (id) VALUES (TRUE);
 
--- Fill mode B. These two tables and `content.fill_proposals` belong to the LLM-backed fill
--- path, which is ruled enterprise and whose move is frozen part-done on
--- `refactor/move-mode-b-to-enterprise`. They stay until that move lands, because this repo's
--- code still queries them; a migration that omitted them would refuse to boot.
+-- The LLM-backed fill path. This table and `content.fill_proposals` are on their way out --
+-- Yorishiro makes no outbound model calls -- but the code still queries them at this version,
+-- and a migration that omitted a table the code reads would refuse to boot. A later migration
+-- drops both.
 CREATE TABLE identity.workspace_llm_keys (
   workspace_id UUID PRIMARY KEY REFERENCES identity.workspaces(id) ON DELETE CASCADE,
   base_url     TEXT NOT NULL,
@@ -418,9 +417,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA content GRANT USAGE, SELECT ON SEQUENCES TO y
 -- `SECURITY DEFINER` so the lookup can read rows RLS would hide: the caller has not been
 -- identified yet, so there is no workspace to scope to.
 --
--- One argument. The enterprise edition adds a two-argument overload for tenant-scoped keys,
--- which name their workspace per request; this one resolves a key bound to a single workspace
--- and correctly returns nothing for a tenant-scoped one.
+-- One argument, and the overload set is open: a downstream deployment may add a two-argument
+-- form for keys that name their workspace per request. This one resolves a key bound to a
+-- single workspace, and correctly returns nothing for a key that carries none.
 
 CREATE FUNCTION identity.authenticate_api_key(p_key_hash bytea)
 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, scope text, user_id uuid)

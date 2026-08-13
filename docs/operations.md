@@ -138,14 +138,13 @@ came after the first.
 
 ### Inferring values
 
-Inferring a missing value from a language model is not provided here. `fill-defaults` writes
-values the schema itself states; a required field with no default is reported in
-`still_missing` and left alone.
+Inferring a missing value from a language model is not provided. `fill-defaults` writes values
+the schema itself states; a required field with no default is reported in `still_missing` and
+left alone.
 
-This edition makes no outbound chat-completion calls, whoever would pay for them. The embedding
+Yorishiro makes no outbound chat-completion calls, whoever would pay for them. The embedding
 providers are not an exception to that — an embeddings endpoint is not a chat completion, and
-the local ONNX provider makes no network call at all. Inference-backed fill belongs to the
-hosted edition.
+the local ONNX provider makes no network call at all.
 
 ## Switching queue infrastructure
 
