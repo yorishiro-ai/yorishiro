@@ -362,9 +362,18 @@ CREATE POLICY workspace_isolation ON identity.api_keys
 CREATE POLICY tenant_isolation ON identity.invites
   USING (tenant_id = current_setting('app.current_tenant')::uuid);
 
--- The workspace-scoped policies read the setting with `true` (missing is NULL rather than an
--- error) and fold the empty string to NULL, so a connection that has not named a workspace
--- matches nothing instead of failing.
+-- Two forms follow, and the difference is deliberate.
+--
+-- `content.schemas`, `entity_snapshots` and `fill_proposals` read the setting with `true`
+-- (missing is NULL rather than an error) and fold the empty string to NULL, so a connection
+-- that has not named a workspace matches nothing instead of failing. They need it because the
+-- control-plane pool reaches them over a connection that sets neither variable.
+--
+-- Everything else uses the strict form on purpose. `yorishiro_app` sets both GUCs on every
+-- connection, so reaching one of those tables without a workspace is a bug -- and raising
+-- surfaces it, where matching zero rows would look like an empty workspace. Unifying on the
+-- lenient form was measured and is worse: it would make an unset GUC return no rows for a
+-- *valid* API key, so every request would fail authentication with nothing logged anywhere.
 CREATE POLICY workspace_isolation ON content.schemas
   USING (workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid);
 
