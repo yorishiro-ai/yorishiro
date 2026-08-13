@@ -305,8 +305,28 @@ CREATE INDEX fill_proposals_job_idx
 -- Row-level security
 --------------------------------------------------------------------------------
 --
--- FORCE as well as ENABLE: without it the table owner bypasses its own policies, and the
--- migration role owns everything here.
+-- ENABLE, deliberately without FORCE. `ENABLE` alone already constrains `yorishiro_app`, which
+-- is not the owner, so tenant isolation does not depend on FORCE at all -- verified in both
+-- directions: scoped to one tenant the app role sees only that tenant's rows, and with no
+-- tenant named it sees nothing (the strict `current_setting` below raises rather than
+-- filtering, so the failure is loud).
+--
+-- FORCE would additionally subject the *owner* to the policies, and the owner must not be:
+--
+--   * `identity.authenticate_api_key` runs as the owner precisely because no workspace is known
+--     yet -- there is nothing to scope to until the key resolves one. Under FORCE it evaluates
+--     an unset `app.current_workspace` and raises `unrecognized configuration parameter`, so no
+--     request can authenticate at all.
+--   * The admin CLI creates tenants, workspaces, memberships and invites as the owner, before
+--     the ids those policies compare against exist.
+--
+-- Both are broken only when the owner is *not* a superuser, since a superuser bypasses RLS
+-- whatever FORCE says -- so FORCE has never taken effect in any deployment here, and the first
+-- environment where it would (a non-superuser CI database) is the one it stops working.
+--
+-- Making the policies lenient instead does not fix it: with the GUCs unset a lenient policy
+-- matches no rows, so `authenticate_api_key` returns nothing for a *valid* key and every
+-- request fails authentication silently. Measured, not reasoned.
 --
 -- `identity.templates` is deliberately absent. Template queries run as the owner through the
 -- repository layer, which scopes by tenant in the query, because a policy would have to read
@@ -324,16 +344,8 @@ ALTER TABLE content.relations            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content.entity_snapshots     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content.fill_proposals       ENABLE ROW LEVEL SECURITY;
 
-ALTER TABLE identity.tenants             FORCE ROW LEVEL SECURITY;
-ALTER TABLE identity.tenant_memberships  FORCE ROW LEVEL SECURITY;
-ALTER TABLE identity.workspaces          FORCE ROW LEVEL SECURITY;
-ALTER TABLE identity.api_keys            FORCE ROW LEVEL SECURITY;
-ALTER TABLE identity.invites             FORCE ROW LEVEL SECURITY;
-ALTER TABLE content.schemas              FORCE ROW LEVEL SECURITY;
-ALTER TABLE content.entities             FORCE ROW LEVEL SECURITY;
-ALTER TABLE content.relations            FORCE ROW LEVEL SECURITY;
-ALTER TABLE content.entity_snapshots     FORCE ROW LEVEL SECURITY;
-ALTER TABLE content.fill_proposals       FORCE ROW LEVEL SECURITY;
+-- No `FORCE ROW LEVEL SECURITY` here, for the reasons above. The owner must stay able to
+-- authenticate a key and to provision tenants; `ENABLE` alone is what constrains the app role.
 
 CREATE POLICY tenant_isolation ON identity.tenants
   USING (id = current_setting('app.current_tenant')::uuid);

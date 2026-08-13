@@ -18,7 +18,8 @@ The server needs an embedding model to start. It defaults to the local ONNX prov
 
 To use an OpenAI-compatible endpoint instead, see [embedding-providers.md](embedding-providers.md).
 
-2. Give the role in `DATABASE_URL` what the migration needs. It creates the extensions, the `yorishiro_app` application role, and every table, so:
+2. Provide **PostgreSQL 18 or newer**. The schema uses the built-in `uuidv7()` for primary keys, which arrived in 18; on an older server the migration fails outright rather than degrading.
+3. Give the role in `DATABASE_URL` what the migration needs. It creates the extensions, the `yorishiro_app` application role, and every table, so:
 
    - `vector` (pgvector) must already be installed on the server. `pg_trgm` ships with PostgreSQL's contrib package, so a non-superuser can create it; pgvector does not, and installing it is a superuser -- or packaging -- step. If the role is not a superuser, create both extensions beforehand: either in the target database, or in `template1` so every database created afterwards inherits them. The migration declares both with `IF NOT EXISTS` and passes over extensions that already exist.
    - The role must be able to `SET ROLE yorishiro_app`, since that is the role the server serves requests as. PostgreSQL 16 and later do not grant that to the creating role automatically, so the migration issues `GRANT yorishiro_app TO CURRENT_USER` itself. A superuser may `SET ROLE` regardless of membership, which is why a superuser deployment never exercises this.

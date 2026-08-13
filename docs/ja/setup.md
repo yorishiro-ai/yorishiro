@@ -18,7 +18,9 @@
 
 OpenAI互換エンドポイントを代わりに使う場合は[embedding-providers.md](embedding-providers.md)を参照してください。
 
-2. `DATABASE_URL`のロールに、マイグレーションが必要とする権限を与えます。マイグレーションは拡張・アプリケーションロール`yorishiro_app`・全テーブルを作成するため、次の2点が必要です。
+2. **PostgreSQL 18以降**を用意します。主キーに組み込みの`uuidv7()`を使っており、これはPostgreSQL 18で追加されたものです。それより古いサーバでは機能が縮退するのではなく、マイグレーション自体が失敗します。
+
+3. `DATABASE_URL`のロールに、マイグレーションが必要とする権限を与えます。マイグレーションは拡張・アプリケーションロール`yorishiro_app`・全テーブルを作成するため、次の2点が必要です。
 
    - `vector`(pgvector)がサーバに導入済みであること。`pg_trgm`はPostgreSQLのcontribに同梱されるため非superuserでも作成できますが、pgvectorは同梱されておらず、その導入自体がsuperuser(あるいはパッケージ)側の作業になります。ロールがsuperuserでない場合は、両方の拡張を事前に作成してください — 対象データベース上か、あるいは`template1`上に作れば以降作成されるデータベースが継承します。マイグレーションは両方を`IF NOT EXISTS`付きで宣言するため、既に存在する拡張はそのまま通過します。
    - `SET ROLE yorishiro_app`が可能であること。サーバはリクエストをこのロールで処理します。PostgreSQL 16以降、作成したロールであっても自動では`SET ROLE`できないため、マイグレーション自身が`GRANT yorishiro_app TO CURRENT_USER`を発行します。superuserはメンバーシップに関わらず`SET ROLE`できるので、superuser運用ではこの経路が一度も踏まれません。
