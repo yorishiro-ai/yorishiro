@@ -38,13 +38,9 @@ None of these targets rotate or prune on their own beyond what `daily`'s day-bou
 
 ## Changing the embedding model
 
-Vectors from two different models cannot share an HNSW index, and the server refuses to start
-when `YSR_EMBEDDING_DIMENSIONS` disagrees with the model it loaded — a mismatch stops the
-process rather than quietly returning bad search results.
+Vectors from two different models cannot share an HNSW index, and the server refuses to start when `YSR_EMBEDDING_DIMENSIONS` disagrees with the model it loaded — a mismatch stops the process rather than quietly returning bad search results.
 
-An existing deployment is unaffected by a change of default: the dimension is read from the
-environment, so one already running 768 keeps its model and its vectors. To move to a different
-model, re-embed:
+An existing deployment is unaffected by a change of default: the dimension is read from the environment, so one already running 768 keeps its model and its vectors. To move to a different model, re-embed:
 
 ```console
 $ # 1. Stop the server, then replace models/model.onnx and models/tokenizer.json.
@@ -55,25 +51,20 @@ $ # 4. Start the server, then regenerate per workspace:
 $ yorishiro-server admin resync-embeddings <workspace-id>
 ```
 
-Search still works between steps 3 and 4: entities without an embedding are reachable through
-the `pg_trgm` fallback, so the window degrades results rather than emptying them.
+Search still works between steps 3 and 4: entities without an embedding are reachable through the `pg_trgm` fallback, so the window degrades results rather than emptying them.
 
-Re-embedding is the whole corpus through the model, so time it against a batch write rather
-than a query.
+Re-embedding is the whole corpus through the model, so time it against a batch write rather than a query.
 
 ## Maintenance mode
 
-Two modes, both shared by every node in the deployment (the state is a row in the database, not
-a flag in the process — a flag would put one replica in maintenance while its siblings kept
-serving):
+Two modes, both shared by every node in the deployment (the state is a row in the database, not a flag in the process — a flag would put one replica in maintenance while its siblings kept serving):
 
 | Mode | Reads | Writes | Status |
 |---|---|---|---|
 | `read-only` | served | refused | `423 Locked` |
 | `full-lock` | refused | refused | `503 Service Unavailable` |
 
-Both send `Retry-After`. Agents retry on the header rather than on the body, so a refusal
-without one invites the immediate retry the mode exists to prevent.
+Both send `Retry-After`. Agents retry on the header rather than on the body, so a refusal without one invites the immediate retry the mode exists to prevent.
 
 ```console
 $ yorishiro-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
@@ -81,22 +72,15 @@ $ yorishiro-server admin maintenance-status
 $ yorishiro-server admin maintenance off
 ```
 
-`--reason` is shown to callers in place of the generic message; an operator saying "restoring
-from backup, back by 09:00" answers the question a bare status code provokes.
+`--reason` is shown to callers in place of the generic message; an operator saying "restoring from backup, back by 09:00" answers the question a bare status code provokes.
 
-`/up` and `/health` answer in every mode. Refusing them would have an orchestrator restart a
-server that is deliberately paused, and a restart does not clear the state, so the loop would
-not converge.
+`/up` and `/health` answer in every mode. Refusing them would have an orchestrator restart a server that is deliberately paused, and a restart does not clear the state, so the loop would not converge.
 
-Read-only decides by HTTP method, so `POST /mcp` is treated as a write even when the tool
-called is a read: the middleware would have to consume the request body to know which tool it
-is, and a body consumed there is one the handler no longer has. It errs toward refusing a read
-rather than admitting a write.
+Read-only decides by HTTP method, so `POST /mcp` is treated as a write even when the tool called is a read: the middleware would have to consume the request body to know which tool it is, and a body consumed there is one the handler no longer has. It errs toward refusing a read rather than admitting a write.
 
 ### Driving it from a monitor
 
-The mode is a row, so anything holding the migration role's credentials can set it — the CLI is
-one caller, not the only one. A monitor watching database load can shed writes on its own:
+The mode is a row, so anything holding the migration role's credentials can set it — the CLI is one caller, not the only one. A monitor watching database load can shed writes on its own:
 
 ```sql
 -- Sustained load: stop writes, tell callers when to come back.
@@ -109,69 +93,40 @@ UPDATE identity.maintenance
    SET mode = 'off', reason = NULL, updated_at = now();
 ```
 
-Every request already reads this row, so the change takes effect on the next request across
-every node — no restart, no deploy.
+Every request already reads this row, so the change takes effect on the next request across every node — no restart, no deploy.
 
-**Pair the entry with an exit.** A monitor that switches to `read_only` and never switches back
-leaves the deployment refusing writes until somebody notices: an overnight spike becomes an
-outage that lasts until morning. Whatever rule turns it on is the rule that has to turn it off.
+**Pair the entry with an exit.** A monitor that switches to `read_only` and never switches back leaves the deployment refusing writes until somebody notices: an overnight spike becomes an outage that lasts until morning. Whatever rule turns it on is the rule that has to turn it off.
 
-The server does not watch load itself. A database's CPU usage is not available over SQL, so
-anything the process could measure on its own — its own connection pool, `pg_stat_database` —
-measures demand rather than the load the threshold is about.
+The server does not watch load itself. A database's CPU usage is not available over SQL, so anything the process could measure on its own — its own connection pool, `pg_stat_database` — measures demand rather than the load the threshold is about.
 
 ### Filling defaults
 
-`POST /api/schemas/active/{name}/fill-defaults` (schema scope) writes the active version's
-`default` values into entities written before those fields existed, and returns a `job_id`.
+`POST /api/schemas/active/{name}/fill-defaults` (schema scope) writes the active version's `default` values into entities written before those fields existed, and returns a `job_id`.
 
-Entities keep their own schema version. Filling a value is not a migration between definitions
-— it adds data the entity was always allowed to hold, validated against the version it already
-claims. What version an entity belongs to is a separate question.
+Entities keep their own schema version. Filling a value is not a migration between definitions — it adds data the entity was always allowed to hold, validated against the version it already claims. What version an entity belongs to is a separate question.
 
-A required field with **no** default is left alone and reported in `still_missing`. A value
-nobody chose is indistinguishable from one somebody did, once written.
+A required field with **no** default is left alone and reported in `still_missing`. A value nobody chose is indistinguishable from one somebody did, once written.
 
-`POST /api/migration-jobs/{job_id}/undo` puts the whole run back. The snapshots are consumed by
-the undo, so a job can only be undone once — a second undo would lay stale data over whatever
-came after the first.
+`POST /api/migration-jobs/{job_id}/undo` puts the whole run back. The snapshots are consumed by the undo, so a job can only be undone once — a second undo would lay stale data over whatever came after the first.
 
 ### Inferring values
 
-Inferring a missing value from a language model is not provided. `fill-defaults` writes values
-the schema itself states; a required field with no default is reported in `still_missing` and
-left alone.
+Inferring a missing value from a language model is not provided. `fill-defaults` writes values the schema itself states; a required field with no default is reported in `still_missing` and left alone.
 
-Yorishiro makes no outbound chat-completion calls, whoever would pay for them. The embedding
-providers are not an exception to that — an embeddings endpoint is not a chat completion, and
-the local ONNX provider makes no network call at all.
+Yorishiro makes no outbound chat-completion calls, whoever would pay for them. The embedding providers are not an exception to that — an embeddings endpoint is not a chat completion, and the local ONNX provider makes no network call at all.
 
 ## Switching queue infrastructure
 
-`DrainingQueue` runs two queues at once while an infrastructure switchover is in progress. New
-work goes to the new queue from the moment it is installed; the old one keeps running what it
-had already accepted.
+`DrainingQueue` runs two queues at once while an infrastructure switchover is in progress. New work goes to the new queue from the moment it is installed; the old one keeps running what it had already accepted.
 
-1. Construct `DrainingQueue::new(new, old)` and serve from it. Nothing upstream needs to know —
-   it is a `Queue` like any other.
-2. `drain_old(timeout)` waits for the old queue's outstanding work and **returns whether it
-   finished**. `DrainOutcome::TimedOut` means something is still running — do not proceed.
-   This is deliberately not `drain()`: that one waits for *everything*, including work that has
-   only just arrived on the new queue, which is not the question a switchover is asking.
+1. Construct `DrainingQueue::new(new, old)` and serve from it. Nothing upstream needs to know — it is a `Queue` like any other.
+2. `drain_old(timeout)` waits for the old queue's outstanding work and **returns whether it finished**. `DrainOutcome::TimedOut` means something is still running — do not proceed. This is deliberately not `drain()`: that one waits for *everything*, including work that has only just arrived on the new queue, which is not the question a switchover is asking.
 3. Drop it and serve from the new queue directly.
 
-Nothing sent through the switchover reaches the old queue — otherwise step 2 would be chasing a
-target that keeps moving.
+Nothing sent through the switchover reaches the old queue — otherwise step 2 would be chasing a target that keeps moving.
 
 ## Chunked work
 
-Long work is split into pieces that are acknowledged one at a time
-(`yorishiro_core::services::chunking`), so a worker that dies mid-job loses one chunk rather
-than the job. `split` breaks at whitespace, never mid-word; `ChunkProgress` records which chunks
-were acknowledged and reports which were not.
+Long work is split into pieces that are acknowledged one at a time (`yorishiro_core::services::chunking`), so a worker that dies mid-job loses one chunk rather than the job. `split` breaks at whitespace, never mid-word; `ChunkProgress` records which chunks were acknowledged and reports which were not.
 
-**Reassignment is not here.** Returning an unacknowledged chunk to the pool is a visibility
-timeout, a property of a queue that ships work between processes. `LocalQueue` runs tasks on
-this runtime, where a lost chunk and a lost process are the same event. A distributed driver
-brings its own timeout and reuses everything above — `outstanding()` is exactly the list it
-hands back.
+**Reassignment is not here.** Returning an unacknowledged chunk to the pool is a visibility timeout, a property of a queue that ships work between processes. `LocalQueue` runs tasks on this runtime, where a lost chunk and a lost process are the same event. A distributed driver brings its own timeout and reuses everything above — `outstanding()` is exactly the list it hands back.
