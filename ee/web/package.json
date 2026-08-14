@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build && touch dist/.gitkeep",
+    "build": "rsbuild build && node -e \"require('fs').closeSync(require('fs').openSync('dist/.gitkeep','a'))\"",
     "preview": "rsbuild preview",
     "lint": "oxlint src",
     "lint:fix": "oxlint --fix src",
