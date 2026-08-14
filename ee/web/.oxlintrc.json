@@ -1,0 +1,56 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+
+  "plugins": ["oxc", "react", "react-perf", "typescript", "unicorn", "import", "promise", "jsx-a11y"],
+
+  "env": {
+    "browser": true,
+    "es2025": true
+  },
+
+  "settings": {
+    "react": {
+      "version": "19"
+    }
+  },
+
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-console": "off",
+    "no-shadow": "off",
+
+    "typescript/no-non-null-assertion": "off",
+
+    "react/button-has-type": "warn",
+    "react/react-in-jsx-scope": "off",
+
+    "unicorn/filename-case": "off",
+    "unicorn/no-null": "off",
+    "unicorn/prefer-top-level-await": "off",
+
+    "react-perf/jsx-no-new-function-as-prop": "off",
+    "react-perf/jsx-no-jsx-as-prop": "off",
+
+    "jsx-a11y/heading-has-content": "off",
+
+    "import/max-dependencies": "off",
+    "import/no-unassigned-import": "off",
+
+    "promise/always-return": "off",
+
+    "jsx-a11y/no-autofocus": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+
+    "no-inline-comments": "off",
+    "no-lonely-if": "off",
+    "no-negated-condition": "off",
+    "max-lines-per-function": "off"
+  },
+
+  "ignorePatterns": ["**/node_modules/**", "**/dist/**"]
+}

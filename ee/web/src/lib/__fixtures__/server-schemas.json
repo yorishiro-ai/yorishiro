@@ -1,0 +1,242 @@
+{
+  "EntityRecord": {
+    "description": "A row in the `entities` table. `embedding` is managed separately by the\nsearch/embedding pipeline, so this module's CRUD doesn't touch it. `created_by`/\n`updated_by` are `None` for entities touched by an unattributed (service/automation) API\nkey, since there's no user to record. `Deserialize` is derived so this can be read back\nfrom a JSONL export (see `repositories::import`); import treats `id`, `schema_version`,\n`created_at`/`updated_at` as informational only (a fresh row is always inserted).",
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "created_by": {
+        "format": "uuid",
+        "type": ["string", "null"]
+      },
+      "data": {
+        "type": "object"
+      },
+      "entity_type": {
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "schema_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "schema_version": {
+        "format": "int32",
+        "type": "integer"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "updated_by": {
+        "format": "uuid",
+        "type": ["string", "null"]
+      },
+      "workspace_id": {
+        "format": "uuid",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "workspace_id",
+      "schema_id",
+      "schema_version",
+      "entity_type",
+      "data",
+      "created_at",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "ImportResult": {
+    "type": "object",
+    "description": "Outcome of a successful `import_jsonl` call: how many records of each kind were\ninserted. Since the whole import runs in one transaction (see `import_jsonl`), a\nnon-empty `errors` here never coexists with partially-applied data -- either every\nrecord listed by `errors` (and everything after it) was rolled back along with it, or\n`errors` is empty and every counted record is committed.",
+    "required": ["schemas", "entities", "relations", "errors"],
+    "properties": {
+      "entities": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      },
+      "errors": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "relations": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      },
+      "schemas": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      }
+    }
+  },
+  "RecallContext": {
+    "properties": {
+      "entity": {
+        "$ref": "#/components/schemas/EntityRecord",
+        "description": "The requested entity, always with its full `data`."
+      },
+      "relations": {
+        "description": "Flat list of every neighbor found within `depth` hops, each tagged with its\n`hop_distance`. A neighbor reachable via more than one path is only reported once, at\nthe shortest hop_distance it was found at.",
+        "items": {
+          "$ref": "#/components/schemas/RecallRelation"
+        },
+        "type": "array"
+      },
+      "truncated": {
+        "description": "`true` when more neighbors exist at some hop than `limit` allowed to be included there.",
+        "type": "boolean"
+      }
+    },
+    "required": ["entity", "relations", "truncated"],
+    "type": "object"
+  },
+  "RecallRelation": {
+    "properties": {
+      "direction": {
+        "type": "string"
+      },
+      "hop_distance": {
+        "description": "How many hops away from the requested entity this neighbor is (1 = direct neighbor,\n2 = neighbor-of-neighbor, etc).",
+        "format": "int32",
+        "type": "integer"
+      },
+      "neighbor": {
+        "$ref": "#/components/schemas/EntityRecord",
+        "description": "The connected entity. Shallow (only `x-embed` fields in `data`) by default; pass\n`full: true` to `recall_context` to get every field instead."
+      },
+      "relation_type": {
+        "type": "string"
+      }
+    },
+    "required": ["relation_type", "direction", "neighbor", "hop_distance"],
+    "type": "object"
+  },
+  "SchemaRecord": {
+    "description": "Represents a row in the `schemas` table. `definition` is JSONB in the DB, but the\napplication layer always treats it as a parsed `MetaSchemaDefinition`.",
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "definition": {
+        "$ref": "#/components/schemas/MetaSchemaDefinition"
+      },
+      "id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "version": {
+        "format": "int32",
+        "type": "integer"
+      }
+    },
+    "required": ["id", "tenant_id", "name", "version", "definition", "status", "created_at"],
+    "type": "object"
+  },
+  "SchemaSummary": {
+    "description": "A row in a schema listing. A lightweight summary that omits the `definition` body,\nused as the entry point for MCP clients (LLMs) to discover what schemas exist for a\ntenant.",
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      },
+      "version": {
+        "format": "int32",
+        "type": "integer"
+      }
+    },
+    "required": ["id", "name", "version", "status", "created_at"],
+    "type": "object"
+  },
+  "SearchHit": {
+    "properties": {
+      "distance": {
+        "description": "pgvector cosine distance (the `<=>` operator). Closer to 0 means more similar. `None`\nwhen the entity has no embedding and was only surfaced through the pg_trgm fuzzy\ntext match on `query_text`.",
+        "format": "double",
+        "type": ["number", "null"]
+      },
+      "entity": {
+        "$ref": "#/components/schemas/EntityRecord"
+      }
+    },
+    "required": ["entity"],
+    "type": "object"
+  },
+  "TemplateSummary": {
+    "description": "Summary of a built-in schema template, returned by `list_templates` so a caller can\npick a `template_id` without first fetching every template's full definition.",
+    "properties": {
+      "description": {
+        "type": ["string", "null"]
+      },
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      }
+    },
+    "required": ["id", "name"],
+    "type": "object"
+  },
+  "WorkspaceRecord": {
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "max_entities": {
+        "format": "int32",
+        "type": ["integer", "null"]
+      },
+      "name": {
+        "type": "string"
+      },
+      "schema_id": {
+        "format": "uuid",
+        "type": ["string", "null"]
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "type": "string"
+      }
+    },
+    "required": ["id", "tenant_id", "name", "created_at"],
+    "type": "object"
+  }
+}

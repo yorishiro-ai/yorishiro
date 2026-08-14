@@ -1,0 +1,427 @@
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
+use chrono::{DateTime, Utc};
+use sea_query::{Alias, Expr, Iden, OnConflict, PostgresQueryBuilder, Query};
+use sea_query_binder::SqlxBinder;
+use serde::Deserialize;
+use sqlx::PgPool;
+use yorishiro_core::ResultExt;
+use yorishiro_core::YorishiroError;
+use yorishiro_core::repositories::tenancy;
+
+use crate::services::billing;
+
+use crate::services::plan::{Plan, StripePriceMapping};
+use crate::services::{hmac_sign, non_empty_env};
+use crate::state::HostedState;
+
+/// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible
+/// replay. Stripe's own guidance uses 5 minutes.
+const SIGNATURE_TOLERANCE_SECS: i64 = 300;
+
+/// Configuration for the Stripe integration. Both fields are absent by default -- a deployment
+/// with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of
+/// silently accepting unverifiable requests, matching this session's deferral of real Stripe
+/// credentials.
+#[derive(Debug, Clone, Default)]
+pub struct StripeConfig {
+    pub webhook_secret: Option<String>,
+    pub price_mapping: StripePriceMapping,
+}
+
+impl StripeConfig {
+    pub fn from_env() -> Self {
+        Self {
+            webhook_secret: non_empty_env("YORISHIRO_STRIPE_WEBHOOK_SECRET"),
+            price_mapping: StripePriceMapping::from_env(),
+        }
+    }
+}
+
+/// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`),
+/// checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches
+/// the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret. Both checks are
+/// required -- the timestamp check alone doesn't authenticate anything, and the signature check
+/// alone doesn't prevent a captured request from being replayed indefinitely.
+///
+/// `pub(crate)`: the only caller is `stripe_webhook` below, and the tests reach it as
+/// `crate::http::controllers::stripe::verify_stripe_signature` since they compile inside this
+/// crate. It was `pub` + `#[doc(hidden)]` back when `tests/` could only see the public surface.
+pub(crate) fn verify_stripe_signature(
+    payload: &[u8],
+    signature_header: &str,
+    secret: &str,
+) -> Result<(), &'static str> {
+    let mut timestamp: Option<i64> = None;
+    let mut candidates = Vec::new();
+    for part in signature_header.split(',') {
+        let mut kv = part.splitn(2, '=');
+        match (kv.next(), kv.next()) {
+            (Some("t"), Some(v)) => timestamp = v.parse().ok(),
+            (Some("v1"), Some(v)) => candidates.push(v),
+            _ => {}
+        }
+    }
+    let timestamp = timestamp.ok_or("missing timestamp in Stripe-Signature header")?;
+    if (Utc::now().timestamp() - timestamp).abs() > SIGNATURE_TOLERANCE_SECS {
+        return Err("Stripe-Signature timestamp is outside the allowed tolerance");
+    }
+    if candidates.is_empty() {
+        return Err("missing v1 signature in Stripe-Signature header");
+    }
+
+    let mut signed_payload = format!("{timestamp}.").into_bytes();
+    signed_payload.extend_from_slice(payload);
+
+    if candidates
+        .iter()
+        .any(|candidate| hmac_sign::verify(secret.as_bytes(), &signed_payload, candidate))
+    {
+        return Ok(());
+    }
+    Err("no v1 signature matched the computed HMAC")
+}
+
+#[derive(Debug, Deserialize)]
+struct StripeEvent {
+    id: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    /// Unix timestamp of when Stripe created this event -- used to detect a delayed/retried
+    /// delivery that arrives after a newer event for the same customer has already landed (see
+    /// `is_stale_for_customer`).
+    created: i64,
+    data: StripeEventData,
+}
+
+#[derive(Debug, Deserialize)]
+struct StripeEventData {
+    object: serde_json::Value,
+}
+
+/// The single public HTTP entry point for Stripe webhooks. Returns 501 without a configured
+/// secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has
+/// been applied (or was simply not one we act on).
+///
+/// Intentionally returns `impl IntoResponse` with raw status codes rather than
+/// `Result<_, HostedApiError>`: Stripe expects plain-text error bodies from webhooks, not the
+/// JSON `{"error": {...}}` envelope the dashboard API uses.
+#[utoipa::path(
+    post,
+    path = "/hosted/stripe/webhook",
+    request_body(
+        content = String,
+        description = "The raw Stripe event JSON. Read as bytes and HMAC-verified before parsing, so the exact bytes Stripe sent must reach this endpoint unmodified",
+        content_type = "application/json",
+    ),
+    params(
+        ("Stripe-Signature" = String, Header, description = "Stripe's signature header, `t=<timestamp>,v1=<hmac>`. Verified against `YORISHIRO_STRIPE_WEBHOOK_SECRET`, rejecting a timestamp more than 5 minutes out in either direction"),
+    ),
+    responses(
+        (status = 200, description = "Event verified and applied, or of a type this deployment does not act on. A repeat of an already-recorded event id is also accepted here so Stripe stops retrying it", body = String),
+        (status = 400, description = "Missing/invalid `Stripe-Signature`, or a malformed JSON body", body = String),
+        (status = 500, description = "The event was valid but applying it failed", body = String),
+        (status = 501, description = "`YORISHIRO_STRIPE_WEBHOOK_SECRET` is unset -- Stripe billing is opt-in, and unverifiable requests are refused rather than accepted", body = String),
+    ),
+    tag = "hosted",
+)]
+pub async fn stripe_webhook(
+    State(state): State<HostedState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    let Some(secret) = state.stripe_config.webhook_secret.as_deref() else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            "Stripe billing is not configured on this deployment (set \
+             YORISHIRO_STRIPE_WEBHOOK_SECRET to enable it)",
+        )
+            .into_response();
+    };
+
+    let Some(signature_header) = headers
+        .get("stripe-signature")
+        .and_then(|v| v.to_str().ok())
+    else {
+        return (StatusCode::BAD_REQUEST, "missing Stripe-Signature header").into_response();
+    };
+
+    if let Err(reason) = verify_stripe_signature(&body, signature_header, secret) {
+        tracing::warn!(
+            reason,
+            "rejected Stripe webhook: signature verification failed"
+        );
+        return (StatusCode::BAD_REQUEST, reason).into_response();
+    }
+
+    let event: StripeEvent = match serde_json::from_slice(&body) {
+        Ok(event) => event,
+        Err(err) => {
+            tracing::warn!(error = %err, "rejected Stripe webhook: invalid JSON body");
+            return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response();
+        }
+    };
+
+    match apply_stripe_event(&state, event).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(err) => {
+            tracing::error!(error = %err, "failed to process Stripe webhook event");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Iden)]
+enum StripeProcessedEvents {
+    Table,
+    EventId,
+    EventType,
+    CustomerId,
+    StripeCreated,
+}
+
+/// Whether `event_id` has already been applied. Stripe retries a webhook delivery on a slow or
+/// failed response, so the same event can arrive more than once; `event_id` is the primary key
+/// of `identity.stripe_processed_events`, so this is a plain existence check.
+async fn is_event_processed(pool: &PgPool, event_id: &str) -> Result<bool, YorishiroError> {
+    let (sql, values) = Query::select()
+        .expr(Expr::val(1))
+        .from((Alias::new("identity"), StripeProcessedEvents::Table))
+        .and_where(Expr::col(StripeProcessedEvents::EventId).eq(event_id))
+        .build_sqlx(PostgresQueryBuilder);
+
+    let row: Option<(i32,)> = sqlx::query_as_with(&sql, values)
+        .fetch_optional(pool)
+        .await
+        .internal()?;
+    Ok(row.is_some())
+}
+
+/// Whether `created` is older than the most recently applied event's `created` for the same
+/// `customer_id`. Stripe does not guarantee delivery order, so a delayed/retried delivery of a
+/// stale event must not be allowed to undo a newer one that already landed for that customer.
+async fn is_stale_for_customer(
+    pool: &PgPool,
+    customer_id: &str,
+    created: DateTime<Utc>,
+) -> Result<bool, YorishiroError> {
+    let (sql, values) = Query::select()
+        .column(StripeProcessedEvents::StripeCreated)
+        .from((Alias::new("identity"), StripeProcessedEvents::Table))
+        .and_where(Expr::col(StripeProcessedEvents::CustomerId).eq(customer_id))
+        .order_by(StripeProcessedEvents::StripeCreated, sea_query::Order::Desc)
+        .limit(1)
+        .build_sqlx(PostgresQueryBuilder);
+
+    let row: Option<(DateTime<Utc>,)> = sqlx::query_as_with(&sql, values)
+        .fetch_optional(pool)
+        .await
+        .internal()?;
+    Ok(row.is_some_and(|(latest,)| created < latest))
+}
+
+/// Records that `event_id` has been applied, so a later retry or reorder of the same or an older
+/// event for `customer_id` is rejected by [`is_event_processed`]/[`is_stale_for_customer`].
+///
+/// `ON CONFLICT (event_id) DO NOTHING`: `apply_stripe_event`'s [`is_event_processed`] check and
+/// this insert are not wrapped in a shared transaction, so two truly concurrent deliveries of the
+/// same brand-new event id can both pass that check and both dispatch (harmless -- the handlers
+/// below are idempotent, e.g. `set_tenant_plan` just sets the same plan twice). Without the
+/// conflict clause, the loser's insert would then fail on the `event_id` primary key and surface
+/// as a spurious `500`; Stripe would retry, and the retry's own `is_event_processed` check would
+/// find the winner's already-recorded row and correctly skip re-dispatch. The conflict clause
+/// just avoids that unnecessary `500`/retry round trip.
+///
+/// `event_type` is written but never read back by any query here, which makes it look removable
+/// -- it isn't. This table is the billing audit trail: when a tenant's plan or cap ends up wrong,
+/// the only record of which Stripe event types actually landed (and in what order, via
+/// `stripe_created`/`processed_at`) is these rows. Dropping the column would leave an
+/// investigator able to see *that* an event was applied but not *what it did*, right when that
+/// distinction matters most. It also mirrors the `match event.event_type` dispatch below, so
+/// keeping it stops the recorded history and the branching logic from drifting apart.
+async fn record_processed_event(
+    pool: &PgPool,
+    event_id: &str,
+    event_type: &str,
+    customer_id: Option<&str>,
+    created: DateTime<Utc>,
+) -> Result<(), YorishiroError> {
+    let (sql, values) = Query::insert()
+        .into_table((Alias::new("identity"), StripeProcessedEvents::Table))
+        .columns([
+            StripeProcessedEvents::EventId,
+            StripeProcessedEvents::EventType,
+            StripeProcessedEvents::CustomerId,
+            StripeProcessedEvents::StripeCreated,
+        ])
+        .values_panic([
+            event_id.into(),
+            event_type.into(),
+            customer_id.into(),
+            created.into(),
+        ])
+        .on_conflict(
+            OnConflict::column(StripeProcessedEvents::EventId)
+                .do_nothing()
+                .to_owned(),
+        )
+        .build_sqlx(PostgresQueryBuilder);
+
+    sqlx::query_with(&sql, values)
+        .execute(pool)
+        .await
+        .internal()?;
+    Ok(())
+}
+
+/// The tenant a subscription event's `customer` field resolves to, or `None` (logged by the
+/// caller as appropriate) when the object has no `customer` field or that customer isn't linked
+/// to any tenant yet.
+async fn resolve_tenant_by_customer(
+    pool: &PgPool,
+    object: &serde_json::Value,
+) -> Result<Option<uuid::Uuid>, YorishiroError> {
+    let Some(customer_id) = object.get("customer").and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    Ok(billing::get_by_stripe_customer(pool, customer_id)
+        .await?
+        .map(|record| record.tenant_id))
+}
+
+/// Applies a verified Stripe event to our tenant model. Only the handful of event types needed
+/// to keep a tenant's plan/cap in sync are handled; anything else (e.g. invoice events used only
+/// for record-keeping on Stripe's side) is accepted but ignored.
+///
+/// The Stripe object's linkage to our tenant is intentionally simple for this skeleton: the
+/// checkout session that starts a subscription is expected to have been created with
+/// `client_reference_id` set to our tenant id, which is recorded (`link_stripe_customer`) so
+/// later subscription events -- keyed only by Stripe customer id -- can be traced back to it.
+///
+/// Idempotency and ordering are enforced up front (see `identity.stripe_processed_events`,
+/// `is_event_processed`/`is_stale_for_customer`): a duplicate delivery of an event already
+/// applied, or a delayed delivery of an event older than one already applied for the same
+/// customer, is accepted (so Stripe doesn't retry it forever) but not re-applied.
+async fn apply_stripe_event(state: &HostedState, event: StripeEvent) -> Result<(), YorishiroError> {
+    let pool = &state.identity_pool;
+
+    if is_event_processed(pool, &event.id).await? {
+        tracing::info!(
+            event_id = event.id,
+            "ignoring already-processed Stripe event"
+        );
+        return Ok(());
+    }
+
+    let Some(created) = DateTime::<Utc>::from_timestamp(event.created, 0) else {
+        tracing::warn!(
+            event_id = event.id,
+            created = event.created,
+            "ignoring a Stripe event with an unrepresentable `created` timestamp"
+        );
+        return Ok(());
+    };
+    // Only the subscription events are ordered per customer. `checkout.session.completed` also
+    // carries a `customer` field, but it's a one-time link event with no ordering relationship to
+    // the subscription stream -- recording it here would set a staleness floor that can reject a
+    // `customer.subscription.created` for the same purchase if it happens to arrive first with an
+    // earlier `created` (Stripe does not guarantee delivery order between the two).
+    let customer_id = matches!(
+        event.event_type.as_str(),
+        "customer.subscription.created"
+            | "customer.subscription.updated"
+            | "customer.subscription.deleted"
+    )
+    .then(|| {
+        event
+            .data
+            .object
+            .get("customer")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+    })
+    .flatten();
+
+    if let Some(customer_id) = customer_id.as_deref()
+        && is_stale_for_customer(pool, customer_id, created).await?
+    {
+        tracing::info!(
+            event_id = event.id,
+            customer_id,
+            "ignoring a Stripe event older than the last one applied for this customer"
+        );
+        return Ok(());
+    }
+
+    match event.event_type.as_str() {
+        "checkout.session.completed" => {
+            let object = &event.data.object;
+            let (Some(tenant_id), Some(customer_id)) = (
+                object
+                    .get("client_reference_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok()),
+                object.get("customer").and_then(|v| v.as_str()),
+            ) else {
+                tracing::warn!("checkout.session.completed missing client_reference_id/customer");
+                return Ok(());
+            };
+            billing::link_stripe_customer(pool, tenant_id, customer_id).await?;
+        }
+        "customer.subscription.created" | "customer.subscription.updated" => {
+            let object = &event.data.object;
+            let Some(tenant_id) = resolve_tenant_by_customer(pool, object).await? else {
+                tracing::warn!(
+                    ?customer_id,
+                    "subscription event for an unlinked Stripe customer"
+                );
+                return Ok(());
+            };
+            let price_id = object
+                .get("items")
+                .and_then(|v| v.get("data"))
+                .and_then(|v| v.get(0))
+                .and_then(|v| v.get("price"))
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.as_str());
+            let Some(plan) = price_id
+                .and_then(|id| Plan::from_stripe_price_id(id, &state.stripe_config.price_mapping))
+            else {
+                tracing::warn!(
+                    ?customer_id,
+                    ?price_id,
+                    "subscription event with an unmapped price id"
+                );
+                return Ok(());
+            };
+            let caps = plan.caps();
+            billing::set_plan(pool, tenant_id, plan.as_str()).await?;
+            tenancy::set_tenant_max_workspaces(pool, tenant_id, caps.max_workspaces).await?;
+        }
+        "customer.subscription.deleted" => {
+            let object = &event.data.object;
+            let Some(tenant_id) = resolve_tenant_by_customer(pool, object).await? else {
+                return Ok(());
+            };
+            let caps = Plan::Free.caps();
+            billing::set_plan(pool, tenant_id, Plan::Free.as_str()).await?;
+            tenancy::set_tenant_max_workspaces(pool, tenant_id, caps.max_workspaces).await?;
+        }
+        _ => {}
+    }
+
+    record_processed_event(
+        pool,
+        &event.id,
+        &event.event_type,
+        customer_id.as_deref(),
+        created,
+    )
+    .await
+}
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/stripe.rs"]
+mod tests;

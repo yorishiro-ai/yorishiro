@@ -1,0 +1,161 @@
+import type { FormEvent } from "react";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { login, getOAuthStatus } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
+import { setSessionWorkspaceId, whoami } from "@/lib/api";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
+
+export function LoginPage() {
+  const navigate = useNavigate();
+  const { loginSession } = useAuth();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [needsWorkspace, setNeedsWorkspace] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+
+  useEffect(() => {
+    getOAuthStatus()
+      .then((status) => setSsoEnabled(status.enabled))
+      .catch(() => setSsoEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash) return;
+
+    if (hash.includes("api_key=")) {
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      const apiKey = params.get("api_key");
+      const oauthEmail = params.get("email") ?? "";
+      if (apiKey) {
+        loginSession(apiKey, oauthEmail);
+        window.history.replaceState(null, "", window.location.pathname);
+        // The callback returns only the key, so the key's own workspace is asked for
+        // separately -- `request` needs it to know when the workspace header is required.
+        whoami()
+          .then((who) => setSessionWorkspaceId(who.workspace_id))
+          .catch(() => {
+            // Leaving it unset only means the header is sent when it need not be, which a
+            // workspace-scoped key refuses -- visible, not silent.
+          });
+        navigate("/dashboard", { replace: true });
+      }
+    } else if (hash.includes("error=oauth_failed") || hash.includes("error=access_denied")) {
+      setError("SSO login failed. Please try again or use email/password.");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const result = await login(email, password, needsWorkspace ? workspaceId : undefined);
+      loginSession(result.api_key, email, result.workspace_id);
+      navigate("/dashboard");
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 422) {
+        setNeedsWorkspace(true);
+        setError("Multiple workspaces found. Please specify a workspace ID.");
+      } else {
+        const message = err instanceof Error ? err.message : "Login failed";
+        setError(message);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleSsoClick() {
+    window.location.href = "/auth/oauth/authorize";
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>Sign in</CardTitle>
+          <CardDescription>Sign in to your Yorishiro workspace.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <Input
+              label="Email"
+              type="email"
+              name="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <Input
+              label="Password"
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            {needsWorkspace && (
+              <Input
+                label="Workspace ID"
+                type="text"
+                name="workspaceId"
+                required
+                value={workspaceId}
+                onChange={(e) => setWorkspaceId(e.target.value)}
+              />
+            )}
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? "Signing in..." : "Sign in"}
+            </Button>
+          </form>
+
+          {ssoEnabled && (
+            <>
+              <div className="my-4 flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs text-muted-foreground">OR</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <Button type="button" variant="secondary" className="w-full" onClick={handleSsoClick}>
+                Sign in with SSO
+              </Button>
+            </>
+          )}
+        </CardContent>
+        <CardFooter className="justify-center">
+          <p className="text-sm text-muted-foreground">
+            Don&apos;t have an account?{" "}
+            <Link to="/signup" className="font-medium text-link hover:underline">
+              Sign up
+            </Link>
+          </p>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+}

@@ -1,5 +1,19 @@
 # Rust coding rules for yorishiro
 
+## Editions and the `ee/` boundary
+
+- One repository, two licences.
+  Everything outside `ee/` is BUSL-1.1; `ee/` is the paid edition under `ee/LICENSE`, which adds a Competing Use restriction and requires a licence key for production use.
+- **`crates/yorishiro-{core,server}` must not depend on `ee/`.
+  `ee/` depends on them.**
+  One binary composes both.
+  A `use` or a path dependency pointing from `crates/` into `ee/` inverts this and is the one import direction that is always wrong.
+- Which side a feature belongs on is decided by what the feature *is*, never by what it needs.
+  **The server calling an LLM**, billing, external SaaS and rich UI are `ee/` by character.
+  "The user brings their own key" does not move a feature out of `ee/`, because it changes who pays rather than what the server does.
+  Any sentence of the form "it does not depend on X" is the wrong test.
+- Unclear cases are a question for the user, asked as the classification itself rather than buried in the options of an implementation question.
+
 ## Error handling
 
 - Use `yorishiro_core::ResultExt` (`.internal()`) for any fallible call that produces a non-`YorishiroError` error.
@@ -10,6 +24,17 @@
 - Use `YorishiroError::not_found(msg)` for NotFound construction instead of building the struct literal directly.
 - The `into_response` mapping from `YorishiroError` to HTTP status+body lives in `YorishiroError::into_http_parts()` (in `yorishiro_core::error`).
   `ApiError` calls it, and so must any other axum error wrapper built on `YorishiroError` — never duplicate the match block.
+  `ee/`'s `HostedApiError` delegates to it for the same reason.
+  Both names are fixed; do not rename either.
+- The Stripe webhook (`stripe_webhook`) returns a plain `impl IntoResponse` with raw status codes, because Stripe expects simple text rather than a JSON error envelope.
+  It is the sole exception to using `HostedApiError`.
+
+## Router integration (`ee/`)
+
+- The hosted router MUST have `apply_observability_layers()` applied before it is merged into `build_app()`.
+  `axum::Router::merge` does not propagate layers.
+- `Router::merge` panics on a duplicate route, and only a booted server sees it.
+  A route registered on both sides is therefore a startup crash rather than a compile error.
 
 ## MCP handlers (yorishiro-server)
 
@@ -26,9 +51,9 @@
 
 ## Visibility and dead code (yorishiro-core)
 
-- `yorishiro-core`'s `pub` API has consumers outside this repository.
-  **"No caller in this workspace" does not mean unused** -- a repo-wide grep can only prove that *this* repo doesn't call it.
-  Check the downstream consumers before deleting a `pub` item or narrowing its visibility.
+- `yorishiro-core`'s consumers are all in this workspace now: `yorishiro-server` and `ee/crates/yorishiro-hosted`.
+  A workspace-wide grep therefore does settle whether a `pub` item is called -- but it has to include `ee/`, which is a member of this workspace and the only caller of much of what core exports.
+  The five published contracts (`build_app`, `apply_observability_layers`, `into_http_parts()`, `hex_decode`, `bearer_credential`) stay regardless: they are the seam `ee/` composes against.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
 - `Authenticator` (`services/auth`) is a seam, not an internal detail.
   Every authenticated path -- the `AuthContext`/`Authorized<R>`/`Verified<R>` extractors and both MCP entry points -- resolves through the one `AppState::authenticator`.
@@ -55,11 +80,13 @@
   - **Private items are testable.** `pub(crate)` and private functions are reachable, so a test never needs visibility widened for its own sake.
   - **`autotests = false` is required** in `Cargo.toml`.
     Without it cargo also compiles each `tests/*.rs` as a standalone integration target, where `use crate::` fails.
-    This is also why the layout cannot be adopted one file at a time — both crates are already on it, in ~77 places.
+    This is also why the layout cannot be adopted one file at a time — all three crates are already on it, in ~77 places.
 - Test-only fixtures live in a `#[cfg(test)]`, `pub(crate)` `test_support` module (`crates/yorishiro-core/src/lib.rs`).
   `tests/` reaches it as `crate::test_support`.
   Do **not** widen it to `pub` or drop the `#[cfg(test)]`: under the bridge neither is needed, and `pub` would put fixtures on the crate's public surface for no reader outside these tests.
 - A `src` file with nothing to test (a `mod`-only re-export hub) gets no test file and no bridge.
+- In `ee/`, shared helpers (`tests/test_helpers.rs`) are declared **once**, in `tests/lib.rs`, and reached elsewhere with `use crate::tests::test_helpers;`.
+  Declaring `mod test_helpers;` in several files compiles it several times and trips `clippy::duplicate_mod`.
 
 ## Imports
 

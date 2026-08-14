@@ -1,9 +1,14 @@
 Business Source License 1.1
 
+This license covers this repository EXCEPT the `ee/` directory, which is
+licensed separately and more restrictively by `ee/LICENSE`. Production use of
+the code under `ee/` requires a license key; the code covered by this license
+does not.
+
 Parameters
 
 Licensor:             Yorishiro Contributors
-Licensed Work:        Yorishiro
+Licensed Work:        Yorishiro, excluding the contents of the `ee/` directory
                       The Licensed Work is (c) 2026 Yorishiro Contributors
 Additional Use Grant: You may use, copy, modify, and redistribute the Licensed
                       Work for any purpose, including production use, except
