@@ -109,7 +109,7 @@ pub(crate) mod test_support {
     /// never about the SPA. It 404s, matching what this crate serves on its own: the UI lives in
     /// `ee/` and a crate here cannot reach it.
     pub fn no_static_fallback() -> axum::routing::MethodRouter {
-        axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })
+        axum::routing::any(|| async { StatusCode::NOT_FOUND })
     }
 
     /// A provider that returns a deterministic vector, for end-to-end tests of the embedding

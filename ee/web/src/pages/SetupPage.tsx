@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getSetupStatus, setup } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/Card";
@@ -25,6 +25,8 @@ export function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [checking, setChecking] = useState(true);
+  // Set when the server says setup can never succeed here, whatever is typed.
+  const [terminal, setTerminal] = useState(false);
 
   // A deployment that is already set up, or one where the wizard is disabled, must not sit on a
   // form that can only fail. Both cases send the visitor to the login page instead.
@@ -55,10 +57,13 @@ export function SetupPage() {
     } catch (err) {
       const status = (err as { status?: number }).status;
       // 409 and 404 both mean the form can never succeed: someone else finished setup first, or
-      // the wizard is disabled on this deployment. Say which, and point at the login page.
+      // the wizard is disabled on this deployment. Say which, and show the way out — a message
+      // telling the reader to sign in, on a page with no link to sign in, is a dead end.
       if (status === 409) {
-        setError("This deployment has already been set up. Sign in instead.");
+        setTerminal(true);
+        setError("This deployment has already been set up.");
       } else if (status === 404) {
+        setTerminal(true);
         setError("The setup wizard is not enabled on this deployment.");
       } else {
         setError(err instanceof Error ? err.message : "Setup failed");
@@ -109,10 +114,15 @@ export function SetupPage() {
             />
             {error && (
               <p className="text-sm text-destructive" role="alert">
-                {error}
+                {error}{" "}
+                {terminal && (
+                  <Link to="/login" className="font-medium text-link hover:underline">
+                    Sign in
+                  </Link>
+                )}
               </p>
             )}
-            <Button type="submit" className="w-full" disabled={submitting}>
+            <Button type="submit" className="w-full" disabled={submitting || terminal}>
               {submitting ? "Setting up..." : "Create owner account"}
             </Button>
           </form>
