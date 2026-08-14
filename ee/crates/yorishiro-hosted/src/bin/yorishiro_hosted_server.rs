@@ -13,10 +13,10 @@ use yorishiro_server::{
     build_embedding_provider, shutdown_signal,
 };
 
-/// The single process a hosted deployment runs. A plain start runs the HTTP
-/// server; `yorishiro-hosted-server admin ...` runs one-off administrative
-/// commands (same as `yorishiro-server admin ...` but against the hosted DB
-/// with both vendor and local migrations applied).
+/// The Yorishiro server. A plain start runs the HTTP server and serves the web UI;
+/// `yorishiro-hosted-server admin ...` runs one-off administrative commands. Migrations are
+/// applied on startup either way. Paid features need a licence key in `YORISHIRO_LICENSE_KEY`;
+/// without one the server runs normally and those features answer 404.
 #[derive(Parser)]
 #[command(name = "yorishiro-hosted-server")]
 struct Cli {
@@ -34,8 +34,7 @@ enum Command {
     /// Issue a tenant-scoped API key: one key that can act on any workspace in the tenant,
     /// naming the workspace per request with the `X-Workspace-Id` header.
     ///
-    /// Separate from `admin create-api-key`, which is the community edition's own command and
-    /// always binds a key to one workspace. Prefer that one when a client only ever works in a
+    /// Separate from `admin create-api-key`, which always binds a key to one workspace. Prefer that one when a client only ever works in a
     /// single workspace -- a key bound to one workspace reaches less if it leaks.
     CreateTenantApiKey {
         tenant_id: uuid::Uuid,
@@ -158,8 +157,7 @@ async fn run(cli: Cli) -> Result<()> {
     // Installing this here is what makes tenant-scoped keys work at all: every authenticated
     // path in the process -- REST extractors and MCP handlers alike -- resolves through the one
     // authenticator the state carries, so a key is read the same way whichever door it arrives
-    // at. Leaving it at the community edition's default would silently accept only
-    // workspace-scoped keys.
+    // at. Leaving it at the default would silently accept only workspace-scoped keys.
     let app_state = AppState::new(tenant_db.clone(), identity_pool.clone(), embedding_provider)
         .with_authenticator(std::sync::Arc::new(
             yorishiro_hosted::services::tenant_auth::TenantScopedAuthenticator,

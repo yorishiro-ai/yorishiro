@@ -375,17 +375,30 @@ jobs:
             -e DATABASE_URL=postgres://yorishiro:yorishiro@127.0.0.1:5432/yorishiro \
             "${IMAGE}:${TAG}"
 
+          booted=
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
-              echo "::notice::${IMAGE}:${TAG} booted and answered /up"
-              exit 0
+              booted=1
+              break
             fi
             sleep 2
           done
 
-          echo "The published image never answered /up." >&2
-          docker logs smoke >&2 || true
-          exit 1
+          if [ -z "$booted" ]; then
+            echo "The published image never answered /up." >&2
+            docker logs smoke >&2 || true
+            exit 1
+          fi
+
+          # The one binary serves the UI too, so an image whose SPA failed to build answers
+          # /up perfectly while serving a blank 404 at /. `/up` alone would call that healthy.
+          if ! curl -fsS http://127.0.0.1:8080/ | grep -q "<html"; then
+            echo "The published image booted but served no SPA at /." >&2
+            docker logs smoke >&2 || true
+            exit 1
+          fi
+
+          echo "::notice::${IMAGE}:${TAG} booted, answered /up, and served the SPA"
 
   github-release:
     needs: [binary, smoke, prepare]
