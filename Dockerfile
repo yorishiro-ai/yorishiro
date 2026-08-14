@@ -37,7 +37,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     --mount=type=cache,target=/root/.cache/ort.pyke.io \
     cargo build --release -p yorishiro-hosted \
-    && cp target/release/yorishiro-hosted-server /usr/local/bin/yorishiro-server
+    && cp target/release/yorishiro-hosted-server /usr/local/bin/yorishiro-hosted-server
 
 # onnxruntime is statically linked, so the only shared library needed at runtime is
 # libstdc++6 (plus ca-certificates for the OpenAI-compatible provider's TLS, and curl for
@@ -52,7 +52,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --no-create-home yorishiro
 
-COPY --from=builder /usr/local/bin/yorishiro-server /usr/local/bin/yorishiro-server
+COPY --from=builder /usr/local/bin/yorishiro-hosted-server /usr/local/bin/yorishiro-hosted-server
+
+# The docs say `yorishiro-hosted-server admin ...`, and that has to work inside the image. The
+# old name stays as a symlink: every existing `docker run ... yorishiro-server admin` keeps
+# working rather than failing with "not found" on an upgrade.
+RUN ln -s /usr/local/bin/yorishiro-hosted-server /usr/local/bin/yorishiro-server
 
 # Relative paths in embedding provider settings (e.g. YORISHIRO_ONNX_MODEL_PATH=models/model.onnx)
 # resolve against this directory, so a model directory can be bind-mounted here without
@@ -67,4 +72,4 @@ ENV YORISHIRO_BIND=0.0.0.0:8080
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD curl -sf http://localhost:8080/up || exit 1
-ENTRYPOINT ["yorishiro-server"]
+ENTRYPOINT ["yorishiro-hosted-server"]
