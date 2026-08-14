@@ -68,7 +68,10 @@ async fn app_with_key(
         .unwrap();
     drop(conn);
 
-    let app = build_app(AppState::new(db, pool.clone(), provider), None);
+    let app = build_app(
+        AppState::new(db, pool.clone(), provider),
+        no_static_fallback(),
+    );
     (app, created.plaintext)
 }
 
@@ -133,7 +136,7 @@ async fn get(app: axum::Router, uri: &str, key: &str) -> axum::http::Response<Bo
 /// than the 401 this asserts.
 #[sqlx::test(migrations = "../../migrations")]
 async fn search_requires_authentication(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = app
         .oneshot(
@@ -216,7 +219,7 @@ async fn a_search_never_returns_another_workspaces_entities(pool: PgPool) {
     for (owner, key) in &keys {
         let app = build_app(
             AppState::new(db.clone(), pool.clone(), Arc::new(FixedEmbeddingProvider)),
-            None,
+            no_static_fallback(),
         );
         let response = get(app, "/api/search?query_text=anything&limit=50", key).await;
         assert_eq!(response.status(), StatusCode::OK);

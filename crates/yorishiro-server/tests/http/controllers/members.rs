@@ -37,7 +37,7 @@ async fn owner_can_list_and_add_members(pool: PgPool) {
         .unwrap();
     drop(conn);
 
-    let app = build_app(test_state(pool.clone()), None);
+    let app = build_app(test_state(pool.clone()), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -103,7 +103,7 @@ async fn add_member_rejects_an_email_with_no_account(pool: PgPool) {
     )
     .await;
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -147,7 +147,7 @@ async fn member_role_cannot_manage_members(pool: PgPool) {
     )
     .await;
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -162,7 +162,7 @@ async fn member_role_cannot_manage_members(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn members_endpoints_require_authentication(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(&app, "GET", "/api/members", None, None).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

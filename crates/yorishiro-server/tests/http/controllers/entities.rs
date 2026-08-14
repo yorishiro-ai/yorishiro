@@ -9,7 +9,7 @@ use yorishiro_core::services::auth::{ApiKeyScope, create_api_key};
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn rest_openapi_json_is_served(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(&app, "GET", "/api-docs/openapi.json", None, None).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -41,7 +41,7 @@ async fn rest_openapi_json_is_served(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn rest_entities_endpoint_requires_authentication(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(&app, "GET", "/api/entities", None, None).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -49,7 +49,7 @@ async fn rest_entities_endpoint_requires_authentication(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn rest_entities_endpoint_rejects_an_unknown_bearer_token(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -77,7 +77,7 @@ async fn rest_create_entity_rejects_insufficient_scope(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
 
     let response = rest_request(
@@ -113,7 +113,7 @@ async fn rest_entity_crud_round_trip(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth = format!("Bearer {}", schema_key.plaintext);
     let write_auth = format!("Bearer {}", write_key.plaintext);
@@ -221,7 +221,7 @@ async fn rest_created_entity_becomes_searchable(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(FixedEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth = format!("Bearer {}", schema_key.plaintext);
     let write_auth = format!("Bearer {}", write_key.plaintext);
@@ -316,7 +316,7 @@ async fn rest_enforces_tenant_isolation(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth_a = format!("Bearer {}", schema_key_a.plaintext);
     let write_auth_a = format!("Bearer {}", write_key_a.plaintext);

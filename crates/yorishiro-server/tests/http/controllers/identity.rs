@@ -21,7 +21,7 @@ async fn signup_consumes_invite_and_creates_membership(pool: PgPool) {
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool.clone()), None);
+    let app = build_app(test_state(pool.clone()), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -68,7 +68,7 @@ async fn signup_rejects_an_already_used_invite_token(pool: PgPool) {
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
     let signup_body = Some(serde_json::json!({
         "invite_token": token,
         "password": "hunter2-hunter2",
@@ -97,7 +97,7 @@ async fn login_issues_an_api_key_scoped_to_the_members_role(pool: PgPool) {
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -155,7 +155,7 @@ async fn login_rejects_an_incorrect_password(pool: PgPool) {
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -188,7 +188,7 @@ async fn login_resolves_the_workspace_automatically_when_the_account_has_exactly
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -260,7 +260,7 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
     .unwrap();
     drop(conn);
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -288,7 +288,7 @@ async fn login_rejects_an_account_with_no_tenant_membership(pool: PgPool) {
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -306,7 +306,7 @@ async fn login_rejects_an_account_with_no_tenant_membership(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn auth_endpoints_are_rate_limited_per_caller(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     // The test driver never populates `ConnectInfo`, so every call here falls back to the
     // same shared bucket -- exercising the same "no requester info" path a request behind

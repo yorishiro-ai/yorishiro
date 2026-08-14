@@ -1,4 +1,4 @@
-use crate::fallback_service;
+use super::{Assets, fallback_service};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
@@ -10,6 +10,18 @@ async fn get(router: Router, uri: &str) -> Response {
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap()
+}
+
+/// The build gate. `ee/web/dist` is produced by `pnpm run build` and is not committed, so a
+/// checkout that skipped that step embeds only `.gitkeep` -- and every other test here still
+/// passes, because an empty embed serves 404s that look like ordinary misses. This is the one
+/// that fails, rather than shipping a binary whose UI is a blank 404.
+#[test]
+fn embeds_a_built_spa() {
+    assert!(
+        Assets::get("index.html").is_some(),
+        "ee/web/dist holds no index.html: run `pnpm run build` in ee/web before building"
+    );
 }
 
 #[tokio::test]
@@ -27,11 +39,17 @@ async fn serves_index_html_at_root_from_embedded_assets() {
     assert!(String::from_utf8(body.to_vec()).unwrap().contains("<html"));
 }
 
+/// rsbuild hashes its output filenames, so no asset can be named literally. The name is taken
+/// from the embed itself; what is asserted is that a real asset is served with the content type
+/// its extension implies, not that a particular file exists.
 #[tokio::test]
 async fn serves_a_named_asset_with_the_right_content_type() {
+    let js = Assets::iter()
+        .find(|p| p.ends_with(".js"))
+        .expect("a built SPA has at least one .js asset");
     let router = Router::new().fallback_service(fallback_service(None));
 
-    let response = get(router, "/app.js").await;
+    let response = get(router, &format!("/{js}")).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(

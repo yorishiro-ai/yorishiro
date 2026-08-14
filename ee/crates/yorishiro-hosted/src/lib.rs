@@ -1,14 +1,17 @@
-//! Hosted-only concerns split out of the core/server crates: Stripe billing, plan-to-cap
-//! mapping, usage metering for invoicing, transactional email, and the admin dashboard backend.
-//! Self-hosted (community) deployments never build or run this crate's binary; it exists so
-//! hosted-specific code never leaks into the community edition's dependency tree or attack
-//! surface.
+//! The paid edition: Stripe billing, OAuth/OIDC, the marketplace, LLM-backed fill, and the SPA.
+//!
+//! This crate's binary is the only one the product ships, so a self-hosted deployment runs it
+//! too -- what a deployment gets is decided by its licence key and its configuration, not by
+//! which binary it installed. The separation that matters is the dependency direction:
+//! `yorishiro-core` and `yorishiro-server` do not depend on this crate, and composing them here
+//! is what lets the paid half be removed without touching them.
 
 pub mod error;
 pub mod http;
 pub mod repositories;
 pub mod services;
 pub mod state;
+pub mod web;
 
 use std::sync::LazyLock;
 

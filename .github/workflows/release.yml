@@ -205,9 +205,29 @@ jobs:
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: cargo build --release -p yorishiro-server
+      # The SPA is embedded from `ee/web/dist`, a build output that is not committed, so it is
+      # built before cargo -- a release binary that links without it serves no UI.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ee/web/package.json
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ee/web/pnpm-lock.yaml
+
+      - name: Build the SPA
+        run: |
+          pnpm --dir ee/web install --frozen-lockfile
+          pnpm --dir ee/web run build
+
+      - name: Build
+        run: cargo build --release -p yorishiro-hosted
+
+      # The archive keeps the `yorishiro-server` name the published download URLs already use,
+      # while the binary inside it is the single one the product now ships. Renaming the asset
+      # would break every existing link for a cosmetic gain.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         env:
@@ -216,7 +236,7 @@ jobs:
         run: |
           mkdir -p dist
           tar -czf "dist/yorishiro-server-${TAG}-linux-${ARCH}.tar.gz" \
-            -C target/release yorishiro-server
+            -C target/release yorishiro-hosted-server
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -226,7 +246,7 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           New-Item -ItemType Directory -Force dist
-          Compress-Archive -Path "target/release/yorishiro-server.exe" `
+          Compress-Archive -Path "target/release/yorishiro-hosted-server.exe" `
             -DestinationPath "dist/yorishiro-server-$env:TAG-windows-$env:ARCH.zip"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

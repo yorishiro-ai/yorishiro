@@ -71,8 +71,23 @@ async fn run_migrations(pool: &sqlx::PgPool) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    // Synchronous prologue: both calls below use `std::env::set_var`, which is unsound under
+    // concurrent env access. Doing them here, before the tokio runtime starts, is what makes
+    // them sound.
+    //
     // SAFETY: no other thread exists at this point in `main`.
-    unsafe { std::env::set_var("YORISHIRO_MAX_TENANTS", "0") };
+    unsafe {
+        yorishiro_server::config::load_and_apply_env_overrides()?;
+        // Default to a single-tenant deployment, which is what a self-hoster gets and what
+        // enables the first-run setup wizard. A hosted deployment sets this to `0` (unlimited)
+        // in its own environment, which disables the wizard -- it onboards through checkout or
+        // an invite instead. This binary serves both, so the default belongs here rather than
+        // being hardcoded: it was `0` unconditionally while a separate community binary carried
+        // the self-hosted path.
+        if std::env::var_os("YORISHIRO_MAX_TENANTS").is_none() {
+            std::env::set_var("YORISHIRO_MAX_TENANTS", "1");
+        }
+    }
 
     let cli = Cli::parse();
 
@@ -159,7 +174,8 @@ async fn run(cli: Cli) -> Result<()> {
         oauth_config: OAuthConfig::from_env(),
     };
 
-    let web_dir = yorishiro_hosted::services::web_dir_from_env();
+    let static_fallback =
+        yorishiro_hosted::web::fallback_service(yorishiro_hosted::services::web_dir_from_env());
 
     // Shared with `build_app_with_rate_limiter` below so `/auth/oauth/authorize|callback` draw
     // from the same quota as this crate's own `/auth/login`/`/auth/signup`/`/setup*` -- an
@@ -210,7 +226,7 @@ async fn run(cli: Cli) -> Result<()> {
     // **every method on it**. A request whose path matches here but whose method does not gets
     // this router's `405`, and never reaches the community edition's handler for that method.
     // Define every method a path needs, or leave the path alone.
-    let base_app = build_app_with_rate_limiter(app_state, web_dir, rate_limiter);
+    let base_app = build_app_with_rate_limiter(app_state, static_fallback, rate_limiter);
     let app = hosted_router
         .merge(oauth_login_router)
         .fallback_service(base_app);
@@ -239,15 +255,28 @@ async fn run(cli: Cli) -> Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
+    // After closing HTTP, wait for the embedding sync of already-written entities to finish.
+    // Exiting immediately would leave recently created entities permanently missing from search.
+    // A second Ctrl-C/SIGTERM during this wait forces an immediate exit: without it, an operator
+    // who interrupts again out of impatience sees no response at all until the 30s timeout, since
+    // the first signal's `ctrl_c()` in `shutdown_signal` has already resolved and nothing else is
+    // listening for a repeat.
     embedding_tasks.close();
-    if tokio::time::timeout(std::time::Duration::from_secs(30), embedding_tasks.wait())
-        .await
-        .is_err()
-    {
-        tracing::warn!(
-            "embedding syncs did not finish within 30s; exiting anyway \
-             (recover with `yorishiro-hosted-server admin resync-embeddings`)"
-        );
+    tokio::select! {
+        result = tokio::time::timeout(std::time::Duration::from_secs(30), embedding_tasks.wait()) => {
+            if result.is_err() {
+                tracing::warn!(
+                    "embedding syncs did not finish within 30s; exiting anyway \
+                     (recover with `admin resync-embeddings`)"
+                );
+            }
+        }
+        _ = shutdown_signal() => {
+            tracing::warn!(
+                "second interrupt received; exiting immediately without waiting for embedding \
+                 syncs to finish (recover with `admin resync-embeddings`)"
+            );
+        }
     }
 
     Ok(())

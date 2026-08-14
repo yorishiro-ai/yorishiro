@@ -1,12 +1,17 @@
-//! Serves the Yorishiro setup/login/admin-dashboard SPA (this crate's own `web/`), compiled
-//! into the binary at build time via `rust-embed`. This is what lets `yorishiro-server` serve a
-//! working web UI without a deployment needing to separately fetch and place a `web/` directory
-//! alongside the binary; the release tarball and Docker image both only ever shipped the binary
-//! itself.
+//! Serves the SPA built from `ee/web/`, compiled into the binary at build time via `rust-embed`.
+//! This is what keeps the promise the README and setup docs make: one binary, and starting it
+//! gives you a UI. The release tarball and Docker image only ever shipped the binary itself.
 //!
-//! An operator actively iterating on `web/`'s contents can still point at a real directory on
-//! disk instead of the compiled-in copy (`YSR_WEB_DIR`) -- see [`fallback_service`]. That
-//! directory is read fresh on every request, so edits show up without a rebuild.
+//! The embedded directory is `ee/web/dist`, which `pnpm run build` produces and which is **not**
+//! committed. A checked-in `dist` cannot be told apart from a stale one without rebuilding it to
+//! compare, and that needs the same node step as building it outright -- so the build is the
+//! source of truth and the tree carries only `dist/.gitkeep`, which keeps `cargo check`
+//! compiling before anyone has run pnpm. `embeds_a_built_spa` is what turns a skipped build into
+//! a red test rather than a UI-less binary nobody notices.
+//!
+//! An operator actively iterating can point at a real directory on disk instead of the
+//! compiled-in copy (`YORISHIRO_HOSTED_WEB_DIR`) -- see [`fallback_service`]. That directory is
+//! read fresh on every request, so edits show up without a rebuild.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -17,12 +22,12 @@ use axum::routing::{MethodRouter, get};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
-#[folder = "web/"]
-struct Assets;
+#[folder = "../../web/dist"]
+pub(crate) struct Assets;
 
 /// Maps a request path to the asset path it should serve: `/` (and the empty path) map to
 /// `index.html`, same as `ServeDir`'s default `index_file` behavior; everything else is used
-/// as-is, relative to `web/`.
+/// as-is, relative to the embedded `dist`.
 fn asset_path(uri_path: &str) -> &str {
     match uri_path.trim_start_matches('/') {
         "" => "index.html",
@@ -100,5 +105,5 @@ pub fn fallback_service(override_dir: Option<String>) -> MethodRouter {
 }
 
 #[cfg(test)]
-#[path = "../tests/lib.rs"]
+#[path = "../../tests/web/mod.rs"]
 mod tests;

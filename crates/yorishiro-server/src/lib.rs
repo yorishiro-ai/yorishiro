@@ -105,6 +105,13 @@ pub(crate) mod test_support {
         )
     }
 
+    /// The `static_fallback` argument for tests in this crate, which assert about API routes and
+    /// never about the SPA. It 404s, matching what this crate serves on its own: the UI lives in
+    /// `ee/` and a crate here cannot reach it.
+    pub fn no_static_fallback() -> axum::routing::MethodRouter {
+        axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })
+    }
+
     /// A provider that returns a deterministic vector, for end-to-end tests of the embedding
     /// wiring. Every text maps to the same vector, so the distance between query and entity
     /// is always 0 — guaranteeing a hit.

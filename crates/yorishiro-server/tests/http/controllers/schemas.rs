@@ -25,7 +25,7 @@ async fn rest_schema_endpoints_round_trip(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth = format!("Bearer {}", schema_key.plaintext);
     let write_auth = format!("Bearer {}", write_key.plaintext);
@@ -163,7 +163,7 @@ async fn rest_creates_a_schema_from_a_built_in_template(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth = format!("Bearer {}", schema_key.plaintext);
 
@@ -233,7 +233,7 @@ async fn rest_creates_a_schema_from_a_library_template(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth = format!("Bearer {}", schema_key.plaintext);
 
@@ -290,7 +290,7 @@ async fn rest_cannot_create_a_schema_from_another_tenants_template(pool: PgPool)
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
 
     let response = rest_request(
@@ -320,7 +320,7 @@ async fn rest_rejects_an_unknown_library_template_id(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
 
     let response = rest_request(
