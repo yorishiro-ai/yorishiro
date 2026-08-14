@@ -18,7 +18,7 @@ It matters that both editions are configured alike: they point at one database, 
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string (required). Used by both the embedded community server and this repo's own tenant/billing queries. Migrations are applied automatically on startup: first `vendor/yorishiro/migrations` (community edition), then this repo's own `crates/yorishiro-hosted/migrations` (enterprise-only additions: OAuth's `identity.users` columns, and `identity.stripe_processed_events` for webhook idempotency) |
 | `YORISHIRO_HOSTED_BIND` | Listen address (default: `0.0.0.0:8081`). Set but empty (`YORISHIRO_HOSTED_BIND=`) falls back to the same default rather than failing to bind |
-| `YORISHIRO_LICENSE_KEY` | The licence key that enables the paid features: an RS256-signed JWT, verified against a public key compiled into the binary. Unset, empty, invalid or expired all mean the same thing — the paid features are disabled and their endpoints answer `404`, while everything else runs normally. The server never refuses to start over this. See [Licence keys](#licence-keys) |
+| `YORISHIRO_LICENSE_KEY` | The licence key that enables the paid features: an RS256-signed JWT, verified against a public key compiled into the binary. Unset, empty, invalid or expired all mean the same thing at startup — the paid features are disabled, while everything else runs normally. The server never refuses to start over this. What a disabled feature answers differs per feature; see [Licence keys](#licence-keys) |
 | `YORISHIRO_HOSTED_WEB_DIR` | Directory to serve this repo's admin dashboard SPA (`web/`, built with `pnpm build`) from at `/`. The Docker image presets this to `/app/web` (the bundled build output), so Docker deployments need no override. Bare-binary deployments must build `web/` separately and set this variable -- `web/` is never compiled into the binary itself (see [web-ui.md](web-ui.md)); left unset (or set to an empty string) outside Docker, `/` is served by the community edition's own embedded assets instead |
 
 ## OAuth2/OIDC login
@@ -71,13 +71,16 @@ It is verified against a public key compiled into the binary, so no network acce
 Four surfaces are gated: Stripe billing, OAuth2/OIDC login, the marketplace (`/api/marketplace/*`), and LLM-backed fill (`POST /api/schemas/active/{name}/infer-fill`).
 Everything else — the API, MCP, the setup wizard, login, member and workspace management, and the template library — runs with no licence at all.
 
-A gated endpoint answers `404 Not Found` when no active licence is held, the same answer a deployment gives for any capability it does not serve.
-The check runs before authentication, so the answer does not depend on whether the caller holds a valid API key.
+The marketplace and infer-fill are gated per request: without an active licence they answer `404 Not Found`, the same answer a deployment gives for any capability it does not serve.
+That check runs before authentication, so the answer does not depend on whether the caller holds a valid API key.
+Because it runs per request, a key that expires while the server is running closes those two without a restart.
+
+Stripe and OAuth are gated differently: an unlicensed process simply does not configure them, so they behave exactly as they do on a deployment that never set their variables — `/hosted/stripe/webhook` answers `501 Not Implemented` and every `/auth/oauth/*` route answers `404`.
+That is decided once at startup, so a key that expires mid-run leaves those two configured until the process restarts.
 
 `plan` is recorded and logged but does not select features: any valid, unexpired key unlocks all four.
 
-The marketplace and infer-fill gates are checked per request, so a key that expires while the server is running closes them without a restart.
-Stripe and OAuth are configured at startup, so those two stay as they were until the process restarts.
+The subject the key was issued to is not logged, since it is free-form and routinely an email address.
 
 One line at startup states which mode the process is in — the issuee, plan and expiry when a key was accepted, or that the paid features are disabled when there is none.
 A key that is set but does not verify logs a warning and leaves the paid features disabled; the server still starts, because refusing to would take the free half down over a paid-feature misconfiguration.

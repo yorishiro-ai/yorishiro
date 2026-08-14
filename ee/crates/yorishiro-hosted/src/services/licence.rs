@@ -27,8 +27,8 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../../keys/licence-public.pem");
 /// mapping built before the second one exists would encode a guess.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
-    /// Who the licence was issued to. Free-form; shown in the startup log so an operator can
-    /// confirm which key a deployment is running on.
+    /// Who the licence was issued to. Free-form, and routinely an email address, so it is
+    /// deliberately not logged -- see `from_env`.
     pub sub: String,
     pub plan: String,
     /// Expiry, as a Unix timestamp. Checked at verification *and* again at each gate, so a key
@@ -92,8 +92,10 @@ impl LicenceState {
 
         match verify(&token, PUBLIC_KEY_PEM) {
             Ok(claims) => {
+                // `sub` is free-form and routinely an email address, so it does not go in a
+                // routine log line. Plan and expiry are what an operator needs to see; the
+                // issuee is in the key they already hold.
                 tracing::info!(
-                    issued_to = %claims.sub,
                     plan = %claims.plan,
                     expires_at = claims.exp,
                     "licence key accepted: paid features are enabled"
