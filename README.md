@@ -52,7 +52,7 @@ flowchart TD
   - Breaking changes (removed fields, type changes, newly required fields, etc.) are reported as a diff.
   - Existing entities continue to be validated against the schema version that was active when they were created.
 - Single binary
-  - Everything above ships in the single `yorishiro-server` binary.
+  - Everything above ships in the single `yorishiro-hosted-server` binary.
   - Defaults to a single-tenant deployment (`YORISHIRO_MAX_TENANTS=1`; set it to `0` for unlimited tenants).
   - That same cap also enables a first-run setup wizard (browser UI at `/`, or `POST /setup`) that creates the tenant, workspace, and owner account in one step, no admin CLI needed.
   - Beyond that first account, further account creation is invite-only (`admin create-invite` → `POST /auth/signup` → `POST /auth/login`).

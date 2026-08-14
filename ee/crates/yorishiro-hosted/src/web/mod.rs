@@ -10,7 +10,7 @@
 //! a red test rather than a UI-less binary nobody notices.
 //!
 //! An operator actively iterating can point at a real directory on disk instead of the
-//! compiled-in copy (`YORISHIRO_HOSTED_WEB_DIR`) -- see [`fallback_service`]. That directory is
+//! compiled-in copy (`YORISHIRO_WEB_DIR`) -- see [`fallback_service`]. That directory is
 //! read fresh on every request, so edits show up without a rebuild.
 
 use std::path::{Component, Path, PathBuf};

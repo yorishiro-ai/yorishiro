@@ -187,9 +187,13 @@ const LOCK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(1
 /// writing different names for the same deployment would make that comparison meaningless.
 pub(crate) fn embedding_stamp() -> (String, i32) {
     resolve_embedding_stamp(
-        std::env::var("YSR_EMBEDDING_MODEL").ok().as_deref(),
-        std::env::var("YSR_EMBEDDING_PROVIDER").ok().as_deref(),
-        std::env::var("YSR_EMBEDDING_DIMENSIONS").ok().as_deref(),
+        std::env::var("YORISHIRO_EMBEDDING_MODEL").ok().as_deref(),
+        std::env::var("YORISHIRO_EMBEDDING_PROVIDER")
+            .ok()
+            .as_deref(),
+        std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
+            .ok()
+            .as_deref(),
     )
 }
 

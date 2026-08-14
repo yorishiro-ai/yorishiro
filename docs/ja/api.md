@@ -9,17 +9,17 @@
 ```console
 # スキーマ登録(schema scope)
 $ curl -X POST localhost:8080/api/schemas \
-    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $YORISHIRO_KEY" -H "Content-Type: application/json" \
     -d @templates/task-management.json
 
 # エンティティ作成(write scope)
 $ curl -X POST localhost:8080/api/entities \
-    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $YORISHIRO_KEY" -H "Content-Type: application/json" \
     -d '{"schema_name":"task-management","entity_type":"task","data":{"title":"牛乳を買う"}}'
 
 # ベクトル類似検索(構造化フィルタとの組み合わせ、read scope)
 $ curl "localhost:8080/api/search?query_text=買い物&filter=%7B%22status%22%3A%22active%22%7D" \
-    -H "Authorization: Bearer $YSR_KEY"
+    -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # 新規ワークスペースはスキーマを持たないため、最初の1本ができるまでエンティティ作成は422で
 # 拒否される(「create a schema first: POST /api/schemas...」)。最初のスキーマ作成で解除され、
@@ -28,27 +28,27 @@ $ curl "localhost:8080/api/search?query_text=買い物&filter=%7B%22status%22%3A
 # リレーションを削除せずに引退させる。探索は辿らなくなるが記録は残る(write scope)。
 # status は active / deprecated / archived の3値。
 $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
-    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $YORISHIRO_KEY" -H "Content-Type: application/json" \
     -d '{"status": "deprecated"}'
 
 # 特定の状態のリレーションのみを一覧する。`status`を省略すると全状態が対象(read scope)
-$ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # エンティティが自分のスキーマのアクティブ版に対してどう古いかを返す(read scope)。
 # 遅延移行のため、古い版で書かれたエンティティは後から追加されたフィールドを持たない。
 # 「未記入」と「そもそも無かった」を区別するための情報である。
-$ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # エンティティとそのリレーション・隣接エンティティを一括取得(read scope)
-$ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # JSON Linesエクスポート: テナント内の全スキーマバージョン + このワークスペースのエンティティ・
 # リレーション(read scope)
-$ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # 同じJSON Lines形式を取り込む。単一トランザクションとして実行(schema scope。
 # スキーマのインポート自体がschema scope専用の操作であるため)
-$ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KEY" \
+$ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
@@ -103,7 +103,7 @@ UUIDはライブラリのみ、それ以外は組み込みのみを検索しま�
 `/auth/signup`と`/auth/login`はbearerトークンを必要としません。
 これらの目的自体がトークンを発行することだからです。
 `/setup`/`/setup/status`([setup.md](setup.md#初回セットアップ)参照)と、生存確認・準備確認用の`/up`/`/health`も同様に認証不要です。
-このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。
+このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。
 招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
 
 ```console
@@ -117,13 +117,13 @@ $ curl -X POST localhost:8080/auth/login -H "Content-Type: application/json" \
     -d '{"email":"...","password":"..."}'
 
 # 呼び出し元自身のテナントのメンバーを一覧・追加(owner/adminのみ)
-$ curl localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY"
-$ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY" \
+$ curl localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY"
+$ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "Content-Type: application/json" -d '{"email":"...","role":"member"}'
 
 # 呼び出し元自身のテナントのワークスペースを一覧・作成(一覧: 全メンバー、作成: owner/adminのみ)
-$ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
-$ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY" \
+$ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY"
+$ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "Content-Type: application/json" -d '{"name":"staging"}'
 ```
 
@@ -161,7 +161,7 @@ RESTのルートとMCPのツールが呼び出し元の identity について食
 
 - 拡張子なし(例: `/foo`、`/dashboard`、`/schemas/abc`) — 常にSPAの`index.html`を`200 OK`で返します。
   これによりWeb UIのクライアントサイドルーティングが機能します — 認識できないパスは全て「存在しないリソース」ではなく「SPAのルート」とみなされます。
-- 拡張子あり(例: `/foo.js`、`/does-not-exist.txt`) — 該当ファイルが存在すれば返し(組み込み、または`YSR_WEB_DIR`設定時はそこから)、存在しなければSPAフォールバックなしの正真正銘の`404 Not Found`を返します。
+- 拡張子あり(例: `/foo.js`、`/does-not-exist.txt`) — 該当ファイルが存在すれば返し(組み込み、または`YORISHIRO_WEB_DIR`設定時はそこから)、存在しなければSPAフォールバックなしの正真正銘の`404 Not Found`を返します。
 
 そのため、拡張子のないパスはこのフォールバックを通じて404になることが決してありません — タイプミスしたAPIルート(例: `GET /api/entitites`)は`404`のJSONエラーではなくSPAのHTMLを返すため、クライアント側のデバッグ時に混乱の原因になり得ます。
 ドットファイル形式のパス(例: `/.env`)も拡張子なし扱いとなり、単純な404ではなく`index.html`にフォールバックします — 先頭のドットは拡張子の区切りではなくファイル名の一部として扱われるため、`Path::extension()`(およびこのフォールバックロジック)からは拡張子なしに見えます。
@@ -173,7 +173,7 @@ Claude Codeでの接続例:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
-    --header "Authorization: Bearer $YSR_KEY"
+    --header "Authorization: Bearer $YORISHIRO_KEY"
 ```
 
 | ツール | scope | 内容 |

@@ -1199,7 +1199,7 @@ async fn a_fill_can_be_undone_as_one_job(pool: PgPool) {
 }
 
 /// Snapshots age out, so a workspace that migrates repeatedly does not accumulate before-images
-/// without bound. `YSR_SNAPSHOT_RETENTION_DAYS` defaults to 30; this backdates one past that and
+/// without bound. `YORISHIRO_SNAPSHOT_RETENTION_DAYS` defaults to 30; this backdates one past that and
 /// runs a second job, which is when the sweep happens.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
@@ -1278,11 +1278,11 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
 fn an_out_of_range_retention_falls_back_to_the_default() {
     // Serialized against the other env-reading tests in this crate is not needed: this reads a
     // key nothing else touches, and reads it through the same function the sweep uses.
-    let restore = std::env::var_os("YSR_SNAPSHOT_RETENTION_DAYS");
+    let restore = std::env::var_os("YORISHIRO_SNAPSHOT_RETENTION_DAYS");
 
     for value in ["2147483648", "9999999999999999999", "not-a-number", ""] {
         // SAFETY: single-threaded test, and no other test reads this key.
-        unsafe { std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", value) };
+        unsafe { std::env::set_var("YORISHIRO_SNAPSHOT_RETENTION_DAYS", value) };
         assert_eq!(
             entities::snapshot_retention_days(),
             30,
@@ -1294,14 +1294,14 @@ fn an_out_of_range_retention_falls_back_to_the_default() {
     // anything `<= 0` as "keep everything", so it lands with `0` rather than reaching
     // `make_interval` and moving the cutoff into the future.
     // SAFETY: as above.
-    unsafe { std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", "-1") };
+    unsafe { std::env::set_var("YORISHIRO_SNAPSHOT_RETENTION_DAYS", "-1") };
     assert!(entities::snapshot_retention_days() <= 0, "sweeping is off");
 
     // SAFETY: as above.
     unsafe {
         match restore {
-            Some(v) => std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", v),
-            None => std::env::remove_var("YSR_SNAPSHOT_RETENTION_DAYS"),
+            Some(v) => std::env::set_var("YORISHIRO_SNAPSHOT_RETENTION_DAYS", v),
+            None => std::env::remove_var("YORISHIRO_SNAPSHOT_RETENTION_DAYS"),
         }
     }
 }

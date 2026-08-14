@@ -142,7 +142,7 @@ pub fn apply_observability_layers(router: Router) -> Router {
 }
 
 fn build_cors_layer() -> CorsLayer {
-    let origins_str = std::env::var("YSR_CORS_ORIGINS").unwrap_or_default();
+    let origins_str = std::env::var("YORISHIRO_CORS_ORIGINS").unwrap_or_default();
 
     let layer = if !origins_str.is_empty() {
         let origins: Vec<_> = origins_str
@@ -151,7 +151,7 @@ fn build_cors_layer() -> CorsLayer {
             .collect();
         CorsLayer::new().allow_origin(origins)
     } else if cfg!(debug_assertions) {
-        // Debug builds only: with no explicit YSR_CORS_ORIGINS, allow any localhost/127.0.0.1
+        // Debug builds only: with no explicit YORISHIRO_CORS_ORIGINS, allow any localhost/127.0.0.1
         // port so browser-based dev tools (e.g. the MCP Inspector) can reach this server
         // without requiring a manually configured origin list. Release builds never take this
         // branch, so the all-reject default (below) is unaffected in production.
@@ -176,7 +176,7 @@ fn build_cors_layer() -> CorsLayer {
 }
 
 /// Matches `http://localhost:<any port>` and `http://127.0.0.1:<any port>` origins. Only
-/// reached from a debug build with `YSR_CORS_ORIGINS` unset (see `build_cors_layer`).
+/// reached from a debug build with `YORISHIRO_CORS_ORIGINS` unset (see `build_cors_layer`).
 fn debug_local_origin_layer() -> CorsLayer {
     CorsLayer::new().allow_origin(AllowOrigin::predicate(|origin, _parts| {
         origin

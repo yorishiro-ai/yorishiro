@@ -19,7 +19,7 @@
 APIキー単位・テナント単位の*レート*制限(リクエストスループットの上限)は現状どこにも実装していません。
 単一のAPIキーが埋め込み生成や検索を大量に呼び出すと、他のリクエストが遅延しえます。
 
-特に`YSR_EMBEDDING_PROVIDER=local`(ONNXローカル推論)は単一Mutexで推論を直列化しているため、同一テナントはもちろん他テナントの埋め込み生成も待たされます。
+特に`YORISHIRO_EMBEDDING_PROVIDER=local`(ONNXローカル推論)は単一Mutexで推論を直列化しているため、同一テナントはもちろん他テナントの埋め込み生成も待たされます。
 必要に応じてリバースプロキシ層(nginx/Envoyなど)でAPIキー単位のレート制限を導入してください。
 
 一方、レート制限とは別に、リソース件数のクォータ機構は存在します。
@@ -38,7 +38,7 @@ embedding同期(entity書き込み後のバックグラウンド処理)の失敗
 ## アクセスログ
 
 全リクエストはJSON形式のログ行(method・path・status・latency)としてアプリケーションの他の`tracing`出力と同じ形で出力されます。
-`YSR_LOG_TARGET`で出力先をまとめて切り替えられます。
+`YORISHIRO_LOG_TARGET`で出力先をまとめて切り替えられます。
 詳細は[configuration.md](configuration.md#ログ出力)を参照してください。
 
 - `stdout`はコンテナランタイムが標準出力からログを収集する運用に向いています。
@@ -52,7 +52,7 @@ embedding同期(entity書き込み後のバックグラウンド処理)の失敗
 ## 埋め込みモデルを変更する
 
 異なるモデルのベクトルは同じHNSWインデックスに同居できません。
-また`YSR_EMBEDDING_DIMENSIONS`が読み込んだモデルと食い違う場合、サーバは**起動を拒否**します。
+また`YORISHIRO_EMBEDDING_DIMENSIONS`が読み込んだモデルと食い違う場合、サーバは**起動を拒否**します。
 不一致は黙って検索結果を悪化させるのではなく、プロセスを止めて知らせます。
 
 **既定値の変更は稼働中のデプロイに影響しません。** 次元は環境変数から読むため、768で動いているデプロイはモデルもベクトルもそのままです。
@@ -60,11 +60,11 @@ embedding同期(entity書き込み後のバックグラウンド処理)の失敗
 
 ```console
 $ # 1. サーバを停止し、models/model.onnx と models/tokenizer.json を差し替える
-$ # 2. YSR_EMBEDDING_DIMENSIONS を新しいモデルの次元に設定する
+$ # 2. YORISHIRO_EMBEDDING_DIMENSIONS を新しいモデルの次元に設定する
 $ # 3. 既存のベクトルを消す(古いモデルのものであるため):
 $ psql "$DATABASE_URL" -c "UPDATE content.entities SET embedding = NULL"
 $ # 4. サーバを起動し、ワークスペースごとに再生成する:
-$ yorishiro-server admin resync-embeddings <workspace-id>
+$ yorishiro-hosted-server admin resync-embeddings <workspace-id>
 ```
 
 手順3と4の間も検索は動きます。
@@ -86,9 +86,9 @@ $ yorishiro-server admin resync-embeddings <workspace-id>
 **AIエージェントは本文ではなくヘッダを見て再試行する**ため、これが無いと即座に再試行され、モードが減らそうとしている負荷をむしろ増やします。
 
 ```console
-$ yorishiro-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
-$ yorishiro-server admin maintenance-status
-$ yorishiro-server admin maintenance off
+$ yorishiro-hosted-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
+$ yorishiro-hosted-server admin maintenance-status
+$ yorishiro-hosted-server admin maintenance off
 ```
 
 `--reason`は汎用メッセージの代わりに呼び出し元へ表示されます。

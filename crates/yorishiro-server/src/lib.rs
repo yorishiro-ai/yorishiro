@@ -425,12 +425,12 @@ pub async fn shutdown_signal() {
     tracing::info!("shutdown signal received, draining connections");
 }
 
-/// Builds the embeddings provider from environment variables. `YSR_EMBEDDING_PROVIDER`
+/// Builds the embeddings provider from environment variables. `YORISHIRO_EMBEDDING_PROVIDER`
 /// switches between `local` (a local ONNX model, the default -- needs no external service or
 /// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
 /// operators already running something like Ollama/LM Studio). The `entities.embedding`
 /// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
-/// share the same dimension count (set via `YSR_EMBEDDING_DIMENSIONS`, default 1024 — the
+/// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024 — the
 /// width of the default model, multilingual-e5-large).
 /// The model name this deployment is configured for, for stamping onto new workspaces.
 ///
@@ -439,41 +439,40 @@ pub async fn shutdown_signal() {
 /// naming question ("what does a local ONNX file call itself?") into a trait every downstream
 /// implementation would have to answer.
 pub fn embedding_model_name() -> String {
-    match std::env::var("YSR_EMBEDDING_PROVIDER")
+    match std::env::var("YORISHIRO_EMBEDDING_PROVIDER")
         .unwrap_or_else(|_| "local".into())
         .as_str()
     {
-        "openai" => std::env::var("YSR_EMBEDDING_MODEL").unwrap_or_else(|_| "openai".into()),
-        _ => {
-            std::env::var("YSR_EMBEDDING_MODEL").unwrap_or_else(|_| "multilingual-e5-large".into())
-        }
+        "openai" => std::env::var("YORISHIRO_EMBEDDING_MODEL").unwrap_or_else(|_| "openai".into()),
+        _ => std::env::var("YORISHIRO_EMBEDDING_MODEL")
+            .unwrap_or_else(|_| "multilingual-e5-large".into()),
     }
 }
 
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
-    let dimensions: usize = std::env::var("YSR_EMBEDDING_DIMENSIONS")
+    let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "1024".into())
         .parse()?;
 
-    let kind = std::env::var("YSR_EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".into());
+    let kind = std::env::var("YORISHIRO_EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".into());
     match kind.as_str() {
         "openai" => {
-            let base_url = std::env::var("YSR_EMBEDDING_BASE_URL").map_err(|_| {
+            let base_url = std::env::var("YORISHIRO_EMBEDDING_BASE_URL").map_err(|_| {
                 anyhow::anyhow!(
-                    "YSR_EMBEDDING_BASE_URL must be set when YSR_EMBEDDING_PROVIDER=openai"
+                    "YORISHIRO_EMBEDDING_BASE_URL must be set when YORISHIRO_EMBEDDING_PROVIDER=openai"
                 )
             })?;
-            let model = std::env::var("YSR_EMBEDDING_MODEL").map_err(|_| {
+            let model = std::env::var("YORISHIRO_EMBEDDING_MODEL").map_err(|_| {
                 anyhow::anyhow!(
-                    "YSR_EMBEDDING_MODEL must be set when YSR_EMBEDDING_PROVIDER=openai"
+                    "YORISHIRO_EMBEDDING_MODEL must be set when YORISHIRO_EMBEDDING_PROVIDER=openai"
                 )
             })?;
             let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
                 base_url: base_url.clone(),
-                api_key: std::env::var("YSR_EMBEDDING_API_KEY").unwrap_or_default(),
+                api_key: std::env::var("YORISHIRO_EMBEDDING_API_KEY").unwrap_or_default(),
                 model: model.clone(),
                 dimensions,
-                send_dimensions_param: std::env::var("YSR_EMBEDDING_SEND_DIMENSIONS_PARAM")
+                send_dimensions_param: std::env::var("YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM")
                     .map(|v| v == "true")
                     .unwrap_or(true),
             });
@@ -481,22 +480,22 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
             Ok(Arc::new(provider))
         }
         "local" => {
-            let max_sequence_length: usize = std::env::var("YSR_ONNX_MAX_SEQUENCE_LENGTH")
+            let max_sequence_length: usize = std::env::var("YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH")
                 .unwrap_or_else(|_| "512".into())
                 .parse()?;
-            let model_path =
-                std::env::var("YSR_ONNX_MODEL_PATH").unwrap_or_else(|_| "models/model.onnx".into());
-            let tokenizer_path = std::env::var("YSR_ONNX_TOKENIZER_PATH")
+            let model_path = std::env::var("YORISHIRO_ONNX_MODEL_PATH")
+                .unwrap_or_else(|_| "models/model.onnx".into());
+            let tokenizer_path = std::env::var("YORISHIRO_ONNX_TOKENIZER_PATH")
                 .unwrap_or_else(|_| "models/tokenizer.json".into());
             // Rejected rather than defaulted on an unknown value: reading a model with the
             // wrong pooling does not fail, it just returns worse vectors.
-            let pooling = match std::env::var("YSR_ONNX_POOLING") {
+            let pooling = match std::env::var("YORISHIRO_ONNX_POOLING") {
                 Ok(value) => Pooling::parse(&value)?,
                 Err(_) => Pooling::default(),
             };
             // Empty is treated as unset: an operator clearing the variable means "no prefix",
             // not "prefix with nothing".
-            let query_instruction = std::env::var("YSR_ONNX_QUERY_INSTRUCTION")
+            let query_instruction = std::env::var("YORISHIRO_ONNX_QUERY_INSTRUCTION")
                 .ok()
                 .filter(|value| !value.trim().is_empty());
             let provider = LocalOnnxProvider::load(LocalOnnxConfig {
@@ -510,10 +509,10 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
             .map_err(|err| {
                 anyhow::anyhow!(
                     "{err}\n\nThe local ONNX embedding provider (the default; see \
-                     YSR_EMBEDDING_PROVIDER) needs '{model_path}' and '{tokenizer_path}' -- \
+                     YORISHIRO_EMBEDDING_PROVIDER) needs '{model_path}' and '{tokenizer_path}' -- \
                      these are not bundled in the repository or the Docker image, and must be \
                      fetched separately. See docs/setup.md#prerequisites for the download \
-                     commands, or set YSR_EMBEDDING_PROVIDER=openai to use an OpenAI-compatible \
+                     commands, or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an OpenAI-compatible \
                      endpoint instead (see docs/embedding-providers.md)."
                 )
             })?;
@@ -521,7 +520,9 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
             Ok(Arc::new(provider))
         }
         other => {
-            anyhow::bail!("unknown YSR_EMBEDDING_PROVIDER '{other}' (expected 'openai' or 'local')")
+            anyhow::bail!(
+                "unknown YORISHIRO_EMBEDDING_PROVIDER '{other}' (expected 'openai' or 'local')"
+            )
         }
     }
 }

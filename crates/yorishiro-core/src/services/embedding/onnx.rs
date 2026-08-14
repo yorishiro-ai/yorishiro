@@ -277,7 +277,7 @@ pub enum Pooling {
 }
 
 impl Pooling {
-    /// Parses the `YSR_ONNX_POOLING` value. Unknown values are rejected rather than defaulted:
+    /// Parses the `YORISHIRO_ONNX_POOLING` value. Unknown values are rejected rather than defaulted:
     /// silently falling back to `Mean` is exactly the quiet degradation this type exists to
     /// prevent.
     pub fn parse(value: &str) -> Result<Self, YorishiroError> {

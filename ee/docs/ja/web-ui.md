@@ -1,18 +1,29 @@
-# 管理ダッシュボードSPA
+# Web UI
 
 [English](../web-ui.md) | **日本語**
 
-管理ダッシュボード(`web/`)はエンタープライズ版独自のUIであるReact SPAで、コミュニティ版の`app.js`は踏襲しません。
-このSPAは`yorishiro-hosted-server`バイナリ自体にはコンパイルされて**組み込まれません**が(rsbuildで別途ビルドするプロジェクト)、Dockerイメージでは専用のNodeステージでビルドされ`/app/web`に同梱、`YORISHIRO_HOSTED_WEB_DIR`もプリセットされるため、Dockerデプロイではそのまま配信されます。
-ベアバイナリデプロイ(リリースtarball)では別途ビルドし(`web/`で`pnpm build`を実行し`web/dist`を生成)、`YORISHIRO_HOSTED_WEB_DIR`環境変数でそのビルド出力を指定する必要があります([configuration.md](configuration.md)参照)。
-Docker外で`YORISHIRO_HOSTED_WEB_DIR`が未設定の場合、`/`はこのダッシュボードではなく、コミュニティ版が組み込んでいるアセットによって配信されます。
+`ee/web`はこのプロダクトのUIです。
+React SPAであり、これが唯一のUIです——かつて並存していたvanilla JSのUIは廃止しました。
 
-**`web/`はpnpmプロジェクトです。**
-lockfileは`pnpm-lock.yaml`で、pnpmのバージョンは`web/package.json`の`packageManager`フィールドに固定されています(CIは`pnpm/action-setup`、Dockerイメージは`corepack enable`を通じてこれを読みます)。
+このSPAは`ee/web/dist`から`rust-embed`でバイナリに**組み込まれます**。
+READMEが約束している「バイナリ1つ、起動すればUIが出る」を保つのはこの仕組みです。
+`dist/`はビルド成果物でありコミットしないため、ビルドは`cargo build`の前に`ee/web`で`pnpm run build`を実行します——CI・リリースワークフロー・Dockerfileのいずれもそうしています。
+この手順を飛ばしたチェックアウトは`embeds_a_built_spa`テストで落ちます。
+`/`が空の404を返すバイナリが出来上がるより先に気付けます。
+
+`YORISHIRO_WEB_DIR`を設定すると、組み込み済みのコピーの代わりにディスク上のディレクトリから配信します。
+リクエストごとに読み直すため、バイナリを再ビルドせずUIを編集・反映できます。
+
+ライセンスキーを要する画面は、キーが無い場合APIが返すエラーをそのまま表示します。
+UI自体はgate対象ではありません。
+セットアップ・ログイン・メンバー/ワークスペース管理は無償の範囲だからです。
+
+**`ee/web`はpnpmプロジェクトです。**
+lockfileは`pnpm-lock.yaml`で、pnpmのバージョンは`package.json`の`packageManager`フィールドに固定されています(CIは`pnpm/action-setup`、Dockerイメージは`corepack enable`を通じてこれを読みます)。
 ここで`npm install`を実行すると`pnpm-lock.yaml`が完全に無視され、ビルド・テスト済みのものとは異なる依存ツリーが解決されてしまいます——`pnpm install`を使ってください。
 `pnpm run check`はCIと同じlint/format/typecheck/buildの一連を実行します。
 
-認証後のデータ取得・更新リクエストは、[public repoのdocs/api.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/api.md)およびこのリポジトリの[api.md](api.md)に記載されている、bearerキー方式のREST APIを経由します。
+認証後のデータ取得・更新リクエストは、[APIリファレンス本体](../../../docs/ja/api.md)および[api.md](api.md)に記載されている、bearerキー方式のREST APIを経由します。
 SPA自体はAPIが強制していない特権的なアクセス権を一切持ちません。
 ログイン・サインアップ・OAuthフローは例外です——これらはまさにbearerキーを最初に取得するための手段そのものなので、キーなしで到達できる必要があります。
 

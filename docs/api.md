@@ -9,17 +9,17 @@ Key endpoints (see the Swagger UI at `/docs` for the full list and details):
 ```console
 # Register a schema (schema scope)
 $ curl -X POST localhost:8080/api/schemas \
-    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $YORISHIRO_KEY" -H "Content-Type: application/json" \
     -d @templates/task-management.json
 
 # Create an entity (write scope)
 $ curl -X POST localhost:8080/api/entities \
-    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $YORISHIRO_KEY" -H "Content-Type: application/json" \
     -d '{"schema_name":"task-management","entity_type":"task","data":{"title":"Buy milk"}}'
 
 # Vector similarity search, combined with a structured filter (read scope)
 $ curl "localhost:8080/api/search?query_text=shopping&filter=%7B%22status%22%3A%22active%22%7D" \
-    -H "Authorization: Bearer $YSR_KEY"
+    -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # A new workspace has no schema yet, so entity writes are refused with a 422 until one exists
 # ("create a schema first: POST /api/schemas..."). Creating the first schema lifts this and
@@ -28,27 +28,27 @@ $ curl "localhost:8080/api/search?query_text=shopping&filter=%7B%22status%22%3A%
 # Retire a relation without deleting it: traversal stops following it, the record stays
 # (write scope). Statuses are active, deprecated and archived.
 $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
-    -H "Authorization: Bearer $YSR_KEY" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $YORISHIRO_KEY" -H "Content-Type: application/json" \
     -d '{"status": "deprecated"}'
 
 # List only the relations in one state; omit `status` to list every state (read scope)
-$ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # How an entity stands against the active version of its schema (read scope). Entities are
 # migrated lazily, so one written earlier simply lacks fields added since -- this tells that
 # apart from a field its author left blank.
-$ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # Entity plus its relations and connected neighbors in one call (read scope)
-$ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/entities/$ENTITY_ID/context" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # JSON Lines export: every schema version in the tenant, plus this workspace's entities and
 # relations (read scope)
-$ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YSR_KEY"
+$ curl "localhost:8080/api/export.jsonl" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # Import the same JSON Lines format back in, as a single transaction (schema scope,
 # since importing schemas is itself a schema-scope-only operation)
-$ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YSR_KEY" \
+$ curl -X POST localhost:8080/api/import.jsonl -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "Content-Type: application/x-ndjson" --data-binary @export.jsonl
 ```
 
@@ -95,7 +95,7 @@ A fork is an independent copy that only records which template it came from, so 
 
 `/auth/signup` and `/auth/login` take no bearer token — their entire purpose is to hand one out.
 `/setup`/`/setup/status` (see [setup.md](setup.md#first-run-setup)) and the liveness/readiness checks `/up`/`/health` are also unauthenticated.
-Of those, the four that accept input (`/auth/signup`, `/auth/login`, `/setup`, `/setup/status`) are rate-limited by client IP (`429 Too Many Requests` past the limit; see `YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS` in [configuration.md](configuration.md)) -- the health probes `/up`/`/health` are not.
+Of those, the four that accept input (`/auth/signup`, `/auth/login`, `/setup`, `/setup/status`) are rate-limited by client IP (`429 Too Many Requests` past the limit; see `YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` in [configuration.md](configuration.md)) -- the health probes `/up`/`/health` are not.
 See [setup.md](setup.md#signup-login-member-and-workspace-management) for the full invite → signup → login flow.
 
 ```console
@@ -109,13 +109,13 @@ $ curl -X POST localhost:8080/auth/login -H "Content-Type: application/json" \
     -d '{"email":"...","password":"..."}'
 
 # List / add members of the caller's own tenant (owner/admin only)
-$ curl localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY"
-$ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY" \
+$ curl localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY"
+$ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "Content-Type: application/json" -d '{"email":"...","role":"member"}'
 
 # List / create workspaces in the caller's own tenant (listing: any member; creating: owner/admin only)
-$ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
-$ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY" \
+$ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY"
+$ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "Content-Type: application/json" -d '{"name":"staging"}'
 ```
 
@@ -150,7 +150,7 @@ Any request path that isn't one of the API routes above falls through to the web
 
 - No file extension (e.g. `/foo`, `/dashboard`, `/schemas/abc`) -- always serves the SPA's `index.html`, `200 OK`.
   This is what makes the web UI's client-side routing work: any unrecognized path is assumed to be a SPA route, not a missing resource.
-- Has a file extension (e.g. `/foo.js`, `/does-not-exist.txt`) -- serves that file if it exists (compiled in, or from `YSR_WEB_DIR` if set), otherwise a real `404 Not Found` with no SPA fallback.
+- Has a file extension (e.g. `/foo.js`, `/does-not-exist.txt`) -- serves that file if it exists (compiled in, or from `YORISHIRO_WEB_DIR` if set), otherwise a real `404 Not Found` with no SPA fallback.
 
 A path with no extension therefore never 404s through this fallback -- a typo'd API route (e.g. `GET /api/entitites`) returns the SPA's HTML instead of a `404` JSON error, which can be surprising when debugging a client.
 A dotfile-style path (e.g. `/.env`) is also treated as extension-less and falls through to `index.html`, not a straight 404 -- the leading dot is treated as part of the filename, not an extension marker, so `Path::extension()` (and this fallback logic with it) sees no extension at all.
@@ -162,7 +162,7 @@ Example connection from Claude Code:
 
 ```console
 $ claude mcp add --transport http yorishiro http://localhost:8080/mcp \
-    --header "Authorization: Bearer $YSR_KEY"
+    --header "Authorization: Bearer $YORISHIRO_KEY"
 ```
 
 | Tool | Scope | Description |

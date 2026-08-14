@@ -42,52 +42,57 @@ fn write_config(dir: &std::path::Path, yaml: &str) -> std::path::PathBuf {
 
 #[test]
 fn yaml_value_is_applied_when_env_is_unset() {
-    let _guard = EnvGuard::new(vec!["YSR_CONFIG_PATH", "YSR_BIND"]);
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(dir.path(), "bind: 127.0.0.1:9000\n");
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
-    unsafe { std::env::set_var("YSR_CONFIG_PATH", &path) };
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", &path) };
 
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
-    assert_eq!(std::env::var("YSR_BIND").unwrap(), "127.0.0.1:9000");
+    assert_eq!(std::env::var("YORISHIRO_BIND").unwrap(), "127.0.0.1:9000");
 }
 
 #[test]
 fn env_var_wins_over_yaml_value() {
-    let _guard = EnvGuard::new(vec!["YSR_CONFIG_PATH", "YSR_BIND"]);
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(dir.path(), "bind: 127.0.0.1:9000\n");
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
     unsafe {
-        std::env::set_var("YSR_CONFIG_PATH", &path);
-        std::env::set_var("YSR_BIND", "127.0.0.1:1234");
+        std::env::set_var("YORISHIRO_CONFIG_PATH", &path);
+        std::env::set_var("YORISHIRO_BIND", "127.0.0.1:1234");
     }
 
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
-    assert_eq!(std::env::var("YSR_BIND").unwrap(), "127.0.0.1:1234");
+    assert_eq!(std::env::var("YORISHIRO_BIND").unwrap(), "127.0.0.1:1234");
 }
 
 #[test]
 fn missing_config_file_is_a_no_op() {
-    let _guard = EnvGuard::new(vec!["YSR_CONFIG_PATH", "YSR_BIND"]);
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
     let dir = tempfile::tempdir().unwrap();
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
-    unsafe { std::env::set_var("YSR_CONFIG_PATH", dir.path().join("does-not-exist.yml")) };
+    unsafe {
+        std::env::set_var(
+            "YORISHIRO_CONFIG_PATH",
+            dir.path().join("does-not-exist.yml"),
+        )
+    };
 
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
-    assert!(std::env::var_os("YSR_BIND").is_none());
+    assert!(std::env::var_os("YORISHIRO_BIND").is_none());
 }
 
 #[test]
 fn nested_embedding_settings_are_applied() {
     let _guard = EnvGuard::new(vec![
-        "YSR_CONFIG_PATH",
-        "YSR_EMBEDDING_PROVIDER",
-        "YSR_EMBEDDING_DIMENSIONS",
-        "YSR_ONNX_MODEL_PATH",
+        "YORISHIRO_CONFIG_PATH",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+        "YORISHIRO_EMBEDDING_DIMENSIONS",
+        "YORISHIRO_ONNX_MODEL_PATH",
     ]);
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(
@@ -95,25 +100,31 @@ fn nested_embedding_settings_are_applied() {
         "embedding:\n  provider: local\n  dimensions: 768\n  onnx_model_path: /models/model.onnx\n",
     );
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
-    unsafe { std::env::set_var("YSR_CONFIG_PATH", &path) };
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", &path) };
 
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
-    assert_eq!(std::env::var("YSR_EMBEDDING_PROVIDER").unwrap(), "local");
-    assert_eq!(std::env::var("YSR_EMBEDDING_DIMENSIONS").unwrap(), "768");
     assert_eq!(
-        std::env::var("YSR_ONNX_MODEL_PATH").unwrap(),
+        std::env::var("YORISHIRO_EMBEDDING_PROVIDER").unwrap(),
+        "local"
+    );
+    assert_eq!(
+        std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS").unwrap(),
+        "768"
+    );
+    assert_eq!(
+        std::env::var("YORISHIRO_ONNX_MODEL_PATH").unwrap(),
         "/models/model.onnx"
     );
 }
 
 #[test]
 fn unknown_key_is_a_hard_error() {
-    let _guard = EnvGuard::new(vec!["YSR_CONFIG_PATH"]);
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH"]);
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(dir.path(), "not_a_real_setting: true\n");
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
-    unsafe { std::env::set_var("YSR_CONFIG_PATH", &path) };
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", &path) };
 
     let err = unsafe { load_and_apply_env_overrides() }.unwrap_err();
 
@@ -126,9 +137,9 @@ fn unknown_key_is_a_hard_error() {
 #[test]
 fn search_and_snapshot_settings_are_applied_and_overridable() {
     let _guard = EnvGuard::new(vec![
-        "YSR_CONFIG_PATH",
-        "YSR_SEARCH_TOKENS_PER_MINUTE",
-        "YSR_SNAPSHOT_RETENTION_DAYS",
+        "YORISHIRO_CONFIG_PATH",
+        "YORISHIRO_SEARCH_TOKENS_PER_MINUTE",
+        "YORISHIRO_SNAPSHOT_RETENTION_DAYS",
     ]);
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(
@@ -137,21 +148,56 @@ fn search_and_snapshot_settings_are_applied_and_overridable() {
     );
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
     unsafe {
-        std::env::set_var("YSR_CONFIG_PATH", &path);
+        std::env::set_var("YORISHIRO_CONFIG_PATH", &path);
         // Set one of the two, so this asserts both directions in one run.
-        std::env::set_var("YSR_SNAPSHOT_RETENTION_DAYS", "90");
+        std::env::set_var("YORISHIRO_SNAPSHOT_RETENTION_DAYS", "90");
     }
 
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
     assert_eq!(
-        std::env::var("YSR_SEARCH_TOKENS_PER_MINUTE").unwrap(),
+        std::env::var("YORISHIRO_SEARCH_TOKENS_PER_MINUTE").unwrap(),
         "5000",
         "the yaml value is applied when the environment says nothing"
     );
     assert_eq!(
-        std::env::var("YSR_SNAPSHOT_RETENTION_DAYS").unwrap(),
+        std::env::var("YORISHIRO_SNAPSHOT_RETENTION_DAYS").unwrap(),
         "90",
         "the environment still wins over the file"
+    );
+}
+
+/// `config.example.yml` is `deny_unknown_fields`-parsed like any other config, so a key
+/// documented there but absent from `FileConfig` makes a copied example refuse to start. This
+/// parses the example with every key uncommented, which is the only way that mismatch shows up
+/// before a user hits it.
+#[test]
+fn the_example_config_parses_with_every_key_enabled() {
+    let example = include_str!("../../../../config.example.yml");
+    let enabled: String = example
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix('#')?;
+            let indent = rest.len() - rest.trim_start().len();
+            let body = rest.trim_start();
+            // Only "key: value" lines; prose comments are skipped.
+            let key = body.split(':').next()?;
+            if key.is_empty()
+                || !key.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                || !body.contains(':')
+            {
+                return None;
+            }
+            let body = body.split("  #").next()?.trim_end();
+            Some(format!("{}{}", " ".repeat(indent.saturating_sub(1)), body))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let parsed = serde_yaml_ng::from_str::<super::FileConfig>(&enabled);
+    assert!(
+        parsed.is_ok(),
+        "config.example.yml does not parse into FileConfig: {:?}\n--- what was parsed ---\n{enabled}",
+        parsed.err()
     );
 }

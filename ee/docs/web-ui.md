@@ -1,13 +1,19 @@
-# Admin Dashboard SPA
+# The web UI
 
 **English** | [日本語](ja/web-ui.md)
 
-The admin dashboard (`web/`) is a React SPA that is the enterprise edition's own UI -- it does not reuse the community edition's `app.js`.
-This SPA is **not** compiled into the `yorishiro-hosted-server` binary (it's a separate rsbuild project), but the Docker image builds it in a dedicated Node stage and bundles it at `/app/web` with `YORISHIRO_HOSTED_WEB_DIR` preset, so Docker deployments serve it out of the box.
-Bare-binary deployments (release tarballs) must build it separately (`pnpm build` in `web/`, producing `web/dist`) and set `YORISHIRO_HOSTED_WEB_DIR` to point at the output (see [configuration.md](configuration.md)).
-Without that variable set and outside Docker, `/` is served by the community edition's own embedded assets instead of this dashboard.
+`ee/web` is the product's UI: a React SPA, and the only one — the vanilla-JS UI that used to sit beside it is gone.
 
-**`web/` is a pnpm project.** The lockfile is `pnpm-lock.yaml`, and the pnpm version is pinned in `web/package.json`'s `packageManager` field, which CI and the Docker image both read (via `pnpm/action-setup` and `corepack enable` respectively).
+The SPA **is** compiled into the binary, from `ee/web/dist`, via `rust-embed`.
+That is what keeps the promise the README makes: one binary, and starting it gives you a UI.
+`dist/` is a build output and is not committed, so a build runs `pnpm run build` in `ee/web` before `cargo build` — CI, the release workflow and the Dockerfile all do.
+A checkout that skips it fails the `embeds_a_built_spa` test rather than producing a binary that serves a blank 404 at `/`.
+
+`YORISHIRO_WEB_DIR` overrides the compiled-in copy with a directory on disk, read fresh on every request, for iterating on the UI without rebuilding the binary.
+
+Pages that need a licence key show the API's own error when it is absent; the UI itself is not gated, since setup, login, member and workspace management are part of the free floor.
+
+**`ee/web` is a pnpm project.** The lockfile is `pnpm-lock.yaml`, and the pnpm version is pinned in `package.json`'s `packageManager` field, which CI and the Docker image both read (via `pnpm/action-setup` and `corepack enable` respectively).
 Running `npm install` there instead ignores `pnpm-lock.yaml` entirely and resolves a different dependency tree than the one that was built and tested -- use `pnpm install`.
 `pnpm run check` runs the same lint/format/typecheck/build sequence CI does.
 

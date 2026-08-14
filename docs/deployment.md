@@ -100,8 +100,8 @@ There is no need to delete a tag by hand or burn a patch number.
 
 ## Single-tenant mode
 
-`YORISHIRO_MAX_TENANTS=1` and `YSR_EMBEDDING_PROVIDER=local` (see [configuration.md](configuration.md)) are both defaults.
-A deployment that leaves them unset already serves the [`web/`](../crates/yorishiro-web/web) SPA compiled into the binary, and embeds using the local ONNX model.
+`YORISHIRO_MAX_TENANTS=1` and `YORISHIRO_EMBEDDING_PROVIDER=local` (see [configuration.md](configuration.md)) are both defaults.
+A deployment that leaves them unset already serves the [SPA](../ee/web) compiled into the binary, and embeds using the local ONNX model.
 
 Its setup wizard (see [setup.md](setup.md#first-run-setup)) is enough to onboard the deployment's one tenant.
 Set `YORISHIRO_MAX_TENANTS=0` to lift the tenant cap instead.

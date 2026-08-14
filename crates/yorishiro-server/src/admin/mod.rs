@@ -181,7 +181,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
     // What a workspace created here gets stamped with. Built from the environment rather than
     // from a running provider: the admin commands do not start one, and loading a local ONNX
     // model to read one number off it would make `create-tenant` wait on a model it never uses.
-    let embedding_stamp: Option<(String, i32)> = std::env::var("YSR_EMBEDDING_DIMENSIONS")
+    let embedding_stamp: Option<(String, i32)> = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .ok()
         .and_then(|d| d.parse::<i32>().ok())
         .or(Some(1024))

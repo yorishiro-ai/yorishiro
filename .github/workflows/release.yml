@@ -352,7 +352,7 @@ jobs:
       # model is a hard failure, not a degraded mode), so fetch the same one the docs tell
       # operators to use.
       #
-      # This must stay in step with the default model and YSR_EMBEDDING_DIMENSIONS: the server
+      # This must stay in step with the default model and YORISHIRO_EMBEDDING_DIMENSIONS: the server
       # checks the loaded model's width against the configured one and refuses to start when
       # they disagree. v0.25.0 failed here for exactly that reason -- the default moved to a
       # 1024-wide model while this step still fetched a 768-wide one, and the smoke test caught

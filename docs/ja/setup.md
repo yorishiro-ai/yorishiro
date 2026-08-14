@@ -69,7 +69,7 @@ DockerとPostgreSQLへの接続先が必要です。
 
 これだけでシングルテナント構成として完全に動作します。
 Web UIはバイナリに組み込み済みで、別途`web/`を取得・マウントする必要はありません。
-`YORISHIRO_MAX_TENANTS`/`YSR_EMBEDDING_PROVIDER`も既定でシングルテナント・ローカルONNXの値になっており、上でマウントした`models/`と一致します。
+`YORISHIRO_MAX_TENANTS`/`YORISHIRO_EMBEDDING_PROVIDER`も既定でシングルテナント・ローカルONNXの値になっており、上でマウントした`models/`と一致します。
 変更方法は[configuration.md](configuration.md)を、バックグラウンド起動やソースからのイメージビルド、同じイメージでの管理CLI実行は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
 
 ## ビルド済みバイナリで動かす
@@ -86,7 +86,7 @@ Dockerを使わない、ベアメタル/VMへのデプロイ向けです。
    $ tar -xzf yorishiro.tar.gz && rm yorishiro.tar.gz
    ```
 
-   アーカイブには`yorishiro-server`バイナリのみが含まれます。
+   アーカイブには`yorishiro-hosted-server`バイナリのみが含まれます。
    Web UIはバイナリに組み込み済みなので別途取得は不要です。
    手順1で用意した`models/`をバイナリの隣に移動(またはシンボリックリンク)してください。
 3. 少なくとも`DATABASE_URL`を設定します。
@@ -101,7 +101,7 @@ Dockerを使わない、ベアメタル/VMへのデプロイ向けです。
 4. 起動します。
 
    ```console
-   $ ./yorishiro-server
+   $ ./yorishiro-hosted-server
    ```
 
 systemdで再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
@@ -137,7 +137,7 @@ Docker、Docker Compose、makeが必要です。
 |---|---|
 | `http://localhost:8080/up` | Liveness probe。プロセスが起動していれば依存関係を見ず常に200 |
 | `http://localhost:8080/health` | Readiness check。DB接続も確認し、障害時は503 |
-| `http://localhost:8080/` | Web UI。バイナリに組み込み済み。実ディレクトリから配信させる場合は[configuration.md](configuration.md)の`YSR_WEB_DIR`を参照。何をカバーするかは下記[Web UI](#web-ui)を参照 |
+| `http://localhost:8080/` | Web UI。バイナリに組み込み済み。実ディレクトリから配信させる場合は[configuration.md](configuration.md)の`YORISHIRO_WEB_DIR`を参照。何をカバーするかは下記[Web UI](#web-ui)を参照 |
 | `http://localhost:8080/docs` | Swagger UI(REST APIドキュメント) |
 | `http://localhost:8080/api-docs/openapi.json` | OpenAPI仕様 |
 | `http://localhost:8080/mcp` | MCPエンドポイント(Streamable HTTP) |
@@ -336,8 +336,8 @@ roleによる上限はかかりません。
    認証後は、テナントのowner/adminは`DATABASE_URL`/管理CLIを使わずRESTでメンバーの一覧・追加ができます。
 
    ```console
-   $ curl localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY"
-   $ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY" \
+   $ curl localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY"
+   $ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY" \
        -H "Content-Type: application/json" \
        -d '{"email":"existing-user@example.com","role":"admin"}'
    ```
@@ -354,11 +354,11 @@ roleによる上限はかかりません。
    作成・削除はメンバー管理と同じくowner/adminに限定されます。
 
    ```console
-   $ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
-   $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY" \
+   $ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY"
+   $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY" \
        -H "Content-Type: application/json" -d '{"name":"staging"}'
-   $ curl localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YSR_KEY"
-   $ curl -X DELETE localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YSR_KEY"
+   $ curl localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YORISHIRO_KEY"
+   $ curl -X DELETE localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YORISHIRO_KEY"
    ```
 
    - ワークスペースを削除すると配下の全て(エンティティ・リレーション・スキーマ・APIキー)も削除されます。

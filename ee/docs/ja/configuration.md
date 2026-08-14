@@ -2,30 +2,31 @@
 
 [English](../configuration.md) | **日本語**
 
-`yorishiro-hosted-server`はコミュニティ版一式(`yorishiro-server`)を内包した単一プロセスです。
-このリポジトリ独自の変数(下記)に加えて、内包しているコミュニティ版自身の変数(`YSR_EMBEDDING_*`等。[yotsunagi/yorishiroのdocs/configuration.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/configuration.md)に記載)も読み取ります。
-ただし1点例外があります: そのドキュメントに記載されている`config.yml`/`YSR_CONFIG_PATH`によるYAML設定ファイルのサポートは、コミュニティ版バイナリ自身の`main`にのみ配線されており、このプロセスはそれを一切通らないため、`yorishiro-hosted-server`のそばに`config.yml`を置いても何の効果もありません。
-すべての設定は実際の環境変数として渡す必要があります。
+以下は`ee/`の有償機能が読み取る変数です。
+それ以外が読み取る変数は[設定リファレンス本体](../../../docs/ja/configuration.md)にあり、単一のプロセスが両方を読みます。
 
-`YORISHIRO_MAX_TENANTS`は唯一の例外で、このバイナリはコード側で`0`に強制設定するため、環境変数に設定しても効果はありません。
+`config.yml`と`YORISHIRO_CONFIG_PATH`もここで有効です。
+バイナリは1つであり、そのバイナリ自身がファイルを読み込みます。
 
-ログ初期化もコミュニティ版の`main`と同じ(`yorishiro_server::logging::init`)ため、`YSR_LOG_TARGET`/`YSR_LOG_DIR`/`YSR_SYSLOG_SOCKET`(stdout/single/daily/syslog。[yotsunagi/yorishiroのdocs/ja/configuration.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/ja/configuration.md#ログ出力)参照)がこのバイナリにもそのまま適用されます。
-JSON形式でのstdout固定出力ではありません。
+## `YSR_`接頭辞は非推奨
 
-DBロードガードも同様に、埋め込みルーターではなく**このバイナリ自身が起動**するため、`YSR_DB_LOAD_THRESHOLD`(既定`0`、無効)・`YSR_DB_LOAD_SUSTAIN_SECS`(既定`30`)・`YSR_DB_LOAD_POLL_SECS`(既定`5`)がここでも有効です。
-閾値に正の数を設定しない限り無効のままです。
-両エディションで同じ設定にすることが重要で、両者は同一のデータベースを見るため、コミュニティ版のバイナリだけがガードを動かしている構成では、このプロセスが掛けている負荷を監視できません。
+変数はすべて`YORISHIRO_*`に統一しています。
+旧`YSR_*`名と、対になるバイナリが無くなった`YORISHIRO_HOSTED_*`名も引き続き受け付けます。
+起動時に新しい名前へ写し替え、両方の名前を挙げた警告を出します。
+`YSR_WEB_DIR`と`YORISHIRO_HOSTED_WEB_DIR`はどちらも`YORISHIRO_WEB_DIR`になります。
+元から同じ1つの設定でした。
+新旧の名前を両方設定した場合は新しい方の値を使います。
 
 | 変数 | 説明 |
 |---|---|
-| `DATABASE_URL` | PostgreSQL接続文字列(必須)。内包しているコミュニティ版と、このリポジトリ独自のテナント/課金クエリの両方が使います。起動時に`vendor/yorishiro/migrations`(コミュニティ版)、続いてこのリポジトリ独自の`crates/yorishiro-hosted/migrations`(エンタープライズ限定の追加分。OAuthの`identity.users`カラム、Webhook冪等性用の`identity.stripe_processed_events`)が自動適用されます |
-| `YORISHIRO_HOSTED_BIND` | リッスンアドレス(デフォルト: `0.0.0.0:8081`)。空文字列(`YORISHIRO_HOSTED_BIND=`)を設定した場合もbind失敗にはならず、同じデフォルトにフォールバックする |
+| `DATABASE_URL` | PostgreSQL接続文字列(必須)。サーバ全体が共有します。起動時にルートの`migrations/`、続いて`ee/crates/yorishiro-hosted/migrations`(有償機能の追加分。OAuthの`identity.users`カラム、Webhook冪等性用の`identity.stripe_processed_events`)が自動適用されます |
+| `YORISHIRO_BIND` | リッスンアドレス(デフォルト: `0.0.0.0:8081`)。空文字列(`YORISHIRO_BIND=`)を設定した場合もbind失敗にはならず、同じデフォルトにフォールバックする |
 | `YORISHIRO_LICENSE_KEY` | 有償機能を有効化するライセンスキー。RS256で署名したJWTで、バイナリに埋め込んだ公開鍵で検証する。未設定・空・不正・期限切れは起動時点ではいずれも同じ結果になる——有償機能が無効になり、それ以外は通常どおり動作する。この理由で起動が拒否されることはない。無効化された機能が何を返すかは機能ごとに異なる。[ライセンスキー](#ライセンスキー)を参照 |
-| `YORISHIRO_HOSTED_WEB_DIR` | このリポジトリの管理ダッシュボードSPA(`web/`。`pnpm build`でビルド)を`/`から配信するディレクトリ。Dockerイメージでは`/app/web`(同梱されたビルド成果物)にプリセットされているため、Dockerデプロイでは上書き不要。ベアバイナリデプロイでは`web/`を別途ビルドしてこの変数の設定が必要 — `web/`がバイナリ自体に組み込まれることはない([web-ui.md](web-ui.md)参照)。Docker外で未設定(または空文字列)の場合、`/`はコミュニティ版が組み込んでいるアセットによって配信される |
+| `YORISHIRO_WEB_DIR` | 管理ダッシュボードSPA(`ee/web/dist`。`pnpm build`でビルド)は`rust-embed`でバイナリに組み込まれており、この変数は未設定であればそれをそのまま`/`から配信する。設定した場合はディスク上のそのディレクトリを毎リクエスト読み直して代わりに配信する — ビルド済みSPAを再ビルドなしに差し替えたいときのオプトインの上書き |
 
 ## OAuth2/OIDCログイン
 
-内包しているコミュニティ版自身のメール/パスワードによる`POST /auth/login`に加えて、追加のオプションのログイン手段です。
+組み込みのメール/パスワードによる`POST /auth/login`に加えて、追加のオプションのログイン手段です。
 これが有効化するエンドポイントについては[api.md](api.md#oauth2oidcログイン)を参照してください。
 
 | 変数 | 説明 |
@@ -33,7 +34,7 @@ DBロードガードも同様に、埋め込みルーターではなく**この�
 | `YORISHIRO_OAUTH_ISSUER_URL` | IDプロバイダのissuer URL。例: `https://accounts.google.com`や`https://login.microsoftonline.com/{tenant}/v2.0`。未設定(デフォルト)の場合OAuthログインは完全に無効化され、`/auth/oauth/*`の全ルートが`404 Not Found`を返し、Web UIのログイン画面にもSSOボタンは表示されない(この機能が存在しない過去のデプロイと同じ挙動) |
 | `YORISHIRO_OAUTH_CLIENT_ID` | プロバイダに登録したOAuthクライアントID。`YORISHIRO_OAUTH_ISSUER_URL`を設定した場合は必須(未設定または空文字列だと起動時に即座に失敗する) |
 | `YORISHIRO_OAUTH_CLIENT_SECRET` | OAuthクライアントシークレット。`YORISHIRO_OAUTH_ISSUER_URL`を設定した場合は必須(未設定または空文字列だと起動時に即座に失敗する)。プロバイダのリダイレクトを経由するCSRF/PKCEの`state`パラメータに署名するHMACキーの導出にも使われる(別途シークレットは不要) |
-| `YORISHIRO_OAUTH_REDIRECT_URI` | 認証後にプロバイダがリダイレクトし戻す先。デフォルトは`{YORISHIRO_HOSTED_BIND}/auth/oauth/callback`で、全インターフェースを表すbindホスト(`0.0.0.0`、IPv6の場合は`::`/`[::]`)は`localhost`に書き換えられる(ローカルテストでのみ意味があり、リバースプロキシ経由の公開ホスト名を使う実運用では明示的に設定すべき。ブラウザは`YORISHIRO_HOSTED_BIND`に直接到達できないため) |
+| `YORISHIRO_OAUTH_REDIRECT_URI` | 認証後にプロバイダがリダイレクトし戻す先。デフォルトは`{YORISHIRO_BIND}/auth/oauth/callback`で、全インターフェースを表すbindホスト(`0.0.0.0`、IPv6の場合は`::`/`[::]`)は`localhost`に書き換えられる(ローカルテストでのみ意味があり、リバースプロキシ経由の公開ホスト名を使う実運用では明示的に設定すべき。ブラウザは`YORISHIRO_BIND`に直接到達できないため) |
 
 OIDCディスカバリドキュメント(`{issuer_url}/.well-known/openid-configuration`)とプロバイダのJWKSは`/auth/oauth/authorize`/`/auth/oauth/callback`の各リクエスト時に都度取得され、起動時にキャッシュされません。
 そのため署名鍵やエンドポイントをローテーションするプロバイダでも`yorishiro-hosted-server`の再起動は不要です。
@@ -48,7 +49,7 @@ OIDCディスカバリドキュメント(`{issuer_url}/.well-known/openid-config
 初回のOAuthログイン(このインストールで未見のIDプロバイダ`sub`かつ既存のYorishiroアカウントに一致しない場合)は、新規テナント・ワークスペース・`member`ロールのメンバーシップを自動プロビジョニングします([api.md](api.md#get-authoauthcallback)参照)。
 他のテナント作成経路と同様に`YORISHIRO_MAX_TENANTS`の制約を受けますが、前述の通り`yorishiro-hosted-server`は常にこれを無制限に強制設定しています。
 
-`GET /auth/oauth/authorize`/`GET /auth/oauth/callback`は、内包しているコミュニティ版自身の`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`(デフォルト: クライアントIPごとに60秒あたり10リクエスト——詳細は[yotsunagi/yorishiroのdocs/configuration.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/configuration.md)参照)によってレート制限され、コミュニティ版自身の`/auth/login`/`/auth/signup`/`/setup*`ルートと同一のクォータを共有します——理由は[api.md](api.md#oauth2oidc-login)参照。
+`GET /auth/oauth/authorize`/`GET /auth/oauth/callback`は`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`(デフォルト: クライアントIPごとに60秒あたり10リクエスト——詳細は[設定リファレンス本体](../../../docs/ja/configuration.md)参照)によってレート制限され、`/auth/login`/`/auth/signup`/`/setup*`と同一のクォータを共有します——理由は[api.md](api.md#oauth2oidcログイン)参照。
 `GET /auth/oauth/status`はレート制限の対象外です。
 
 ## Stripe課金

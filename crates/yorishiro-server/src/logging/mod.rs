@@ -1,5 +1,5 @@
 //! Selects where log output (including the HTTP access log emitted by `TraceLayer`) goes,
-//! controlled by `YSR_LOG_TARGET`:
+//! controlled by `YORISHIRO_LOG_TARGET`:
 //!
 //! - `stdout` (default): JSON lines on stdout, for a container runtime's log driver.
 //! - `single`: JSON lines appended to one file that's never rotated.
@@ -8,8 +8,8 @@
 //!   `syslog` submodule for the datagram framing). Unix-only -- `/dev/log` is a Unix domain
 //!   socket, so this target is rejected at startup on other platforms.
 //!
-//! `single`/`daily` write under `YSR_LOG_DIR` (default `.`) as `yorishiro.log`. `syslog`
-//! connects to the socket at `YSR_SYSLOG_SOCKET` (default `/dev/log`).
+//! `single`/`daily` write under `YORISHIRO_LOG_DIR` (default `.`) as `yorishiro.log`. `syslog`
+//! connects to the socket at `YORISHIRO_SYSLOG_SOCKET` (default `/dev/log`).
 pub mod syslog;
 
 use anyhow::Result;
@@ -29,7 +29,7 @@ pub enum LogGuard {
 }
 
 pub fn init() -> Result<LogGuard> {
-    let target = std::env::var("YSR_LOG_TARGET").unwrap_or_else(|_| "stdout".into());
+    let target = std::env::var("YORISHIRO_LOG_TARGET").unwrap_or_else(|_| "stdout".into());
     let env_filter = EnvFilter::from_default_env();
 
     match target.as_str() {
@@ -41,7 +41,7 @@ pub fn init() -> Result<LogGuard> {
             Ok(LogGuard::None)
         }
         "single" | "daily" => {
-            let dir = std::env::var("YSR_LOG_DIR").unwrap_or_else(|_| ".".into());
+            let dir = std::env::var("YORISHIRO_LOG_DIR").unwrap_or_else(|_| ".".into());
             let rotation = if target == "daily" {
                 Rotation::DAILY
             } else {
@@ -67,7 +67,7 @@ pub fn init() -> Result<LogGuard> {
             use syslog::SyslogMakeWriter;
 
             let socket_path =
-                std::env::var("YSR_SYSLOG_SOCKET").unwrap_or_else(|_| "/dev/log".into());
+                std::env::var("YORISHIRO_SYSLOG_SOCKET").unwrap_or_else(|_| "/dev/log".into());
             let socket = UnixDatagram::unbound().context("failed to create syslog socket")?;
             socket
                 .connect(&socket_path)
@@ -88,7 +88,7 @@ pub fn init() -> Result<LogGuard> {
         }
         other => {
             anyhow::bail!(
-                "unknown YSR_LOG_TARGET '{other}' (expected 'stdout', 'single', 'daily', or 'syslog')"
+                "unknown YORISHIRO_LOG_TARGET '{other}' (expected 'stdout', 'single', 'daily', or 'syslog')"
             )
         }
     }

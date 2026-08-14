@@ -18,7 +18,7 @@ Relying on volume snapshots alone can produce an inconsistent backup.
 There is currently no per-API-key or per-tenant *rate* limiting; request throughput isn't capped anywhere.
 A single API key making heavy use of embedding generation or search can delay other requests.
 
-This is especially true for `YSR_EMBEDDING_PROVIDER=local` (local ONNX inference), which serializes inference behind a single mutex.
+This is especially true for `YORISHIRO_EMBEDDING_PROVIDER=local` (local ONNX inference), which serializes inference behind a single mutex.
 Embedding generation for other tenants can be blocked too, not just the same tenant.
 Introduce per-API-key rate limiting at a reverse proxy layer (nginx, Envoy, etc.) if needed.
 
@@ -38,7 +38,7 @@ If you need continuous monitoring, set up alerting on your log aggregation platf
 ## Access logging
 
 Every request produces one JSON log line (method, path, status, latency) alongside the rest of the application's `tracing` output.
-`YSR_LOG_TARGET` controls where all of it goes -- see [configuration.md](configuration.md#logging).
+`YORISHIRO_LOG_TARGET` controls where all of it goes -- see [configuration.md](configuration.md#logging).
 
 - `stdout` is the right choice for a container runtime that collects logs from the process's standard streams.
 - `single`/`daily` suit running the binary directly on a host without a surrounding log collector.
@@ -49,18 +49,18 @@ Pair `single`/`daily` with `logrotate` or an equivalent if disk usage needs to b
 
 ## Changing the embedding model
 
-Vectors from two different models cannot share an HNSW index, and the server refuses to start when `YSR_EMBEDDING_DIMENSIONS` disagrees with the model it loaded — a mismatch stops the process rather than quietly returning bad search results.
+Vectors from two different models cannot share an HNSW index, and the server refuses to start when `YORISHIRO_EMBEDDING_DIMENSIONS` disagrees with the model it loaded — a mismatch stops the process rather than quietly returning bad search results.
 
 An existing deployment is unaffected by a change of default: the dimension is read from the environment, so one already running 768 keeps its model and its vectors.
 To move to a different model, re-embed:
 
 ```console
 $ # 1. Stop the server, then replace models/model.onnx and models/tokenizer.json.
-$ # 2. Set YSR_EMBEDDING_DIMENSIONS to the new model's width.
+$ # 2. Set YORISHIRO_EMBEDDING_DIMENSIONS to the new model's width.
 $ # 3. Clear the existing vectors -- they belong to the old model:
 $ psql "$DATABASE_URL" -c "UPDATE content.entities SET embedding = NULL"
 $ # 4. Start the server, then regenerate per workspace:
-$ yorishiro-server admin resync-embeddings <workspace-id>
+$ yorishiro-hosted-server admin resync-embeddings <workspace-id>
 ```
 
 Search still works between steps 3 and 4: entities without an embedding are reachable through the `pg_trgm` fallback, so the window degrades results rather than emptying them.
@@ -80,9 +80,9 @@ Both send `Retry-After`.
 Agents retry on the header rather than on the body, so a refusal without one invites the immediate retry the mode exists to prevent.
 
 ```console
-$ yorishiro-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
-$ yorishiro-server admin maintenance-status
-$ yorishiro-server admin maintenance off
+$ yorishiro-hosted-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
+$ yorishiro-hosted-server admin maintenance-status
+$ yorishiro-hosted-server admin maintenance off
 ```
 
 `--reason` is shown to callers in place of the generic message; an operator saying "restoring from backup, back by 09:00" answers the question a bare status code provokes.
