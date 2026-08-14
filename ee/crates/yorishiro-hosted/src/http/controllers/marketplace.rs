@@ -27,6 +27,25 @@ use crate::services::marketplace::{
 };
 use crate::state::HostedState;
 
+/// The licence gate for every route in this module, paired with authentication so the two cannot
+/// drift apart -- a handler added here reaches for this rather than `authz::authenticate_tenant`
+/// directly, and is gated by construction.
+///
+/// The gate is not on `authenticate_tenant` itself: the tenant dashboard authenticates through
+/// the same function and is part of the free floor (requirements FR-5-3), so gating there would
+/// close a page that must stay open.
+///
+/// It is checked *before* authentication, so an unlicensed deployment answers the same `404`
+/// whether or not the caller holds a valid key -- a marketplace that 401s tells an anonymous
+/// prober that it exists here and is merely locked.
+async fn licensed_tenant(
+    state: &HostedState,
+    headers: &HeaderMap,
+) -> Result<(Uuid, Option<Uuid>), yorishiro_core::YorishiroError> {
+    state.licence.require_active()?;
+    authz::authenticate_tenant(state, headers).await
+}
+
 /// `GET /api/marketplace` -- community-visible templates from every tenant.
 #[utoipa::path(
     get,
@@ -44,7 +63,7 @@ pub async fn list_marketplace(
 ) -> Result<Json<Vec<MarketplaceListing>>, HostedApiError> {
     // The listing spans every tenant, so the identity is not read -- but a valid key is still
     // required, which is what authenticating here enforces.
-    let _ = authz::authenticate_tenant(&state, &headers).await?;
+    let _ = licensed_tenant(&state, &headers).await?;
     let listings = marketplace::list_marketplace(&state.identity_pool).await?;
     Ok(Json(listings))
 }
@@ -67,7 +86,7 @@ pub async fn list_versions(
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, HostedApiError> {
-    let (tenant_id, _) = authz::authenticate_tenant(&state, &headers).await?;
+    let (tenant_id, _) = licensed_tenant(&state, &headers).await?;
     let versions = marketplace::list_versions(&state.identity_pool, tenant_id, template_id).await?;
     Ok(Json(versions))
 }
@@ -93,7 +112,7 @@ pub async fn publish_version(
     Path(template_id): Path<Uuid>,
     Json(body): Json<PublishVersionRequest>,
 ) -> Result<(StatusCode, Json<TemplateVersionRecord>), HostedApiError> {
-    let (tenant_id, user_id) = authz::authenticate_tenant(&state, &headers).await?;
+    let (tenant_id, user_id) = licensed_tenant(&state, &headers).await?;
     let record =
         marketplace::publish_version(&state.identity_pool, tenant_id, template_id, user_id, body)
             .await?;
@@ -117,7 +136,7 @@ pub async fn list_reviews(
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, HostedApiError> {
-    let (tenant_id, _) = authz::authenticate_tenant(&state, &headers).await?;
+    let (tenant_id, _) = licensed_tenant(&state, &headers).await?;
     let reviews = marketplace::list_reviews(&state.identity_pool, tenant_id, template_id).await?;
     Ok(Json(reviews))
 }
@@ -143,7 +162,7 @@ pub async fn submit_review(
     Path(template_id): Path<Uuid>,
     Json(body): Json<SubmitReviewRequest>,
 ) -> Result<Json<TemplateReviewRecord>, HostedApiError> {
-    let (tenant_id, user_id) = authz::authenticate_tenant(&state, &headers).await?;
+    let (tenant_id, user_id) = licensed_tenant(&state, &headers).await?;
     let record =
         marketplace::submit_review(&state.identity_pool, tenant_id, template_id, user_id, body)
             .await?;
@@ -182,7 +201,7 @@ pub async fn fork_template(
     Path(template_id): Path<Uuid>,
     Query(params): Query<ForkParams>,
 ) -> Result<(StatusCode, Json<ForkResponse>), HostedApiError> {
-    let (tenant_id, user_id) = authz::authenticate_tenant(&state, &headers).await?;
+    let (tenant_id, user_id) = licensed_tenant(&state, &headers).await?;
     let forked = marketplace::fork_template(
         &state.identity_pool,
         tenant_id,
@@ -226,7 +245,7 @@ pub async fn set_visibility(
     Path(template_id): Path<Uuid>,
     Json(body): Json<SetVisibilityRequest>,
 ) -> Result<StatusCode, HostedApiError> {
-    let (tenant_id, _) = authz::authenticate_tenant(&state, &headers).await?;
+    let (tenant_id, _) = licensed_tenant(&state, &headers).await?;
     marketplace::set_visibility(
         &state.identity_pool,
         tenant_id,
@@ -236,3 +255,7 @@ pub async fn set_visibility(
     .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/http/controllers/marketplace.rs"]
+mod tests;

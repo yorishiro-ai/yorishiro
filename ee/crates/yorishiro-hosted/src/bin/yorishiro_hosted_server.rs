@@ -167,11 +167,40 @@ async fn run(cli: Cli) -> Result<()> {
     // Kept for the load guard below, which is spawned after `identity_pool` moves into the state.
     let guard_pool = identity_pool.clone();
 
+    // Logs which mode this process booted into. An operator who set a key and still sees the paid
+    // features closed needs that line to tell a rejected key from an absent one.
+    let licence = yorishiro_hosted::services::licence::LicenceState::from_env();
+
+    // Stripe and OAuth are gated by simply not configuring them without a licence, which reuses
+    // the `None`/unconfigured paths both already have -- their routes answer 404 exactly as they
+    // do on a deployment that never set the variables. Unlike the marketplace and infer-fill
+    // gates, this is decided once at startup: both read process-wide configuration at boot
+    // anyway, so a key expiring mid-run leaves them configured until the next restart. The two
+    // request-time gates are the ones that close immediately.
+    let licensed = licence.is_active();
+    if !licensed {
+        if StripeConfig::from_env().webhook_secret.is_some() {
+            tracing::warn!("Stripe is configured but no active licence: billing routes are off");
+        }
+        if OAuthConfig::from_env().is_some() {
+            tracing::warn!("OAuth is configured but no active licence: SSO routes are off");
+        }
+    }
+
     let hosted_state = HostedState {
         identity_pool,
         tenant_db,
-        stripe_config: StripeConfig::from_env(),
-        oauth_config: OAuthConfig::from_env(),
+        stripe_config: if licensed {
+            StripeConfig::from_env()
+        } else {
+            StripeConfig::default()
+        },
+        oauth_config: if licensed {
+            OAuthConfig::from_env()
+        } else {
+            None
+        },
+        licence,
     };
 
     let static_fallback =
