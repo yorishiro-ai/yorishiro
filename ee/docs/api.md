@@ -1,10 +1,13 @@
-# Hosted API Reference
+# API reference for the paid features
 
 **English** | [日本語](ja/api.md)
 
-`yorishiro-hosted-server` embeds the full community edition (see [yotsunagi/yorishiro's docs/api.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/api.md) for everything it inherits as-is: schemas, entities, search, auth, member/workspace management) and mounts several additional endpoints of its own on the same router.
+The endpoints on this page are the ones `ee/` adds.
+Everything else the server offers — schemas, entities, search, auth, member and workspace management — is in [the main API reference](../../docs/api.md).
 
-Endpoints below read/write `identity.tenants`/`identity.tenant_memberships`/`identity.users` directly, in the same database the embedded community server uses.
+These endpoints read and write `identity.tenants`/`identity.tenant_memberships`/`identity.users` directly, in the same database the rest of the server uses.
+
+Most of them require a licence key; see [configuration.md](configuration.md#licence-keys) for which, and for what they answer without one.
 
 ## OpenAPI
 
@@ -12,38 +15,38 @@ The process serves **two** OpenAPI documents, each canonical for one half of the
 
 | Document | Covers |
 |---|---|
-| `/api-docs/openapi.json` | The embedded community edition's own API — schemas, entities, relations, search, auth, workspaces |
+| `/api-docs/openapi.json` | The core API — schemas, entities, relations, search, auth, workspaces |
 | `/api-docs/hosted-openapi.json` | The endpoints documented on this page |
 
-They are separate rather than combined because the community edition builds and mounts the first one from inside `build_app`, using a crate-private `ApiDoc` this repo cannot reach or extend, and `axum::Router::merge` rejects a duplicate route path.
+They are separate rather than combined because `yorishiro-server` builds and mounts the first from inside `build_app`, using a crate-private `ApiDoc` that `ee/` cannot reach or extend, and `axum::Router::merge` rejects a duplicate route path.
 Both are unauthenticated, so a client can fetch either without a key.
 
 Both are raw JSON.
-The community edition also registers a Swagger UI at `/docs`, but under `yorishiro-hosted-server` that path currently redirects to `/docs/` and 404s there -- its bundled assets aren't served in this process.
+A Swagger UI is registered at `/docs`, but that path currently redirects to `/docs/` and 404s there — its bundled assets are not served.
 Fetch the JSON directly rather than relying on the UI.
 
-## Overriding the community edition
+## Overriding a core route
 
-This crate's routes are matched **first**, with the community edition's router behind them as the fallback:
+`ee/`'s routes are matched **first**, with the core router behind them as the fallback:
 
 ```rust
 hosted_router.merge(oauth_login_router).fallback_service(base_app)
 ```
 
-rather than merged alongside it. `axum::Router::merge` panics on a duplicate path, so a merged layout can only ever *add* paths the community edition does not already serve.
-This one can also *replace* them — a hosted-only behaviour can take over an endpoint the community edition defines, without that edition needing to know.
+rather than merged alongside it. `axum::Router::merge` panics on a duplicate path, so a merged layout can only ever *add* paths the core router does not already serve.
+This one can also *replace* them — a paid behaviour can take over an endpoint the core defines, without the core needing to know.
 
-Resolution order is: this crate's routes, then the community edition's, then the community edition's static-asset fallback.
-An unmatched path still reaches the SPA's `index.html` exactly as before.
+Resolution order is: `ee/`'s routes, then the core's, then the static-asset fallback.
+An unmatched path reaches the SPA's `index.html`, which is what lets the SPA own client-side routing.
 
 Two things to keep in mind when adding a route:
 
-- **Overriding a path overrides every method on it.** A request whose path matches here but whose method does not gets this router's `405`, and never reaches the community edition's handler for that method.
+- **Overriding a path overrides every method on it.** A request whose path matches here but whose method does not gets this router's `405`, and never reaches the core handler for that method.
   Define every method the path needs, or leave the path alone.
-- Layers still do not cross the boundary.
-  Each sub-router carries its own `apply_observability_layers`/`apply_body_limit_layer`, exactly as it did under `merge`.
+- Layers do not cross the boundary.
+  Each sub-router carries its own `apply_observability_layers`/`apply_body_limit_layer`.
 
-The two binaries never run in the same process, so there is no case where both editions' versions of a route need to be reachable at once.
+One process serves both halves, so an override is final: there is no second process where the core's version of that route is still reachable.
 
 ## `POST /hosted/stripe/webhook`
 
@@ -76,7 +79,7 @@ For the three `customer.subscription.*` event types specifically, Stripe also do
 The sole read the admin dashboard's landing page needs: plan, workspace cap, usage counters, and the member list, in one round trip.
 
 ```console
-$ curl localhost:8081/hosted/tenant/overview -H "Authorization: Bearer $YSR_KEY"
+$ curl localhost:8081/hosted/tenant/overview -H "Authorization: Bearer $YORISHIRO_KEY"
 ```
 
 Requires the same bearer API key format `/auth/login` issues -- a missing or invalid bearer token gets `401 Unauthorized` -- and restricts access to callers whose tenant membership role is `owner` or `admin` — a `member`-role key gets `403 Forbidden` regardless of the key's own `ApiKeyScope`, since billing/usage data is a tenant-admin concern independent of what content scopes the key happens to hold.
@@ -166,9 +169,9 @@ Resolve it by editing the schema, then merge.
 A schema that follows no template, or one copied before merge bases were recorded, is refused rather than guessed at: substituting the current template for the missing base would read every local addition as a conflict.
 
 These endpoints accept **both key kinds** — a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
-The community edition's versions only ever saw the first.
+The versions that predate the move only ever saw the first.
 
-**No MCP tools.** `list_upstream_changes`, `merge_preview` and `merge_apply` existed as MCP tools while the chain lived in the community edition; `/mcp` is that edition's embedded surface and this edition cannot add tools to it.
+**No MCP tools.** `list_upstream_changes`, `merge_preview` and `merge_apply` existed as MCP tools before the chain moved here; `/mcp` is mounted by `build_app` from a crate-private tool router, so `ee/` cannot add to it.
 The three are REST-only here.
 
 ## Inferring missing values
@@ -210,11 +213,11 @@ A job can be confirmed once — the proposals are deleted on apply, so confirmin
 Encryption at rest is the volume's or the managed database's concern — a key stored beside the data it protects, on a host the operator controls, leaks with the dump either way.
 
 **No MCP tools.**
-`/mcp` is the community edition's embedded surface and this edition cannot add to it, so these six are REST-only.
+`/mcp` is mounted by `build_app` from a crate-private tool router that `ee/` cannot reach, so these six are REST-only.
 
 ## Tenant-scoped API keys
 
-The community edition binds an API key to exactly one workspace, so a client working across several has to hold one key per workspace and swap between them.
+A plain API key binds to exactly one workspace, so a client working across several would otherwise hold one key per workspace and swap between them.
 A key issued here can instead be bound to a **tenant**, naming the workspace per request with `X-Workspace-Id`.
 
 ```console
@@ -222,11 +225,11 @@ A key issued here can instead be bound to a **tenant**, naming the workspace per
 $ yorishiro-hosted-server create-tenant-api-key <tenant-id> write
 
 # Every request then names its workspace
-$ curl localhost:8081/api/entities -H "Authorization: Bearer $YSR_KEY" \
+$ curl localhost:8081/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "X-Workspace-Id: <workspace-id>"
 ```
 
-This works by installing a `yorishiro_core::services::auth::Authenticator` -- the community edition's seam for replacing how a key resolves -- so the header is honoured on **every** authenticated path, REST and MCP alike, rather than on the routes that remembered to look.
+This works by installing a `yorishiro_core::services::auth::Authenticator` -- the seam for replacing how a key resolves -- so the header is honoured on **every** authenticated path, REST and MCP alike, rather than on the routes that remembered to look.
 
 | Key | `X-Workspace-Id` | Result |
 |---|---|---|
@@ -241,7 +244,7 @@ This works by installing a `yorishiro_core::services::auth::Authenticator` -- th
 **A tenant-scoped key never reaches outside its own tenant.**
 `identity.authenticate_api_key`'s two-argument form resolves the requested workspace only when it belongs to the key's tenant, and that check runs during authentication, before any row is read.
 
-The community edition's own single-argument `authenticate_api_key(bytea)` is left in place -- Postgres overloads on arity, so this is an addition.
+The original single-argument `authenticate_api_key(bytea)` is left in place -- Postgres overloads on arity, so this is an addition.
 That function INNER JOINs `identity.workspaces`, so a community-edition process reading the same database rejects a tenant-scoped key rather than mis-resolving it, which is the correct answer for a process with no way to be told which workspace was meant.
 
 Scope works exactly as it does for a workspace-scoped key (`read` < `write` < `schema`, capped by the attributed user's tenant role) -- it just applies across every workspace in the tenant.
@@ -249,12 +252,12 @@ Prefer a workspace-scoped key when a client only ever works in one: it reaches l
 
 ## OAuth2/OIDC login
 
-An additional, optional way to obtain a Yorishiro API key alongside the embedded community server's own `POST /auth/login` (email/password).
+An additional, optional way to obtain a Yorishiro API key alongside the built-in `POST /auth/login` (email/password).
 Disabled by default; see [configuration.md](configuration.md#oauth2oidc-login) for the environment variables that enable it.
 When OAuth isn't configured, `GET /auth/oauth/authorize` and `GET /auth/oauth/callback` both return a `404 Not Found` JSON error body -- this is not necessarily the same response a mistyped URL gets: an *extensionless* unmatched path falls through to the Web UI's `index.html` (`200 OK`) instead of a `404` when the Web UI is being served, whereas a path with a file extension (e.g. `/foo.js`) does still get a real `404`.
 `GET /auth/oauth/status` is the exception to the disabled-means-404 rule: it always answers `200` so the Web UI's login page can decide whether to show the "Sign in with SSO" button.
 
-The embedded community server's per-IP rate limiter (`429` once exhausted, `YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS` -- see [yotsunagi/yorishiro's docs/configuration.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/configuration.md)) is applied route-locally within each sub-router that needs it, not globally -- `axum::Router::merge` doesn't carry a `.layer()` across the merge, so a route only gets rate-limited if the sub-router it's actually defined in applies the layer before merging.
+The per-IP rate limiter (`429` once exhausted, `YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` -- see [the main configuration reference](../../docs/configuration.md)) is applied route-locally within each sub-router that needs it, not globally -- `axum::Router::merge` doesn't carry a `.layer()` across the merge, so a route only gets rate-limited if the sub-router it's actually defined in applies the layer before merging.
 `yorishiro-hosted-server`'s `main` applies it to `GET /auth/oauth/authorize`/`GET /auth/oauth/callback` explicitly, sharing the *same* limiter instance (and so the same per-IP quota) the community server's own `POST /auth/login`/`POST /auth/signup`/`GET /setup/status`/`POST /setup` draw from -- an attacker who exhausts the quota against one can't get a fresh one by switching to the other.
 `/authorize` itself never issues a key -- it only redirects to the provider and sets a CSRF cookie; `GET /auth/oauth/callback` is the one route that can end up issuing a Yorishiro API key, after validating the callback (see below), from caller-supplied input (an authorization code), which is exactly why it's rate-limited the same as a login attempt.
 `GET /auth/oauth/status` is deliberately *not* rate-limited: it returns no secret, and the Web UI's login page calls it on every load.
@@ -298,7 +301,7 @@ Every failure after that point instead falls through the standard JSON error env
 A request that exceeds the rate limit (see above) never reaches any of this -- it gets a bare `429` with no JSON body, the same as `POST /auth/login` does, before the CSRF/state checks even run.
 
 Request bodies on every route in this document are capped at 2 MB.
-`axum::Router::merge` doesn't carry a `.layer()` from either side to the other, so `yorishiro-hosted-server`'s `main` applies the embedded community server's `apply_body_limit_layer` explicitly to this repo's own sub-router, the same way it does for the rate limiter (see above) -- even without it, `axum`'s `Bytes`/`Json`/`String` extractors fall back to their own built-in 2 MB default whenever no explicit layer applies, which is what enforced this cap before the layer was added; the explicit layer additionally covers a hypothetical future handler that reads a raw `Request`/streaming body instead of one of those extractors.
+`axum::Router::merge` doesn't carry a `.layer()` from either side to the other, so `yorishiro-hosted-server`'s `main` applies `apply_body_limit_layer` explicitly to `ee/`'s own sub-router, the same way it does for the rate limiter (see above) -- even without it, `axum`'s `Bytes`/`Json`/`String` extractors fall back to their own built-in 2 MB default whenever no explicit layer applies, which is what enforced this cap before the layer was added; the explicit layer additionally covers a hypothetical future handler that reads a raw `Request`/streaming body instead of one of those extractors.
 
 ```console
 $ curl -i localhost:8081/auth/oauth/authorize

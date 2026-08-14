@@ -4,15 +4,15 @@
 //!
 //! It does this by reading the file (if present) and, for each setting it sets, writing the
 //! corresponding environment variable -- but only if that variable isn't already set. Every
-//! existing `std::env::var("YSR_...")` call site elsewhere in this crate and in
+//! existing `std::env::var("YORISHIRO_...")` call site elsewhere in this crate and in
 //! `yorishiro-core` is untouched: environment variables still win when both are set, and a
 //! deployment with no `config.yml` behaves exactly as before.
 //!
-//! This is only ever invoked from this crate's `main` (in its synchronous prologue, before the
-//! tokio runtime starts -- see `load_and_apply_env_overrides`'s safety contract). It lives here
-//! rather than in `main.rs` so `tests/config.rs` can reach it as an ordinary public item. A
-//! downstream binary that embeds this crate's library API directly, rather than going through
-//! this binary's `main`, simply never calls it.
+//! Invoked from the binary's synchronous prologue, before the tokio runtime starts -- see
+//! `load_and_apply_env_overrides`'s safety contract. [`aliases::apply`] runs immediately before
+//! it, so an exported old-prefix name still beats a value in the file.
+
+pub mod aliases;
 
 use std::path::Path;
 
@@ -34,8 +34,21 @@ struct FileConfig {
     logging: LoggingConfig,
     #[serde(default)]
     auth_rate_limit: AuthRateLimitConfig,
+    #[serde(default)]
+    db_load_guard: DbLoadGuardConfig,
     search_tokens_per_minute: Option<u32>,
     snapshot_retention_days: Option<i32>,
+}
+
+/// The load shedder's settings. Present here because they are documented, and this struct is
+/// `deny_unknown_fields`: a documented key that has no field makes a copied example config
+/// refuse to start.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DbLoadGuardConfig {
+    threshold: Option<u32>,
+    poll_secs: Option<u64>,
+    sustain_secs: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -84,7 +97,7 @@ unsafe fn apply_if_unset(key: &str, value: Option<String>) {
     }
 }
 
-/// Loads `config.yml` (path overridable via `YSR_CONFIG_PATH`, defaulting to `config.yml` in
+/// Loads `config.yml` (path overridable via `YORISHIRO_CONFIG_PATH`, defaulting to `config.yml` in
 /// the working directory) and materializes its settings into the process environment. A
 /// missing file is not an error -- it just means every setting stays exactly as the
 /// environment already has it, which is the same as if this function were never called.
@@ -94,7 +107,7 @@ unsafe fn apply_if_unset(key: &str, value: Option<String>) {
 /// See `apply_if_unset`: must be called from `main`'s synchronous prologue, before the tokio
 /// runtime starts.
 pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
-    let path = std::env::var("YSR_CONFIG_PATH").unwrap_or_else(|_| "config.yml".into());
+    let path = std::env::var("YORISHIRO_CONFIG_PATH").unwrap_or_else(|_| "config.yml".into());
     let path = Path::new(&path);
     if !path.exists() {
         return Ok(());
@@ -108,66 +121,82 @@ pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
     // SAFETY: forwarded from this function's own contract.
     unsafe {
         apply_if_unset("DATABASE_URL", config.database_url);
-        apply_if_unset("YSR_BIND", config.bind);
-        apply_if_unset("YSR_WEB_DIR", config.web_dir);
-        apply_if_unset("YSR_CORS_ORIGINS", config.cors_origins);
+        apply_if_unset("YORISHIRO_BIND", config.bind);
+        apply_if_unset("YORISHIRO_WEB_DIR", config.web_dir);
+        apply_if_unset("YORISHIRO_CORS_ORIGINS", config.cors_origins);
         apply_if_unset(
             "YORISHIRO_MAX_TENANTS",
             config.max_tenants.map(|n| n.to_string()),
         );
         apply_if_unset("RUST_LOG", config.rust_log);
 
-        apply_if_unset("YSR_EMBEDDING_PROVIDER", config.embedding.provider);
+        apply_if_unset("YORISHIRO_EMBEDDING_PROVIDER", config.embedding.provider);
         apply_if_unset(
-            "YSR_EMBEDDING_DIMENSIONS",
+            "YORISHIRO_EMBEDDING_DIMENSIONS",
             config.embedding.dimensions.map(|n| n.to_string()),
         );
-        apply_if_unset("YSR_EMBEDDING_BASE_URL", config.embedding.base_url);
-        apply_if_unset("YSR_EMBEDDING_MODEL", config.embedding.model);
-        apply_if_unset("YSR_EMBEDDING_API_KEY", config.embedding.api_key);
+        apply_if_unset("YORISHIRO_EMBEDDING_BASE_URL", config.embedding.base_url);
+        apply_if_unset("YORISHIRO_EMBEDDING_MODEL", config.embedding.model);
+        apply_if_unset("YORISHIRO_EMBEDDING_API_KEY", config.embedding.api_key);
         apply_if_unset(
-            "YSR_EMBEDDING_SEND_DIMENSIONS_PARAM",
+            "YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM",
             config
                 .embedding
                 .send_dimensions_param
                 .map(|b| b.to_string()),
         );
-        apply_if_unset("YSR_ONNX_MODEL_PATH", config.embedding.onnx_model_path);
-        apply_if_unset("YSR_ONNX_POOLING", config.embedding.onnx_pooling);
         apply_if_unset(
-            "YSR_ONNX_QUERY_INSTRUCTION",
+            "YORISHIRO_ONNX_MODEL_PATH",
+            config.embedding.onnx_model_path,
+        );
+        apply_if_unset("YORISHIRO_ONNX_POOLING", config.embedding.onnx_pooling);
+        apply_if_unset(
+            "YORISHIRO_ONNX_QUERY_INSTRUCTION",
             config.embedding.onnx_query_instruction,
         );
         apply_if_unset(
-            "YSR_ONNX_TOKENIZER_PATH",
+            "YORISHIRO_ONNX_TOKENIZER_PATH",
             config.embedding.onnx_tokenizer_path,
         );
         apply_if_unset(
-            "YSR_ONNX_MAX_SEQUENCE_LENGTH",
+            "YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH",
             config
                 .embedding
                 .onnx_max_sequence_length
                 .map(|n| n.to_string()),
         );
 
-        apply_if_unset("YSR_LOG_TARGET", config.logging.target);
-        apply_if_unset("YSR_LOG_DIR", config.logging.dir);
-        apply_if_unset("YSR_SYSLOG_SOCKET", config.logging.syslog_socket);
+        apply_if_unset("YORISHIRO_LOG_TARGET", config.logging.target);
+        apply_if_unset("YORISHIRO_LOG_DIR", config.logging.dir);
+        apply_if_unset("YORISHIRO_SYSLOG_SOCKET", config.logging.syslog_socket);
 
         apply_if_unset(
-            "YSR_AUTH_RATE_LIMIT_MAX",
+            "YORISHIRO_DB_LOAD_THRESHOLD",
+            config.db_load_guard.threshold.map(|n| n.to_string()),
+        );
+        apply_if_unset(
+            "YORISHIRO_DB_LOAD_POLL_SECS",
+            config.db_load_guard.poll_secs.map(|n| n.to_string()),
+        );
+        apply_if_unset(
+            "YORISHIRO_DB_LOAD_SUSTAIN_SECS",
+            config.db_load_guard.sustain_secs.map(|n| n.to_string()),
+        );
+
+        apply_if_unset(
+            "YORISHIRO_AUTH_RATE_LIMIT_MAX",
             config.auth_rate_limit.max.map(|n| n.to_string()),
         );
         apply_if_unset(
-            "YSR_AUTH_RATE_LIMIT_WINDOW_SECS",
+            "YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS",
             config.auth_rate_limit.window_secs.map(|n| n.to_string()),
         );
         apply_if_unset(
-            "YSR_SEARCH_TOKENS_PER_MINUTE",
+            "YORISHIRO_SEARCH_TOKENS_PER_MINUTE",
             config.search_tokens_per_minute.map(|n| n.to_string()),
         );
         apply_if_unset(
-            "YSR_SNAPSHOT_RETENTION_DAYS",
+            "YORISHIRO_SNAPSHOT_RETENTION_DAYS",
             config.snapshot_retention_days.map(|n| n.to_string()),
         );
     }

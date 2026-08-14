@@ -2,14 +2,14 @@
 
 **English** | [日本語](ja/embedding-providers.md)
 
-Embedding generation for `x-embed` fields is switched with `YSR_EMBEDDING_PROVIDER`.
-The dimension count is configurable via `YSR_EMBEDDING_DIMENSIONS` (default 1024) and must match the model's output.
+Embedding generation for `x-embed` fields is switched with `YORISHIRO_EMBEDDING_PROVIDER`.
+The dimension count is configurable via `YORISHIRO_EMBEDDING_DIMENSIONS` (default 1024) and must match the model's output.
 Embeddings are generated asynchronously in the background after an entity is written, so write API latency is unaffected.
 
 ## `local` — Local ONNX model (default)
 
 Requires no external service or API key — just the model files below — so it's the default and what a self-hosted deployment normally wants.
-Requires a BERT-family ONNX export at `YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`, which already default to `models/model.onnx`/`models/tokenizer.json`.
+Requires a BERT-family ONNX export at `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH`, which already default to `models/model.onnx`/`models/tokenizer.json`.
 The default model (multilingual-e5-large) outputs 1024-dimensional vectors and covers 100+ languages, so Japanese and English text describing the same thing land near each other:
 
 ```console
@@ -29,12 +29,12 @@ If your build environment is also air-gapped, provide a pre-placed onnxruntime a
 ## `openai` — OpenAI-compatible API
 
 Uses an `/v1/embeddings`-compatible endpoint such as Ollama, LM Studio, or OpenAI.
-Set `YSR_EMBEDDING_PROVIDER=openai` explicitly to opt into this instead of the local ONNX default:
+Set `YORISHIRO_EMBEDDING_PROVIDER=openai` explicitly to opt into this instead of the local ONNX default:
 
 ```dotenv
-YSR_EMBEDDING_PROVIDER=openai
-YSR_EMBEDDING_BASE_URL=http://localhost:11434/v1
-YSR_EMBEDDING_MODEL=nomic-embed-text
+YORISHIRO_EMBEDDING_PROVIDER=openai
+YORISHIRO_EMBEDDING_BASE_URL=http://localhost:11434/v1
+YORISHIRO_EMBEDDING_MODEL=nomic-embed-text
 ```
 
 ### When the provider is busy

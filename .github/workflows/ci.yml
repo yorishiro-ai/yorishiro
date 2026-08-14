@@ -152,9 +152,9 @@ jobs:
       # CI checkout can't load it. "openai" only builds an HTTP client at startup -- it never
       # connects until an actual embed() call, which this smoke test never makes -- so a
       # non-resolving placeholder URL is enough to boot without needing a real endpoint.
-      YSR_EMBEDDING_PROVIDER: openai
-      YSR_EMBEDDING_BASE_URL: http://localhost:1
-      YSR_EMBEDDING_MODEL: smoke-test-unused
+      YORISHIRO_EMBEDDING_PROVIDER: openai
+      YORISHIRO_EMBEDDING_BASE_URL: http://localhost:1
+      YORISHIRO_EMBEDDING_MODEL: smoke-test-unused
 
     steps:
       - uses: actions/checkout@v7

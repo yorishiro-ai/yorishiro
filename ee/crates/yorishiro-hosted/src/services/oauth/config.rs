@@ -15,7 +15,7 @@ pub struct OAuthConfig {
     pub client_id: String,
     pub client_secret: String,
     /// Where the provider redirects back to after the user authenticates. Defaults to
-    /// `{YORISHIRO_HOSTED_BIND}/auth/oauth/callback` reinterpreted as a public-facing URL isn't
+    /// `{YORISHIRO_BIND}/auth/oauth/callback` reinterpreted as a public-facing URL isn't
     /// possible from the bind address alone (it's usually `0.0.0.0:...`, not a reachable host),
     /// so this has its own explicit default derived from a public base URL instead -- see
     /// [`OAuthConfig::from_env`].
@@ -92,7 +92,7 @@ pub fn require_non_empty(key: &str, raw: Option<&str>) -> String {
     }
 }
 
-/// `{bind}/auth/oauth/callback`, per the design doc. `YORISHIRO_HOSTED_BIND` defaults to
+/// `{bind}/auth/oauth/callback`, per the design doc. `YORISHIRO_BIND` defaults to
 /// `0.0.0.0:8081` (see `main`), which is very rarely the host a browser can actually reach --
 /// most real deployments sit behind a reverse proxy on a public hostname, so they're expected to
 /// set `YORISHIRO_OAUTH_REDIRECT_URI` explicitly. This default only covers same-host/local

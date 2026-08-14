@@ -784,7 +784,7 @@ pub async fn fill_defaults(
 
 /// How long a batch migration stays undoable.
 ///
-/// `YSR_SNAPSHOT_RETENTION_DAYS` (default 30); `0` keeps every image forever. Left unbounded,
+/// `YORISHIRO_SNAPSHOT_RETENTION_DAYS` (default 30); `0` keeps every image forever. Left unbounded,
 /// a workspace that migrates repeatedly accumulates before-images faster than it holds
 /// entities -- every run writes one row per entity it touches, and only an undo takes them
 /// away again.
@@ -799,7 +799,7 @@ pub async fn fill_defaults(
 /// out of range included, falls back to the default rather than being clamped: a retention of
 /// six million years is a typo, and honouring the nearest legal value would hide it.
 fn snapshot_retention_days() -> i32 {
-    std::env::var("YSR_SNAPSHOT_RETENTION_DAYS")
+    std::env::var("YORISHIRO_SNAPSHOT_RETENTION_DAYS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(30)

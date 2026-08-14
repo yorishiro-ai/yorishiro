@@ -41,14 +41,14 @@ pub struct LoadGuardConfig {
 }
 
 impl LoadGuardConfig {
-    /// `YSR_DB_LOAD_THRESHOLD` (default 0 = disabled), `YSR_DB_LOAD_SUSTAIN_SECS` (default 30),
-    /// `YSR_DB_LOAD_POLL_SECS` (default 5).
+    /// `YORISHIRO_DB_LOAD_THRESHOLD` (default 0 = disabled), `YORISHIRO_DB_LOAD_SUSTAIN_SECS` (default 30),
+    /// `YORISHIRO_DB_LOAD_POLL_SECS` (default 5).
     ///
     /// Off by default. Switching a deployment to read-only without being asked is a large thing
     /// to do on a default, and the right threshold depends on `max_connections`, which this
     /// crate does not choose.
     pub fn from_env() -> Option<Self> {
-        let threshold: i64 = std::env::var("YSR_DB_LOAD_THRESHOLD")
+        let threshold: i64 = std::env::var("YORISHIRO_DB_LOAD_THRESHOLD")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
@@ -58,13 +58,13 @@ impl LoadGuardConfig {
         Some(Self {
             threshold,
             sustain: Duration::from_secs(
-                std::env::var("YSR_DB_LOAD_SUSTAIN_SECS")
+                std::env::var("YORISHIRO_DB_LOAD_SUSTAIN_SECS")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(30),
             ),
             poll: Duration::from_secs(
-                std::env::var("YSR_DB_LOAD_POLL_SECS")
+                std::env::var("YORISHIRO_DB_LOAD_POLL_SECS")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(5),

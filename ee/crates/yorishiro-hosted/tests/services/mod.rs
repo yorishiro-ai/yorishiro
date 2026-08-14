@@ -1,7 +1,7 @@
 use crate::services::oauth::{require_non_empty, rewrite_unspecified_host};
 use crate::services::{bind_addr_or_default, web_dir_or_none};
 
-// Item 1 / item 4: `YORISHIRO_HOSTED_WEB_DIR`/`YORISHIRO_HOSTED_BIND` must treat "set to an
+// Item 1 / item 4: `YORISHIRO_WEB_DIR`/`YORISHIRO_BIND` must treat "set to an
 // empty string" the same as "unset", falling back to their defaults rather than passing an
 // empty string through to `build_app`/`TcpListener::bind`.
 

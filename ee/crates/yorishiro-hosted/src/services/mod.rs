@@ -21,14 +21,14 @@ pub(crate) fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|s| !s.is_empty())
 }
 
-/// The default bind address when `YORISHIRO_HOSTED_BIND` is unset or empty.
+/// The default bind address when `YORISHIRO_BIND` is unset or empty.
 pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8081";
 
-/// `YORISHIRO_HOSTED_BIND`, defaulting to [`DEFAULT_BIND_ADDR`]. `FOO=` (set but empty) falls
+/// `YORISHIRO_BIND`, defaulting to [`DEFAULT_BIND_ADDR`]. `FOO=` (set but empty) falls
 /// back to the default the same as unset, via [`non_empty_env`], rather than being passed
 /// through to `TcpListener::bind` as an empty string and aborting startup with a bind error.
 pub fn bind_addr_from_env() -> String {
-    bind_addr_or_default(non_empty_env("YORISHIRO_HOSTED_BIND").as_deref())
+    bind_addr_or_default(non_empty_env("YORISHIRO_BIND").as_deref())
 }
 
 /// The pure fold `bind_addr_from_env` wraps around [`non_empty_env`]'s output, split out so it's
@@ -42,12 +42,12 @@ pub fn bind_addr_or_default(raw: Option<&str>) -> String {
         .to_string()
 }
 
-/// `YORISHIRO_HOSTED_WEB_DIR`, the directory `yorishiro-hosted-server` serves its admin
+/// `YORISHIRO_WEB_DIR`, the directory `yorishiro-hosted-server` serves its admin
 /// dashboard SPA from. `None` (unset, or set to an empty string via [`non_empty_env`]) makes the
 /// caller fall back to the community edition's own embedded assets -- see
 /// `yorishiro_server::build_app`.
 pub fn web_dir_from_env() -> Option<String> {
-    web_dir_or_none(non_empty_env("YORISHIRO_HOSTED_WEB_DIR").as_deref())
+    web_dir_or_none(non_empty_env("YORISHIRO_WEB_DIR").as_deref())
 }
 
 /// The pure fold `web_dir_from_env` wraps around [`non_empty_env`]'s output, split out so it's

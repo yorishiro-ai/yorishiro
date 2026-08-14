@@ -59,7 +59,7 @@ pub async fn search_entities(
         return Err(YorishiroError::ValidationFailed {
             message: "this workspace has spent its search token budget for the minute".to_string(),
             details: vec![],
-            hint: "retry shortly, or raise YSR_SEARCH_TOKENS_PER_MINUTE".to_string(),
+            hint: "retry shortly, or raise YORISHIRO_SEARCH_TOKENS_PER_MINUTE".to_string(),
         }
         .into());
     }

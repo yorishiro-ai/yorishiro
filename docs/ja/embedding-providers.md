@@ -2,15 +2,15 @@
 
 [English](../embedding-providers.md) | **日本語**
 
-`x-embed`フィールドの埋め込み生成は`YSR_EMBEDDING_PROVIDER`で切り替えます。
-次元数は`YSR_EMBEDDING_DIMENSIONS`(既定1024)で設定し、使用するモデルの出力次元と一致させる必要があります。
+`x-embed`フィールドの埋め込み生成は`YORISHIRO_EMBEDDING_PROVIDER`で切り替えます。
+次元数は`YORISHIRO_EMBEDDING_DIMENSIONS`(既定1024)で設定し、使用するモデルの出力次元と一致させる必要があります。
 埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
 
 ## `local` — ローカルONNXモデル(デフォルト)
 
 外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。
 これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。
-BERT系ONNXエクスポートが必要で、`YSR_ONNX_MODEL_PATH`/`YSR_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。
+BERT系ONNXエクスポートが必要で、`YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH`は既に`models/model.onnx`/`models/tokenizer.json`をデフォルト値としています。
 デフォルトのモデル(multilingual-e5-large)は1024次元のベクトルを出力し、100言語以上に対応します。
 日本語と英語で同じ内容を書いた文が互いに近い位置に来ます。
 
@@ -29,12 +29,12 @@ $ curl -L -o models/tokenizer.json \
 ## `openai` — OpenAI互換API
 
 Ollama / LM Studio / OpenAIなどの`/v1/embeddings`互換エンドポイントを使います。
-ローカルONNXのデフォルトから切り替えるには`YSR_EMBEDDING_PROVIDER=openai`を明示的に設定します。
+ローカルONNXのデフォルトから切り替えるには`YORISHIRO_EMBEDDING_PROVIDER=openai`を明示的に設定します。
 
 ```dotenv
-YSR_EMBEDDING_PROVIDER=openai
-YSR_EMBEDDING_BASE_URL=http://localhost:11434/v1
-YSR_EMBEDDING_MODEL=nomic-embed-text
+YORISHIRO_EMBEDDING_PROVIDER=openai
+YORISHIRO_EMBEDDING_BASE_URL=http://localhost:11434/v1
+YORISHIRO_EMBEDDING_MODEL=nomic-embed-text
 ```
 
 ### プロバイダが混んでいるとき

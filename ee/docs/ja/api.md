@@ -1,10 +1,14 @@
-# ホスティング版APIリファレンス
+# 有償機能APIリファレンス
 
 [English](../api.md) | **日本語**
 
-`yorishiro-hosted-server`はコミュニティ版一式(スキーマ・エンティティ・検索・認証・メンバー/ワークスペース管理など)を内包した上で、同じルータに独自のエンドポイントをいくつか追加します。
-そのまま継承される部分の詳細は[yotsunagi/yorishiroのdocs/api.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/api.md)を参照してください。
-以下のエンドポイントは、内包しているコミュニティ版と同一のデータベース内にある`identity.tenants`/`identity.tenant_memberships`/`identity.users`を直接読み書きします。
+このページのエンドポイントは`ee/`が追加するものです。
+それ以外——スキーマ・エンティティ・検索・認証・メンバー/ワークスペース管理など、サーバが提供する残り全部——は[APIリファレンス本体](../../../docs/ja/api.md)にあります。
+
+これらのエンドポイントは、サーバの他の部分と同じデータベース内にある`identity.tenants`/`identity.tenant_memberships`/`identity.users`を直接読み書きします。
+
+ほとんどはライセンスキーが必要です。
+対象と、キーが無い場合に何を返すかは[configuration.md](configuration.md#ライセンスキー)を参照してください。
 
 ## OpenAPI
 
@@ -13,43 +17,43 @@
 
 | ドキュメント | 対象 |
 |---|---|
-| `/api-docs/openapi.json` | 内包しているコミュニティ版自身のAPI — スキーマ・エンティティ・リレーション・検索・認証・ワークスペース |
+| `/api-docs/openapi.json` | コアAPI — スキーマ・エンティティ・リレーション・検索・認証・ワークスペース |
 | `/api-docs/hosted-openapi.json` | このページに記載のエンドポイント |
 
-統合せず分離しているのは、前者をコミュニティ版が `build_app`の内部で自身の crate 内非公開(`pub(crate)`)な `ApiDoc`から構築・マウントしており、このリポジトリからは参照も拡張もできないためです。
+統合せず分離しているのは、前者を`yorishiro-server`が `build_app`の内部で自身の crate 内非公開(`pub(crate)`)な `ApiDoc`から構築・マウントしており、`ee/`からは参照も拡張もできないためです。
 加えて `axum::Router::merge`は同一パスの重複を許しません。
 どちらも認証不要で、APIキーなしに取得できます。
 
 どちらも生のJSONです。
-コミュニティ版は `/docs`に Swagger UI も登録していますが、`yorishiro-hosted-server`上では現状 `/docs`が `/docs/`にリダイレクトした先で 404 になります(このプロセスではUIのアセットが配信されないため)。
+`/docs`に Swagger UI も登録されていますが、現状 `/docs`が `/docs/`にリダイレクトした先で 404 になります(UIのアセットが配信されないため)。
 UIに頼らず、JSONを直接取得してください。
 
-## コミュニティ版の上書き
+## コアルートの上書き
 
-このクレートのルートを**先に**マッチさせ、コミュニティ版のルータをその背後のフォールバックに置きます。
+`ee/`のルートを**先に**マッチさせ、コアのルータをその背後のフォールバックに置きます。
 
 ```rust
 hosted_router.merge(oauth_login_router).fallback_service(base_app)
 ```
 
 横に並べてmergeするのではありません。
-`axum::Router::merge`はパス重複でpanicするため、merge構成では「コミュニティ版が提供していないパスの**追加**」しかできません。
+`axum::Router::merge`はパス重複でpanicするため、merge構成では「コアが提供していないパスの**追加**」しかできません。
 この構成では**置き換え**もできます。
-コミュニティ版が定義しているエンドポイントを、コミュニティ版に何も知らせることなく、ホスティング版固有の挙動が引き取れます。
+コアが定義しているエンドポイントを、コアに何も知らせることなく、有償機能固有の挙動が引き取れます。
 
-解決順序は、このクレートのルート → コミュニティ版のルート → コミュニティ版の静的アセットフォールバックです。
-未マッチのパスは従来どおりSPAの`index.html`に到達します。
+解決順序は、`ee/`のルート → コアのルート → 静的アセットフォールバックです。
+未マッチのパスはSPAの`index.html`に到達し、これによってSPAがクライアント側ルーティングを担えます。
 
 ルートを追加する際の注意点は2つです。
 
 - **パスを上書きすると、そのパスの全メソッドを上書きします。**
-  パスは一致するがメソッドが一致しないリクエストは、このルータの`405`を受け取り、コミュニティ版の当該メソッドのハンドラには到達しません。
+  パスは一致するがメソッドが一致しないリクエストは、このルータの`405`を受け取り、コアの当該メソッドのハンドラには到達しません。
   そのパスに必要な全メソッドを定義するか、パスごと触らないかのどちらかにしてください。
 - レイヤは境界を越えません。
   各サブルータは`apply_observability_layers`/`apply_body_limit_layer`を自前で持ちます。
-  `merge`だった頃と同じです。
 
-2つのバイナリが同一プロセスで動くことはないため、両版のルートが同時に到達可能である必要のあるケースは存在しません。
+単一プロセスが両方を提供するため、上書きは最終的なものです。
+コア側のそのルートがまだ到達可能な別プロセスは存在しません。
 
 ## `POST /hosted/stripe/webhook`
 
@@ -83,7 +87,7 @@ Stripeのサブスクリプションイベントを受信します。
 プラン・ワークスペース上限・使用量カウンタ・メンバー一覧を1回のリクエストで取得します。
 
 ```console
-$ curl localhost:8081/hosted/tenant/overview -H "Authorization: Bearer $YSR_KEY"
+$ curl localhost:8081/hosted/tenant/overview -H "Authorization: Bearer $YORISHIRO_KEY"
 ```
 
 `/auth/login`が発行するのと同じ形式のbearer APIキーが必要です(欠落・不正なbearerトークンは`401 Unauthorized`)。
@@ -255,7 +259,7 @@ reqwest での実装点はカスタムDNSリゾルバであり、保存時のチ
 $ yorishiro-hosted-server create-tenant-api-key <tenant-id> write
 
 # 各リクエストで対象ワークスペースを指定する
-$ curl localhost:8081/api/entities -H "Authorization: Bearer $YSR_KEY" \
+$ curl localhost:8081/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "X-Workspace-Id: <workspace-id>"
 ```
 
@@ -294,7 +298,7 @@ OAuth未設定時、`GET /auth/oauth/authorize`と`GET /auth/oauth/callback`は�
 ただしこれは必ずしもタイプミスしたURLへのリクエストと同じレスポンスとは限りません——Web UIが配信されている場合、**拡張子を持たない**未マッチのパスは`404`ではなくWeb UIの`index.html`にフォールバックします(`200 OK`)が、拡張子を持つパス(例: `/foo.js`)は依然として実際の`404`になります。
 `GET /auth/oauth/status`は例外で、常に`200`を返し、Web UIのログインページが「SSOでサインイン」ボタンを表示するかどうかの判定に使います。
 
-内包しているコミュニティ版のIPベースのレート制限(上限に達すると`429`。`YSR_AUTH_RATE_LIMIT_MAX`/`YSR_AUTH_RATE_LIMIT_WINDOW_SECS`——詳細は[yotsunagi/yorishiroのdocs/configuration.md](https://github.com/yotsunagi/yorishiro/blob/master/docs/configuration.md)参照)は、それを必要とする各サブルータ内でルート単位に適用されているのであってグローバルではありません。
+IPベースのレート制限(上限に達すると`429`。`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`——詳細は[設定リファレンス本体](../../../docs/ja/configuration.md)参照)は、それを必要とする各サブルータ内でルート単位に適用されているのであってグローバルではありません。
 `axum::Router::merge`は`.layer()`をmerge先へ引き継がないため、あるルートがレート制限の対象になるかどうかは、そのルートが実際に定義されているサブルータがmerge前にレイヤーを適用しているかどうかで決まります。
 `yorishiro-hosted-server`の`main`は`GET /auth/oauth/authorize`/`GET /auth/oauth/callback`に明示的にこれを適用しており、コミュニティ版自身の`POST /auth/login`/`POST /auth/signup`/`GET /setup/status`/`POST /setup`と**同一のリミッターインスタンス**(つまり同一のIP単位クォータ)を共有します——片方でクォータを使い切った攻撃者が、もう片方に切り替えても新しい枠を得ることはできません。
 `/authorize`自体はAPIキーを一切発行せず、プロバイダへのリダイレクトとCSRF Cookieの設定のみを行います。
@@ -347,7 +351,7 @@ IDプロバイダのリダイレクト先(`redirect_uri`)。
 レート制限(上記参照)を超過したリクエストはここまで到達すらせず、CSRF/state検証すら実行される前に、`POST /auth/login`と同様JSONボディなしの`429`を返します。
 
 このドキュメントに記載の全ルートで、リクエストボディは2MBに制限されています。
-`axum::Router::merge`は`.layer()`をどちらの側にも引き継がないため、`yorishiro-hosted-server`の`main`は(上記のレート制限と同様に)このリポジトリ自身のサブルータに、内包しているコミュニティ版の`apply_body_limit_layer`を明示的に適用しています。
+`axum::Router::merge`は`.layer()`をどちらの側にも引き継がないため、`yorishiro-hosted-server`の`main`は(上記のレート制限と同様に)`ee/`自身のサブルータへ`apply_body_limit_layer`を明示的に適用しています。
 このレイヤーがなくても、`axum`の`Bytes`/`Json`/`String`エクストラクタ自体が組み込みの2MBデフォルトにフォールバックするため——このレイヤーが追加される以前はこれによって上限が維持されていました——明示的なレイヤーは、それらのエクストラクタを使わず生の`Request`/ストリーミングボディを読むような将来のハンドラも追加でカバーします。
 
 ```console

@@ -77,6 +77,11 @@ fn main() -> Result<()> {
     //
     // SAFETY: no other thread exists at this point in `main`.
     unsafe {
+        // Before the config file, not after. `load_and_apply_env_overrides` only sets a variable
+        // that is unset, so running the aliases second would let a config-file value beat an
+        // explicitly exported old name -- silently inverting the precedence a deployment already
+        // depends on.
+        yorishiro_server::config::aliases::apply();
         yorishiro_server::config::load_and_apply_env_overrides()?;
         // Default to a single-tenant deployment, which is what a self-hoster gets and what
         // enables the first-run setup wizard. A hosted deployment sets this to `0` (unlimited)
@@ -264,7 +269,7 @@ async fn run(cli: Cli) -> Result<()> {
     // router layer, so embedding the community router does not bring it along. Both editions
     // point at one database, so a guard only the community binary ran would watch a pool this
     // process is the one loading. Same env vars and same default (off unless
-    // `YSR_DB_LOAD_THRESHOLD` is set), so a deployment configures both editions identically.
+    // `YORISHIRO_DB_LOAD_THRESHOLD` is set), so a deployment configures both editions identically.
     if let Some(guard) = yorishiro_core::services::db_load_guard::LoadGuardConfig::from_env() {
         tracing::info!(
             threshold = guard.threshold,

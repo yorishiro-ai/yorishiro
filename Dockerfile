@@ -3,7 +3,7 @@
 # (test/fmt/clippy) instead runs through the `dev` service, see .devcontainer/Dockerfile.
 #
 #   docker build -t yorishiro .
-#   docker run --rm -e DATABASE_URL=... -e YSR_EMBEDDING_PROVIDER=... yorishiro
+#   docker run --rm -e DATABASE_URL=... -e YORISHIRO_EMBEDDING_PROVIDER=... yorishiro
 #
 # Note: the `ort` crate fetches an onnxruntime binary at build time, so the build needs
 # network access (for air-gapped builds, see ORT_LIB_LOCATION in the README).
@@ -54,16 +54,16 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=builder /usr/local/bin/yorishiro-server /usr/local/bin/yorishiro-server
 
-# Relative paths in embedding provider settings (e.g. YSR_ONNX_MODEL_PATH=models/model.onnx)
+# Relative paths in embedding provider settings (e.g. YORISHIRO_ONNX_MODEL_PATH=models/model.onnx)
 # resolve against this directory, so a model directory can be bind-mounted here without
 # also needing an absolute-path override.
 WORKDIR /app
 RUN chown -R yorishiro:yorishiro /app
 
 USER yorishiro
-# The one binary defaults to 8081 (`YORISHIRO_HOSTED_BIND`). Set it here so the image keeps
+# The one binary defaults to 8081 (`YORISHIRO_BIND`). Set it here so the image keeps
 # serving on 8080, which every existing compose file, healthcheck and deployment expects.
-ENV YORISHIRO_HOSTED_BIND=0.0.0.0:8080
+ENV YORISHIRO_BIND=0.0.0.0:8080
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD curl -sf http://localhost:8080/up || exit 1

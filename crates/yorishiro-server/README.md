@@ -2,11 +2,13 @@
 
 HTTP server for [Yorishiro](https://github.com/yotsunagi/yorishiro) — an MCP-native, multi-tenant knowledge store with user-defined schemas.
 
-This crate provides the `yorishiro-server` binary: an axum-based HTTP server that exposes `yorishiro-core`'s domain logic through both a REST API (with OpenAPI/Swagger UI) and an MCP server (Streamable HTTP). It also includes the admin CLI (`yorishiro-server admin ...`), the setup/login web UI, and the logging/configuration infrastructure.
+This crate is the HTTP layer: an axum router exposing `yorishiro-core`'s domain logic through a REST API (with OpenAPI/Swagger UI) and an MCP server (Streamable HTTP), plus the admin CLI and the logging/configuration infrastructure.
 
-## Not a library
+## A library, not a binary
 
-While this crate does export a library API (`build_app`, `apply_observability_layers`, `logging::init`, etc.) for embedding by other binaries, it is primarily a binary crate. Most users should interact with Yorishiro through its REST API, MCP tools, or the admin CLI rather than depending on this crate directly.
+This crate ships no binary. `ee/crates/yorishiro-hosted` provides the one the product ships (`yorishiro-hosted-server`), and it composes this crate's `build_app` with the paid features and the web UI. The admin CLI lives here and is reached through that binary: `yorishiro-hosted-server admin ...`.
+
+The dependency runs one way: this crate must not depend on `ee/`; `ee/` depends on it.
 
 ## License
 

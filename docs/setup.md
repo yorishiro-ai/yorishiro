@@ -63,7 +63,7 @@ Needs Docker and a reachable PostgreSQL instance.
 
 This is a complete, working single-tenant deployment as-is.
 The web UI is compiled into the binary, so there's no separate `web/` directory to fetch or mount.
-`YORISHIRO_MAX_TENANTS`/`YSR_EMBEDDING_PROVIDER` already default to single-tenant/local-ONNX, matching the volume mounted above.
+`YORISHIRO_MAX_TENANTS`/`YORISHIRO_EMBEDDING_PROVIDER` already default to single-tenant/local-ONNX, matching the volume mounted above.
 
 See [configuration.md](configuration.md) to change any of that.
 See [deployment.md](deployment.md#running-in-the-background) for running it in the background, building the image from source, or running the admin CLI from the same image.
@@ -82,7 +82,7 @@ For a bare-metal or VM deployment without Docker.
    $ tar -xzf yorishiro.tar.gz && rm yorishiro.tar.gz
    ```
 
-   The archive contains only the `yorishiro-server` binary.
+   The archive contains only the `yorishiro-hosted-server` binary.
    The web UI is compiled in, so nothing else needs fetching for it.
    Move (or symlink) the `models/` directory from step 1 next to the binary.
 3. Set at least `DATABASE_URL`.
@@ -97,7 +97,7 @@ For a bare-metal or VM deployment without Docker.
 4. Run it:
 
    ```console
-   $ ./yorishiro-server
+   $ ./yorishiro-hosted-server
    ```
 
 See [deployment.md](deployment.md#running-in-the-background) to keep it running across reboots with systemd.
@@ -132,7 +132,7 @@ Migrations are applied automatically on startup, for all three methods above.
 |---|---|
 | `http://localhost:8080/up` | Liveness probe (always 200 if the process is running; no dependency checks) |
 | `http://localhost:8080/health` | Readiness check (also probes DB connectivity; 503 on outage) |
-| `http://localhost:8080/` | Web UI (compiled into the binary; see `YSR_WEB_DIR` in [configuration.md](configuration.md) to serve it from disk instead) -- see [Web UI](#web-ui) below for what it covers |
+| `http://localhost:8080/` | Web UI (compiled into the binary; see `YORISHIRO_WEB_DIR` in [configuration.md](configuration.md) to serve it from disk instead) -- see [Web UI](#web-ui) below for what it covers |
 | `http://localhost:8080/docs` | Swagger UI (REST API documentation) |
 | `http://localhost:8080/api-docs/openapi.json` | OpenAPI specification |
 | `http://localhost:8080/mcp` | MCP endpoint (Streamable HTTP) |
@@ -326,8 +326,8 @@ A tenant owner/admin issues an invite (by CLI or, once they hold an API key, by 
    Once authenticated, a tenant owner/admin can list and add members over REST without needing `DATABASE_URL`/the admin CLI at all:
 
    ```console
-   $ curl localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY"
-   $ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YSR_KEY" \
+   $ curl localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY"
+   $ curl -X POST localhost:8080/api/members -H "Authorization: Bearer $YORISHIRO_KEY" \
        -H "Content-Type: application/json" \
        -d '{"email":"existing-user@example.com","role":"admin"}'
    ```
@@ -343,11 +343,11 @@ A tenant owner/admin issues an invite (by CLI or, once they hold an API key, by 
    Similarly, any authenticated member can list a tenant's workspaces (including their entity/relation/schema counts), while creating or deleting one is restricted to owners/admins, the same way member management is:
 
    ```console
-   $ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY"
-   $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YSR_KEY" \
+   $ curl localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY"
+   $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIRO_KEY" \
        -H "Content-Type: application/json" -d '{"name":"staging"}'
-   $ curl localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YSR_KEY"
-   $ curl -X DELETE localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YSR_KEY"
+   $ curl localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YORISHIRO_KEY"
+   $ curl -X DELETE localhost:8080/api/workspaces/$WORKSPACE_ID -H "Authorization: Bearer $YORISHIRO_KEY"
    ```
 
    - Deleting a workspace cascades to everything under it: entities, relations, schemas, API keys.

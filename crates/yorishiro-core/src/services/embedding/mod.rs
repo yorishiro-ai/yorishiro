@@ -24,7 +24,7 @@ pub enum EmbedKind {
 
 /// Provider that generates embedding vectors. The `entities.embedding` column
 /// is dimensionless (`vector`), so any model works. All vectors in a deployment
-/// must share the same dimension count (`YSR_EMBEDDING_DIMENSIONS`).
+/// must share the same dimension count (`YORISHIRO_EMBEDDING_DIMENSIONS`).
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;

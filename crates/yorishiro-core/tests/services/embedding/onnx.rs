@@ -61,9 +61,9 @@ fn load_reports_missing_files_clearly() {
 /// models/tokenizer.json to enable it.
 #[tokio::test]
 async fn embeds_texts_with_a_real_model() {
-    let model_path =
-        std::env::var("YSR_TEST_ONNX_MODEL").unwrap_or_else(|_| "../../models/model.onnx".into());
-    let tokenizer_path = std::env::var("YSR_TEST_ONNX_TOKENIZER")
+    let model_path = std::env::var("YORISHIRO_TEST_ONNX_MODEL")
+        .unwrap_or_else(|_| "../../models/model.onnx".into());
+    let tokenizer_path = std::env::var("YORISHIRO_TEST_ONNX_TOKENIZER")
         .unwrap_or_else(|_| "../../models/tokenizer.json".into());
     if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
         eprintln!("skipping embeds_texts_with_a_real_model: model files not found");
@@ -216,9 +216,9 @@ async fn an_instruction_changes_queries_only() {
 }
 
 fn real_model_provider(instruction: Option<&str>) -> Option<LocalOnnxProvider> {
-    let model_path =
-        std::env::var("YSR_TEST_ONNX_MODEL").unwrap_or_else(|_| "../../models/model.onnx".into());
-    let tokenizer_path = std::env::var("YSR_TEST_ONNX_TOKENIZER")
+    let model_path = std::env::var("YORISHIRO_TEST_ONNX_MODEL")
+        .unwrap_or_else(|_| "../../models/model.onnx".into());
+    let tokenizer_path = std::env::var("YORISHIRO_TEST_ONNX_TOKENIZER")
         .unwrap_or_else(|_| "../../models/tokenizer.json".into());
     if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
         eprintln!("skipping: model files not found");
