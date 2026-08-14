@@ -23,7 +23,7 @@ fn router(state: HostedState) -> Router {
 /// they didn't exist -- `404 Not Found` -- so a self-hosted/community-style deployment (or an
 /// enterprise deployment that simply hasn't set up SSO) sees no difference from before this
 /// feature existed.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn authorize_404s_when_oauth_is_not_configured(pool: PgPool) {
     let app = router(hosted_state(pool));
     let response = app
@@ -38,7 +38,7 @@ async fn authorize_404s_when_oauth_is_not_configured(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn callback_404s_when_oauth_is_not_configured(pool: PgPool) {
     let app = router(hosted_state(pool));
     let response = app
@@ -59,7 +59,7 @@ async fn callback_404s_when_oauth_is_not_configured(pool: PgPool) {
 /// this test suite has no mock server for. This still covers the part specific to this feature:
 /// auto-provisioning a brand-new tenant/workspace/`member`-role membership on first login, and
 /// resolving back to the same account on a second login by the same provider+subject id.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn find_or_create_provisions_a_tenant_and_membership_on_first_login(pool: PgPool) {
     let provisioned = oauth::find_or_create(
         &pool,
@@ -92,7 +92,7 @@ async fn find_or_create_provisions_a_tenant_and_membership_on_first_login(pool: 
     );
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn find_or_create_resolves_the_same_user_on_a_second_login(pool: PgPool) {
     let first = oauth::find_or_create(
         &pool,
@@ -114,7 +114,7 @@ async fn find_or_create_resolves_the_same_user_on_a_second_login(pool: PgPool) {
 
 /// A different `subject_id` under the same `provider` must never resolve to an existing user --
 /// otherwise two distinct identities at the provider could collide onto one Yorishiro account.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn find_or_create_treats_distinct_subject_ids_as_distinct_users(pool: PgPool) {
     let first = oauth::find_or_create(
         &pool,
@@ -163,7 +163,7 @@ async fn find_or_create_treats_distinct_subject_ids_as_distinct_users(pool: PgPo
 /// resolve to whatever the first created rather than fail. This exercises the
 /// `pg_advisory_xact_lock` serialization in `find_or_create` (see `identity_lock_key`) by racing
 /// two `find_or_create` calls for the same identity concurrently.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn concurrent_first_logins_for_the_same_identity_both_resolve(pool: PgPool) {
     let (first, second) = tokio::join!(
         oauth::find_or_create(
@@ -190,7 +190,7 @@ async fn concurrent_first_logins_for_the_same_identity_both_resolve(pool: PgPool
 
 /// A provider that omits the `email` claim entirely can't be auto-provisioned -- there is no
 /// email to create the account or tenant name from.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn find_or_create_rejects_a_new_identity_with_no_email_claim(pool: PgPool) {
     let result = oauth::find_or_create(&pool, "oidc", "subject-no-email", None, None).await;
     assert!(result.is_err());
@@ -204,7 +204,7 @@ async fn find_or_create_rejects_a_new_identity_with_no_email_claim(pool: PgPool)
 /// ever hit `add_member`'s "tenant not found" path; a bogus tenant id is the simplest way to make
 /// `add_member` fail without special-casing a real caller. Mirrors base's
 /// `create_user_and_add_member_roll_back_together_on_failure`.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn create_oauth_user_and_add_member_roll_back_together_on_failure(pool: PgPool) {
     let mut tx = pool.begin().await.unwrap();
     let user = oauth::create_oauth_user(

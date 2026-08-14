@@ -54,19 +54,15 @@ enum Command {
     SeedOfficialTemplates,
 }
 
-/// Runs both vendor (community) and local (enterprise-only) migrations against
-/// the same database and `_sqlx_migrations` table. `set_ignore_missing(true)`
-/// on the second pass prevents it from rejecting the vendor migration IDs it
-/// doesn't own.
+/// One directory, applied once.
+///
+/// `set_ignore_missing(true)` is deliberately absent. It existed because two directories shared
+/// one `_sqlx_migrations` table and each pass saw the other's versions as missing; with one set
+/// there is nothing legitimate for it to ignore, and keeping it would silence a genuinely absent
+/// migration -- including the fresh-database boundary this version declares, which is supposed
+/// to refuse loudly.
 async fn run_migrations(pool: &sqlx::PgPool) -> Result<()> {
-    sqlx::migrate!("../../../migrations")
-        .set_ignore_missing(true)
-        .run(pool)
-        .await?;
-    sqlx::migrate!("./migrations")
-        .set_ignore_missing(true)
-        .run(pool)
-        .await?;
+    sqlx::migrate!("../../../migrations").run(pool).await?;
     Ok(())
 }
 

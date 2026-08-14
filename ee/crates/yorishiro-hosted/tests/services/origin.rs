@@ -41,7 +41,7 @@ async fn seed_template(pool: &PgPool, tenant_id: Uuid) -> Uuid {
     id
 }
 
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_edited_template_is_reported_as_an_upstream_change(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -85,7 +85,7 @@ async fn an_edited_template_is_reported_as_an_upstream_change(pool: PgPool) {
 }
 
 /// A schema written by hand follows nothing, so it can never be reported.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_detached_schema_is_never_an_upstream_change(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let db = TenantDb::new(pool.clone());
@@ -106,7 +106,7 @@ async fn a_detached_schema_is_never_an_upstream_change(pool: PgPool) {
 
 /// Once the template is deleted there is no update left to take, so a yanked schema drops out
 /// of the report rather than sitting in it forever.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_yanked_schema_stops_being_reported(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -155,7 +155,7 @@ async fn a_yanked_schema_stops_being_reported(pool: PgPool) {
 /// The merge base. A copy keeps the definition it was made from, and that snapshot does not
 /// move when the template does — otherwise there would be nothing to compare the upstream
 /// edit against.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_hand_written_schema_has_no_merge_base(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let db = TenantDb::new(pool);
@@ -173,7 +173,7 @@ async fn a_hand_written_schema_has_no_merge_base(pool: PgPool) {
 
 /// The whole point, end to end: a template that moved and a workspace that moved, told apart
 /// by the base rather than confused with each other.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn merge_preview_separates_upstream_changes_from_local_ones(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -220,7 +220,7 @@ async fn merge_preview_separates_upstream_changes_from_local_ones(pool: PgPool) 
 
 /// A schema that follows nothing cannot be merged, and says so rather than comparing against
 /// something arbitrary.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn merge_preview_refuses_a_schema_with_no_origin(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let db = TenantDb::new(pool.clone());
@@ -245,7 +245,7 @@ async fn merge_preview_refuses_a_schema_with_no_origin(pool: PgPool) {
 
 /// Copied before snapshots existed: no ancestor, so no merge. Substituting the current
 /// template would read every local field as a conflict, which is worse than refusing.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn merge_preview_refuses_when_the_base_was_never_recorded(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -294,7 +294,7 @@ fn task_schema_with_local_field() -> MetaSchemaDefinition {
     .unwrap()
 }
 
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn merge_apply_takes_upstream_and_keeps_local(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -361,7 +361,7 @@ async fn merge_apply_takes_upstream_and_keeps_local(pool: PgPool) {
 /// upstream said, not what the merge produced -- otherwise the *next* merge reads this
 /// workspace's own fields as upstream's, sees them "unchanged here", and follows a later
 /// upstream removal by deleting them.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn merge_apply_advances_the_base_to_upstream(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -422,7 +422,7 @@ async fn merge_apply_advances_the_base_to_upstream(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn merge_apply_refuses_a_conflict(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;
@@ -484,7 +484,7 @@ async fn merge_apply_refuses_a_conflict(pool: PgPool) {
 /// definition. Merging into one is different: the merge installs its result as the new active
 /// version, so an archived id would resurrect an abandoned lineage over the one entities are
 /// actually written against. Both preview and apply refuse, since they share `merge_sides`.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_archived_version_cannot_be_merged_into(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
     let template_id = seed_template(&pool, tenant_id).await;

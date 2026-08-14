@@ -5,7 +5,7 @@ use sqlx::PgPool;
 /// A workspace with nothing configured must read as absent, not as an error and not as an empty
 /// configuration -- the caller turns absence into a refusal, and an empty `base_url` would
 /// instead produce a request to nowhere.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_unconfigured_workspace_has_no_credentials(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, "t").await;
     let workspace_id = seed_workspace(&pool, tenant_id, "w").await;
@@ -16,7 +16,7 @@ async fn an_unconfigured_workspace_has_no_credentials(pool: PgPool) {
 
 /// `describe` is what an endpoint returns, so the key must not be in it. `get` is the only path
 /// that yields the key, and only the inference client calls it.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn describe_reports_the_endpoint_without_the_key(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, "t").await;
     let workspace_id = seed_workspace(&pool, tenant_id, "w").await;
@@ -45,7 +45,7 @@ async fn describe_reports_the_endpoint_without_the_key(pool: PgPool) {
 
 /// Reconfiguring replaces rather than accumulating: a workspace has one set of credentials, and
 /// a second row would leave which one is used up to row order.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn setting_twice_replaces_the_credentials(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, "t").await;
     let workspace_id = seed_workspace(&pool, tenant_id, "w").await;
@@ -65,7 +65,7 @@ async fn setting_twice_replaces_the_credentials(pool: PgPool) {
 
 /// A trailing slash on the base URL would produce `…/v1//chat/completions`. Some providers
 /// accept that and some 404, so it is normalized once here rather than at each call site.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_trailing_slash_is_trimmed_from_the_base_url(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, "t").await;
     let workspace_id = seed_workspace(&pool, tenant_id, "w").await;
@@ -81,7 +81,7 @@ async fn a_trailing_slash_is_trimmed_from_the_base_url(pool: PgPool) {
 
 /// An empty key is a configuration mistake that would otherwise be stored and fail later, at
 /// the provider, as a 401 the operator has to trace back here.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_empty_key_is_rejected(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, "t").await;
     let workspace_id = seed_workspace(&pool, tenant_id, "w").await;
@@ -95,7 +95,7 @@ async fn an_empty_key_is_rejected(pool: PgPool) {
 }
 
 /// Clearing makes inference refuse again, which is how a workspace turns the feature off.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn clearing_removes_the_credentials(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, "t").await;
     let workspace_id = seed_workspace(&pool, tenant_id, "w").await;
@@ -133,7 +133,7 @@ fn check_scheme_accepts_http_and_https_only() {
 /// `check_scheme` alone did not catch this: it trims before looking, so it accepts padding that
 /// `set` was then storing verbatim. The stored value is interpolated into a request URL, so what
 /// matters is what lands in the row -- which only a `set`-level test can see.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn set_stores_the_normalised_base_url(pool: PgPool) {
     let (_tenant_id, workspace_id) =
         crate::tests::test_helpers::seed_tenant_and_workspace(&pool).await;

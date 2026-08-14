@@ -194,7 +194,7 @@ async fn tenant_plan(pool: &PgPool, tenant_id: uuid::Uuid) -> Option<String> {
         .and_then(|record| record.plan)
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_duplicate_event_id_is_not_reapplied(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     billing::link_stripe_customer(&pool, tenant.id, "cus_1")
@@ -230,7 +230,7 @@ async fn a_duplicate_event_id_is_not_reapplied(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_out_of_order_delivery_does_not_undo_a_newer_event(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     billing::link_stripe_customer(&pool, tenant.id, "cus_2")
@@ -264,7 +264,7 @@ async fn an_out_of_order_delivery_does_not_undo_a_newer_event(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn events_for_different_customers_do_not_interfere(pool: PgPool) {
     let tenant_a = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     let tenant_b = tenancy::create_tenant(&pool, "beta", None).await.unwrap();
@@ -304,7 +304,7 @@ async fn events_for_different_customers_do_not_interfere(pool: PgPool) {
 /// same purchase, and the subscription event can carry an earlier `created` timestamp. If the
 /// checkout event's `customer_id` were recorded for ordering, that earlier subscription event
 /// would be wrongly rejected as stale and the tenant would never receive its purchased plan.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_checkout_completion_does_not_block_an_earlier_created_subscription_event(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     let app = router(pool.clone());
@@ -332,7 +332,7 @@ async fn a_checkout_completion_does_not_block_an_earlier_created_subscription_ev
 /// Cancelling a subscription has to put the tenant back on Free -- both the plan and the
 /// workspace cap that comes with it. Missing the cap would leave a cancelled tenant with a paid
 /// tier's limits, which is the expensive direction to get wrong.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_cancellation_returns_the_tenant_to_free(pool: PgPool) {
     let tenant = yorishiro_core::repositories::tenancy::create_tenant(&pool, "acme", None)
         .await
@@ -375,7 +375,7 @@ async fn a_cancellation_returns_the_tenant_to_free(pool: PgPool) {
 /// A cancellation for a customer nobody is linked to must be accepted and ignored, not error.
 /// Stripe retries anything it does not get a 2xx for, so returning an error here would have it
 /// redeliver the same event indefinitely.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_cancellation_for_an_unknown_customer_is_accepted_and_ignored(pool: PgPool) {
     let app = router(pool.clone());
 
@@ -393,7 +393,7 @@ async fn a_cancellation_for_an_unknown_customer_is_accepted_and_ignored(pool: Pg
 /// delivery from anything else, so the endpoint refuses rather than accepting unverifiable
 /// requests -- if this ever started returning 200, a forged body would be applied to real
 /// tenants.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting(pool: PgPool) {
     let state = HostedState {
         tenant_db: yorishiro_core::db::TenantDb::new(pool.clone()),
