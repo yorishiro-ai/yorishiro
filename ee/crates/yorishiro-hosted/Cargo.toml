@@ -1,0 +1,44 @@
+[package]
+name = "yorishiro-hosted"
+version.workspace = true
+edition.workspace = true
+# Not `license.workspace = true`: the workspace is BUSL-1.1 and this crate is not. Everything
+# under `ee/` is licensed by `ee/LICENSE`, which adds a Competing Use restriction.
+license-file = "../../LICENSE"
+autotests = false
+publish = false
+
+[[bin]]
+name = "yorishiro-hosted-server"
+path = "src/bin/yorishiro_hosted_server.rs"
+
+[dependencies]
+async-trait.workspace = true
+yorishiro-core = { path = "../../../crates/yorishiro-core" }
+yorishiro-server = { path = "../../../crates/yorishiro-server" }
+anyhow.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+base64.workspace = true
+chrono.workspace = true
+clap.workspace = true
+cookie.workspace = true
+hmac.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+sea-query.workspace = true
+sea-query-binder.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+tracing-test = { workspace = true, features = ["no-env-filter"] }

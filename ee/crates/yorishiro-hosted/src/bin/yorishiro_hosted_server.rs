@@ -1,0 +1,254 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use clap::Parser;
+use yorishiro_core::db::TenantDb;
+use yorishiro_hosted::http::controllers::stripe::StripeConfig;
+use yorishiro_hosted::services::oauth::OAuthConfig;
+use yorishiro_hosted::state::HostedState;
+use yorishiro_server::admin::{self, AdminCommand};
+use yorishiro_server::http::middleware::rate_limit::{RateLimiter, apply_rate_limit_layer};
+use yorishiro_server::{
+    AppState, apply_body_limit_layer, apply_observability_layers, build_app_with_rate_limiter,
+    build_embedding_provider, shutdown_signal,
+};
+
+/// The single process a hosted deployment runs. A plain start runs the HTTP
+/// server; `yorishiro-hosted-server admin ...` runs one-off administrative
+/// commands (same as `yorishiro-server admin ...` but against the hosted DB
+/// with both vendor and local migrations applied).
+#[derive(Parser)]
+#[command(name = "yorishiro-hosted-server")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Tenant and API key management, embedding resync.
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommand,
+    },
+    /// Issue a tenant-scoped API key: one key that can act on any workspace in the tenant,
+    /// naming the workspace per request with the `X-Workspace-Id` header.
+    ///
+    /// Separate from `admin create-api-key`, which is the community edition's own command and
+    /// always binds a key to one workspace. Prefer that one when a client only ever works in a
+    /// single workspace -- a key bound to one workspace reaches less if it leaks.
+    CreateTenantApiKey {
+        tenant_id: uuid::Uuid,
+        /// `read`, `write`, or `schema`.
+        scope: String,
+        /// Attribute the key to a specific user. The requested scope is capped by that user's
+        /// tenant role, exactly as `admin create-api-key` caps it.
+        #[arg(long)]
+        user: Option<uuid::Uuid>,
+    },
+    /// Publish the built-in templates as official marketplace listings.
+    ///
+    /// Idempotent: a template already published at the same definition is left alone, and one
+    /// whose definition changed gets a new version rather than an edit in place. Safe to run on
+    /// every deployment.
+    SeedOfficialTemplates,
+}
+
+/// Runs both vendor (community) and local (enterprise-only) migrations against
+/// the same database and `_sqlx_migrations` table. `set_ignore_missing(true)`
+/// on the second pass prevents it from rejecting the vendor migration IDs it
+/// doesn't own.
+async fn run_migrations(pool: &sqlx::PgPool) -> Result<()> {
+    sqlx::migrate!("../../../migrations")
+        .set_ignore_missing(true)
+        .run(pool)
+        .await?;
+    sqlx::migrate!("./migrations")
+        .set_ignore_missing(true)
+        .run(pool)
+        .await?;
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    // SAFETY: no other thread exists at this point in `main`.
+    unsafe { std::env::set_var("YORISHIRO_MAX_TENANTS", "0") };
+
+    let cli = Cli::parse();
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> Result<()> {
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let identity_pool = sqlx::PgPool::connect(&database_url).await?;
+    run_migrations(&identity_pool).await?;
+
+    match cli.command {
+        Some(Command::Admin { command }) => {
+            return admin::run_with_pool(&identity_pool, command).await;
+        }
+        Some(Command::CreateTenantApiKey {
+            tenant_id,
+            scope,
+            user,
+        }) => {
+            let created = yorishiro_hosted::services::tenant_auth::create_tenant_api_key(
+                &identity_pool,
+                tenant_id,
+                &scope,
+                user,
+            )
+            .await?;
+            println!(
+                "tenant-scoped api key created (the plaintext key is shown ONLY once — store it now)"
+            );
+            println!("  key:          {}", created.plaintext);
+            println!("  key id:       {}", created.id);
+            println!("  tenant id:    {tenant_id}");
+            println!("  workspace id: (send X-Workspace-Id on each request)");
+            println!("  scope:        {scope}");
+            return Ok(());
+        }
+        Some(Command::SeedOfficialTemplates) => {
+            let outcome = yorishiro_hosted::services::official_templates::seed_official_templates(
+                &identity_pool,
+            )
+            .await?;
+            println!(
+                "official templates: {} published, {} updated, {} unchanged",
+                outcome.published.len(),
+                outcome.updated.len(),
+                outcome.unchanged.len()
+            );
+            for name in outcome.published.iter().chain(outcome.updated.iter()) {
+                println!("  {name}");
+            }
+            return Ok(());
+        }
+        None => {}
+    }
+
+    let _log_guard = yorishiro_server::logging::init()?;
+    tracing::info!("database connected and migrations applied");
+
+    let bind_addr = yorishiro_hosted::services::bind_addr_from_env();
+
+    let tenant_db = TenantDb::connect(&database_url, 20).await?;
+    let embedding_provider = build_embedding_provider()?;
+    // Installing this here is what makes tenant-scoped keys work at all: every authenticated
+    // path in the process -- REST extractors and MCP handlers alike -- resolves through the one
+    // authenticator the state carries, so a key is read the same way whichever door it arrives
+    // at. Leaving it at the community edition's default would silently accept only
+    // workspace-scoped keys.
+    let app_state = AppState::new(tenant_db.clone(), identity_pool.clone(), embedding_provider)
+        .with_authenticator(std::sync::Arc::new(
+            yorishiro_hosted::services::tenant_auth::TenantScopedAuthenticator,
+        ));
+    let embedding_tasks = app_state.embedding_tasks().clone();
+    // Kept for the load guard below, which is spawned after `identity_pool` moves into the state.
+    let guard_pool = identity_pool.clone();
+
+    let hosted_state = HostedState {
+        identity_pool,
+        tenant_db,
+        stripe_config: StripeConfig::from_env(),
+        oauth_config: OAuthConfig::from_env(),
+    };
+
+    let web_dir = yorishiro_hosted::services::web_dir_from_env();
+
+    // Shared with `build_app_with_rate_limiter` below so `/auth/oauth/authorize|callback` draw
+    // from the same quota as this crate's own `/auth/login`/`/auth/signup`/`/setup*` -- an
+    // attacker who exhausts one doesn't get a fresh bucket by switching to the other. See
+    // `yorishiro_hosted::router`'s doc comment for why the OAuth login pair is a separate
+    // sub-router from the rest of `yorishiro-hosted`'s routes.
+    let rate_limiter = Arc::new(RateLimiter::from_env());
+    let oauth_login_router =
+        apply_body_limit_layer(apply_observability_layers(apply_rate_limit_layer(
+            yorishiro_hosted::oauth_login_router().with_state(hosted_state.clone()),
+            rate_limiter.clone(),
+        )));
+    // `/hosted/tenant/overview` (bearer-token-authenticated) and `/auth/oauth/status` (unlimited
+    // by design -- the Web UI's login page polls it on every load) don't need the rate limiter,
+    // but every route in this process still needs the body-size cap and observability stack
+    // `build_app`'s own routes get -- `axum::Router::merge` doesn't propagate a `.layer()` from
+    // either side, so each sub-router carries its own copy. `/hosted/stripe/webhook` in
+    // particular must keep the body limit (an unbounded webhook body is its own DoS vector) but
+    // must never be rate-limited: dropping a legitimate Stripe billing event on a `429` is worse
+    // than not rate-limiting a signature-verified webhook Stripe itself, not an attacker, calls.
+    let hosted_router = apply_body_limit_layer(apply_observability_layers(
+        yorishiro_hosted::router().with_state(hosted_state),
+    ));
+    // The maintenance guard is applied inside `build_app`, and `merge`/`fallback_service`
+    // propagate a layer no more than `.layer()` does -- so without this, pausing the
+    // deployment would refuse `/api/*` while this crate's own routes kept writing. Applied
+    // here rather than to the merged router so it sits inside the observability stack, as it
+    // does in the community edition. `/up` and `/health` opt out inside the guard itself.
+    let hosted_router = hosted_router.layer(axum::middleware::from_fn_with_state(
+        app_state.clone(),
+        yorishiro_server::http::middleware::maintenance::maintenance_guard,
+    ));
+    let oauth_login_router = oauth_login_router.layer(axum::middleware::from_fn_with_state(
+        app_state.clone(),
+        yorishiro_server::http::middleware::maintenance::maintenance_guard,
+    ));
+    // This crate's routes are matched *first*, with the community edition behind them as the
+    // fallback, rather than merged alongside. `Router::merge` panics on a duplicate path, so a
+    // merged layout can only ever add paths the community edition does not already serve --
+    // this one can also replace them, which is what lets a hosted-only behaviour take over an
+    // endpoint the community edition defines.
+    //
+    // The community edition's own router still ends in its static-asset fallback, so an
+    // unmatched path reaches the SPA exactly as before: this crate's routes, then the community
+    // edition's, then `index.html`.
+    //
+    // One consequence to keep in mind when adding a route here: overriding a path overrides
+    // **every method on it**. A request whose path matches here but whose method does not gets
+    // this router's `405`, and never reaches the community edition's handler for that method.
+    // Define every method a path needs, or leave the path alone.
+    let base_app = build_app_with_rate_limiter(app_state, web_dir, rate_limiter);
+    let app = hosted_router
+        .merge(oauth_login_router)
+        .fallback_service(base_app);
+
+    // Load shedding is started by the binary, not by `build_app` -- it is a spawned task, not a
+    // router layer, so embedding the community router does not bring it along. Both editions
+    // point at one database, so a guard only the community binary ran would watch a pool this
+    // process is the one loading. Same env vars and same default (off unless
+    // `YSR_DB_LOAD_THRESHOLD` is set), so a deployment configures both editions identically.
+    if let Some(guard) = yorishiro_core::services::db_load_guard::LoadGuardConfig::from_env() {
+        tracing::info!(
+            threshold = guard.threshold,
+            "db load guard enabled: read-only above this many active connections"
+        );
+        tokio::spawn(yorishiro_core::services::db_load_guard::run(
+            guard_pool, guard,
+        ));
+    }
+
+    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+    tracing::info!("yorishiro-hosted-server listening on {bind_addr}");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
+
+    embedding_tasks.close();
+    if tokio::time::timeout(std::time::Duration::from_secs(30), embedding_tasks.wait())
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            "embedding syncs did not finish within 30s; exiting anyway \
+             (recover with `yorishiro-hosted-server admin resync-embeddings`)"
+        );
+    }
+
+    Ok(())
+}

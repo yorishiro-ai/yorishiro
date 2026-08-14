@@ -1,0 +1,122 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Light theme (default) */
+  --color-background: #fafafa;
+  --color-foreground: #0f0f10;
+  --color-card: #ffffff;
+  --color-card-foreground: #0f0f10;
+  --color-primary: #4f46e5;
+  --color-primary-foreground: #ffffff;
+  /* Primary as *text* rather than as a button fill. The two pull in opposite
+     directions -- a fill dark enough for white labels is too dark to read as a link
+     on a dark surface -- so they cannot be one token. Here light's primary already
+     works as text, so this matches it; the dark block lightens it. */
+  --color-link: #4f46e5;
+  --color-secondary: #f4f4f5;
+  --color-secondary-foreground: #3f3f46;
+  --color-muted: #f4f4f5;
+  /* Contrast floor is --color-muted (#f4f4f5), not the page background: muted text
+     also sits on muted surfaces (inactive tabs, table chrome). #71717a cleared 4.5
+     against the page but only reached 4.4 there. */
+  --color-muted-foreground: #66666e;
+  --color-accent: #4f46e5;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-border: #e4e4e7;
+  --color-input: #e4e4e7;
+  --color-ring: #4f46e5;
+  /* Sidebar is always dark */
+  --color-sidebar: #111113;
+  --color-sidebar-foreground: #a1a1aa;
+  --color-sidebar-active: #4f46e5;
+  --color-sidebar-hover: #1c1c20;
+  --color-sidebar-border: #27272a;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+.dark {
+  --color-background: #09090b;
+  --color-foreground: #f4f4f5;
+  --color-card: #18181b;
+  --color-card-foreground: #f4f4f5;
+  /* White-on-primary is the label colour for every filled button, and #6366f1 put it
+     at 4.47 -- just under 4.5. Still lighter than the light theme's #4f46e5, so the
+     dark theme keeps its brighter indigo. */
+  --color-primary: #5b54e8;
+  --color-primary-foreground: #ffffff;
+  /* Lighter than --color-primary so link text clears 4.5 on #18181b and #27272a,
+     which the fill colour cannot do while still carrying a white label. */
+  --color-link: #8b93f8;
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #a1a1aa;
+  --color-muted: #27272a;
+  /* Every other token here inverts for dark; this one did not, so the same zinc-500
+     that reads at 4.6 on a light page fell to 3.1 on #27272a. Secondary text was the
+     single largest source of low-contrast text in the dark theme. */
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #6366f1;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #ef4444;
+  /* Dark, not white. This red is lightened for use as *text* on a dark background (4.7 on a
+     card), and white on top of it as a fill reads at only 3.8; dark text on the same fill gives
+     5.2. Applies to both the destructive button and the destructive badge. */
+  --color-destructive-foreground: #1a0505;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-border: #27272a;
+  --color-input: #27272a;
+  --color-ring: #6366f1;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+      "Inter",
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      system-ui,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+}
+
+/* Dark-mode form controls */
+.dark input,
+.dark select,
+.dark textarea {
+  color-scheme: dark;
+}

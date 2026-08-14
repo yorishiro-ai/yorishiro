@@ -6,3 +6,5 @@
 .cargo-cache
 .worktrees/
 /models
+ee/web/dist/
+ee/web/node_modules/

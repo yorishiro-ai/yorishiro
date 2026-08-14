@@ -1,0 +1,82 @@
+Yorishiro Enterprise Edition License
+
+DRAFT. This text has not been settled by counsel. It states the intent that
+governs `ee/` and is drafted from the Business Source License 1.1 that covers
+the rest of this repository; it is not a final legal instrument.
+
+Parameters
+
+Licensor:             Yorishiro Contributors
+Licensed Work:        Yorishiro Enterprise Edition — everything under the
+                      `ee/` directory of this repository
+                      The Licensed Work is (c) 2026 Yorishiro Contributors
+Additional Use Grant: You may use, copy, modify, and redistribute the Licensed
+                      Work for development, testing, and evaluation, and for
+                      production use while you hold a valid license key issued
+                      by the Licensor covering that use, except for a
+                      Competing Use. A "Competing Use" means offering the
+                      Licensed Work, or a modified or unmodified substantial
+                      portion of its functionality, to third parties as a
+                      hosted, managed, or embedded service (for example,
+                      Database-as-a-Service, Backend-as-a-Service, or a
+                      similar offering), whether or not those third parties
+                      obtain their own license. A Competing Use is not
+                      permitted under any license key.
+Change Date:          None
+Change License:       None
+
+The root of this repository is licensed separately under the Business Source
+License 1.1 (see `../LICENSE`). That license permits self-hosting for your own
+or your organization's internal use without a license key. This license does
+not: the Licensed Work is the paid portion of the product, and self-hosting it
+in production requires a license key.
+
+For information about license keys and alternative licensing arrangements,
+please contact the Licensor.
+
+Notice
+
+This is not an Open Source license, and unlike the Business Source License
+that covers the rest of this repository, the Licensed Work is not scheduled to
+become available under one.
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited
+production use.
+
+If your use of the Licensed Work does not comply with the requirements
+currently in effect as described in this License, you must obtain a license
+key or a commercial license from the Licensor, its affiliated entities, or
+authorized resellers, or you must refrain from using the Licensed Work.
+
+The Licensed Work contains code that verifies a license key. That code is
+distributed in source form and can therefore be removed. Removing, disabling,
+or circumventing it, and using the resulting build, is a violation of this
+License and terminates your rights under it. The Licensor relies on this term
+rather than on technical enforcement.
+
+All copies of the original and modified Licensed Work, and derivative works of
+the Licensed Work, are subject to this License. This License applies
+separately for each version of the Licensed Work.
+
+You must conspicuously display this License on each original or modified copy
+of the Licensed Work. If you receive the Licensed Work in original or modified
+form from a third party, the terms and conditions set forth in this License
+apply to your use of that work.
+
+Any use of the Licensed Work in violation of this License will automatically
+terminate your rights under this License for the current and all other
+versions of the Licensed Work.
+
+This License does not grant you any right in any trademark or logo of Licensor
+or its affiliates (provided that you may use a trademark or logo of Licensor
+as expressly required by this License).
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED ON AN
+"AS IS" BASIS. LICENSOR HEREBY DISCLAIMS ALL WARRANTIES AND CONDITIONS,
+EXPRESS OR IMPLIED, INCLUDING (WITHOUT LIMITATION) WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND
+TITLE.
