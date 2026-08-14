@@ -10,7 +10,7 @@ include = ["src/**/*", "README.md", "../../migrations/**/*"]
 autotests = false
 
 # No `[[bin]]`: this crate is a library the one binary composes. `ee/`'s
-# `yorishiro-hosted-server` is that binary, and it re-exports this crate's `admin` CLI, so the
+# `yorishiro-server` is that binary, and it re-exports this crate's `admin` CLI, so the
 # commands a `yorishiro-server admin ...` used to run are reached through it.
 
 [dependencies]

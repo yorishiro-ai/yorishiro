@@ -8,9 +8,11 @@ license-file = "../../LICENSE"
 autotests = false
 publish = false
 
+# The crate keeps its name; the binary does not need one that distinguishes it from a
+# counterpart that no longer exists.
 [[bin]]
-name = "yorishiro-hosted-server"
-path = "src/bin/yorishiro_hosted_server.rs"
+name = "yorishiro-server"
+path = "src/bin/yorishiro_server.rs"
 
 [dependencies]
 async-trait.workspace = true

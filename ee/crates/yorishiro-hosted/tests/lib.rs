@@ -1,4 +1,4 @@
-//! Exercises how `yorishiro_hosted_server`'s `main` actually wires `apply_rate_limit_layer`/
+//! Exercises how `yorishiro_server`'s `main` actually wires `apply_rate_limit_layer`/
 //! `apply_body_limit_layer` (see that file) -- `oauth_login_router()`'s two routes share the
 //! community server's own `/auth/login`/`/auth/signup`/`/setup*` rate-limit quota, while
 //! `router()`'s routes (the dashboard, the Stripe webhook, and `/auth/oauth/status`) are
@@ -23,7 +23,7 @@ use yorishiro_server::http::middleware::rate_limit::{RateLimiter, apply_rate_lim
 pub mod test_helpers;
 use test_helpers::hosted_state;
 
-/// Mirrors `yorishiro_hosted_server::run`'s `oauth_login_router` construction, with an
+/// Mirrors `yorishiro_server::run`'s `oauth_login_router` construction, with an
 /// injectable `RateLimiter` so tests can use a tiny limit instead of `from_env`'s default of 10
 /// requests/60s (which would make a "goes over the limit" test either slow or require sending
 /// 11 requests -- both avoidable).
@@ -39,7 +39,7 @@ fn unlimited_router(state: HostedState) -> Router {
     crate::router().with_state(state)
 }
 
-/// Mirrors `yorishiro_hosted_server::run`'s `hosted_router` construction: `router()`'s routes
+/// Mirrors `yorishiro_server::run`'s `hosted_router` construction: `router()`'s routes
 /// with the same 2 MiB body cap `build_app`'s own routes get, but no rate limiter -- see
 /// `unlimited_router` for that half.
 fn body_limited_router(state: HostedState) -> Router {

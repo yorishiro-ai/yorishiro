@@ -118,7 +118,7 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 別のモデルへ移す場合は、デプロイメントをそのモデルに向けたうえで再埋め込みします:
 
 ```console
-$ yorishiro-hosted-server admin resync-embeddings --workspace <id>
+$ yorishiro-server admin resync-embeddings --workspace <id>
 ```
 
 この記録が導入される前に作られたワークスペースは記録を持たず、

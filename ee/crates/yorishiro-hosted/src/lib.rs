@@ -22,7 +22,7 @@ use utoipa::OpenApi;
 use http::controllers::{HostedApiDoc, dashboard, inference, marketplace, oauth, origin, stripe};
 use state::HostedState;
 
-/// The hosted dashboard/webhook/OAuth-status router, mounted by `yorishiro-hosted-server`'s
+/// The hosted dashboard/webhook/OAuth-status router, mounted by `yorishiro-server`'s
 /// `main` (or, alternatively, nested into `yorishiro-server`'s own router by a deployment that
 /// prefers a single process). `/auth/oauth/status` always returns `200` regardless of whether
 /// OAuth is configured, so the Web UI's login page can tell "OAuth not configured" apart from
@@ -39,7 +39,7 @@ use state::HostedState;
 /// it), or is `/auth/oauth/status`, deliberately unlimited because the Web UI's login page polls
 /// it on every load. `apply_rate_limit_layer` itself lives in `yorishiro-server`, which this
 /// crate's lib is not allowed to depend on (see CLAUDE.md) -- so the split exists here, and
-/// `yorishiro-hosted-server`'s `main` is what actually applies the layer, the same way it's the
+/// `yorishiro-server`'s `main` is what actually applies the layer, the same way it's the
 /// only place in this crate that's allowed to call into `yorishiro-server`'s public API.
 pub fn router() -> Router<HostedState> {
     Router::new()

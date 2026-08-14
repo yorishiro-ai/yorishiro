@@ -109,7 +109,7 @@ Without that check the write would succeed — the column is dimensionless — a
 To move a workspace to another model, point the deployment at it and re-embed:
 
 ```console
-$ yorishiro-hosted-server admin resync-embeddings --workspace <id>
+$ yorishiro-server admin resync-embeddings --workspace <id>
 ```
 
 Workspaces created before this stamp existed carry none, and accept whatever the deployment produces — which is what they have always done.

@@ -42,7 +42,7 @@ pub fn bind_addr_or_default(raw: Option<&str>) -> String {
         .to_string()
 }
 
-/// `YORISHIRO_WEB_DIR`, the directory `yorishiro-hosted-server` serves its admin
+/// `YORISHIRO_WEB_DIR`, the directory `yorishiro-server` serves its admin
 /// dashboard SPA from. `None` (unset, or set to an empty string via [`non_empty_env`]) makes the
 /// caller fall back to the community edition's own embedded assets -- see
 /// `yorishiro_server::build_app`.
