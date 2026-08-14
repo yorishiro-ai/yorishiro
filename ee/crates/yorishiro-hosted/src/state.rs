@@ -2,6 +2,7 @@ use sqlx::PgPool;
 use yorishiro_core::db::TenantDb;
 
 use crate::http::controllers::stripe::StripeConfig;
+use crate::services::licence::LicenceState;
 use crate::services::oauth::OAuthConfig;
 
 /// Shared state for the hosted admin dashboard/Stripe webhook/OAuth router. `identity_pool`
@@ -22,6 +23,13 @@ pub struct HostedState {
     /// OAuth is a purely additive, opt-in feature: a deployment that never sets it behaves
     /// exactly as it did before this feature existed.
     pub oauth_config: Option<OAuthConfig>,
+    /// Verified once at startup from `YORISHIRO_LICENSE_KEY`. The paid gates call
+    /// `require_active()` on it per request rather than reading a flag captured at boot, so a
+    /// key that expires mid-run closes the gates without a restart.
+    ///
+    /// An unlicensed state is a supported way to run: the free half is unaffected and the gated
+    /// endpoints answer `404`, the same shape as `oauth_config` being `None`.
+    pub licence: LicenceState,
 }
 
 #[cfg(test)]

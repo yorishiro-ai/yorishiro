@@ -6,6 +6,7 @@
 //! database, the same way `yorishiro-hosted-server`'s `main` applies both to the real one.
 
 use crate::http::controllers::stripe::StripeConfig;
+use crate::services::licence::{LicenceClaims, LicenceState};
 use crate::state::HostedState;
 use sqlx::PgPool;
 use sqlx::migrate::Migrator;
@@ -30,6 +31,9 @@ pub static COMBINED_MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| {
 
 /// A `HostedState` with default (unconfigured) Stripe config and OAuth disabled -- the baseline
 /// every test that only cares about a different field (or configures OAuth itself) starts from.
+/// Licensed by default: the tests here exercise the paid features, so an unlicensed baseline
+/// would make every one of them assert a 404 about licensing instead of the behaviour it is
+/// about. Tests that care about the gate itself use [`unlicensed_hosted_state`].
 #[allow(dead_code)] // Not every test binary that includes this module uses it.
 pub fn hosted_state(pool: PgPool) -> HostedState {
     HostedState {
@@ -37,6 +41,26 @@ pub fn hosted_state(pool: PgPool) -> HostedState {
         identity_pool: pool,
         stripe_config: StripeConfig::default(),
         oauth_config: None,
+        licence: test_licence(),
+    }
+}
+
+/// A far-future licence, so a suite run never starts failing because a fixed expiry went past.
+#[allow(dead_code)]
+pub fn test_licence() -> LicenceState {
+    LicenceState::licensed(LicenceClaims {
+        sub: "test-suite".into(),
+        plan: "enterprise".into(),
+        exp: chrono::Utc::now().timestamp() + 60 * 60 * 24 * 365,
+    })
+}
+
+/// The same state with no licence, for the tests that assert a gated endpoint is closed.
+#[allow(dead_code)]
+pub fn unlicensed_hosted_state(pool: PgPool) -> HostedState {
+    HostedState {
+        licence: LicenceState::default(),
+        ..hosted_state(pool)
     }
 }
 

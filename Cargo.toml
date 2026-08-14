@@ -21,7 +21,12 @@ clap = { version = "4", features = ["derive"] }
 cookie = "0.18"
 hmac = "0.13"
 http = "1"
-jsonwebtoken = "11"
+# The crypto backend must be named explicitly: jsonwebtoken 11 panics at the first signature
+# operation if it cannot resolve a provider from its features, and neither `rust_crypto` nor
+# `aws_lc_rs` is on by default. `aws_lc_rs` because rustls already pulls it in, so this adds no
+# dependency. Without it, OAuth ID-token verification panics on the first real login -- the
+# existing tests never caught it because they only exercise claim deserialization.
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 jsonschema = "0.49"
 mime_guess = "2"
 pgvector = { version = "=0.4.2", features = ["sqlx"] }

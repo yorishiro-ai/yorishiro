@@ -145,6 +145,10 @@ pub async fn infer_fill(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<InferFillReport>, HostedApiError> {
+    // The server calls an LLM here, which is the definition of a paid feature. Checked before
+    // authentication so an unlicensed deployment answers the same 404 to everyone, rather than
+    // confirming to a valid key that the endpoint exists and is merely locked.
+    state.licence.require_active()?;
     let ctx = authz::authenticate_workspace(&state, &headers).await?;
     require_scope(&ctx, ApiKeyScope::Schema)?;
     let workspace_id = ctx.workspace_id;
