@@ -138,7 +138,7 @@ Apply it with `POST /api/schemas` and its UUID as `template_id`, exactly as a bu
 
 ### Official listings
 
-The built-in templates are published here too, by `yorishiro-hosted-server admin seed-official-templates`.
+The built-in templates are published here too, by `yorishiro-server admin seed-official-templates`.
 They are ordinary listings — forkable and reviewable like any other — attributed to the author `Yorishiro`.
 
 Their publisher is a tenant row with **no members and no workspaces**: `identity.templates.tenant_id` is `NOT NULL` and the marketplace scopes ownership by it, so official listings need an owner.
@@ -222,7 +222,7 @@ A key issued here can instead be bound to a **tenant**, naming the workspace per
 
 ```console
 # Issue one (there is no REST endpoint for key issuance)
-$ yorishiro-hosted-server create-tenant-api-key <tenant-id> write
+$ yorishiro-server create-tenant-api-key <tenant-id> write
 
 # Every request then names its workspace
 $ curl localhost:8081/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
@@ -258,7 +258,7 @@ When OAuth isn't configured, `GET /auth/oauth/authorize` and `GET /auth/oauth/ca
 `GET /auth/oauth/status` is the exception to the disabled-means-404 rule: it always answers `200` so the Web UI's login page can decide whether to show the "Sign in with SSO" button.
 
 The per-IP rate limiter (`429` once exhausted, `YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` -- see [the main configuration reference](../../docs/configuration.md)) is applied route-locally within each sub-router that needs it, not globally -- `axum::Router::merge` doesn't carry a `.layer()` across the merge, so a route only gets rate-limited if the sub-router it's actually defined in applies the layer before merging.
-`yorishiro-hosted-server`'s `main` applies it to `GET /auth/oauth/authorize`/`GET /auth/oauth/callback` explicitly, sharing the *same* limiter instance (and so the same per-IP quota) the community server's own `POST /auth/login`/`POST /auth/signup`/`GET /setup/status`/`POST /setup` draw from -- an attacker who exhausts the quota against one can't get a fresh one by switching to the other.
+`yorishiro-server`'s `main` applies it to `GET /auth/oauth/authorize`/`GET /auth/oauth/callback` explicitly, sharing the *same* limiter instance (and so the same per-IP quota) the community server's own `POST /auth/login`/`POST /auth/signup`/`GET /setup/status`/`POST /setup` draw from -- an attacker who exhausts the quota against one can't get a fresh one by switching to the other.
 `/authorize` itself never issues a key -- it only redirects to the provider and sets a CSRF cookie; `GET /auth/oauth/callback` is the one route that can end up issuing a Yorishiro API key, after validating the callback (see below), from caller-supplied input (an authorization code), which is exactly why it's rate-limited the same as a login attempt.
 `GET /auth/oauth/status` is deliberately *not* rate-limited: it returns no secret, and the Web UI's login page calls it on every load.
 
@@ -301,7 +301,7 @@ Every failure after that point instead falls through the standard JSON error env
 A request that exceeds the rate limit (see above) never reaches any of this -- it gets a bare `429` with no JSON body, the same as `POST /auth/login` does, before the CSRF/state checks even run.
 
 Request bodies on every route in this document are capped at 2 MB.
-`axum::Router::merge` doesn't carry a `.layer()` from either side to the other, so `yorishiro-hosted-server`'s `main` applies `apply_body_limit_layer` explicitly to `ee/`'s own sub-router, the same way it does for the rate limiter (see above) -- even without it, `axum`'s `Bytes`/`Json`/`String` extractors fall back to their own built-in 2 MB default whenever no explicit layer applies, which is what enforced this cap before the layer was added; the explicit layer additionally covers a hypothetical future handler that reads a raw `Request`/streaming body instead of one of those extractors.
+`axum::Router::merge` doesn't carry a `.layer()` from either side to the other, so `yorishiro-server`'s `main` applies `apply_body_limit_layer` explicitly to `ee/`'s own sub-router, the same way it does for the rate limiter (see above) -- even without it, `axum`'s `Bytes`/`Json`/`String` extractors fall back to their own built-in 2 MB default whenever no explicit layer applies, which is what enforced this cap before the layer was added; the explicit layer additionally covers a hypothetical future handler that reads a raw `Request`/streaming body instead of one of those extractors.
 
 ```console
 $ curl -i localhost:8081/auth/oauth/authorize

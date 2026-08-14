@@ -60,7 +60,7 @@ $ # 2. Set YORISHIRO_EMBEDDING_DIMENSIONS to the new model's width.
 $ # 3. Clear the existing vectors -- they belong to the old model:
 $ psql "$DATABASE_URL" -c "UPDATE content.entities SET embedding = NULL"
 $ # 4. Start the server, then regenerate per workspace:
-$ yorishiro-hosted-server admin resync-embeddings <workspace-id>
+$ yorishiro-server admin resync-embeddings <workspace-id>
 ```
 
 Search still works between steps 3 and 4: entities without an embedding are reachable through the `pg_trgm` fallback, so the window degrades results rather than emptying them.
@@ -80,9 +80,9 @@ Both send `Retry-After`.
 Agents retry on the header rather than on the body, so a refusal without one invites the immediate retry the mode exists to prevent.
 
 ```console
-$ yorishiro-hosted-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
-$ yorishiro-hosted-server admin maintenance-status
-$ yorishiro-hosted-server admin maintenance off
+$ yorishiro-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
+$ yorishiro-server admin maintenance-status
+$ yorishiro-server admin maintenance off
 ```
 
 `--reason` is shown to callers in place of the generic message; an operator saying "restoring from backup, back by 09:00" answers the question a bare status code provokes.

@@ -86,7 +86,7 @@ Dockerを使わない、ベアメタル/VMへのデプロイ向けです。
    $ tar -xzf yorishiro.tar.gz && rm yorishiro.tar.gz
    ```
 
-   アーカイブには`yorishiro-hosted-server`バイナリのみが含まれます。
+   アーカイブには`yorishiro-server`バイナリのみが含まれます。
    Web UIはバイナリに組み込み済みなので別途取得は不要です。
    手順1で用意した`models/`をバイナリの隣に移動(またはシンボリックリンク)してください。
 3. 少なくとも`DATABASE_URL`を設定します。
@@ -101,7 +101,7 @@ Dockerを使わない、ベアメタル/VMへのデプロイ向けです。
 4. 起動します。
 
    ```console
-   $ ./yorishiro-hosted-server
+   $ ./yorishiro-server
    ```
 
 systemdで再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。

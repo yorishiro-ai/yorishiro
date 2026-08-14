@@ -14,11 +14,11 @@ use yorishiro_server::{
 };
 
 /// The Yorishiro server. A plain start runs the HTTP server and serves the web UI;
-/// `yorishiro-hosted-server admin ...` runs one-off administrative commands. Migrations are
+/// `yorishiro-server admin ...` runs one-off administrative commands. Migrations are
 /// applied on startup either way. Paid features need a licence key in `YORISHIRO_LICENSE_KEY`;
 /// without one the server runs normally and those features answer 404.
 #[derive(Parser)]
-#[command(name = "yorishiro-hosted-server")]
+#[command(name = "yorishiro-server")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -275,7 +275,7 @@ async fn run(cli: Cli) -> Result<()> {
     }
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-    tracing::info!("yorishiro-hosted-server listening on {bind_addr}");
+    tracing::info!("yorishiro-server listening on {bind_addr}");
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),

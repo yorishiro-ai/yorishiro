@@ -37,7 +37,7 @@
 | `YORISHIRO_OAUTH_REDIRECT_URI` | 認証後にプロバイダがリダイレクトし戻す先。デフォルトは`{YORISHIRO_BIND}/auth/oauth/callback`で、全インターフェースを表すbindホスト(`0.0.0.0`、IPv6の場合は`::`/`[::]`)は`localhost`に書き換えられる(ローカルテストでのみ意味があり、リバースプロキシ経由の公開ホスト名を使う実運用では明示的に設定すべき。ブラウザは`YORISHIRO_BIND`に直接到達できないため) |
 
 OIDCディスカバリドキュメント(`{issuer_url}/.well-known/openid-configuration`)とプロバイダのJWKSは`/auth/oauth/authorize`/`/auth/oauth/callback`の各リクエスト時に都度取得され、起動時にキャッシュされません。
-そのため署名鍵やエンドポイントをローテーションするプロバイダでも`yorishiro-hosted-server`の再起動は不要です。
+そのため署名鍵やエンドポイントをローテーションするプロバイダでも`yorishiro-server`の再起動は不要です。
 
 ディスカバリ・JWKS・トークン交換の各リクエストはすべて`https://`必須で、リクエスト途中に`https://`から平文の`http://`にダウングレードするリダイレクトには従いません。
 唯一の例外はループバックホスト(`localhost`またはループバックIP)で、TLSを前面に持たないプロバイダ/モックIdPを使ったローカル開発向けに平文`http://`が許可されます——実運用の`YORISHIRO_OAUTH_ISSUER_URL`は常に`https://`にすべきです。
@@ -47,7 +47,7 @@ OIDCディスカバリドキュメント(`{issuer_url}/.well-known/openid-config
 これを個別に制御する変数はありません——公開の`https://`リダイレクトURIを設定することは、プロバイダがコールバックに到達するために必須である一方、それだけでより厳格なCookie属性も自動的に得られます。
 
 初回のOAuthログイン(このインストールで未見のIDプロバイダ`sub`かつ既存のYorishiroアカウントに一致しない場合)は、新規テナント・ワークスペース・`member`ロールのメンバーシップを自動プロビジョニングします([api.md](api.md#get-authoauthcallback)参照)。
-他のテナント作成経路と同様に`YORISHIRO_MAX_TENANTS`の制約を受けますが、前述の通り`yorishiro-hosted-server`は常にこれを無制限に強制設定しています。
+他のテナント作成経路と同様に`YORISHIRO_MAX_TENANTS`の制約を受けますが、前述の通り`yorishiro-server`は常にこれを無制限に強制設定しています。
 
 `GET /auth/oauth/authorize`/`GET /auth/oauth/callback`は`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`(デフォルト: クライアントIPごとに60秒あたり10リクエスト——詳細は[設定リファレンス本体](../../../docs/ja/configuration.md)参照)によってレート制限され、`/auth/login`/`/auth/signup`/`/setup*`と同一のクォータを共有します——理由は[api.md](api.md#oauth2oidcログイン)参照。
 `GET /auth/oauth/status`はレート制限の対象外です。

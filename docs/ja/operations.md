@@ -64,7 +64,7 @@ $ # 2. YORISHIRO_EMBEDDING_DIMENSIONS を新しいモデルの次元に設定す
 $ # 3. 既存のベクトルを消す(古いモデルのものであるため):
 $ psql "$DATABASE_URL" -c "UPDATE content.entities SET embedding = NULL"
 $ # 4. サーバを起動し、ワークスペースごとに再生成する:
-$ yorishiro-hosted-server admin resync-embeddings <workspace-id>
+$ yorishiro-server admin resync-embeddings <workspace-id>
 ```
 
 手順3と4の間も検索は動きます。
@@ -86,9 +86,9 @@ $ yorishiro-hosted-server admin resync-embeddings <workspace-id>
 **AIエージェントは本文ではなくヘッダを見て再試行する**ため、これが無いと即座に再試行され、モードが減らそうとしている負荷をむしろ増やします。
 
 ```console
-$ yorishiro-hosted-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
-$ yorishiro-hosted-server admin maintenance-status
-$ yorishiro-hosted-server admin maintenance off
+$ yorishiro-server admin maintenance read-only --retry-after 60 --reason "migrating schemas"
+$ yorishiro-server admin maintenance-status
+$ yorishiro-server admin maintenance off
 ```
 
 `--reason`は汎用メッセージの代わりに呼び出し元へ表示されます。

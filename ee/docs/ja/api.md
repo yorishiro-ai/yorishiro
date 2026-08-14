@@ -155,7 +155,7 @@ forkはテンプレートであってスキーマではない。
 ### 公式listing
 
 組み込みテンプレートもここに公開される。
-公開は `yorishiro-hosted-server admin seed-official-templates`が行う。
+公開は `yorishiro-server admin seed-official-templates`が行う。
 これらは通常のlistingであり、他と同様にforkもレビューもできる。
 author は `Yorishiro`。
 
@@ -256,7 +256,7 @@ reqwest での実装点はカスタムDNSリゾルバであり、保存時のチ
 
 ```console
 # 発行(キー発行のRESTエンドポイントは存在しません)
-$ yorishiro-hosted-server create-tenant-api-key <tenant-id> write
+$ yorishiro-server create-tenant-api-key <tenant-id> write
 
 # 各リクエストで対象ワークスペースを指定する
 $ curl localhost:8081/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
@@ -300,7 +300,7 @@ OAuth未設定時、`GET /auth/oauth/authorize`と`GET /auth/oauth/callback`は�
 
 IPベースのレート制限(上限に達すると`429`。`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`——詳細は[設定リファレンス本体](../../../docs/ja/configuration.md)参照)は、それを必要とする各サブルータ内でルート単位に適用されているのであってグローバルではありません。
 `axum::Router::merge`は`.layer()`をmerge先へ引き継がないため、あるルートがレート制限の対象になるかどうかは、そのルートが実際に定義されているサブルータがmerge前にレイヤーを適用しているかどうかで決まります。
-`yorishiro-hosted-server`の`main`は`GET /auth/oauth/authorize`/`GET /auth/oauth/callback`に明示的にこれを適用しており、コミュニティ版自身の`POST /auth/login`/`POST /auth/signup`/`GET /setup/status`/`POST /setup`と**同一のリミッターインスタンス**(つまり同一のIP単位クォータ)を共有します——片方でクォータを使い切った攻撃者が、もう片方に切り替えても新しい枠を得ることはできません。
+`yorishiro-server`の`main`は`GET /auth/oauth/authorize`/`GET /auth/oauth/callback`に明示的にこれを適用しており、コミュニティ版自身の`POST /auth/login`/`POST /auth/signup`/`GET /setup/status`/`POST /setup`と**同一のリミッターインスタンス**(つまり同一のIP単位クォータ)を共有します——片方でクォータを使い切った攻撃者が、もう片方に切り替えても新しい枠を得ることはできません。
 `/authorize`自体はAPIキーを一切発行せず、プロバイダへのリダイレクトとCSRF Cookieの設定のみを行います。
 `GET /auth/oauth/callback`が、(下記の)検証を経た上で呼び出し元指定の入力(認可コード)からYorishiro APIキーを発行しうる唯一のルートであり、まさにそれゆえログイン試行と同様にレート制限の対象となっています。
 `GET /auth/oauth/status`は意図的にレート制限の対象**外**です:秘密情報を一切返さず、Web UIのログインページが読み込みのたびに呼び出すためです。
@@ -351,7 +351,7 @@ IDプロバイダのリダイレクト先(`redirect_uri`)。
 レート制限(上記参照)を超過したリクエストはここまで到達すらせず、CSRF/state検証すら実行される前に、`POST /auth/login`と同様JSONボディなしの`429`を返します。
 
 このドキュメントに記載の全ルートで、リクエストボディは2MBに制限されています。
-`axum::Router::merge`は`.layer()`をどちらの側にも引き継がないため、`yorishiro-hosted-server`の`main`は(上記のレート制限と同様に)`ee/`自身のサブルータへ`apply_body_limit_layer`を明示的に適用しています。
+`axum::Router::merge`は`.layer()`をどちらの側にも引き継がないため、`yorishiro-server`の`main`は(上記のレート制限と同様に)`ee/`自身のサブルータへ`apply_body_limit_layer`を明示的に適用しています。
 このレイヤーがなくても、`axum`の`Bytes`/`Json`/`String`エクストラクタ自体が組み込みの2MBデフォルトにフォールバックするため——このレイヤーが追加される以前はこれによって上限が維持されていました——明示的なレイヤーは、それらのエクストラクタを使わず生の`Request`/ストリーミングボディを読むような将来のハンドラも追加でカバーします。
 
 ```console

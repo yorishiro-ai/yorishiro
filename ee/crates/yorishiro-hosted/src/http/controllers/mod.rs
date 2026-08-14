@@ -67,7 +67,7 @@ use utoipa::OpenApi;
     modifiers(&BearerKeySecurity),
     info(
         title = "Yorishiro Hosted API",
-        description = "The endpoints `yorishiro-hosted-server` adds on top of the embedded \
+        description = "The endpoints `yorishiro-server` adds on top of the embedded \
                        community edition: Stripe billing, the admin dashboard's tenant \
                        overview, and OAuth2/OIDC login. Everything the community edition \
                        itself serves is documented separately at `/api-docs/openapi.json`.",

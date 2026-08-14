@@ -82,7 +82,7 @@ For a bare-metal or VM deployment without Docker.
    $ tar -xzf yorishiro.tar.gz && rm yorishiro.tar.gz
    ```
 
-   The archive contains only the `yorishiro-hosted-server` binary.
+   The archive contains only the `yorishiro-server` binary.
    The web UI is compiled in, so nothing else needs fetching for it.
    Move (or symlink) the `models/` directory from step 1 next to the binary.
 3. Set at least `DATABASE_URL`.
@@ -97,7 +97,7 @@ For a bare-metal or VM deployment without Docker.
 4. Run it:
 
    ```console
-   $ ./yorishiro-hosted-server
+   $ ./yorishiro-server
    ```
 
 See [deployment.md](deployment.md#running-in-the-background) to keep it running across reboots with systemd.

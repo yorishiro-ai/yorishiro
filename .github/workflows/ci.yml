@@ -199,7 +199,7 @@ jobs:
       # step is needed here.
       - name: Boot and check /up
         run: |
-          ./target/debug/yorishiro-hosted-server &
+          ./target/debug/yorishiro-server &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
