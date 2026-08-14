@@ -38,5 +38,8 @@ jobs:
         with:
           cache-directories: ~/.cache/ort.pyke.io
 
+      # The library, not the binary: this job exists to catch Windows-only compile breakage, and
+      # the binary additionally embeds `ee/web/dist`, which would drag a node/pnpm stage onto a
+      # Windows runner for no extra coverage. `release.yml` builds the full binary for Windows.
       - name: Build
-        run: cargo build --release -p yorishiro-server
+        run: cargo build --release --lib -p yorishiro-server

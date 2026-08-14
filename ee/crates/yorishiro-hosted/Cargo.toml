@@ -25,7 +25,9 @@ clap.workspace = true
 cookie.workspace = true
 hmac.workspace = true
 jsonwebtoken.workspace = true
+mime_guess.workspace = true
 rand.workspace = true
+rust-embed.workspace = true
 reqwest.workspace = true
 sea-query.workspace = true
 sea-query-binder.workspace = true
@@ -40,5 +42,6 @@ utoipa.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tower.workspace = true
 tracing-test = { workspace = true, features = ["no-env-filter"] }

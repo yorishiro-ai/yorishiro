@@ -9,13 +9,12 @@ readme = "README.md"
 include = ["src/**/*", "README.md", "../../migrations/**/*"]
 autotests = false
 
-[[bin]]
-name = "yorishiro-server"
-path = "src/main.rs"
+# No `[[bin]]`: this crate is a library the one binary composes. `ee/`'s
+# `yorishiro-hosted-server` is that binary, and it re-exports this crate's `admin` CLI, so the
+# commands a `yorishiro-server admin ...` used to run are reached through it.
 
 [dependencies]
 yorishiro-core = { path = "../yorishiro-core" }
-yorishiro-web = { path = "../yorishiro-web" }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true

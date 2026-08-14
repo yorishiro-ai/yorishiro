@@ -1,3 +1,4 @@
+use crate::test_support::no_static_fallback;
 use crate::{AppState, build_app};
 use async_trait::async_trait;
 use axum::body::Body;
@@ -29,7 +30,7 @@ async fn get_response(pool: PgPool, uri: &str) -> axum::response::Response {
         pool,
         std::sync::Arc::new(UnreachableEmbeddingProvider),
     );
-    let app = build_app(state, None);
+    let app = build_app(state, no_static_fallback());
 
     app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await

@@ -14,17 +14,16 @@ use crate::state::AppState;
 
 /// The routing configuration itself needs to be identical between `main` and the
 /// integration tests, so it's factored into a function that builds the app from just an
-/// `AppState`. The setup/login SPA (see `web/`, compiled into the binary via `yorishiro-web`)
-/// is always mounted as the fallback for any path not matched by an API route. `web_dir`, when
-/// set (`YSR_WEB_DIR`), serves that SPA from a real directory on disk instead of the compiled-in
-/// copy, for local iteration on `web/` without a rebuild -- see
-/// `yorishiro_web::fallback_service`. Exposed publicly so a deployment that wants a single
-/// process can build this same router and merge its own routes into it, rather than running two
-/// separate processes.
+/// `AppState`. `static_fallback` is mounted for any path no API route matches, which is what
+/// serves the SPA and lets it own client-side routing.
+///
+/// The caller supplies that fallback rather than this crate reaching for one: the SPA is part of
+/// the paid edition under `ee/`, and a crate here must not depend on that direction. A caller
+/// with no UI to serve can pass any `MethodRouter` -- the tests pass one that always 404s.
 ///
 /// **Merging your own routes in.** `axum::Router::merge` does not propagate a `.layer()` from
 /// either side to the other -- so routes added via `some_router.merge(build_app(state,
-/// web_dir))` get none of this router's `DefaultBodyLimit`/rate-limit/CORS/trace-id layers
+/// static_fallback))` get none of this router's `DefaultBodyLimit`/rate-limit/CORS/trace-id layers
 /// unless applied to `some_router` directly, *before* merging. This crate factors those layers
 /// out for exactly that reason:
 ///
@@ -37,7 +36,7 @@ use crate::state::AppState;
 /// let my_routes = apply_body_limit_layer(apply_observability_layers(
 ///     apply_rate_limit_layer(my_unauthenticated_routes, rate_limiter.clone()),
 /// )); // only routes that should be reachable without a bearer token need the rate limiter
-/// let app = my_routes.merge(build_app_with_rate_limiter(state, web_dir, rate_limiter));
+/// let app = my_routes.merge(build_app_with_rate_limiter(state, static_fallback, rate_limiter));
 /// ```
 ///
 /// (`RateLimiter`/`apply_rate_limit_layer` are in
@@ -45,10 +44,10 @@ use crate::state::AppState;
 /// are in this module.) Pass the same `Arc<RateLimiter>` to both sides to share one quota
 /// across this crate's `/auth/*`/`/setup*` routes and your own unauthenticated routes (e.g. an
 /// OAuth login/callback pair) -- see `build_app_with_rate_limiter`.
-pub fn build_app(state: AppState, web_dir: Option<String>) -> Router {
+pub fn build_app(state: AppState, static_fallback: axum::routing::MethodRouter) -> Router {
     build_app_with_rate_limiter(
         state,
-        web_dir,
+        static_fallback,
         std::sync::Arc::new(crate::http::middleware::rate_limit::RateLimiter::from_env()),
     )
 }
@@ -59,7 +58,7 @@ pub fn build_app(state: AppState, web_dir: Option<String>) -> Router {
 /// unauthenticated routes (see [`build_app`]'s doc comment for the full pattern).
 pub fn build_app_with_rate_limiter(
     state: AppState,
-    web_dir: Option<String>,
+    static_fallback: axum::routing::MethodRouter,
     rate_limiter: std::sync::Arc<crate::http::middleware::rate_limit::RateLimiter>,
 ) -> Router {
     let mcp_service = StreamableHttpService::new(
@@ -89,7 +88,7 @@ pub fn build_app_with_rate_limiter(
     ));
     let router = apply_body_limit_layer(router).with_state(state);
 
-    apply_observability_layers(router).fallback_service(yorishiro_web::fallback_service(web_dir))
+    apply_observability_layers(router).fallback_service(static_fallback)
 }
 
 /// Applies the 2 MiB request-body cap every route in this process needs. Factored out for the

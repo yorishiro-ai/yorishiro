@@ -45,6 +45,26 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # The SPA is embedded into the binary from `ee/web/dist`, which is a build output and is
+      # not committed -- so it has to be built before any cargo step, or `embeds_a_built_spa`
+      # fails and every other web test passes against an empty embed. `pnpm run check` is the
+      # web side's own gate (lint, format, typecheck, vitest) and ends in the build, so one step
+      # covers both.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ee/web/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ee/web/pnpm-lock.yaml
+
+      - name: Build the SPA
+        run: |
+          pnpm --dir ee/web install --frozen-lockfile
+          pnpm --dir ee/web run check
+
       # sccache caches compiled objects by content hash, complementing rust-cache's file-level
       # target/ caching. Installing it is separate from using it: the action exports SCCACHE_PATH
       # and nothing else, so without the "Route rustc through sccache" step below sccache is
@@ -155,20 +175,37 @@ jobs:
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: cargo build -p yorishiro-server
+      # The embedded SPA is a build output; without it the binary links but serves a 404 at `/`,
+      # which is exactly the kind of fault this job exists to catch before a deploy does.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ee/web/package.json
 
-      # The binary migrates the database itself on startup (see main.rs), so no separate
-      # `sqlx migrate run` step is needed here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ee/web/pnpm-lock.yaml
+
+      - name: Build the SPA
+        run: |
+          pnpm --dir ee/web install --frozen-lockfile
+          pnpm --dir ee/web run build
+
+      - name: Build
+        run: cargo build -p yorishiro-hosted
+
+      # The binary migrates the database itself on startup, so no separate `sqlx migrate run`
+      # step is needed here.
       - name: Boot and check /up
         run: |
-          ./target/debug/yorishiro-server &
+          ./target/debug/yorishiro-hosted-server &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
           ok=
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8081/up >/dev/null 2>&1; then
               ok=1
               break
             fi
@@ -176,3 +213,10 @@ jobs:
           done
           [ -n "$ok" ] || { echo "server did not serve /up within 30s"; exit 1; }
           echo "server booted and served /up"
+
+          # The one binary now serves the UI too, so a boot that answers /up while serving no
+          # index.html is still a broken deploy. Asserted here rather than only in the embed
+          # test, because this is the step that runs the real `main`.
+          curl -fsS http://127.0.0.1:8081/ | grep -q "<html" \
+            || { echo "server booted but served no SPA at /"; exit 1; }
+          echo "server served the SPA at /"

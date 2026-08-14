@@ -32,7 +32,7 @@ async fn owner_can_create_list_and_delete_workspaces(pool: PgPool) {
     )
     .await;
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -130,7 +130,7 @@ async fn cannot_delete_a_tenants_only_workspace(pool: PgPool) {
     )
     .await;
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -171,7 +171,7 @@ async fn member_role_cannot_create_or_delete_workspaces(pool: PgPool) {
     )
     .await;
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -207,7 +207,7 @@ async fn member_role_cannot_create_or_delete_workspaces(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn workspaces_endpoints_require_authentication(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(&app, "GET", "/api/workspaces", None, None).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -253,7 +253,7 @@ async fn workspace_endpoints_enforce_tenant_isolation(pool: PgPool) {
         .unwrap();
     crate::max_tenants_env_lock::set(None);
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,

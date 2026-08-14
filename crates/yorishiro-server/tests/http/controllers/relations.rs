@@ -25,7 +25,7 @@ async fn rest_relation_crud_round_trip(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let schema_auth = format!("Bearer {}", schema_key.plaintext);
     let write_auth = format!("Bearer {}", write_key.plaintext);

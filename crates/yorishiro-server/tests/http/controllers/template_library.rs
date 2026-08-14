@@ -44,7 +44,7 @@ async fn owner_can_create_update_fork_and_delete_a_template(pool: PgPool) {
         seed_member(&pool, "owner@example.com", tenancy::MembershipRole::Owner).await;
     let owner_auth = format!("Bearer {owner_key}");
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -132,7 +132,7 @@ async fn member_role_can_read_but_cannot_write_templates(pool: PgPool) {
     .await
     .unwrap();
 
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = rest_request(
         &app,
@@ -200,7 +200,7 @@ async fn member_role_can_read_but_cannot_write_templates(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn template_library_endpoints_require_authentication(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
     let id = Uuid::nil();
 
     let response = rest_request(&app, "GET", "/api/template-library", None, None).await;

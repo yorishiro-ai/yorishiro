@@ -1,4 +1,5 @@
 use crate::max_tenants_env_lock::{LOCK as ENV_LOCK, set as set_max_tenants};
+use crate::test_support::no_static_fallback;
 use crate::{AppState, build_app};
 use async_trait::async_trait;
 use axum::Router;
@@ -51,7 +52,7 @@ fn app(pool: PgPool) -> Router {
         pool,
         std::sync::Arc::new(UnreachableEmbeddingProvider),
     );
-    build_app(state, None)
+    build_app(state, no_static_fallback())
 }
 
 /// `sqlx::test` runs each test on its own single-threaded runtime, so holding a non-`Send`

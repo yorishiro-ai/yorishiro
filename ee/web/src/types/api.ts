@@ -16,6 +16,22 @@ export interface OAuthStatus {
   enabled: boolean;
 }
 
+/**
+ * `setup_required` is true only when the deployment has a finite tenant cap and holds no tenant
+ * yet. A hosted deployment sets the cap to unlimited, so it always reads false there.
+ */
+export interface SetupStatus {
+  setup_required: boolean;
+}
+
+export interface SetupResponse {
+  user_id: string;
+  email: string;
+  tenant_id: string;
+  workspace_id: string;
+  api_key: string;
+}
+
 export interface TenantOverview {
   tenant_id: string;
   plan: string | null;

@@ -16,6 +16,7 @@ import { MembersPage } from "./pages/MembersPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SchemaDetailPage } from "./pages/SchemaDetailPage";
 import { SchemasPage } from "./pages/SchemasPage";
+import { SetupPage } from "./pages/SetupPage";
 import { TemplateDetailPage } from "./pages/TemplateDetailPage";
 import { SignupPage } from "./pages/SignupPage";
 import { WsDashboardPage } from "./pages/WsDashboardPage";
@@ -59,6 +60,7 @@ export const router = createBrowserRouter([
     children: [
       { path: "/login", element: <LoginPage /> },
       { path: "/signup", element: <SignupPage /> },
+      { path: "/setup", element: <SetupPage /> },
     ],
   },
   {

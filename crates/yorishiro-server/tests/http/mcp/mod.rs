@@ -9,7 +9,7 @@ use yorishiro_core::services::auth::{ApiKeyScope, create_api_key};
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn mcp_tool_call_without_authorization_header_is_a_protocol_error(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
     let session_id = mcp_handshake(&app).await;
 
     let response = mcp_post(
@@ -42,7 +42,7 @@ async fn mcp_tool_call_without_authorization_header_is_a_protocol_error(pool: Pg
 /// tool's checks can't slip in unnoticed in the future.
 #[sqlx::test(migrations = "../../migrations")]
 async fn every_registered_tool_requires_an_authorization_header(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
     let session_id = mcp_handshake(&app).await;
 
     let response = mcp_post(
@@ -117,7 +117,7 @@ async fn mcp_tool_call_with_insufficient_scope_returns_a_tool_error(pool: PgPool
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let session_id = mcp_handshake(&app).await;
 
@@ -165,7 +165,7 @@ async fn mcp_tool_call_with_sufficient_scope_succeeds(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let session_id = mcp_handshake(&app).await;
 

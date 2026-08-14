@@ -31,7 +31,7 @@ async fn status_of(app: &axum::Router, method: &str, path: &str) -> (StatusCode,
 /// on, so its absence would leave them retrying immediately against a server shedding load.
 #[sqlx::test(migrations = "../../migrations")]
 async fn read_only_refuses_writes_with_423_and_a_retry_after(pool: PgPool) {
-    let app = build_app(test_state(pool.clone()), None);
+    let app = build_app(test_state(pool.clone()), no_static_fallback());
     set(&pool, MaintenanceMode::ReadOnly, 45, None)
         .await
         .unwrap();
@@ -48,7 +48,7 @@ async fn read_only_refuses_writes_with_423_and_a_retry_after(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn full_lock_refuses_reads_too_with_503(pool: PgPool) {
-    let app = build_app(test_state(pool.clone()), None);
+    let app = build_app(test_state(pool.clone()), no_static_fallback());
     set(&pool, MaintenanceMode::FullLock, 120, None)
         .await
         .unwrap();
@@ -66,7 +66,7 @@ async fn full_lock_refuses_reads_too_with_503(pool: PgPool) {
 /// in the database, so the loop would never converge.
 #[sqlx::test(migrations = "../../migrations")]
 async fn liveness_probes_answer_under_full_lock(pool: PgPool) {
-    let app = build_app(test_state(pool.clone()), None);
+    let app = build_app(test_state(pool.clone()), no_static_fallback());
     set(&pool, MaintenanceMode::FullLock, 300, None)
         .await
         .unwrap();
@@ -81,7 +81,7 @@ async fn liveness_probes_answer_under_full_lock(pool: PgPool) {
 /// cached, so an operator does not wait out a TTL.
 #[sqlx::test(migrations = "../../migrations")]
 async fn clearing_maintenance_takes_effect_immediately(pool: PgPool) {
-    let app = build_app(test_state(pool.clone()), None);
+    let app = build_app(test_state(pool.clone()), no_static_fallback());
 
     set(&pool, MaintenanceMode::FullLock, 300, None)
         .await
@@ -97,7 +97,7 @@ async fn clearing_maintenance_takes_effect_immediately(pool: PgPool) {
 /// A deployment nobody has touched serves normally.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_fresh_deployment_serves_normally(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
     let (status, _) = status_of(&app, "POST", "/api/entities").await;
     assert_ne!(status, StatusCode::LOCKED);
     assert_ne!(status, StatusCode::SERVICE_UNAVAILABLE);

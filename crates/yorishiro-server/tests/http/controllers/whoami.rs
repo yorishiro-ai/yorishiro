@@ -11,7 +11,7 @@ use yorishiro_core::services::auth::{ApiKeyScope, create_api_key};
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn whoami_requires_authentication(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = app
         .oneshot(
@@ -28,7 +28,7 @@ async fn whoami_requires_authentication(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn whoami_rejects_an_unknown_key(pool: PgPool) {
-    let app = build_app(test_state(pool), None);
+    let app = build_app(test_state(pool), no_static_fallback());
 
     let response = app
         .oneshot(
@@ -59,7 +59,7 @@ async fn whoami_returns_tenant_and_scope_for_a_valid_key(pool: PgPool) {
 
     let app = build_app(
         AppState::new(db, pool.clone(), Arc::new(UnreachableEmbeddingProvider)),
-        None,
+        no_static_fallback(),
     );
     let response = app
         .oneshot(

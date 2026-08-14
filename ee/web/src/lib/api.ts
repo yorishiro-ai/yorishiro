@@ -9,6 +9,8 @@ import type {
   SchemaDefinition,
   SchemaDetail,
   SearchHit,
+  SetupResponse,
+  SetupStatus,
   SignupResponse,
   Template,
   TemplateReview,
@@ -179,6 +181,30 @@ export async function signup(
 
 export async function getOAuthStatus(): Promise<OAuthStatus> {
   return request<OAuthStatus>("/auth/oauth/status");
+}
+
+export async function getSetupStatus(): Promise<SetupStatus> {
+  return request<SetupStatus>("/setup/status");
+}
+
+/**
+ * Creates the deployment's first tenant, workspace and owner account.
+ *
+ * Answers 404 when the wizard is disabled (the tenant cap is unlimited, which is how a hosted
+ * deployment runs) and 409 when a tenant already exists. Both are ordinary outcomes rather than
+ * faults, so the caller distinguishes them by status.
+ */
+export async function setup(
+  email: string,
+  password: string,
+  displayName?: string,
+): Promise<SetupResponse> {
+  const body: Record<string, string> = { email, password };
+  if (displayName) body.display_name = displayName;
+  return request<SetupResponse>("/setup", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export async function whoami(): Promise<WhoAmIResponse> {

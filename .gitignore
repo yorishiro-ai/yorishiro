@@ -6,5 +6,5 @@
 .cargo-cache
 .worktrees/
 /models
-ee/web/dist/
-ee/web/node_modules/
+# `ee/web/` carries its own .gitignore for `dist/` and `node_modules/`, including the
+# `!dist/.gitkeep` exception the embed needs.

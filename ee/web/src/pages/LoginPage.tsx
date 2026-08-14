@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { login, getOAuthStatus } from "@/lib/api";
+import { login, getOAuthStatus, getSetupStatus } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { setSessionWorkspaceId, whoami } from "@/lib/api";
 import {
@@ -32,6 +32,23 @@ export function LoginPage() {
       .then((status) => setSsoEnabled(status.enabled))
       .catch(() => setSsoEnabled(false));
   }, []);
+
+  // A deployment with no tenant yet has no account to sign in with, so the first visitor is sent
+  // to the wizard rather than left at a form that cannot succeed. Hosted deployments report
+  // false here (their tenant cap is unlimited) and never redirect.
+  useEffect(() => {
+    let cancelled = false;
+    getSetupStatus()
+      .then((status) => {
+        if (!cancelled && status.setup_required) navigate("/setup", { replace: true });
+      })
+      .catch(() => {
+        // An unreachable status endpoint should not block a login that might still work.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const hash = window.location.hash;
