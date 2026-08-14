@@ -50,7 +50,7 @@ fn body_limited_router(state: HostedState) -> Router {
 /// limit must get `429`, the same as base's own `/auth/login` under `apply_rate_limit_layer` --
 /// see `yorishiro-server`'s `http_middleware_rate_limit.rs` tests for the upstream equivalent
 /// this mirrors.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn authorize_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
     let limiter = std::sync::Arc::new(RateLimiter::new(1, Duration::from_secs(60)));
     let app = rate_limited_oauth_router(hosted_state(pool), limiter);
@@ -87,7 +87,7 @@ async fn authorize_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
 /// `GET /auth/oauth/callback` is the other rate-limited route -- it's the one that can actually
 /// end up issuing an API key from caller-supplied input (an authorization code), so it needs the
 /// same protection `authorize` gets, not a separate, looser one.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn callback_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
     let limiter = std::sync::Arc::new(RateLimiter::new(1, Duration::from_secs(60)));
     let app = rate_limited_oauth_router(hosted_state(pool), limiter);
@@ -120,7 +120,7 @@ async fn callback_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
 /// exhausts one can't get a fresh quota from the other) -- asserted the same way base's own
 /// `apply_rate_limit_layer_shares_one_quota_when_given_the_same_arc` proves it for its own
 /// routes.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn authorize_and_callback_share_one_quota(pool: PgPool) {
     let limiter = std::sync::Arc::new(RateLimiter::new(2, Duration::from_secs(60)));
     let app = rate_limited_oauth_router(hosted_state(pool), limiter);
@@ -152,7 +152,7 @@ async fn authorize_and_callback_share_one_quota(pool: PgPool) {
 
 /// `/auth/oauth/status` must never be rate-limited -- the Web UI's login page calls it on every
 /// load, and it returns no secret, so there's nothing to protect by limiting it.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn status_is_never_rate_limited(pool: PgPool) {
     let app = unlimited_router(hosted_state(pool));
 
@@ -177,7 +177,7 @@ async fn status_is_never_rate_limited(pool: PgPool) {
 /// signature header gets a `401` from the handler's own verification, not a `429` from a rate
 /// limiter that was never applied to this route -- the repeated 401s themselves are the
 /// assertion that nothing here is counting or capping requests.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn stripe_webhook_is_never_rate_limited(pool: PgPool) {
     let app = unlimited_router(hosted_state(pool));
 
@@ -206,7 +206,7 @@ async fn stripe_webhook_is_never_rate_limited(pool: PgPool) {
 /// test covers: the extractor default only protects handlers that actually consume the body via
 /// `Bytes`/`Json`/`String`, so a future handler taking a raw `Request` or a streaming body would
 /// have no cap without it.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn stripe_webhook_rejects_a_body_over_the_2mib_cap(pool: PgPool) {
     let app = body_limited_router(hosted_state(pool));
 
@@ -267,7 +267,7 @@ fn guarded(router: Router, pool: PgPool) -> Router {
 /// accepting billing events: the community edition's `/api/*` would refuse while this crate's
 /// routes kept writing, which is worse than either refusing everything or refusing nothing,
 /// because the two halves of one deployment would disagree about whether it is paused.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn read_only_mode_refuses_this_crates_writes(pool: PgPool) {
     yorishiro_core::repositories::maintenance::set(
         &pool,
@@ -300,7 +300,7 @@ async fn read_only_mode_refuses_this_crates_writes(pool: PgPool) {
 
 /// The mirror image: read-only stops writes, not reads. `/auth/oauth/status` is what the login
 /// page polls, so refusing it would make a paused deployment look broken rather than paused.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn read_only_mode_still_serves_this_crates_reads(pool: PgPool) {
     yorishiro_core::repositories::maintenance::set(
         &pool,
@@ -329,7 +329,7 @@ async fn read_only_mode_still_serves_this_crates_reads(pool: PgPool) {
 /// A full lock refuses reads as well, including the OAuth login pair -- letting someone start a
 /// login flow against a fully locked deployment would hand them an API key for a system that is
 /// about to refuse every call they make with it.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_full_lock_refuses_the_oauth_login_routes(pool: PgPool) {
     yorishiro_core::repositories::maintenance::set(
         &pool,

@@ -40,7 +40,7 @@ async fn issue_key(
         .plaintext
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn owner_can_read_the_tenant_overview(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     let workspace = tenancy::create_workspace(&pool, tenant.id, "prod", None, None, None)
@@ -77,7 +77,7 @@ async fn owner_can_read_the_tenant_overview(pool: PgPool) {
     assert_eq!(json["members"][0]["email"], "owner@acme.test");
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn member_role_is_forbidden_from_the_dashboard(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     let workspace = tenancy::create_workspace(&pool, tenant.id, "prod", None, None, None)
@@ -107,7 +107,7 @@ async fn member_role_is_forbidden_from_the_dashboard(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn missing_bearer_token_is_unauthorized(pool: PgPool) {
     let app = router(hosted_state(pool));
     let response = app
@@ -124,7 +124,7 @@ async fn missing_bearer_token_is_unauthorized(pool: PgPool) {
 }
 
 #[traced_test]
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn logs_a_warning_when_the_bearer_token_is_missing(pool: PgPool) {
     let app = router(hosted_state(pool));
     let response = app
@@ -144,7 +144,7 @@ async fn logs_a_warning_when_the_bearer_token_is_missing(pool: PgPool) {
 }
 
 #[traced_test]
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn logs_a_warning_when_the_bearer_key_does_not_authenticate(pool: PgPool) {
     let app = router(hosted_state(pool));
     let response = app

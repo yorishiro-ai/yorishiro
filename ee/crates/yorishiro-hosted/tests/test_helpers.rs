@@ -1,33 +1,13 @@
-//! Shared test-only helpers. `combined_migrator` in particular exists because `sqlx::test`'s
-//! `migrations = "<path>"` argument accepts only a single directory, but this repo's database
-//! needs two: the vendored community edition's migrations (`identity.users` etc.) and this
-//! repo's own enterprise-only ones (OAuth's `oauth_provider`/`oauth_subject_id` columns). Tests
-//! that exercise OAuth-provisioned users need both applied to their ephemeral `sqlx::test`
-//! database, the same way `yorishiro-hosted-server`'s `main` applies both to the real one.
+//! Shared test-only helpers.
+//!
+//! A `COMBINED_MIGRATOR` used to live here, because `sqlx::test`'s `migrations = "<path>"` takes
+//! a single directory and the database needed two. One directory holds the whole schema now, so
+//! every test names it directly.
 
 use crate::http::controllers::stripe::StripeConfig;
 use crate::services::licence::{LicenceClaims, LicenceState};
 use crate::state::HostedState;
 use sqlx::PgPool;
-use sqlx::migrate::Migrator;
-use std::sync::LazyLock;
-
-/// Covers both the vendored community-edition migrations and this repo's own (enterprise-only)
-/// ones, for use with `#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]`.
-#[allow(dead_code)] // Not every test binary that includes this module uses it.
-pub static COMBINED_MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| {
-    let vendor = sqlx::migrate!("../../../migrations");
-    let enterprise = sqlx::migrate!("./migrations");
-    let migrations = vendor
-        .iter()
-        .chain(enterprise.iter())
-        .cloned()
-        .collect::<Vec<_>>();
-    Migrator {
-        migrations: migrations.into(),
-        ..vendor
-    }
-});
 
 /// A `HostedState` with default (unconfigured) Stripe config and OAuth disabled -- the baseline
 /// every test that only cares about a different field (or configures OAuth itself) starts from.

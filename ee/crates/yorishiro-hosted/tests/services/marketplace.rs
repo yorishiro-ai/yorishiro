@@ -30,7 +30,7 @@ async fn seed_tenant(pool: &PgPool, name: &str) -> Uuid {
 
 /// A template whose only versions are drafts has nothing installable, so listing it would put an
 /// entry in the marketplace that 404s the moment anyone tries to use it.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn the_listing_skips_templates_with_nothing_published(pool: PgPool) {
     let tenant = seed_tenant(&pool, "publisher").await;
     let drafted = seed_template(&pool, tenant, "drafted", "community").await;
@@ -70,7 +70,7 @@ async fn the_listing_skips_templates_with_nothing_published(pool: PgPool) {
 }
 
 /// A private template is not a marketplace entry, however many versions it has.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn the_listing_skips_private_templates(pool: PgPool) {
     let tenant = seed_tenant(&pool, "publisher").await;
     let private = seed_template(&pool, tenant, "private", "tenant").await;
@@ -93,7 +93,7 @@ async fn the_listing_skips_private_templates(pool: PgPool) {
 
 /// **The database does not enforce this** -- `template_versions` carries no RLS -- so the query
 /// is the enforcement. A draft is unfinished work its owner has not chosen to show.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn another_tenant_cannot_see_draft_versions(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let other = seed_tenant(&pool, "other").await;
@@ -125,7 +125,7 @@ async fn another_tenant_cannot_see_draft_versions(pool: PgPool) {
 
 /// Publishing is the owner's alone. Reported as NotFound so a caller cannot map out which
 /// template ids exist by the difference between 403 and 404.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn another_tenant_cannot_publish_a_version(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let other = seed_tenant(&pool, "other").await;
@@ -149,7 +149,7 @@ async fn another_tenant_cannot_publish_a_version(pool: PgPool) {
 }
 
 /// Version numbers are assigned server-side and increment per template.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn versions_increment_from_one(pool: PgPool) {
     let tenant = seed_tenant(&pool, "publisher").await;
     let template = seed_template(&pool, tenant, "t", "community").await;
@@ -173,7 +173,7 @@ async fn versions_increment_from_one(pool: PgPool) {
 }
 
 /// One review per tenant: using a template twice does not earn a second vote.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_second_review_replaces_the_first(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let reviewer = seed_tenant(&pool, "reviewer").await;
@@ -199,7 +199,7 @@ async fn a_second_review_replaces_the_first(pool: PgPool) {
     assert_eq!(reviews[0].rating, 2);
 }
 
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_rating_outside_one_to_five_is_rejected(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let template = seed_template(&pool, owner, "shared", "community").await;
@@ -225,7 +225,7 @@ async fn a_rating_outside_one_to_five_is_rejected(pool: PgPool) {
 }
 
 /// Reviewing a template the caller cannot see would confirm that it exists.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_private_template_cannot_be_reviewed_by_another_tenant(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let other = seed_tenant(&pool, "other").await;
@@ -248,7 +248,7 @@ async fn a_private_template_cannot_be_reviewed_by_another_tenant(pool: PgPool) {
 }
 
 /// A fork takes the chosen *version's* definition, and lands private in the caller's own library.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn forking_copies_the_published_version_into_the_callers_tenant(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let other = seed_tenant(&pool, "other").await;
@@ -287,7 +287,7 @@ async fn forking_copies_the_published_version_into_the_callers_tenant(pool: PgPo
 }
 
 /// A draft is not published, so it cannot be forked even by naming its version number.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_draft_version_cannot_be_forked(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let other = seed_tenant(&pool, "other").await;
@@ -313,7 +313,7 @@ async fn a_draft_version_cannot_be_forked(pool: PgPool) {
     assert!(matches!(err, YorishiroError::NotFound { .. }));
 }
 
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn only_the_owner_can_change_visibility(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
     let other = seed_tenant(&pool, "other").await;
@@ -353,7 +353,7 @@ async fn only_the_owner_can_change_visibility(pool: PgPool) {
 ///   one run in three: the window is narrow, and a test that catches a bug a third of the time
 ///   is a flaky test rather than a gate. Eight widens it enough that the unguarded version
 ///   fails every time, measured before this was relied on.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn concurrent_publishes_get_consecutive_versions(pool: PgPool) {
     const PUBLISHERS: usize = 8;
 

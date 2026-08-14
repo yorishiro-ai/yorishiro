@@ -57,7 +57,7 @@ async fn get_marketplace(state: HostedState, key: &str) -> StatusCode {
         .status()
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_active_licence_opens_the_marketplace(pool: PgPool) {
     let key = seed_key(&pool).await;
 
@@ -66,7 +66,7 @@ async fn an_active_licence_opens_the_marketplace(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn without_a_licence_the_marketplace_is_not_served(pool: PgPool) {
     let key = seed_key(&pool).await;
 
@@ -79,7 +79,7 @@ async fn without_a_licence_the_marketplace_is_not_served(pool: PgPool) {
 
 /// The gate runs before authentication, so an unlicensed deployment cannot be probed for which
 /// paid features it would have had. A 401 here would confirm the route exists.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key(pool: PgPool) {
     let status = get_marketplace(unlicensed_hosted_state(pool), "ysr_not_a_real_key").await;
 
@@ -88,7 +88,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key(pool: PgP
 
 /// A licensed deployment still authenticates. Without this, "gated" and "open to anyone" would
 /// look the same in the test above.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_licence_does_not_replace_authentication(pool: PgPool) {
     let status = get_marketplace(hosted_state(pool), "ysr_not_a_real_key").await;
 
@@ -97,7 +97,7 @@ async fn a_licence_does_not_replace_authentication(pool: PgPool) {
 
 /// A key that lapsed while the process was running closes the gate on the next request, without
 /// a restart -- the state holds claims, not a boolean captured at boot.
-#[sqlx::test(migrator = "test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_licence_that_expired_mid_run_closes_the_gate(pool: PgPool) {
     use crate::services::licence::{LicenceClaims, LicenceState};
 

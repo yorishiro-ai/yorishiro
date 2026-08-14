@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use super::*;
 
 /// Every built-in template ends up listed, owned by the official tenant, with a stable version.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn seeding_publishes_every_builtin_template(pool: PgPool) {
     let outcome = seed_official_templates(&pool).await.unwrap();
 
@@ -26,7 +26,7 @@ async fn seeding_publishes_every_builtin_template(pool: PgPool) {
 /// **The property that lets this run on every deployment.** A second run with unchanged
 /// built-ins must not publish a second version, or the version number climbs forever and every
 /// listing claims an update nobody made.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn seeding_twice_changes_nothing_the_second_time(pool: PgPool) {
     seed_official_templates(&pool).await.unwrap();
     let second = seed_official_templates(&pool).await.unwrap();
@@ -50,7 +50,7 @@ async fn seeding_twice_changes_nothing_the_second_time(pool: PgPool) {
 
 /// A built-in whose definition changed between releases publishes a new version rather than
 /// silently editing the one tenants already installed.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn a_changed_builtin_publishes_a_new_version(pool: PgPool) {
     seed_official_templates(&pool).await.unwrap();
 
@@ -75,7 +75,7 @@ async fn a_changed_builtin_publishes_a_new_version(pool: PgPool) {
 
 /// The publisher exists only to own the listings: it must not be a tenant anyone can use, or
 /// the marketplace would ship with an account nobody controls but everyone can reach.
-#[sqlx::test(migrator = "crate::tests::test_helpers::COMBINED_MIGRATOR")]
+#[sqlx::test(migrations = "../../../migrations")]
 async fn the_official_tenant_has_no_members_and_no_workspaces(pool: PgPool) {
     seed_official_templates(&pool).await.unwrap();
 
