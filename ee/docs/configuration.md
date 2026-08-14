@@ -82,7 +82,7 @@ That is decided once at startup, so a key that expires mid-run leaves those two 
 
 The subject the key was issued to is not logged, since it is free-form and routinely an email address.
 
-One line at startup states which mode the process is in — the issuee, plan and expiry when a key was accepted, or that the paid features are disabled when there is none.
+One line at startup states which mode the process is in — the plan and expiry when a key was accepted, or that the paid features are disabled when there is none.
 A key that is set but does not verify logs a warning and leaves the paid features disabled; the server still starts, because refusing to would take the free half down over a paid-feature misconfiguration.
 
 Verification is ordinary source code and can be removed by anyone who rebuilds.
