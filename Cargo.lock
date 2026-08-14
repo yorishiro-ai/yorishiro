@@ -4745,7 +4745,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro-core"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4775,7 +4775,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro-hosted"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4811,7 +4811,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro-server"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "anyhow",
  "async-trait",
