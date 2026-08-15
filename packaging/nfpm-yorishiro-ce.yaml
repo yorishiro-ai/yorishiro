@@ -19,15 +19,22 @@ license: BUSL-1.1
 depends:
   - ca-certificates
 
+# The binary needs glibc 2.38 and GLIBCXX_3.4.30 or newer, which the onnxruntime that `ort`
+# links imposes -- not our own code. Declared so the package manager refuses on a system that
+# cannot run it, rather than installing happily and failing at first start. Verified: without
+# these, the rpm installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
 overrides:
   deb:
     depends:
       - ca-certificates
-      - libstdc++6
+      - libstdc++6 (>= 12)
+      - libc6 (>= 2.38)
   rpm:
     depends:
       - ca-certificates
-      - libstdc++
+      - libstdc++ >= 12
+      - libc.so.6(GLIBC_2.38)(64bit)
+      - libstdc++.so.6(GLIBCXX_3.4.30)(64bit)
 
 # Conflicts rather than Replaces: the two editions would install services pointing at one
 # database, and the point of this package is that the other one's code is absent.
@@ -39,11 +46,15 @@ contents:
     dst: /usr/bin/yorishiro-ce-server
   - src: ./packaging/yorishiro-ce.service
     dst: /lib/systemd/system/yorishiro-ce.service
+  # In /etc rather than /usr/share/doc: the same dpkg `path-exclude` that drops LICENSE would
+  # drop this, and an example configuration is only useful if it is next to the real one.
   - src: ./config.example.yml
-    dst: /usr/share/doc/yorishiro-ce/config.example.yml
+    dst: /etc/yorishiro-ce/config.example.yml
     type: config
+  # See the note in nfpm-yorishiro.yaml: `copyright` is the name dpkg's default
+  # `path-include` keeps when `/usr/share/doc/*` is excluded.
   - src: ./LICENSE
-    dst: /usr/share/doc/yorishiro-ce/LICENSE
+    dst: /usr/share/doc/yorishiro-ce/copyright
 
 scripts:
   preinstall: ./packaging/preinstall.sh

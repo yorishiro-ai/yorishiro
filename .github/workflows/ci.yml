@@ -146,6 +146,40 @@ jobs:
           [ "$status" -eq 0 ] && echo "community binary is clean; every marker discriminates"
           exit "$status"
 
+      # The packages declare a glibc floor, and a declaration that drifts from the artifact is
+      # worse than none: apt/dnf would install onto a system the binary cannot run on. This
+      # compares what the binary demands against what the packaging promises.
+      #
+      # It caught a real one: a host-built binary needed GLIBC_2.43, and the rpm installed
+      # happily on Rocky 9 (2.34) before dying on a missing symbol at first start.
+      - name: The declared glibc floor matches the binary
+        run: |
+          status=0
+
+          # Each binary against its own package definition, and both symbol families: GLIBCXX
+          # is what actually broke on Rocky 9, so checking GLIBC alone would have missed it.
+          check() {
+            bin="$1" cfg="$2"
+            for sym in GLIBC GLIBCXX; do
+              declared=$(grep -oE "${sym}_[0-9]+(\.[0-9]+)+" "$cfg" | sort -uV | tail -1)
+              needed=$(objdump -T "$bin" | grep -oE "${sym}_[0-9]+(\.[0-9]+)+" | sort -uV | tail -1)
+              [ -n "$needed" ] || continue
+              if [ -z "$declared" ]; then
+                echo "::error::$bin needs $needed but $cfg declares no $sym floor" >&2
+                status=1
+              elif [ "$(printf '%s\n%s\n' "$needed" "$declared" | sort -V | tail -1)" != "$declared" ]; then
+                echo "::error::$bin needs $needed but $cfg declares $declared" >&2
+                status=1
+              else
+                echo "$(basename "$bin") vs $(basename "$cfg"): needs $needed, declared $declared"
+              fi
+            done
+          }
+
+          check target/release/yorishiro-server    packaging/nfpm-yorishiro.yaml
+          check target/release/yorishiro-ce-server packaging/nfpm-yorishiro-ce.yaml
+          exit "$status"
+
   security:
     runs-on: ubuntu-latest
     steps:

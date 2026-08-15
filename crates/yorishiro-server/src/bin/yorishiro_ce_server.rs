@@ -19,7 +19,8 @@ use clap::Parser;
 use yorishiro_core::db::TenantDb;
 use yorishiro_server::admin::{self, AdminCommand};
 use yorishiro_server::{
-    AppState, bind_addr_from_env, build_app, build_embedding_provider, shutdown_signal,
+    AppState, bind_addr_from_env, build_app, build_embedding_provider, database_url_from_env,
+    shutdown_signal,
 };
 
 /// The Yorishiro server, community edition. A plain start runs the HTTP server;
@@ -74,7 +75,7 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url = database_url_from_env()?;
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;
     sqlx::migrate!("../../migrations")
         .run(&identity_pool)

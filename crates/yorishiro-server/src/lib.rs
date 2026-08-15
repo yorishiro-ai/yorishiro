@@ -432,6 +432,24 @@ pub async fn shutdown_signal() {
 /// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
 /// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024 — the
 /// width of the default model, multilingual-e5-large).
+/// `DATABASE_URL`, or an error an operator can act on.
+///
+/// The obvious `.expect("DATABASE_URL must be set")` prints a Rust panic naming a source file,
+/// which is the wrong audience: most people meet this message after installing a package, having
+/// never seen the source. This names the file the package actually puts the setting in.
+pub fn database_url_from_env() -> Result<String> {
+    non_empty_env("DATABASE_URL").ok_or_else(|| {
+        anyhow::anyhow!(
+            "DATABASE_URL is not set.\n\n\
+             Set it in /etc/yorishiro/yorishiro.env (package installs), in the environment, or \n\
+             as `database_url:` in config.yml, then start the server again. For example:\n\n    \
+             DATABASE_URL=postgres://yorishiro:PASSWORD@localhost:5432/yorishiro\n\n\
+             The database must exist and the role must be able to create the schema; the server \n\
+             applies its migrations on startup."
+        )
+    })
+}
+
 /// Reads an environment variable, treating both "unset" and "set to an empty string" as absent.
 /// `env::var(...).ok()` alone would treat `FOO=` (set but empty) as present, which for a bind
 /// address means handing `TcpListener::bind` an empty string and aborting startup.
