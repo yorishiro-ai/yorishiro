@@ -98,7 +98,12 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let database_url = database_url_from_env()?;
+    // Not `?`: an absent DATABASE_URL exits 78 so the unit's `RestartPreventExitStatus=78` stops
+    // rather than retrying every five seconds forever. Everything below keeps exiting 1, which
+    // is what `Restart=on-failure` is for -- a database still starting is worth waiting for, and
+    // missing configuration is not.
+    let database_url =
+        database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;
     run_migrations(&identity_pool).await?;
 

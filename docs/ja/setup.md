@@ -84,6 +84,12 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+`DATABASE_URL`を設定する前に有効化した場合、unitは`status=78/CONFIG`で`failed`になり停止します。
+`journalctl -u yorishiro`にどのファイルを編集すべきかが出ます。
+待っても設定は現れないため、再試行はしません。
+一方、データベースがまだ起動していないだけの場合は逆で、5秒ごとに再試行します。
+同じホストのPostgreSQLと同時に起動する構成でも自力で復帰します。
+
 パッケージは**glibc 2.38以降**を要求します(Ubuntu 24.04・Debian 13・Fedora 39以降)。
 この下限はYorishiro自身ではなく、埋め込みプロバイダがリンクするONNX Runtimeに由来します。
 パッケージの依存として宣言しているため、それより古いシステムではapt/dnfが導入を拒否します。

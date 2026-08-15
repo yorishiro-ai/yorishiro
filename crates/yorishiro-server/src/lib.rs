@@ -425,18 +425,28 @@ pub async fn shutdown_signal() {
     tracing::info!("shutdown signal received, draining connections");
 }
 
-/// Builds the embeddings provider from environment variables. `YORISHIRO_EMBEDDING_PROVIDER`
-/// switches between `local` (a local ONNX model, the default -- needs no external service or
-/// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
-/// operators already running something like Ollama/LM Studio). The `entities.embedding`
-/// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
-/// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024 — the
-/// width of the default model, multilingual-e5-large).
+/// The exit code a binary uses when it stops because its configuration is absent or unusable,
+/// rather than because something it depends on is not ready yet.
+///
+/// `EX_CONFIG` from `sysexits.h`. The units set `RestartPreventExitStatus=78`, which is the
+/// whole point of having a distinct code: an unconfigured start is not a fault that waiting
+/// fixes, so systemd must stop rather than retry every five seconds forever. Anything else
+/// still exits 1 and keeps its retry -- a database that has not finished starting is exactly
+/// the case `Restart=on-failure` exists for.
+///
+/// Measured before this existed: an unconfigured `enable --now` restarted 15 times in 45
+/// seconds, and `systemctl is-failed` answered `activating` throughout, so nothing watching
+/// unit state could ever see it.
+pub const EXIT_CONFIG: i32 = 78;
+
 /// `DATABASE_URL`, or an error an operator can act on.
 ///
 /// The obvious `.expect("DATABASE_URL must be set")` prints a Rust panic naming a source file,
 /// which is the wrong audience: most people meet this message after installing a package, having
 /// never seen the source. This names the file the package actually puts the setting in.
+///
+/// Callers that are a `main` should report this through [`exit_with_config_code`] so the
+/// process carries [`EXIT_CONFIG`] rather than a bare 1.
 pub fn database_url_from_env() -> Result<String> {
     non_empty_env("DATABASE_URL").ok_or_else(|| {
         anyhow::anyhow!(
@@ -448,6 +458,19 @@ pub fn database_url_from_env() -> Result<String> {
              applies its migrations on startup."
         )
     })
+}
+
+/// Prints `error` the way `fn main() -> Result<()>` would and exits with [`EXIT_CONFIG`].
+///
+/// Returning the `Err` from `main` prints the same text but always exits 1, which is
+/// indistinguishable from a database that is not up yet -- and the two want opposite handling
+/// from systemd. This keeps the message identical and changes only the code.
+///
+/// Returns `T` rather than `!` only so it can be passed straight to `unwrap_or_else`, which
+/// needs the closure's return type to match the `Ok` type; it never actually returns.
+pub fn exit_with_config_code<T>(error: anyhow::Error) -> T {
+    eprintln!("Error: {error:?}");
+    std::process::exit(EXIT_CONFIG)
 }
 
 /// Reads an environment variable, treating both "unset" and "set to an empty string" as absent.
@@ -493,6 +516,13 @@ pub fn embedding_model_name() -> String {
     }
 }
 
+/// Builds the embeddings provider from environment variables. `YORISHIRO_EMBEDDING_PROVIDER`
+/// switches between `local` (a local ONNX model, the default -- needs no external service or
+/// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
+/// operators already running something like Ollama/LM Studio). The `entities.embedding`
+/// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
+/// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024 — the
+/// width of the default model, multilingual-e5-large).
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "1024".into())

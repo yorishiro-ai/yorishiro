@@ -79,6 +79,10 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # at minimum, DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+Enabling it before setting `DATABASE_URL` stops the unit at `failed` with `status=78/CONFIG`, and `journalctl -u yorishiro` says which file to edit.
+It does not retry, because waiting does not supply a missing setting.
+A database that is merely not up yet is the opposite case and is retried every five seconds, so a server that boots alongside its own PostgreSQL recovers on its own.
+
 The packages require **glibc 2.38 or newer** (Ubuntu 24.04, Debian 13, Fedora 39 and later).
 That floor comes from the ONNX Runtime the embedding provider links, not from Yorishiro itself.
 It is declared as a package dependency, so apt and dnf refuse on an older system rather than installing a binary that cannot start.
