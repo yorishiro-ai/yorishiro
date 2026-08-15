@@ -61,6 +61,39 @@ for want in RUNS USER COPYRIGHT EXAMPLE ENVPERM STATEOWNER; do
 done
 
 # --------------------------------------------------------------------------------------------
+note "every file the package declares survives the install"
+# --------------------------------------------------------------------------------------------
+# The list above names files one at a time, which only ever catches what someone thought to
+# add. `dpkg-deb -c` versus the installed filesystem catches the general case: dpkg's
+# `path-exclude=/usr/share/doc/*` deletes at unpack, silently, so a package can contain a file
+# it does not deliver.
+#
+# It found one. `ee/LICENSE` shipped as `/usr/share/doc/yorishiro/copyright.ee`, and the
+# `path-include` covers the name `copyright` exactly -- so the enterprise edition delivered
+# everything except the licence it is distributed under, on every minimal image.
+check_declared_files() {
+  pkg="$1" label="$2"
+  out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+    set -euo pipefail
+    apt-get update -qq >/dev/null 2>&1
+    dpkg-deb -c /pkg/'"$pkg"' | awk "\$6 ~ /^\.\// && \$1 !~ /^d/ { print substr(\$6, 2) }" > /tmp/declared
+    apt-get install -y -qq /pkg/'"$pkg"' >/dev/null 2>&1
+    while read -r f; do
+      [ -e "$f" ] || echo "DROPPED:$f"
+    done < /tmp/declared
+    echo "COMPARED:$(wc -l < /tmp/declared)"' 2>&1)
+  if ! grep -q COMPARED: <<<"$out"; then
+    bad "$label: could not compare the package against the install: $(echo "$out" | tr '\n' ' ')"
+  elif grep -q DROPPED: <<<"$out"; then
+    bad "$label: files in the package are missing after install: $(grep -o 'DROPPED:[^ ]*' <<<"$out" | tr '\n' ' ')"
+  else
+    ok "$label: all $(grep -o 'COMPARED:[0-9]*' <<<"$out" | cut -d: -f2) declared files are present"
+  fi
+}
+check_declared_files "$(basename "$(deb)")" "yorishiro"
+check_declared_files "$(basename "$(deb_ce)")" "yorishiro-ce"
+
+# --------------------------------------------------------------------------------------------
 note "deb refused on ubuntu:22.04 — below the glibc floor"
 # --------------------------------------------------------------------------------------------
 # Asserting the reason, not merely a nonzero exit: a network failure also exits nonzero, and

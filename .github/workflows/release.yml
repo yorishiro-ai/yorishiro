@@ -169,15 +169,11 @@ jobs:
           - os: ubuntu-latest
             arch: amd64
             ext: ""
-            archive: tar.gz
+            archive: deb+rpm
           - os: ubuntu-24.04-arm
             arch: arm64
             ext: ""
-            archive: tar.gz
-          - os: windows-latest
-            arch: amd64
-            ext: .exe
-            archive: zip
+            archive: deb+rpm
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -190,10 +186,8 @@ jobs:
 
       # The action exports SCCACHE_PATH but not RUSTC_WRAPPER, so cargo has to be pointed at
       # sccache explicitly, and that happens after rust-cache below since rust-cache folds
-      # RUST*-prefixed env vars into its cache key. Linux legs only -- the $GITHUB_ENV append is
-      # bash syntax and this matrix also runs on windows-latest.
+      # RUST*-prefixed env vars into its cache key.
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        if: runner.os == 'Linux'
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -227,11 +221,20 @@ jobs:
 
       # The community binary carries no code from `ee/`, for a deployment that cannot hold
       # proprietary code at all. Built only on Linux: it exists for the distribution packages
-      # below, and the tarball/zip line ships the default edition.
+      # below, and the default edition is the unsuffixed package.
       - name: Build the community binary
         if: runner.os == 'Linux'
         run: cargo build --release -p yorishiro-server --bin yorishiro-ce-server
 
+      # No Linux tarball. The .deb and .rpm below carry the same binaries and additionally
+      # create the service user, the state directory, the config directory and the systemd
+      # unit -- and they declare the glibc floor, so the package manager refuses a system the
+      # binary cannot run on instead of unpacking one that dies at first start. A tarball
+      # offers none of that and works on exactly the same systems, the floor being a property
+      # of the binary rather than of the packaging.
+      #
+      # No Windows build either: nothing documents it, so the zip was an artifact nobody was
+      # ever pointed at.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         env:
@@ -239,10 +242,6 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist
-          tar -czf "dist/yorishiro-server-${TAG}-linux-${ARCH}.tar.gz" \
-            -C target/release yorishiro-server
-          tar -czf "dist/yorishiro-ce-server-${TAG}-linux-${ARCH}.tar.gz" \
-            -C target/release yorishiro-ce-server
 
       # Installed from the release tarball rather than an action: the version is pinned here in
       # plain sight, and nfpm publishes static binaries for both architectures this matrix runs.
@@ -295,20 +294,9 @@ jobs:
           done
           ls -1 dist/
 
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          TAG: ${{ needs.prepare.outputs.tag }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          New-Item -ItemType Directory -Force dist
-          Compress-Archive -Path "target/release/yorishiro-server.exe" `
-            -DestinationPath "dist/yorishiro-server-$env:TAG-windows-$env:ARCH.zip"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: binary-${{ runner.os == 'Windows' && 'windows' || 'linux' }}-${{ matrix.arch }}
+          name: binary-linux-${{ matrix.arch }}
           path: dist/*
 
   docker:
@@ -489,20 +477,24 @@ jobs:
               echo "ok: $1 ($n)"
             fi
           }
-          # Both editions, both architectures, both formats: 8 packages. Plus the four Linux
-          # tarballs (two editions x two arches) and the one Windows zip.
-          expect '*.deb'      4
-          expect '*.rpm'      4
-          expect '*.tar.gz'   4
-          expect '*.zip'      1
+          # Both editions x both architectures x both formats, and nothing else.
+          expect '*.deb' 4
+          expect '*.rpm' 4
           exit "$status"
+
+      # One checksum file over everything published, so a download can be verified without a
+      # signing key to distribute, rotate and have people trust. The same mechanism this
+      # workflow already relies on for nfpm itself.
+      - name: Checksums
+        run: |
+          ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
+          cat dist/checksums.txt
 
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           files: |
-            dist/*.tar.gz
-            dist/*.zip
             dist/*.deb
             dist/*.rpm
+            dist/checksums.txt
           generate_release_notes: true

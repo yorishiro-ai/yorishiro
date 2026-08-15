@@ -32,9 +32,9 @@ $ docker run --rm -e DATABASE_URL=postgres://... ghcr.io/yotsunagi/yorishiro:lat
 $ docker build -t yorishiro .
 ```
 
-### systemd(ビルド済みバイナリ)
+### systemd(パッケージを使わない場合)
 
-[setup.md](setup.md#ビルド済みバイナリで動かす)で起動したプロセスを、systemdユニットで再起動をまたいで維持し、異常終了時も自動再起動できます。
+`.deb`と`.rpm`は自前のunitを同梱し`systemctl enable --now yorishiro`で有効化するため、この節は[パッケージの外に取り出した](setup.md#パッケージの外でバイナリを動かす)バイナリを別の場所で動かす場合のものです。
 プレーンなシェルと異なり、systemdの`EnvironmentFile=`は`.env`を直接読み込むため、`source`/`set -a`は不要です。
 
 ```ini
@@ -75,7 +75,7 @@ Actionsタブからも実行できます(`Release`ワークフローを選択 �
 
 1. バージョンが先頭ゼロなしの`x.y.z`形式か検証し、新規リリースか再開かを判定します(後述)。
 2. ルート`Cargo.toml`の`workspace.package.version`を更新し、`cargo update -w`を実行した上で、bumpコミットと`vX.Y.Z`タグを**まとめて(atomicに)**`master`へpushします。
-3. `yorishiro-server`を`x86_64`/`aarch64` Linux(glibc、`linux-amd64`/`linux-arm64`として梱包)と`x86_64` Windows(`windows-amd64.zip`)向けにビルドします。
+3. 両エディションを`x86_64`と`aarch64`のLinux向けにビルドし、それぞれ`.deb`と`.rpm`に梱包します(計8ファイル)。
    どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせQEMUを使わずネイティブビルドします。
 4. マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`および`:latest`としてビルド・pushします。
 5. **公開したイメージを実際にpullし、本物のPostgreSQLに対して起動**します。

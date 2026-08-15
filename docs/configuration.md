@@ -114,7 +114,6 @@ $ yorishiro-server admin resync-embeddings --workspace <id>
 
 Workspaces created before this stamp existed carry none, and accept whatever the deployment produces — which is what they have always done.
 
-
 ### When `YORISHIRO_EMBEDDING_PROVIDER=openai` (e.g. Ollama, LM Studio, OpenAI)
 
 | Variable | Description |

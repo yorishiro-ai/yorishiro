@@ -74,9 +74,25 @@ Web UIはバイナリに組み込み済みで、別途`web/`を取得・マウ�
 
 ## パッケージからインストールする
 
-`.deb`と`.rpm`を各[リリース](https://github.com/yotsunagi/yorishiro/releases)に添付しています。
-apt/yumリポジトリの追加は不要で、パッケージ署名も行っていません。
-ファイルを直接インストールしてください。
+各[リリース](https://github.com/yotsunagi/yorishiro/releases)に`.deb`と`.rpm`を添付しています。
+`amd64`と`arm64`、両エディション分です。
+apt/yumリポジトリの追加は不要で、ファイルを直接インストールしてください。
+
+### どちらのパッケージを入れるか
+
+2つは互いにConflictするため、1台にはどちらか一方だけが入ります。
+
+| パッケージ | リリースページ上のファイル | 中身 |
+|---|---|---|
+| `yorishiro` | `yorishiro_X.Y.Z_<arch>.deb`<br>`yorishiro-X.Y.Z-1.<arch>.rpm` | エンタープライズ版であり、既定でもあります。有償機能とWeb UIを含みますが、どちらも`YORISHIRO_LICENSE_KEY`を設定するまで無効のままなので、キーが無ければコミュニティ版とまったく同じ挙動になります。下の行に当てはまらない限り**こちらを入れてください**。 |
+| `yorishiro-ce` | `yorishiro-ce_X.Y.Z_<arch>.deb`<br>`yorishiro-ce-X.Y.Z-1.<arch>.rpm` | コミュニティ版。プロプライエタリなコードを一切置けない配備向けです。**headless**——Web UIは有償側の資産なので`/`では何も配信しません。REST API・MCPサーバ・管理CLIは同一です。 |
+
+無印がエンタープライズ版なのはGitLabと同じ流儀です。
+大半の利用者が入れるべきものに素の名前を与え、コミュニティ版に`-ce`を付けています。
+rpmではライセンス欄でも判別でき、`rpm -qi`が`BUSL-1.1 AND LicenseRef-Yorishiro-EE`と`BUSL-1.1`を返します。
+debにはライセンス欄が無いため、パッケージ名と説明文がその役割を担います。
+
+### インストール
 
 ```console
 $ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # または: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
@@ -84,73 +100,51 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+サービスはパッケージが作成する`yorishiro`システムユーザーで動作し、状態は`/var/lib/yorishiro`に置きます。
+
 `DATABASE_URL`を設定する前に有効化した場合、unitは`status=78/CONFIG`で`failed`になり停止します。
 `journalctl -u yorishiro`にどのファイルを編集すべきかが出ます。
 待っても設定は現れないため、再試行はしません。
 一方、データベースがまだ起動していないだけの場合は逆で、5秒ごとに再試行します。
 同じホストのPostgreSQLと同時に起動する構成でも自力で復帰します。
 
+### ダウンロードの検証
+
+パッケージにGPG署名は付けていません。
+8つすべてを含む`checksums.txt`を各リリースに添付しているため、ダウンロードしたものが公開物と一致するかは確認できます。
+
+```console
+$ curl -LO https://github.com/yotsunagi/yorishiro/releases/download/vX.Y.Z/checksums.txt
+$ sha256sum --check --ignore-missing checksums.txt
+```
+
+### 動作環境
+
 パッケージは**glibc 2.38以降**を要求します(Ubuntu 24.04・Debian 13・Fedora 39以降)。
 この下限はYorishiro自身ではなく、埋め込みプロバイダがリンクするONNX Runtimeに由来します。
-パッケージの依存として宣言しているため、それより古いシステムではapt/dnfが導入を拒否します。
-起動できないバイナリが入ってしまうことはありません。
+パッケージの依存として宣言しているため、それより古いシステムではapt/dnfが導入を拒否し、起動できないバイナリが入ってしまうことはありません。
 
 この2点はプルリクエストごとに、パッケージを読むのではなく実際にインストールして検証しています。
-`packaging/test-install.sh`はビルド済みパッケージの置かれたディレクトリを受け取り、Ubuntu 24.04とFedora 39——glibcがちょうど2.38、サポート下限そのものの環境です——で、導入できること・バイナリが起動すること・実データベースに接続した状態で初回セットアップウィザードが提示されることを確認します。
-拒否側も同様に検証します。
-Ubuntu 22.04とRocky 9は下限未満なので、起動できないものを導入せず、理由を明示して拒否しなければなりません。
-手元で実行する場合は、先に`nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/`(`--packager rpm`と`nfpm-yorishiro-ce.yaml`についても同様)でパッケージをビルドし、`./packaging/test-install.sh dist`を実行します。
-`nfpm`は`src:`をカレントディレクトリ基準で解決するため、リポジトリのルートで実行してください。
-ホストのglibcが下限以下でない限り、バイナリはホストではなくコンテナ内でビルドしてください。
+`packaging/test-install.sh`がUbuntu 24.04とFedora 39——glibcがちょうど2.38、サポート下限そのものの環境です——で導入と起動を確認し、下限未満のUbuntu 22.04とRocky 9が理由を明示して拒否することも要求します。
+systemdでしか確認できない部分は`packaging/test-systemd.sh`が受け持ちます。
+未設定の起動が再試行せず止まること、設定済みなら`/up`を配信すること、再起動後に自力で復帰することの3点です。
+
+どちらもビルド済みパッケージの置かれたディレクトリを受け取り、Dockerを必要とします(systemd側は特権コンテナも必要です)。
+CIも同じ2本を実行するため、CIの失敗は手元で再現できます。
+パッケージのビルドはリポジトリのルートで`nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/`を実行し(`nfpm`は`src:`をカレントディレクトリ基準で解決します)、`--packager rpm`と`nfpm-yorishiro-ce.yaml`についても同様に繰り返します。
+ホストのglibcが下限以下でない限り、バイナリはコンテナ内でビルドしてください。
 新しいglibcでは、パッケージが宣言していないシンボルを要求するバイナリができてしまいます。
-このスクリプトはDockerを使い、CIも同じスクリプトを実行するため、CIの失敗はコミットをpushせずに手元で再現できます。
-systemdでしか確認できない部分は`./packaging/test-systemd.sh dist`が受け持ちます。
-未設定の起動が再試行せず`failed`で止まること、設定済みなら`/up`を配信すること、再起動後に自力で復帰することの3点です。
-特権コンテナが必要なためスクリプトを分けていますが、CIでも実行します。
 
-パッケージは2種類あり、互いにConflictします。
-どちらか一方を入れてください。
+### パッケージの外でバイナリを動かす
 
-| パッケージ | 中身 |
-|---|---|
-| `yorishiro` | 既定。有償機能とWeb UIを含みますが、どちらも`YORISHIRO_LICENSE_KEY`を設定するまで無効のままなので、キーが無ければコミュニティ版とまったく同じ挙動になります。下の行に当てはまらない限りこちらを入れてください |
-| `yorishiro-ce` | `ee/`のコードをマシン上に一切置きません。それが要件になる配備向けです。**headless**——Web UIは有償側の資産なので`/`では何も配信しません。REST API・MCP・管理CLIは同一です |
+ベアメタル/VMへの導入はパッケージが正規の手段です。
+中身は同じバイナリで、加えてサービスユーザー・状態ディレクトリ・systemd unitが揃い、glibc下限を宣言しているため動かせないシステムではパッケージマネージャが導入を拒否します。
+単体のtarballは配布していません。
+リリースに添付されるのは8つのパッケージ(2エディション×2アーキ×2形式)とチェックサムだけです。
 
-サービスはパッケージが作成する`yorishiro`システムユーザーで動作し、状態は`/var/lib/yorishiro`に置きます。
-
-## ビルド済みバイナリで動かす
-
-Dockerを使わない、ベアメタル/VMへのデプロイ向けです。
-
-1. 上記の[前提条件](#前提条件)を済ませます。
-2. 自分のアーキテクチャ向けのリリースアーカイブを取得して展開します。
-
-   ```console
-   $ mkdir -p /opt/yorishiro && cd /opt/yorishiro
-   $ curl -L -o yorishiro.tar.gz \
-       https://github.com/yotsunagi/yorishiro/releases/download/vX.Y.Z/yorishiro-server-vX.Y.Z-linux-amd64.tar.gz
-   $ tar -xzf yorishiro.tar.gz && rm yorishiro.tar.gz
-   ```
-
-   アーカイブには`yorishiro-server`バイナリのみが含まれます。
-   Web UIはバイナリに組み込み済みなので別途取得は不要です。
-   手順1で用意した`models/`をバイナリの隣に移動(またはシンボリックリンク)してください。
-3. 少なくとも`DATABASE_URL`を設定します。
-   バイナリの隣に置く`config.yml`ファイル(バイナリが直接読み込みます。[configuration.md](configuration.md#configyml)と[`config.example.yml`](../../config.example.yml)参照)、または起動するシェルに読み込む方法のいずれかです。
-
-   ```console
-   $ curl -L -o .env https://raw.githubusercontent.com/yotsunagi/yorishiro/vX.Y.Z/.env.example
-   # (.envを編集してDATABASE_URLを設定。他はコメントアウトのままで構わない)
-   $ set -a; source .env; set +a
-   ```
-
-4. 起動します。
-
-   ```console
-   $ ./yorishiro-server
-   ```
-
-systemdで再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
+`/usr/bin`以外の場所でバイナリを動かしたい場合は、パッケージから取り出し(`dpkg-deb -x`、`rpm2cpio | cpio -id`)、手順1の`models/`をその隣に置いてください。
+設定はバイナリの隣の`config.yml`([configuration.md](configuration.md#configyml)と[`config.example.yml`](../../config.example.yml)参照)か環境変数で行います。
+パッケージ同梱のunitを使わずに再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
 
 ## ソースから動かす(Docker Compose)
 
