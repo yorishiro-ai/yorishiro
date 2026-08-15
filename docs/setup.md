@@ -79,6 +79,10 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # at minimum, DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+The packages require **glibc 2.38 or newer** (Ubuntu 24.04, Debian 13, Fedora 39 and later).
+That floor comes from the ONNX Runtime the embedding provider links, not from Yorishiro itself.
+It is declared as a package dependency, so apt and dnf refuse on an older system rather than installing a binary that cannot start.
+
 Two packages exist, and they conflict — install one:
 
 | Package | What it is |

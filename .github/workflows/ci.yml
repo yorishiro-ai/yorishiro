@@ -146,6 +146,29 @@ jobs:
           [ "$status" -eq 0 ] && echo "community binary is clean; every marker discriminates"
           exit "$status"
 
+      # The packages declare a glibc floor, and a declaration that drifts from the artifact is
+      # worse than none: apt/dnf would install onto a system the binary cannot run on. This
+      # compares what the binary demands against what the packaging promises.
+      #
+      # It caught a real one: a host-built binary needed GLIBC_2.43, and the rpm installed
+      # happily on Rocky 9 (2.34) before dying on a missing symbol at first start.
+      - name: The declared glibc floor matches the binary
+        run: |
+          declared=$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' packaging/nfpm-yorishiro.yaml | sort -uV | tail -1)
+          [ -n "$declared" ] || { echo "::error::no glibc floor declared in packaging" >&2; exit 1; }
+
+          status=0
+          for b in target/release/yorishiro-server target/release/yorishiro-ce-server; do
+            needed=$(objdump -T "$b" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -uV | tail -1)
+            if [ "$(printf '%s\n%s\n' "$needed" "$declared" | sort -V | tail -1)" != "$declared" ]; then
+              echo "::error::$b needs $needed but the packages declare $declared" >&2
+              status=1
+            else
+              echo "$(basename "$b"): needs $needed, declared $declared"
+            fi
+          done
+          exit "$status"
+
   security:
     runs-on: ubuntu-latest
     steps:

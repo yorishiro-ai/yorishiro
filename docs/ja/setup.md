@@ -84,6 +84,10 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+パッケージは**glibc 2.38以降**を要求します(Ubuntu 24.04・Debian 13・Fedora 39以降)。
+この下限はYorishiro自身ではなく、埋め込みプロバイダがリンクするONNX Runtimeに由来します。
+パッケージの依存として宣言しているため、それより古いシステムではapt/dnfが導入を拒否します。起動できないバイナリが入ってしまうことはありません。
+
 パッケージは2種類あり、互いにConflictします。
 どちらか一方を入れてください。
 

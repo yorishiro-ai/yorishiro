@@ -10,7 +10,7 @@ use yorishiro_server::admin::{self, AdminCommand};
 use yorishiro_server::http::middleware::rate_limit::{RateLimiter, apply_rate_limit_layer};
 use yorishiro_server::{
     AppState, apply_body_limit_layer, apply_observability_layers, build_app_with_rate_limiter,
-    build_embedding_provider, shutdown_signal,
+    build_embedding_provider, database_url_from_env, shutdown_signal,
 };
 
 /// The Yorishiro server. A plain start runs the HTTP server and serves the web UI;
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url = database_url_from_env()?;
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;
     run_migrations(&identity_pool).await?;
 
