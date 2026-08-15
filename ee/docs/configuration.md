@@ -17,7 +17,7 @@ Setting the new name alongside an old one uses the new value.
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string (required), shared by the whole server. The one `migrations/` directory, which holds the paid tables too, is applied automatically on startup |
-| `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8081`). Set but empty (`YORISHIRO_BIND=`) falls back to the same default rather than failing to bind |
+| `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8080`). Set but empty (`YORISHIRO_BIND=`) falls back to the same default rather than failing to bind |
 | `YORISHIRO_LICENSE_KEY` | The licence key that enables the paid features: an RS256-signed JWT, verified against a public key compiled into the binary. Unset, empty, invalid or expired all mean the same thing at startup — the paid features are disabled, while everything else runs normally. The server never refuses to start over this. What a disabled feature answers differs per feature; see [Licence keys](#licence-keys) |
 | `YORISHIRO_WEB_DIR` | Serves the SPA from a directory on disk instead of the copy compiled into the binary, read fresh on every request. Unset (the default) serves the compiled-in copy, which is what a normal deployment wants — see [web-ui.md](web-ui.md) |
 

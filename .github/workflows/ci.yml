@@ -350,7 +350,7 @@ jobs:
 
           ok=
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8081/up >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
               ok=1
               break
             fi
@@ -362,6 +362,6 @@ jobs:
           # The one binary now serves the UI too, so a boot that answers /up while serving no
           # index.html is still a broken deploy. Asserted here rather than only in the embed
           # test, because this is the step that runs the real `main`.
-          curl -fsS http://127.0.0.1:8081/ | grep -q "<html" \
+          curl -fsS http://127.0.0.1:8080/ | grep -q "<html" \
             || { echo "server booted but served no SPA at /"; exit 1; }
           echo "server served the SPA at /"

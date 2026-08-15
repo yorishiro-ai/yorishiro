@@ -87,7 +87,7 @@ Stripeのサブスクリプションイベントを受信します。
 プラン・ワークスペース上限・使用量カウンタ・メンバー一覧を1回のリクエストで取得します。
 
 ```console
-$ curl localhost:8081/hosted/tenant/overview -H "Authorization: Bearer $YORISHIRO_KEY"
+$ curl localhost:8080/hosted/tenant/overview -H "Authorization: Bearer $YORISHIRO_KEY"
 ```
 
 `/auth/login`が発行するのと同じ形式のbearer APIキーが必要です(欠落・不正なbearerトークンは`401 Unauthorized`)。
@@ -259,7 +259,7 @@ reqwest での実装点はカスタムDNSリゾルバであり、保存時のチ
 $ yorishiro-server create-tenant-api-key <tenant-id> write
 
 # 各リクエストで対象ワークスペースを指定する
-$ curl localhost:8081/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
+$ curl localhost:8080/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "X-Workspace-Id: <workspace-id>"
 ```
 
@@ -355,7 +355,7 @@ IDプロバイダのリダイレクト先(`redirect_uri`)。
 このレイヤーがなくても、`axum`の`Bytes`/`Json`/`String`エクストラクタ自体が組み込みの2MBデフォルトにフォールバックするため——このレイヤーが追加される以前はこれによって上限が維持されていました——明示的なレイヤーは、それらのエクストラクタを使わず生の`Request`/ストリーミングボディを読むような将来のハンドラも追加でカバーします。
 
 ```console
-$ curl -i localhost:8081/auth/oauth/authorize
+$ curl -i localhost:8080/auth/oauth/authorize
 HTTP/1.1 302 Found
 location: https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=...
 ```
