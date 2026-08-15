@@ -172,6 +172,10 @@ Migrations are applied automatically on startup, for all three methods above.
 Deployments where `YORISHIRO_MAX_TENANTS` resolves to an actual cap (the default: unset means `1`) serve a setup wizard at `http://localhost:8080/`.
 No admin CLI needed.
 
+The wizard is served over HTTP, so it starts one step later than GitLab's does: a database has to be reachable before there is anything to serve it from.
+A server started with no `DATABASE_URL` exits and tells you which file to set it in, rather than launching a configuration wizard the way `gitlab-ctl reconfigure` does for an unconfigured `gitlab.rb`.
+Set the connection string, start the server, and the wizard covers everything after that.
+
 On first visit, since no tenant exists yet, the browser shows a form for an email and password (plus an optional display name and an optional schema template to bootstrap the `default` workspace with).
 Submitting it creates the tenant, its `default` workspace, and an owner account in one step, and displays the freshly issued API key (shown only once, same as every other key in this system).
 Visiting the same page afterward shows a login form instead.
