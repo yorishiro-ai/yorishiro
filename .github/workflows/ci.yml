@@ -225,11 +225,20 @@ jobs:
         run: chmod +x target/release/yorishiro-server target/release/yorishiro-ce-server
 
       # Pinned: an unpinned install makes nfpm's next release able to break this job on a
-      # commit that changed nothing.
+      # commit that changed nothing. Checksum-verified as well, the same way release.yml does
+      # it -- a pinned version still trusts whatever that URL serves, and this builds the
+      # artifacts the release publishes. Keep the version in step with release.yml's
+      # NFPM_VERSION, so CI tests the packager that ships.
       - name: Install nfpm
+        env:
+          NFPM_VERSION: 2.47.0
         run: |
-          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz \
-            | tar -xz -C /usr/local/bin nfpm
+          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+          asset="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL -o "/tmp/$asset" "${base}/${asset}"
+          curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
+          ( cd /tmp && sha256sum --check --ignore-missing --strict nfpm-checksums.txt )
+          tar -xzf "/tmp/$asset" -C /usr/local/bin nfpm
           nfpm --version
 
       - name: Build the packages
