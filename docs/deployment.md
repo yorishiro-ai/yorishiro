@@ -37,7 +37,7 @@ $ docker build -t yorishiro .
 
 The `.deb` and `.rpm` install a unit of their own and enable it with `systemctl enable --now yorishiro`, so this section is only for a binary taken [out of the package](setup.md#running-the-binary-outside-the-package) and placed somewhere else.
 Unlike a plain shell, systemd's `EnvironmentFile=` loads `.env` directly, no `source`/`set -a` needed.
-For the community edition the binary is `yorishiro-ce-server`; the unit name here is your own choice, since this one is not the package's.
+The unit name here is your own choice, since this one is not the package's.
 
 ```ini
 # /etc/systemd/system/yorishiro.service
@@ -87,7 +87,7 @@ What it does, in order:
 4. Builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` and `:latest`.
 5. **Pulls that published image and boots it against a real PostgreSQL**, failing the release if it does not answer `/up`.
 6. Creates the GitHub Release, attaching the eight packages and a `checksums.txt` over them.
-   It counts each group first and fails before publishing if any is empty -- a glob that matches nothing is not an error to the upload action, which is how v0.46.0 came out with no packages at all.
+   It counts each group first and fails before publishing if any is empty, since a glob that matches nothing is not an error to the upload action.
 
 ### Recovering from a failed release
 

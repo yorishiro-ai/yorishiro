@@ -84,32 +84,45 @@ apt/yumリポジトリの追加は不要で、ファイルを直接インスト�
 
 | パッケージ | リリースページ上のファイル | 中身 |
 |---|---|---|
-| `yorishiro` | `yorishiro_X.Y.Z_<arch>.deb`<br>`yorishiro-X.Y.Z-1.<arch>.rpm` | エンタープライズ版であり、既定でもあります。有償機能とWeb UIを含みますが、どちらも`YORISHIRO_LICENSE_KEY`を設定するまで無効のままなので、キーが無ければコミュニティ版とまったく同じ挙動になります。下の行に当てはまらない限り**こちらを入れてください**。 |
+| `yorishiro-ee` | `yorishiro-ee_X.Y.Z_<arch>.deb`<br>`yorishiro-ee-X.Y.Z-1.<arch>.rpm` | エンタープライズ版。有償機能とWeb UIを含みますが、どちらも`YORISHIRO_LICENSE_KEY`を設定するまで無効のままなので、キーが無ければコミュニティ版とまったく同じ挙動になります。下の行に当てはまらない限り**こちらを入れてください**。 |
 | `yorishiro-ce` | `yorishiro-ce_X.Y.Z_<arch>.deb`<br>`yorishiro-ce-X.Y.Z-1.<arch>.rpm` | コミュニティ版。プロプライエタリなコードを一切置けない配備向けです。**headless**——Web UIは有償側の資産なので`/`では何も配信しません。REST API・MCPサーバ・管理CLIは同一です。 |
 
-無印がエンタープライズ版なのはGitLabと同じ流儀です。
-大半の利用者が入れるべきものに素の名前を与え、コミュニティ版に`-ce`を付けています。
-rpmではライセンス欄でも判別でき、`rpm -qi`が`BUSL-1.1 AND LicenseRef-Yorishiro-EE`と`BUSL-1.1`を返します。
+エディションの区別はパッケージ名だけです。
+どちらも`/usr/bin/yorishiro-server`を置き、`yorishiro.service`を同梱し、`/etc/yorishiro/`を読みます。
+一方向けに書いた手順書・監視設定・`systemctl`コマンドは、もう一方でもそのまま通用します。
+rpmでは`rpm -qi`がライセンスを返し、エンタープライズ版は`BUSL-1.1 AND LicenseRef-Yorishiro-EE`、コミュニティ版は`BUSL-1.1`です。
 debにはライセンス欄が無いため、パッケージ名と説明文がその役割を担います。
 
 ### インストール
 
 ```console
-$ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # または: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
+$ sudo dpkg -i yorishiro-ee_X.Y.Z_amd64.deb  # または: sudo rpm -i yorishiro-ee-X.Y.Z-1.x86_64.rpm
 $ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
-コミュニティ版は名前が一通り異なり、unitは`yorishiro-ce`、バイナリは`/usr/bin/yorishiro-ce-server`です。
-共通なのは環境変数ファイルだけで、両エディションとも`/etc/yorishiro/yorishiro.env`を読みます(postinstallが1本で、2つのパッケージは互いにConflictするためです)。
-
 サービスはパッケージが作成する`yorishiro`システムユーザーで動作し、状態は`/var/lib/yorishiro`に置きます。
 
 `DATABASE_URL`を設定する前に有効化した場合、unitは`status=78/CONFIG`で`failed`になり停止します。
-`journalctl -u yorishiro`(コミュニティ版は`-u yorishiro-ce`)にどのファイルを編集すべきかが出ます。
+`journalctl -u yorishiro`にどのファイルを編集すべきかが出ます。
 待っても設定は現れないため、再試行はしません。
 一方、データベースがまだ起動していないだけの場合は逆で、5秒ごとに再試行します。
 同じホストのPostgreSQLと同時に起動する構成でも自力で復帰します。
+
+### エディションを切り替える
+
+もう一方のパッケージを入れるだけです。
+既に入っている方を置き換えます。
+
+```console
+$ sudo dpkg -i yorishiro-ce_X.Y.Z_amd64.deb  # または: sudo rpm -U yorishiro-ce-X.Y.Z-1.x86_64.rpm
+```
+
+他に必要な作業はありません。
+`/etc/yorishiro/`と`/var/lib/yorishiro`はエディションではなくデプロイに属し、unit名も有効化状態もそのまま、`/usr/bin/yorishiro-server`が差し替わります。
+反映するにはサービスを再起動してください。
+
+コミュニティ版へ移るとWeb UIと有償機能は失われますが、データベースには手を触れないため、戻せば再び使えます。
 
 ### ダウンロードの検証
 
@@ -146,7 +159,7 @@ CIも同じ2本を実行するため、CIの失敗は手元で再現できます
 リリースに添付されるのは8つのパッケージ(2エディション×2アーキ×2形式)とチェックサムだけです。
 
 `/usr/bin`以外の場所でバイナリを動かしたい場合は、パッケージから取り出し(`dpkg-deb -x`、`rpm2cpio | cpio -id`)、手順1の`models/`をその隣に置いてください。
-取り出すのは`usr/bin/yorishiro-server`、コミュニティ版なら`usr/bin/yorishiro-ce-server`です。
+取り出すのはどちらのエディションでも`usr/bin/yorishiro-server`です。
 設定はバイナリの隣の`config.yml`([configuration.md](configuration.md#configyml)と[`config.example.yml`](../../config.example.yml)参照)か環境変数で行います。
 パッケージ同梱のunitを使わずに再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
 

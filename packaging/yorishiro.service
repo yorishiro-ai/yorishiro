@@ -1,4 +1,9 @@
-# Installed by the `yorishiro` package. Enable with `systemctl enable --now yorishiro`.
+# Installed by both the `yorishiro-ee` and `yorishiro-ce` packages, under one name.
+# Enable with `systemctl enable --now yorishiro`.
+#
+# One unit for both editions. The packages conflict, so a machine has exactly one of them, and
+# a single name makes switching editions an in-place swap of the file: whatever was enabled
+# stays enabled, and no `enable` symlink is left pointing at a unit that is not there.
 #
 # Configuration goes in /etc/yorishiro/yorishiro.env as KEY=value lines; at minimum
 # DATABASE_URL. See /etc/yorishiro/config.example.yml for the file-based alternative.
@@ -12,6 +17,12 @@ User=yorishiro
 Group=yorishiro
 WorkingDirectory=/var/lib/yorishiro
 EnvironmentFile=/etc/yorishiro/yorishiro.env
+# Both editions read the same /etc/yorishiro/, and they conflict, so a machine has one of them
+# and one configuration directory. Without this the server would look for `config.yml` in
+# WorkingDirectory, which is the state directory -- not somewhere an operator would think to
+# put configuration. The file is optional: absent, everything comes from the env file above.
+Environment=YORISHIRO_CONFIG_PATH=/etc/yorishiro/config.yml
+# Each package installs its own binary at this path, so the unit does not name an edition.
 ExecStart=/usr/bin/yorishiro-server
 Restart=on-failure
 # 78 is EX_CONFIG, which the binary uses for "configuration is absent or unusable" and nothing

@@ -37,7 +37,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     --mount=type=cache,target=/root/.cache/ort.pyke.io \
     cargo build --release -p yorishiro-hosted \
-    && cp target/release/yorishiro-server /usr/local/bin/yorishiro-server
+    && cp target/release/yorishiro-ee-server /usr/local/bin/yorishiro-ee-server
 
 # onnxruntime is statically linked, so the only shared library needed at runtime is
 # libstdc++6 (plus ca-certificates for the OpenAI-compatible provider's TLS, and curl for
@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --no-create-home yorishiro
 
-COPY --from=builder /usr/local/bin/yorishiro-server /usr/local/bin/yorishiro-server
+COPY --from=builder /usr/local/bin/yorishiro-ee-server /usr/local/bin/yorishiro-ee-server
 
 # Relative paths in embedding provider settings (e.g. YORISHIRO_ONNX_MODEL_PATH=models/model.onnx)
 # resolve against this directory, so a model directory can be bind-mounted here without
@@ -61,11 +61,9 @@ WORKDIR /app
 RUN chown -R yorishiro:yorishiro /app
 
 USER yorishiro
-# No `ENV YORISHIRO_BIND`: 8080 is the binary's own default. This line used to set it, because
-# the default was 8081 and the image had to be held at the port every compose file and
-# healthcheck expects -- which left every non-Docker install on 8081 while all the
-# documentation said 8080.
+# No `ENV YORISHIRO_BIND`: 8080 is the binary's own default, which is the port every compose
+# file, healthcheck and document here expects.
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD curl -sf http://localhost:8080/up || exit 1
-ENTRYPOINT ["yorishiro-server"]
+ENTRYPOINT ["yorishiro-ee-server"]

@@ -30,7 +30,7 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-DEB="$(basename "$(ls "$PKG_DIR"/yorishiro_*.deb | head -1)")"
+DEB="$(basename "$(ls "$PKG_DIR"/yorishiro-ee_*.deb | head -1)")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
 
 cleanup() {
