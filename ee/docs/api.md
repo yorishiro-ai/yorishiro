@@ -79,7 +79,7 @@ For the three `customer.subscription.*` event types specifically, Stripe also do
 The sole read the admin dashboard's landing page needs: plan, workspace cap, usage counters, and the member list, in one round trip.
 
 ```console
-$ curl localhost:8081/hosted/tenant/overview -H "Authorization: Bearer $YORISHIRO_KEY"
+$ curl localhost:8080/hosted/tenant/overview -H "Authorization: Bearer $YORISHIRO_KEY"
 ```
 
 Requires the same bearer API key format `/auth/login` issues -- a missing or invalid bearer token gets `401 Unauthorized` -- and restricts access to callers whose tenant membership role is `owner` or `admin` — a `member`-role key gets `403 Forbidden` regardless of the key's own `ApiKeyScope`, since billing/usage data is a tenant-admin concern independent of what content scopes the key happens to hold.
@@ -225,7 +225,7 @@ A key issued here can instead be bound to a **tenant**, naming the workspace per
 $ yorishiro-server create-tenant-api-key <tenant-id> write
 
 # Every request then names its workspace
-$ curl localhost:8081/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
+$ curl localhost:8080/api/entities -H "Authorization: Bearer $YORISHIRO_KEY" \
     -H "X-Workspace-Id: <workspace-id>"
 ```
 
@@ -304,7 +304,7 @@ Request bodies on every route in this document are capped at 2 MB.
 `axum::Router::merge` doesn't carry a `.layer()` from either side to the other, so `yorishiro-server`'s `main` applies `apply_body_limit_layer` explicitly to `ee/`'s own sub-router, the same way it does for the rate limiter (see above) -- even without it, `axum`'s `Bytes`/`Json`/`String` extractors fall back to their own built-in 2 MB default whenever no explicit layer applies, which is what enforced this cap before the layer was added; the explicit layer additionally covers a hypothetical future handler that reads a raw `Request`/streaming body instead of one of those extractors.
 
 ```console
-$ curl -i localhost:8081/auth/oauth/authorize
+$ curl -i localhost:8080/auth/oauth/authorize
 HTTP/1.1 302 Found
 location: https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=...
 ```

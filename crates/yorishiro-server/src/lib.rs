@@ -481,7 +481,7 @@ pub fn non_empty_env(key: &str) -> Option<String> {
 }
 
 /// The default bind address when `YORISHIRO_BIND` is unset or empty.
-pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8081";
+pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
 
 /// `YORISHIRO_BIND`, defaulting to [`DEFAULT_BIND_ADDR`].
 ///

@@ -61,9 +61,10 @@ WORKDIR /app
 RUN chown -R yorishiro:yorishiro /app
 
 USER yorishiro
-# The one binary defaults to 8081 (`YORISHIRO_BIND`). Set it here so the image keeps
-# serving on 8080, which every existing compose file, healthcheck and deployment expects.
-ENV YORISHIRO_BIND=0.0.0.0:8080
+# No `ENV YORISHIRO_BIND`: 8080 is the binary's own default. This line used to set it, because
+# the default was 8081 and the image had to be held at the port every compose file and
+# healthcheck expects -- which left every non-Docker install on 8081 while all the
+# documentation said 8080.
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD curl -sf http://localhost:8080/up || exit 1

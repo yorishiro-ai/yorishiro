@@ -93,7 +93,7 @@ pub fn require_non_empty(key: &str, raw: Option<&str>) -> String {
 }
 
 /// `{bind}/auth/oauth/callback`, per the design doc. `YORISHIRO_BIND` defaults to
-/// `0.0.0.0:8081` (see `main`), which is very rarely the host a browser can actually reach --
+/// `0.0.0.0:8080` (see `main`), which is very rarely the host a browser can actually reach --
 /// most real deployments sit behind a reverse proxy on a public hostname, so they're expected to
 /// set `YORISHIRO_OAUTH_REDIRECT_URI` explicitly. This default only covers same-host/local
 /// testing, replacing an all-interfaces bind address with `localhost` since browsers can't dial

@@ -1,18 +1,37 @@
 use crate::services::oauth::{require_non_empty, rewrite_unspecified_host};
-use crate::services::{bind_addr_or_default, web_dir_or_none};
+use crate::services::{DEFAULT_BIND_ADDR, bind_addr_or_default, web_dir_or_none};
 
 // Item 1 / item 4: `YORISHIRO_WEB_DIR`/`YORISHIRO_BIND` must treat "set to an
 // empty string" the same as "unset", falling back to their defaults rather than passing an
 // empty string through to `build_app`/`TcpListener::bind`.
+//
+// Against the constant, not a literal: what these assert is "falls back to the default", and
+// spelling the port out again would make them fail on a deliberate change to it while proving
+// nothing more. `the_default_port_is_the_documented_one` below is where the number itself is
+// pinned, once.
 
 #[test]
 fn bind_addr_falls_back_to_default_when_unset() {
-    assert_eq!(bind_addr_or_default(None), "0.0.0.0:8081");
+    assert_eq!(bind_addr_or_default(None), DEFAULT_BIND_ADDR);
 }
 
 #[test]
 fn bind_addr_falls_back_to_default_when_set_but_empty() {
-    assert_eq!(bind_addr_or_default(Some("")), "0.0.0.0:8081");
+    assert_eq!(bind_addr_or_default(Some("")), DEFAULT_BIND_ADDR);
+}
+
+/// The number itself, pinned once and deliberately.
+///
+/// Every document, the `config.example.yml`, the Dockerfile's `EXPOSE` and the compose files
+/// say 8080. The binary said 8081 for as long, so an operator who installed the package and
+/// followed the documentation reached nothing -- the Docker image was the only path that
+/// agreed, because it set `YORISHIRO_BIND` to paper over the difference.
+///
+/// Changing this constant is therefore a documentation change too. The assertion exists to make
+/// that unavoidable rather than to protect the value.
+#[test]
+fn the_default_port_is_the_documented_one() {
+    assert_eq!(DEFAULT_BIND_ADDR, "0.0.0.0:8080");
 }
 
 #[test]
