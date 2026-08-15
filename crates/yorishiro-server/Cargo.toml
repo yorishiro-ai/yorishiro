@@ -9,9 +9,12 @@ readme = "README.md"
 include = ["src/**/*", "README.md", "../../migrations/**/*"]
 autotests = false
 
-# No `[[bin]]`: this crate is a library the one binary composes. `ee/`'s
-# `yorishiro-server` is that binary, and it re-exports this crate's `admin` CLI, so the
-# commands a `yorishiro-server admin ...` used to run are reached through it.
+# The community edition's binary: BUSL-1.1 only, nothing from `ee/`, and headless because the
+# web UI is the paid edition's. The default artifact is `ee/`'s `yorishiro-server`, which is a
+# superset -- this one exists for a deployment that cannot have proprietary code on disk.
+[[bin]]
+name = "yorishiro-ce-server"
+path = "src/bin/yorishiro_ce_server.rs"
 
 [dependencies]
 yorishiro-core = { path = "../yorishiro-core" }

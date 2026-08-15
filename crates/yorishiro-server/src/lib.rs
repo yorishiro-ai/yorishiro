@@ -432,6 +432,32 @@ pub async fn shutdown_signal() {
 /// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
 /// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024 — the
 /// width of the default model, multilingual-e5-large).
+/// Reads an environment variable, treating both "unset" and "set to an empty string" as absent.
+/// `env::var(...).ok()` alone would treat `FOO=` (set but empty) as present, which for a bind
+/// address means handing `TcpListener::bind` an empty string and aborting startup.
+pub fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|s| !s.is_empty())
+}
+
+/// The default bind address when `YORISHIRO_BIND` is unset or empty.
+pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8081";
+
+/// `YORISHIRO_BIND`, defaulting to [`DEFAULT_BIND_ADDR`].
+///
+/// Here rather than in `ee/` because both binaries need it and neither edition owns the idea of
+/// a listen address. `ee/` re-exports it.
+pub fn bind_addr_from_env() -> String {
+    bind_addr_or_default(non_empty_env("YORISHIRO_BIND").as_deref())
+}
+
+/// The pure fold [`bind_addr_from_env`] wraps, split out so it is testable without touching the
+/// process environment: `None` and `Some("")` both fall back to [`DEFAULT_BIND_ADDR`].
+pub fn bind_addr_or_default(raw: Option<&str>) -> String {
+    raw.filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_BIND_ADDR)
+        .to_string()
+}
+
 /// The model name this deployment is configured for, for stamping onto new workspaces.
 ///
 /// Read from the environment rather than the provider: `EmbeddingProvider` exposes

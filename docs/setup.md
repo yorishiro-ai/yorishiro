@@ -68,6 +68,25 @@ The web UI is compiled into the binary, so there's no separate `web/` directory 
 See [configuration.md](configuration.md) to change any of that.
 See [deployment.md](deployment.md#running-in-the-background) for running it in the background, building the image from source, or running the admin CLI from the same image.
 
+## Install from a package
+
+`.deb` and `.rpm` are attached to every [release](https://github.com/yotsunagi/yorishiro/releases). There is no apt or yum repository to add, and the packages are not signed — download and install the file.
+
+```console
+$ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # or: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
+$ sudoedit /etc/yorishiro/yorishiro.env      # at minimum, DATABASE_URL
+$ sudo systemctl enable --now yorishiro
+```
+
+Two packages exist, and they conflict — install one:
+
+| Package | What it is |
+|---|---|
+| `yorishiro` | The default. Includes the paid features and the web UI; both stay inactive until `YORISHIRO_LICENSE_KEY` is set, so without a key it behaves exactly like the community edition. Install this one unless the row below applies to you. |
+| `yorishiro-ce` | No code from `ee/` on disk at all, for a deployment where that is a requirement. **Headless** — the web UI is part of the paid edition, so this package serves nothing at `/`. The REST API, MCP and the admin CLI are unchanged. |
+
+The service runs as the `yorishiro` system user the package creates, with state in `/var/lib/yorishiro`.
+
 ## Run the prebuilt binary
 
 For a bare-metal or VM deployment without Docker.

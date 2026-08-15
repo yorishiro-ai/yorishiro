@@ -1,0 +1,50 @@
+# The community package: BUSL-1.1 only, no code from `ee/` on disk, and therefore headless --
+# the web UI belongs to the paid edition. Install this only if that is a requirement; the
+# `yorishiro` package is a superset and is what most deployments want.
+name: yorishiro-ce
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Yorishiro Contributors <noreply@yotsunagi.dev>
+description: |
+  An MCP-native, multi-tenant knowledge store with user-defined schemas.
+  Community edition: REST API, MCP server and admin CLI, with no paid features and no web UI.
+  Contains no proprietary code.
+vendor: Yotsunagi
+homepage: https://github.com/yotsunagi/yorishiro
+license: BUSL-1.1
+
+depends:
+  - ca-certificates
+
+overrides:
+  deb:
+    depends:
+      - ca-certificates
+      - libstdc++6
+  rpm:
+    depends:
+      - ca-certificates
+      - libstdc++
+
+# Conflicts rather than Replaces: the two editions would install services pointing at one
+# database, and the point of this package is that the other one's code is absent.
+conflicts:
+  - yorishiro
+
+contents:
+  - src: ./target/release/yorishiro-ce-server
+    dst: /usr/bin/yorishiro-ce-server
+  - src: ./packaging/yorishiro-ce.service
+    dst: /lib/systemd/system/yorishiro-ce.service
+  - src: ./config.example.yml
+    dst: /usr/share/doc/yorishiro-ce/config.example.yml
+    type: config
+  - src: ./LICENSE
+    dst: /usr/share/doc/yorishiro-ce/LICENSE
+
+scripts:
+  preinstall: ./packaging/preinstall.sh
+  postinstall: ./packaging/postinstall.sh

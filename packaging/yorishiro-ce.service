@@ -1,0 +1,28 @@
+# Installed by the `yorishiro-ce` package. Enable with `systemctl enable --now yorishiro-ce`.
+#
+# Configuration goes in /etc/yorishiro/yorishiro.env as KEY=value lines; at minimum
+# DATABASE_URL. See /usr/share/doc/yorishiro-ce/config.example.yml for the file-based
+# alternative.
+[Unit]
+Description=Yorishiro server (community edition)
+After=network.target
+
+[Service]
+Type=simple
+User=yorishiro
+Group=yorishiro
+WorkingDirectory=/var/lib/yorishiro
+EnvironmentFile=/etc/yorishiro/yorishiro.env
+ExecStart=/usr/bin/yorishiro-ce-server
+Restart=on-failure
+RestartSec=5s
+
+# The process needs no write access outside its own state directory, and no new privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yorishiro
+
+[Install]
+WantedBy=multi-user.target

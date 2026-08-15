@@ -72,6 +72,26 @@ Web UIはバイナリに組み込み済みで、別途`web/`を取得・マウ�
 `YORISHIRO_MAX_TENANTS`/`YORISHIRO_EMBEDDING_PROVIDER`も既定でシングルテナント・ローカルONNXの値になっており、上でマウントした`models/`と一致します。
 変更方法は[configuration.md](configuration.md)を、バックグラウンド起動やソースからのイメージビルド、同じイメージでの管理CLI実行は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
 
+## パッケージからインストールする
+
+`.deb`と`.rpm`を各[リリース](https://github.com/yotsunagi/yorishiro/releases)に添付しています。
+apt/yumリポジトリの追加は不要で、パッケージ署名も行っていません。ファイルを直接インストールしてください。
+
+```console
+$ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # または: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
+$ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
+$ sudo systemctl enable --now yorishiro
+```
+
+パッケージは2種類あり、互いにConflictします。どちらか一方を入れてください。
+
+| パッケージ | 中身 |
+|---|---|
+| `yorishiro` | 既定。有償機能とWeb UIを含みますが、どちらも`YORISHIRO_LICENSE_KEY`を設定するまで無効のままなので、キーが無ければコミュニティ版とまったく同じ挙動になります。下の行に当てはまらない限りこちらを入れてください |
+| `yorishiro-ce` | `ee/`のコードをマシン上に一切置きません。それが要件になる配備向けです。**headless**——Web UIは有償側の資産なので`/`では何も配信しません。REST API・MCP・管理CLIは同一です |
+
+サービスはパッケージが作成する`yorishiro`システムユーザーで動作し、状態は`/var/lib/yorishiro`に置きます。
+
 ## ビルド済みバイナリで動かす
 
 Dockerを使わない、ベアメタル/VMへのデプロイ向けです。
