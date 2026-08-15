@@ -1,7 +1,8 @@
-# Installed by the `yorishiro-ce` package. Enable with `systemctl enable --now yorishiro`.
+# Installed by the `yorishiro-ce` package. Enable with `systemctl enable --now yorishiro-ce`.
 #
 # Configuration goes in /etc/yorishiro/yorishiro.env as KEY=value lines; at minimum
-# DATABASE_URL. See /usr/share/doc/yorishiro/config.example.yml for the file-based alternative.
+# DATABASE_URL. See /usr/share/doc/yorishiro-ce/config.example.yml for the file-based
+# alternative.
 [Unit]
 Description=Yorishiro server (community edition)
 After=network.target

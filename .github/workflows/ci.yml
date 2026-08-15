@@ -120,21 +120,24 @@ jobs:
       # a pattern would make this step pass by matching nothing.
       - name: The community binary contains no paid code
         run: |
-          cargo build --bin yorishiro-ce-server -p yorishiro-server
-          cargo build --bin yorishiro-server -p yorishiro-hosted
+          # Release, not debug: the packages ship `target/release`, and this must scan the
+          # artifact that reaches a user. A build-profile difference could otherwise let
+          # something through the check that ships anyway.
+          cargo build --release --bin yorishiro-ce-server -p yorishiro-server
+          cargo build --release --bin yorishiro-server -p yorishiro-hosted
 
           markers='hosted/stripe yorishiro_hosted api/marketplace LICENSE_KEY infer-fill'
           status=0
 
           for m in $markers; do
-            if strings -a target/debug/yorishiro-ce-server | grep -q -- "$m"; then
+            if strings -a target/release/yorishiro-ce-server | grep -q -- "$m"; then
               echo "::error::'$m' is present in the community binary, which must carry no ee/ code" >&2
               status=1
             fi
           done
 
           for m in $markers; do
-            if ! strings -a target/debug/yorishiro-server | grep -q -- "$m"; then
+            if ! strings -a target/release/yorishiro-server | grep -q -- "$m"; then
               echo "::error::'$m' is absent from the paid binary, so the check above proves nothing" >&2
               status=1
             fi

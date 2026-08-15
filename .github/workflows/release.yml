@@ -258,8 +258,17 @@ jobs:
             arm64) asset_arch=arm64 ;;
             *) echo "no nfpm asset known for arch '$ARCH'" >&2; exit 1 ;;
           esac
-          curl -fsSL -o /tmp/nfpm.tar.gz \
-            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${asset_arch}.tar.gz"
+          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+          asset="nfpm_${NFPM_VERSION}_Linux_${asset_arch}.tar.gz"
+
+          curl -fsSL -o /tmp/nfpm.tar.gz "${base}/${asset}"
+          # A tool that writes the artifacts a release publishes is verified before it runs.
+          # The checksum file is published alongside; `--ignore-missing` narrows it to the one
+          # asset downloaded, and `-c` fails on a mismatch.
+          curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
+          ( cd /tmp && cp nfpm.tar.gz "$asset" \
+            && sha256sum --check --ignore-missing --strict nfpm-checksums.txt \
+            && rm -f "$asset" )
           tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
           sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           nfpm --version

@@ -14,6 +14,7 @@
 //! is all it would take to make the artifact unshippable for the audience it exists for.
 
 use anyhow::Result;
+use axum::http::StatusCode;
 use clap::Parser;
 use yorishiro_core::db::TenantDb;
 use yorishiro_server::admin::{self, AdminCommand};
@@ -43,7 +44,7 @@ enum Command {
 /// Serves nothing: the SPA belongs to the paid edition, so this build has no assets to fall back
 /// to. A request for `/` gets a `404` rather than an empty page pretending a UI is coming.
 fn no_web_ui() -> axum::routing::MethodRouter {
-    axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })
+    axum::routing::any(|| async { StatusCode::NOT_FOUND })
 }
 
 fn main() -> Result<()> {
