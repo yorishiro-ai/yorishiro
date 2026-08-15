@@ -75,7 +75,8 @@ Web UIはバイナリに組み込み済みで、別途`web/`を取得・マウ�
 ## パッケージからインストールする
 
 `.deb`と`.rpm`を各[リリース](https://github.com/yotsunagi/yorishiro/releases)に添付しています。
-apt/yumリポジトリの追加は不要で、パッケージ署名も行っていません。ファイルを直接インストールしてください。
+apt/yumリポジトリの追加は不要で、パッケージ署名も行っていません。
+ファイルを直接インストールしてください。
 
 ```console
 $ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # または: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
@@ -83,7 +84,8 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
-パッケージは2種類あり、互いにConflictします。どちらか一方を入れてください。
+パッケージは2種類あり、互いにConflictします。
+どちらか一方を入れてください。
 
 | パッケージ | 中身 |
 |---|---|

@@ -70,7 +70,8 @@ See [deployment.md](deployment.md#running-in-the-background) for running it in t
 
 ## Install from a package
 
-`.deb` and `.rpm` are attached to every [release](https://github.com/yotsunagi/yorishiro/releases). There is no apt or yum repository to add, and the packages are not signed — download and install the file.
+`.deb` and `.rpm` are attached to every [release](https://github.com/yotsunagi/yorishiro/releases).
+There is no apt or yum repository to add, and the packages are not signed — download and install the file.
 
 ```console
 $ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # or: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
