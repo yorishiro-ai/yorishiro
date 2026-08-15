@@ -83,6 +83,11 @@ The packages require **glibc 2.38 or newer** (Ubuntu 24.04, Debian 13, Fedora 39
 That floor comes from the ONNX Runtime the embedding provider links, not from Yorishiro itself.
 It is declared as a package dependency, so apt and dnf refuse on an older system rather than installing a binary that cannot start.
 
+Both claims are tested on every pull request, by installing the packages rather than by reading them.
+`packaging/test-install.sh` builds the two packages and runs them through Ubuntu 24.04 and Fedora 39 — which is glibc 2.38 exactly, the tightest system supported — asserting that each installs, that the binary runs, and that a configured server starts against a real database and offers the first-run wizard.
+It also asserts the refusals: Ubuntu 22.04 and Rocky 9 are below the floor, and the package manager must decline by name rather than install something that cannot start.
+The script takes a directory of packages and needs Docker, so a CI failure reproduces locally without pushing a commit.
+
 Two packages exist, and they conflict — install one:
 
 | Package | What it is |

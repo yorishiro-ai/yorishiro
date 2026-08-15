@@ -180,6 +180,67 @@ jobs:
           check target/release/yorishiro-ce-server packaging/nfpm-yorishiro-ce.yaml
           exit "$status"
 
+      # Handed to `package-install` rather than rebuilt there: these are the same release
+      # binaries the two steps above just scanned, so the job that installs them tests the
+      # artifact the gates passed -- and skips a second cold ort/tokenizers build.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            target/release/yorishiro-server
+            target/release/yorishiro-ce-server
+          retention-days: 1
+
+  # Installs the packages in the distributions they claim to support. `check` reads the binaries
+  # and the packaging configuration; nothing before this job ever ran a package manager, and
+  # every packaging bug found so far was invisible until one did: dpkg deleting the licence file
+  # under `path-exclude=/usr/share/doc/*`, an rpm that installed onto a glibc too old to run it,
+  # an unconfigured start printing a Rust panic at an operator.
+  #
+  # The script is the same one that runs locally (`packaging/test-install.sh`), so a failure here
+  # reproduces without pushing a commit.
+  package-install:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Into `target/release/`, because nfpm resolves `src:` against the working directory
+      # rather than against the config file.
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: target/release
+
+      # Artifacts are zipped without permissions, so both binaries arrive as 644. nfpm would
+      # package them exactly as it found them, and every "does it run" assertion downstream
+      # would fail looking like a broken build.
+      - name: Restore the executable bit
+        run: chmod +x target/release/yorishiro-server target/release/yorishiro-ce-server
+
+      # Pinned: an unpinned install makes nfpm's next release able to break this job on a
+      # commit that changed nothing.
+      - name: Install nfpm
+        run: |
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz \
+            | tar -xz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build the packages
+        run: |
+          mkdir -p dist
+          for cfg in packaging/nfpm-yorishiro.yaml packaging/nfpm-yorishiro-ce.yaml; do
+            for pkg in deb rpm; do
+              nfpm package --config "$cfg" --packager "$pkg" --target dist/
+            done
+          done
+          ls -l dist/
+
+      - name: Install and check the packages
+        run: ./packaging/test-install.sh dist
+
   security:
     runs-on: ubuntu-latest
     steps:
