@@ -274,6 +274,12 @@ note "the systemd units are valid"
 # ExecStart, so a unit checked without its binary reports a missing command -- a failure about
 # the test environment rather than about the unit. The two packages conflict, so this is also
 # the only way to have each binary present for its own unit.
+#
+# The same container also checks that every absolute path the unit *names* exists, comments
+# included. `systemd-analyze` reads directives and ignores comments, so it was silent while both
+# units pointed at a `config.example.yml` under `/usr/share/doc/` that had moved to `/etc/` --
+# an operator following the unit's own instructions would have found nothing there. A path in a
+# comment is documentation the package ships, so it is checked like the rest of the package.
 verify_unit() {
   pkg="$1" unit="$2"
   out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
@@ -284,6 +290,25 @@ verify_unit() {
     ok "systemd-analyze verify is silent on $unit"
   else
     bad "systemd-analyze verify complained about $unit: $(echo "$out" | head -3 | tr '\n' ' ')"
+  fi
+
+  # `/usr/bin/...` from ExecStart, `/etc/...` from EnvironmentFile and from the comments.
+  # `/var/lib/...` is created by postinstall. Anything else the unit spells out in full.
+  out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq /pkg/'"$pkg"' >/dev/null 2>&1
+    unit=/lib/systemd/system/'"$unit"'
+    [ -f "$unit" ] || { echo "NO_UNIT"; exit 1; }
+    grep -oE "/(usr|etc|var)/[A-Za-z0-9._/-]+" "$unit" | sed "s/[.,]$//" | sort -u | while read -r p; do
+      [ -e "$p" ] || echo "MISSING:$p"
+    done
+    echo CHECKED' 2>&1)
+  if ! grep -q CHECKED <<<"$out"; then
+    bad "could not check the paths $unit names: $(echo "$out" | tr '\n' ' ')"
+  elif grep -q MISSING: <<<"$out"; then
+    bad "$unit names paths the package does not install: $(grep -o 'MISSING:[^ ]*' <<<"$out" | tr '\n' ' ')"
+  else
+    ok "every path $unit names exists after install"
   fi
 }
 verify_unit "$(basename "$(deb)")" yorishiro.service
