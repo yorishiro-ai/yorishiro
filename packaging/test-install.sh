@@ -170,6 +170,9 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq binutils /pkg/'"$(basename "$(deb_ce)")"' >/dev/null 2>&1
   command -v strings >/dev/null || { echo "NO_STRINGS"; exit 1; }
+  # And the binary itself: a failed install leaves `strings` erroring to stderr while every
+  # grep finds nothing, which is the same false clean the missing tool produces.
+  [ -x /usr/bin/yorishiro-ce-server ] || { echo "NO_BINARY"; exit 1; }
   for m in hosted/stripe yorishiro_hosted api/marketplace LICENSE_KEY infer-fill; do
     strings -a /usr/bin/yorishiro-ce-server | grep -q -- "$m" && echo "LEAK:$m"
   done
