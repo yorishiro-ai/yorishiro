@@ -86,7 +86,7 @@ It is declared as a package dependency, so apt and dnf refuse on an older system
 Both claims are tested on every pull request, by installing the packages rather than by reading them.
 `packaging/test-install.sh` takes a directory of already-built packages and runs them through Ubuntu 24.04 and Fedora 39 — which is glibc 2.38 exactly, the tightest system supported — asserting that each installs, that the binary runs, and that a configured server starts against a real database and offers the first-run wizard.
 It also asserts the refusals: Ubuntu 22.04 and Rocky 9 are below the floor, and the package manager must decline by name rather than install something that cannot start.
-Build them first with `nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/` (and the same for `--packager rpm` and for `nfpm-yorishiro-ce.yaml`), then run `./packaging/test-install.sh dist`.
+To run it yourself, build the packages first with `nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/` (and the same for `--packager rpm` and for `nfpm-yorishiro-ce.yaml`), then run `./packaging/test-install.sh dist`.
 `nfpm` resolves `src:` against the working directory, so run it from the repository root.
 Build the binaries in a container rather than on the host unless the host's glibc is at or below the floor: a newer one produces a binary that needs symbols the packages do not declare.
 The script needs Docker, and CI runs this same script, so a CI failure reproduces locally without pushing a commit.

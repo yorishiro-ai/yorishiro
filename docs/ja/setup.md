@@ -93,7 +93,7 @@ $ sudo systemctl enable --now yorishiro
 `packaging/test-install.sh`はビルド済みパッケージの置かれたディレクトリを受け取り、Ubuntu 24.04とFedora 39——glibcがちょうど2.38、サポート下限そのものの環境です——で、導入できること・バイナリが起動すること・実データベースに接続した状態で初回セットアップウィザードが提示されることを確認します。
 拒否側も同様に検証します。
 Ubuntu 22.04とRocky 9は下限未満なので、起動できないものを導入せず、理由を明示して拒否しなければなりません。
-先に`nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/`(`--packager rpm`と`nfpm-yorishiro-ce.yaml`についても同様)でビルドし、`./packaging/test-install.sh dist`を実行します。
+手元で実行する場合は、先に`nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/`(`--packager rpm`と`nfpm-yorishiro-ce.yaml`についても同様)でパッケージをビルドし、`./packaging/test-install.sh dist`を実行します。
 `nfpm`は`src:`をカレントディレクトリ基準で解決するため、リポジトリのルートで実行してください。
 ホストのglibcが下限以下でない限り、バイナリはホストではなくコンテナ内でビルドしてください。
 新しいglibcでは、パッケージが宣言していないシンボルを要求するバイナリができてしまいます。
