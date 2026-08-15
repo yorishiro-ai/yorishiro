@@ -83,6 +83,14 @@ The packages require **glibc 2.38 or newer** (Ubuntu 24.04, Debian 13, Fedora 39
 That floor comes from the ONNX Runtime the embedding provider links, not from Yorishiro itself.
 It is declared as a package dependency, so apt and dnf refuse on an older system rather than installing a binary that cannot start.
 
+Both claims are tested on every pull request, by installing the packages rather than by reading them.
+`packaging/test-install.sh` takes a directory of already-built packages and runs them through Ubuntu 24.04 and Fedora 39 — which is glibc 2.38 exactly, the tightest system supported — asserting that each installs, that the binary runs, and that a configured server starts against a real database and offers the first-run wizard.
+It also asserts the refusals: Ubuntu 22.04 and Rocky 9 are below the floor, and the package manager must decline by name rather than install something that cannot start.
+To run it yourself, build the packages first with `nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/` (and the same for `--packager rpm` and for `nfpm-yorishiro-ce.yaml`), then run `./packaging/test-install.sh dist`.
+`nfpm` resolves `src:` against the working directory, so run it from the repository root.
+Build the binaries in a container rather than on the host unless the host's glibc is at or below the floor: a newer one produces a binary that needs symbols the packages do not declare.
+The script needs Docker, and CI runs this same script, so a CI failure reproduces locally without pushing a commit.
+
 Two packages exist, and they conflict — install one:
 
 | Package | What it is |
@@ -166,6 +174,10 @@ Migrations are applied automatically on startup, for all three methods above.
 
 Deployments where `YORISHIRO_MAX_TENANTS` resolves to an actual cap (the default: unset means `1`) serve a setup wizard at `http://localhost:8080/`.
 No admin CLI needed.
+
+The wizard is served over HTTP, so it starts one step later than GitLab's does: a database has to be reachable before there is anything to serve it from.
+A server started with no `DATABASE_URL` exits and tells you which file to set it in, rather than launching a configuration wizard the way `gitlab-ctl reconfigure` does for an unconfigured `gitlab.rb`.
+Set the connection string, start the server, and the wizard covers everything after that.
 
 On first visit, since no tenant exists yet, the browser shows a form for an email and password (plus an optional display name and an optional schema template to bootstrap the `default` workspace with).
 Submitting it creates the tenant, its `default` workspace, and an owner account in one step, and displays the freshly issued API key (shown only once, same as every other key in this system).
