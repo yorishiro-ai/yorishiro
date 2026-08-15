@@ -3,7 +3,7 @@ members = ["crates/yorishiro-core", "crates/yorishiro-server", "ee/crates/yorish
 resolver = "2"
 
 [workspace.package]
-version = "0.46.0"
+version = "0.47.0"
 edition = "2024"
 license = "BUSL-1.1"
 repository = "https://github.com/yotsunagi/yorishiro"
