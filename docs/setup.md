@@ -93,9 +93,12 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # at minimum, DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+The community package uses its own names throughout: the unit is `yorishiro-ce`, the binary `/usr/bin/yorishiro-ce-server`.
+Only the environment file is shared — both editions read `/etc/yorishiro/yorishiro.env`, since one postinstall writes it and the two packages conflict.
+
 The service runs as the `yorishiro` system user the package creates, with its state in `/var/lib/yorishiro`.
 
-Enabling it before setting `DATABASE_URL` stops the unit at `failed` with `status=78/CONFIG`, and `journalctl -u yorishiro` names the file to edit.
+Enabling it before setting `DATABASE_URL` stops the unit at `failed` with `status=78/CONFIG`, and `journalctl -u yorishiro` (or `-u yorishiro-ce`) names the file to edit.
 It does not retry, because waiting does not supply a missing setting.
 A database that is merely not up yet is the opposite case: that is retried every five seconds, so a server booting alongside its own PostgreSQL recovers on its own.
 
@@ -129,6 +132,7 @@ The package is the supported way to install on bare metal or a VM: it is the sam
 There is no standalone tarball — a release attaches the eight packages (two editions, two architectures, two formats) and their checksums, and nothing else.
 
 To run the binary from somewhere other than `/usr/bin`, take it out of the package (`dpkg-deb -x`, `rpm2cpio | cpio -id`) and put the `models/` directory from step 1 beside it.
+The file to extract is `usr/bin/yorishiro-server`, or `usr/bin/yorishiro-ce-server` for the community edition.
 Configure it with a `config.yml` next to the binary (read directly — see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)) or with environment variables, then start it.
 [deployment.md](deployment.md#running-in-the-background) covers keeping it running across reboots when the package's own unit is not being used.
 

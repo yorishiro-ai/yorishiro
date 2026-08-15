@@ -100,10 +100,13 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
+コミュニティ版は名前が一通り異なり、unitは`yorishiro-ce`、バイナリは`/usr/bin/yorishiro-ce-server`です。
+共通なのは環境変数ファイルだけで、両エディションとも`/etc/yorishiro/yorishiro.env`を読みます(postinstallが1本で、2つのパッケージは互いにConflictするためです)。
+
 サービスはパッケージが作成する`yorishiro`システムユーザーで動作し、状態は`/var/lib/yorishiro`に置きます。
 
 `DATABASE_URL`を設定する前に有効化した場合、unitは`status=78/CONFIG`で`failed`になり停止します。
-`journalctl -u yorishiro`にどのファイルを編集すべきかが出ます。
+`journalctl -u yorishiro`(コミュニティ版は`-u yorishiro-ce`)にどのファイルを編集すべきかが出ます。
 待っても設定は現れないため、再試行はしません。
 一方、データベースがまだ起動していないだけの場合は逆で、5秒ごとに再試行します。
 同じホストのPostgreSQLと同時に起動する構成でも自力で復帰します。
@@ -143,6 +146,7 @@ CIも同じ2本を実行するため、CIの失敗は手元で再現できます
 リリースに添付されるのは8つのパッケージ(2エディション×2アーキ×2形式)とチェックサムだけです。
 
 `/usr/bin`以外の場所でバイナリを動かしたい場合は、パッケージから取り出し(`dpkg-deb -x`、`rpm2cpio | cpio -id`)、手順1の`models/`をその隣に置いてください。
+取り出すのは`usr/bin/yorishiro-server`、コミュニティ版なら`usr/bin/yorishiro-ce-server`です。
 設定はバイナリの隣の`config.yml`([configuration.md](configuration.md#configyml)と[`config.example.yml`](../../config.example.yml)参照)か環境変数で行います。
 パッケージ同梱のunitを使わずに再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
 

@@ -36,6 +36,8 @@ $ docker build -t yorishiro .
 
 `.deb`と`.rpm`は自前のunitを同梱し`systemctl enable --now yorishiro`で有効化するため、この節は[パッケージの外に取り出した](setup.md#パッケージの外でバイナリを動かす)バイナリを別の場所で動かす場合のものです。
 プレーンなシェルと異なり、systemdの`EnvironmentFile=`は`.env`を直接読み込むため、`source`/`set -a`は不要です。
+コミュニティ版のバイナリは`yorishiro-ce-server`です。
+このunit名はパッケージのものではないため任意に決められます。
 
 ```ini
 # /etc/systemd/system/yorishiro.service
@@ -48,6 +50,11 @@ WorkingDirectory=/opt/yorishiro
 ExecStart=/opt/yorishiro/yorishiro-server
 EnvironmentFile=/opt/yorishiro/.env
 Restart=on-failure
+# 78 は EX_CONFIG。サーバは「設定が無い/使えない」場合にのみこの値で終了する。
+# これが無いと DATABASE_URL 未設定の起動が5秒ごとに永久再試行し、`systemctl is-failed` は
+# `failed` ではなく `activating` を返すため、unit の状態を見る監視からは障害が見えない。
+# それ以外の失敗は従来どおり再試行される(起動途中のデータベースはそれで復帰する)。
+RestartPreventExitStatus=78
 User=yorishiro
 
 [Install]
@@ -80,7 +87,8 @@ Actionsタブからも実行できます(`Release`ワークフローを選択 �
 4. マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`および`:latest`としてビルド・pushします。
 5. **公開したイメージを実際にpullし、本物のPostgreSQLに対して起動**します。
    `/up`が応答しなければリリースを失敗させます。
-6. バイナリを添付したGitHub Releaseを作成します。
+6. GitHub Releaseを作成し、8つのパッケージとそれらを対象とした`checksums.txt`を添付します。
+   添付前に各グループの個数を数え、1つでも空なら公開せず失敗します——何にもマッチしないglobはアップロードアクションにとってエラーではなく、v0.46.0がパッケージ無しで公開されたのはそのためです。
 
 ### 失敗したリリースからの復旧
 
