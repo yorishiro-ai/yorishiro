@@ -154,19 +154,30 @@ jobs:
       # happily on Rocky 9 (2.34) before dying on a missing symbol at first start.
       - name: The declared glibc floor matches the binary
         run: |
-          declared=$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' packaging/nfpm-yorishiro.yaml | sort -uV | tail -1)
-          [ -n "$declared" ] || { echo "::error::no glibc floor declared in packaging" >&2; exit 1; }
-
           status=0
-          for b in target/release/yorishiro-server target/release/yorishiro-ce-server; do
-            needed=$(objdump -T "$b" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -uV | tail -1)
-            if [ "$(printf '%s\n%s\n' "$needed" "$declared" | sort -V | tail -1)" != "$declared" ]; then
-              echo "::error::$b needs $needed but the packages declare $declared" >&2
-              status=1
-            else
-              echo "$(basename "$b"): needs $needed, declared $declared"
-            fi
-          done
+
+          # Each binary against its own package definition, and both symbol families: GLIBCXX
+          # is what actually broke on Rocky 9, so checking GLIBC alone would have missed it.
+          check() {
+            bin="$1" cfg="$2"
+            for sym in GLIBC GLIBCXX; do
+              declared=$(grep -oE "${sym}_[0-9]+(\.[0-9]+)+" "$cfg" | sort -uV | tail -1)
+              needed=$(objdump -T "$bin" | grep -oE "${sym}_[0-9]+(\.[0-9]+)+" | sort -uV | tail -1)
+              [ -n "$needed" ] || continue
+              if [ -z "$declared" ]; then
+                echo "::error::$bin needs $needed but $cfg declares no $sym floor" >&2
+                status=1
+              elif [ "$(printf '%s\n%s\n' "$needed" "$declared" | sort -V | tail -1)" != "$declared" ]; then
+                echo "::error::$bin needs $needed but $cfg declares $declared" >&2
+                status=1
+              else
+                echo "$(basename "$bin") vs $(basename "$cfg"): needs $needed, declared $declared"
+              fi
+            done
+          }
+
+          check target/release/yorishiro-server    packaging/nfpm-yorishiro.yaml
+          check target/release/yorishiro-ce-server packaging/nfpm-yorishiro-ce.yaml
           exit "$status"
 
   security:
