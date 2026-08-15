@@ -468,10 +468,41 @@ jobs:
           pattern: binary-*
           merge-multiple: true
 
+      # Count what is about to be published, before publishing it.
+      #
+      # v0.46.0 shipped with no `.deb` and no `.rpm` at all. The packaging step built all eight
+      # and uploaded them to this job's artifact; the attachment list simply did not name them.
+      # Every job was green, and the release published half of what `docs/setup.md` tells people
+      # to download.
+      #
+      # A glob matching nothing is not an error to the upload action -- which is precisely why
+      # the list below cannot be trusted to prove its own coverage, and this counts instead.
+      - name: Every documented artifact is present
+        run: |
+          status=0
+          expect() {
+            n=$(find dist -maxdepth 1 -name "$1" | wc -l)
+            if [ "$n" -ne "$2" ]; then
+              echo "::error::expected $2 matching '$1', found $n" >&2
+              status=1
+            else
+              echo "ok: $1 ($n)"
+            fi
+          }
+          # Both editions, both architectures, both formats: 8 packages. Plus the four Linux
+          # tarballs (two editions x two arches) and the one Windows zip.
+          expect '*.deb'      4
+          expect '*.rpm'      4
+          expect '*.tar.gz'   4
+          expect '*.zip'      1
+          exit "$status"
+
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.deb
+            dist/*.rpm
           generate_release_notes: true
