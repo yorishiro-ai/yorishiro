@@ -70,8 +70,22 @@ See [deployment.md](deployment.md#running-in-the-background) for running it in t
 
 ## Install from a package
 
-`.deb` and `.rpm` are attached to every [release](https://github.com/yotsunagi/yorishiro/releases).
-There is no apt or yum repository to add, and the packages are not signed — download and install the file.
+Every [release](https://github.com/yotsunagi/yorishiro/releases) attaches a `.deb` and a `.rpm` for `amd64` and `arm64`, in both editions.
+There is no apt or yum repository to add — download the file and install it.
+
+### Which package
+
+The two conflict, so a machine has one or the other.
+
+| Package | Files on the release page | What it is |
+|---|---|---|
+| `yorishiro` | `yorishiro_X.Y.Z_<arch>.deb`<br>`yorishiro-X.Y.Z-1.<arch>.rpm` | The enterprise edition, and the default. Carries the paid features and the web UI; both stay inactive until `YORISHIRO_LICENSE_KEY` is set, so without a key it behaves exactly like the community edition. **Install this one** unless the row below applies to you. |
+| `yorishiro-ce` | `yorishiro-ce_X.Y.Z_<arch>.deb`<br>`yorishiro-ce-X.Y.Z-1.<arch>.rpm` | The community edition, for a deployment that may not hold proprietary code at all. **Headless**: the web UI belongs to the paid edition, so this one serves nothing at `/`. The REST API, MCP server and admin CLI are identical. |
+
+The unsuffixed name is the enterprise edition, as GitLab does it — the build most people want gets the plain name, and the community build is the one marked `-ce`.
+`rpm -qi` also reports the difference as the licence, `BUSL-1.1 AND LicenseRef-Yorishiro-EE` against `BUSL-1.1` alone; Debian packages have no licence field, so there the name and description carry it.
+
+### Installing
 
 ```console
 $ sudo dpkg -i yorishiro_X.Y.Z_amd64.deb     # or: sudo rpm -i yorishiro-X.Y.Z-1.x86_64.rpm
@@ -79,66 +93,48 @@ $ sudoedit /etc/yorishiro/yorishiro.env      # at minimum, DATABASE_URL
 $ sudo systemctl enable --now yorishiro
 ```
 
-Enabling it before setting `DATABASE_URL` stops the unit at `failed` with `status=78/CONFIG`, and `journalctl -u yorishiro` says which file to edit.
+The community package uses its own names throughout: the unit is `yorishiro-ce`, the binary `/usr/bin/yorishiro-ce-server`.
+Only the environment file is shared — both editions read `/etc/yorishiro/yorishiro.env`, since one postinstall writes it and the two packages conflict.
+
+The service runs as the `yorishiro` system user the package creates, with its state in `/var/lib/yorishiro`.
+
+Enabling it before setting `DATABASE_URL` stops the unit at `failed` with `status=78/CONFIG`, and `journalctl -u yorishiro` (or `-u yorishiro-ce`) names the file to edit.
 It does not retry, because waiting does not supply a missing setting.
-A database that is merely not up yet is the opposite case and is retried every five seconds, so a server that boots alongside its own PostgreSQL recovers on its own.
+A database that is merely not up yet is the opposite case: that is retried every five seconds, so a server booting alongside its own PostgreSQL recovers on its own.
+
+### Verifying a download
+
+The packages are not GPG-signed.
+Every release attaches a `checksums.txt` covering all eight files, so a download can still be checked against what was published:
+
+```console
+$ curl -LO https://github.com/yotsunagi/yorishiro/releases/download/vX.Y.Z/checksums.txt
+$ sha256sum --check --ignore-missing checksums.txt
+```
+
+### Supported systems
 
 The packages require **glibc 2.38 or newer** (Ubuntu 24.04, Debian 13, Fedora 39 and later).
 That floor comes from the ONNX Runtime the embedding provider links, not from Yorishiro itself.
-It is declared as a package dependency, so apt and dnf refuse on an older system rather than installing a binary that cannot start.
+It is declared as a package dependency, so apt and dnf refuse an older system rather than installing a binary that cannot start.
 
-Both claims are tested on every pull request, by installing the packages rather than by reading them.
-`packaging/test-install.sh` takes a directory of already-built packages and runs them through Ubuntu 24.04 and Fedora 39 — which is glibc 2.38 exactly, the tightest system supported — asserting that each installs, that the binary runs, and that a configured server starts against a real database and offers the first-run wizard.
-It also asserts the refusals: Ubuntu 22.04 and Rocky 9 are below the floor, and the package manager must decline by name rather than install something that cannot start.
-To run it yourself, build the packages first with `nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/` (and the same for `--packager rpm` and for `nfpm-yorishiro-ce.yaml`), then run `./packaging/test-install.sh dist`.
-`nfpm` resolves `src:` against the working directory, so run it from the repository root.
-Build the binaries in a container rather than on the host unless the host's glibc is at or below the floor: a newer one produces a binary that needs symbols the packages do not declare.
-The script needs Docker, and CI runs this same script, so a CI failure reproduces locally without pushing a commit.
-`./packaging/test-systemd.sh dist` is the companion for the parts only systemd can exercise — that an unconfigured start stops at `failed` instead of retrying, that a configured one serves `/up`, and that the service returns by itself after a reboot.
-It needs a privileged container, which is why it is a separate script; CI runs it too.
+Both halves of that are tested on every pull request by installing the packages, not by reading them: `packaging/test-install.sh` runs them through Ubuntu 24.04 and Fedora 39 — glibc 2.38 exactly, the tightest system supported — and requires Ubuntu 22.04 and Rocky 9 to refuse by name.
+`packaging/test-systemd.sh` covers what only systemd can exercise: that an unconfigured start stops instead of retrying, that a configured one serves `/up`, and that the service returns by itself after a reboot.
 
-Two packages exist, and they conflict — install one:
+Both scripts take a directory of built packages and need Docker; the systemd one also needs a privileged container.
+CI runs the same two, so a failure there reproduces locally.
+To build the packages for it, run `nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/` from the repository root — `nfpm` resolves `src:` against the working directory — and repeat for `--packager rpm` and `nfpm-yorishiro-ce.yaml`.
+Build the binaries in a container unless the host's glibc is at or below the floor, since a newer one emits symbols the packages do not declare.
 
-| Package | What it is |
-|---|---|
-| `yorishiro` | The default. Includes the paid features and the web UI; both stay inactive until `YORISHIRO_LICENSE_KEY` is set, so without a key it behaves exactly like the community edition. Install this one unless the row below applies to you. |
-| `yorishiro-ce` | No code from `ee/` on disk at all, for a deployment where that is a requirement. **Headless** — the web UI is part of the paid edition, so this package serves nothing at `/`. The REST API, MCP and the admin CLI are unchanged. |
+### Running the binary outside the package
 
-The service runs as the `yorishiro` system user the package creates, with state in `/var/lib/yorishiro`.
+The package is the supported way to install on bare metal or a VM: it is the same binary, plus the service user, the state directory and the systemd unit, and it declares the glibc floor so the package manager refuses a system that cannot run it.
+There is no standalone tarball — a release attaches the eight packages (two editions, two architectures, two formats) and their checksums, and nothing else.
 
-## Run the prebuilt binary
-
-For a bare-metal or VM deployment without Docker.
-
-1. Complete [Prerequisites](#prerequisites) above.
-2. Download and extract the release archive for your architecture:
-
-   ```console
-   $ mkdir -p /opt/yorishiro && cd /opt/yorishiro
-   $ curl -L -o yorishiro.tar.gz \
-       https://github.com/yotsunagi/yorishiro/releases/download/vX.Y.Z/yorishiro-server-vX.Y.Z-linux-amd64.tar.gz
-   $ tar -xzf yorishiro.tar.gz && rm yorishiro.tar.gz
-   ```
-
-   The archive contains only the `yorishiro-server` binary.
-   The web UI is compiled in, so nothing else needs fetching for it.
-   Move (or symlink) the `models/` directory from step 1 next to the binary.
-3. Set at least `DATABASE_URL`.
-   Either write a `config.yml` file next to the binary (it's read directly -- see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)), or load it into the shell that starts it:
-
-   ```console
-   $ curl -L -o .env https://raw.githubusercontent.com/yotsunagi/yorishiro/vX.Y.Z/.env.example
-   # (edit .env to set DATABASE_URL; everything else can stay commented out)
-   $ set -a; source .env; set +a
-   ```
-
-4. Run it:
-
-   ```console
-   $ ./yorishiro-server
-   ```
-
-See [deployment.md](deployment.md#running-in-the-background) to keep it running across reboots with systemd.
+To run the binary from somewhere other than `/usr/bin`, take it out of the package (`dpkg-deb -x`, `rpm2cpio | cpio -id`) and put the `models/` directory from step 1 beside it.
+The file to extract is `usr/bin/yorishiro-server`, or `usr/bin/yorishiro-ce-server` for the community edition.
+Configure it with a `config.yml` next to the binary (read directly — see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)) or with environment variables, then start it.
+[deployment.md](deployment.md#running-in-the-background) covers keeping it running across reboots when the package's own unit is not being used.
 
 ## Run from source (Docker Compose)
 

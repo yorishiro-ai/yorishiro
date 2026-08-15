@@ -33,10 +33,11 @@ To build the image from source instead (e.g. to test an unreleased change), the 
 $ docker build -t yorishiro .
 ```
 
-### systemd (prebuilt binary)
+### systemd, without the package
 
-A systemd unit keeps the process from [setup.md](setup.md#run-the-prebuilt-binary) running across reboots and restarts it on failure.
-Unlike a plain shell, systemd's `EnvironmentFile=` loads `.env` directly, no `source`/`set -a` needed:
+The `.deb` and `.rpm` install a unit of their own and enable it with `systemctl enable --now yorishiro`, so this section is only for a binary taken [out of the package](setup.md#running-the-binary-outside-the-package) and placed somewhere else.
+Unlike a plain shell, systemd's `EnvironmentFile=` loads `.env` directly, no `source`/`set -a` needed.
+For the community edition the binary is `yorishiro-ce-server`; the unit name here is your own choice, since this one is not the package's.
 
 ```ini
 # /etc/systemd/system/yorishiro.service
@@ -49,6 +50,11 @@ WorkingDirectory=/opt/yorishiro
 ExecStart=/opt/yorishiro/yorishiro-server
 EnvironmentFile=/opt/yorishiro/.env
 Restart=on-failure
+# 78 is EX_CONFIG, which the server uses for "configuration is absent or unusable" and nothing
+# else. Without this a start with no DATABASE_URL retries every five seconds forever, and
+# `systemctl is-failed` answers `activating` rather than `failed` -- so nothing watching unit
+# state ever sees it. Other failures still retry, which is what a database still starting needs.
+RestartPreventExitStatus=78
 User=yorishiro
 
 [Install]
@@ -76,11 +82,12 @@ What it does, in order:
 
 1. Validates the version is `x.y.z` with no leading zeros, and decides whether this is a fresh release or a resume (see below).
 2. Bumps `workspace.package.version` in the root `Cargo.toml`, runs `cargo update -w`, then pushes the bump commit and the `vX.Y.Z` tag to `master` together, atomically.
-3. Builds `yorishiro-server` for `x86_64`/`aarch64` Linux (glibc, packaged as `linux-amd64`/`linux-arm64`) and `x86_64` Windows (`windows-amd64.zip`).
-   Both Linux architectures build natively -- no QEMU -- matching the `ort`/onnxruntime build requirements.
+3. Builds both editions for `x86_64` and `aarch64` Linux and packages each as a `.deb` and an `.rpm` -- eight files.
+   Both architectures build natively -- no QEMU -- matching the `ort`/onnxruntime build requirements.
 4. Builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` and `:latest`.
 5. **Pulls that published image and boots it against a real PostgreSQL**, failing the release if it does not answer `/up`.
-6. Creates the GitHub Release with the binaries attached.
+6. Creates the GitHub Release, attaching the eight packages and a `checksums.txt` over them.
+   It counts each group first and fails before publishing if any is empty -- a glob that matches nothing is not an error to the upload action, which is how v0.46.0 came out with no packages at all.
 
 ### Recovering from a failed release
 
@@ -96,7 +103,6 @@ The workflow tells the two states apart by whether the GitHub Release exists, no
 
 The GitHub Release is created last, after every artifact is pushed and the smoke test passes, which is what makes it a reliable marker of "this version shipped".
 There is no need to delete a tag by hand or burn a patch number.
-
 
 ## Single-tenant mode
 
