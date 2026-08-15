@@ -23,6 +23,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # the two disagree.
 GLIBC_FLOOR="$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' "$REPO/packaging/nfpm-yorishiro.yaml" | sort -uV | tail -1)"
 
+# Checked up front rather than at the call site: a missing tool otherwise surfaces as the
+# assertion it happens to sit in, which reads as a packaging fault.
+for tool in docker jq; do
+  command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 2; }
+done
+
 pass=0 fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
@@ -235,8 +241,17 @@ EOF
     bad "configured server never answered /up"
   else
     ok "starts and applies its migrations"
-    grep -q 'true' <<<"$(docker exec "app-$$" curl -s http://127.0.0.1:8081/setup/status)" \
-      && ok "the first-run wizard is offered" || bad "setup_required was not true"
+
+    # The field, not the word: `grep true` would also pass on
+    # `{"setup_required":false,"something_else":true}`, which is the opposite of what this
+    # asserts. `jq` rather than a pattern, so adding a field to the response cannot quietly
+    # turn this green.
+    status=$(docker exec "app-$$" curl -s http://127.0.0.1:8081/setup/status)
+    if [ "$(jq -r '.setup_required' <<<"$status" 2>/dev/null)" = "true" ]; then
+      ok "the first-run wizard is offered"
+    else
+      bad "setup_required was not true: $status"
+    fi
 
     code=$(docker exec "app-$$" curl -s -o /dev/null -w '%{http_code}' \
       -X POST http://127.0.0.1:8081/setup -H 'Content-Type: application/json' \
