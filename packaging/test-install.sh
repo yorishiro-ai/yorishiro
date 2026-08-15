@@ -21,7 +21,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The floor the packages declare. Read rather than hardcoded: this file must not be the place
 # the two disagree.
-GLIBC_FLOOR="$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' "$REPO/packaging/nfpm-yorishiro.yaml" | sort -uV | tail -1)"
+GLIBC_FLOOR="$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' "$REPO/packaging/nfpm-yorishiro-ee.yaml" | sort -uV | tail -1)"
 
 # Checked up front rather than at the call site: a missing tool otherwise surfaces as the
 # assertion it happens to sit in, which reads as a packaging fault.
@@ -34,10 +34,9 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-deb() { ls "$PKG_DIR"/yorishiro_*.deb | head -1; }
+deb() { ls "$PKG_DIR"/yorishiro-ee_*.deb | head -1; }
 deb_ce() { ls "$PKG_DIR"/yorishiro-ce_*.deb | head -1; }
-# The `[0-9]` is what keeps this from matching `yorishiro-ce-*.rpm`, which has its own accessor.
-rpm() { ls "$PKG_DIR"/yorishiro-[0-9]*.rpm | head -1; }
+rpm() { ls "$PKG_DIR"/yorishiro-ee-[0-9]*.rpm | head -1; }
 rpm_ce() { ls "$PKG_DIR"/yorishiro-ce-[0-9]*.rpm | head -1; }
 
 # --------------------------------------------------------------------------------------------
@@ -48,7 +47,7 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro-server --help >/dev/null 2>&1 && echo "RUNS"
   getent passwd yorishiro >/dev/null && echo "USER"
-  [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
+  [ -f /usr/share/doc/yorishiro-ee/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/config.example.yml ] && echo "EXAMPLE"
   [ "$(stat -c "%a %U:%G" /etc/yorishiro/yorishiro.env)" = "640 root:yorishiro" ] && echo "ENVPERM"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEOWNER"
@@ -68,7 +67,7 @@ note "every file the package declares survives the install"
 # `path-exclude=/usr/share/doc/*` deletes at unpack, silently, so a package can contain a file
 # it does not deliver.
 #
-# It found one. `ee/LICENSE` shipped as `/usr/share/doc/yorishiro/copyright.ee`, and the
+# It found one. `ee/LICENSE` shipped as `/usr/share/doc/yorishiro-ee/copyright.ee`, and the
 # `path-include` covers the name `copyright` exactly -- so the enterprise edition delivered
 # everything except the licence it is distributed under, on every minimal image.
 check_declared_files() {
@@ -90,7 +89,7 @@ check_declared_files() {
     ok "$label: all $(grep -o 'COMPARED:[0-9]*' <<<"$out" | cut -d: -f2) declared files are present"
   fi
 }
-check_declared_files "$(basename "$(deb)")" "yorishiro"
+check_declared_files "$(basename "$(deb)")" "yorishiro-ee"
 check_declared_files "$(basename "$(deb_ce)")" "yorishiro-ce"
 
 # --------------------------------------------------------------------------------------------
@@ -120,7 +119,7 @@ note "rpm on fedora:39 — glibc $GLIBC_FLOOR exactly, the tightest supported ca
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro-server --help >/dev/null 2>&1 && echo "RUNS"
-  [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
+  [ -f /usr/share/doc/yorishiro-ee/copyright ] && echo "COPYRIGHT"
   getent passwd yorishiro >/dev/null && echo "USER"
 ' 2>&1)
 for want in RUNS COPYRIGHT USER; do
@@ -135,7 +134,7 @@ done
 # container because the two packages conflict.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm_ce)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
-  /usr/bin/yorishiro-ce-server --help >/dev/null 2>&1 && echo "RUNS"
+  /usr/bin/yorishiro-server --help >/dev/null 2>&1 && echo "RUNS"
   [ -f /usr/share/doc/yorishiro-ce/copyright ] && echo "COPYRIGHT"
 ' 2>&1)
 for want in RUNS COPYRIGHT; do
@@ -211,7 +210,7 @@ note "the community package is the community package"
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb_ce)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
-  /usr/bin/yorishiro-ce-server --help >/dev/null 2>&1 && echo "RUNS"
+  /usr/bin/yorishiro-server --help >/dev/null 2>&1 && echo "RUNS"
   [ -f /usr/share/doc/yorishiro-ce/copyright ] && echo "COPYRIGHT"
   [ -f /usr/share/doc/yorishiro-ce/copyright.ee ] && echo "HAS_EE_LICENCE"
   dpkg -s yorishiro-ce 2>/dev/null | grep -qi "^Conflicts: yorishiro" && echo "CONFLICTS"
@@ -242,9 +241,9 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   command -v strings >/dev/null || { echo "NO_STRINGS"; exit 1; }
   # And the binary itself: a failed install leaves `strings` erroring to stderr while every
   # grep finds nothing, which is the same false clean the missing tool produces.
-  [ -x /usr/bin/yorishiro-ce-server ] || { echo "NO_BINARY"; exit 1; }
+  [ -x /usr/bin/yorishiro-server ] || { echo "NO_BINARY"; exit 1; }
   for m in hosted/stripe yorishiro_hosted api/marketplace LICENSE_KEY infer-fill; do
-    strings -a /usr/bin/yorishiro-ce-server | grep -q -- "$m" && echo "LEAK:$m"
+    strings -a /usr/bin/yorishiro-server | grep -q -- "$m" && echo "LEAK:$m"
   done
   echo "SCANNED"' 2>&1)
 # `SCANNED` is the receipt that the loop actually ran; an install failure or a missing
@@ -361,10 +360,13 @@ verify_unit() {
   # `set -euo pipefail` so a half-finished install -- unit written, postinstall failed -- cannot
   # reach the `CHECKED` receipt and read as a pass.
   #
-  # Two exclusions, both because the path is not a file the package ships: systemd's own
+  # Three exclusions, each because the path is not a file the package ships: systemd's own
   # `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory),
-  # and anything under `/proc` or `/sys`. Neither appears in these units today; they are listed
-  # so a future directive that does use them fails on its own merits rather than here.
+  # anything under `/proc` or `/sys`, and `/etc/yorishiro/config.yml` -- the optional config the
+  # unit points `YORISHIRO_CONFIG_PATH` at. That last one is deliberately absent after install:
+  # a deployment configured entirely through the env file never creates it, and shipping an
+  # empty one would make `deny_unknown_fields` parse a file nobody wrote. The example beside it
+  # (`config.example.yml`) is shipped, and is checked.
   out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
     set -euo pipefail
     apt-get update -qq >/dev/null 2>&1
@@ -373,7 +375,7 @@ verify_unit() {
     [ -f "$unit" ] || { echo "NO_UNIT"; exit 1; }
     grep -oE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" "$unit" \
       | sed -e "s/^[[:space:]=\"]//" -e "s/[.,]$//" \
-      | grep -vE "^/(proc|sys)(/|$)" \
+      | grep -vE "^/(proc|sys)(/|$)|^/etc/yorishiro/config\.yml$" \
       | sort -u | while read -r p; do
         [ -e "$p" ] || echo "MISSING:$p"
       done
@@ -387,7 +389,70 @@ verify_unit() {
   fi
 }
 verify_unit "$(basename "$(deb)")" yorishiro.service
-verify_unit "$(basename "$(deb_ce)")" yorishiro-ce.service
+verify_unit "$(basename "$(deb_ce)")" yorishiro.service
+
+# --------------------------------------------------------------------------------------------
+note "switching editions keeps the machine working"
+# --------------------------------------------------------------------------------------------
+# The two packages conflict, so moving between editions is a remove and an install in one
+# transaction -- a path an operator takes deliberately (evaluating the paid features, or
+# dropping back) and one nothing else here covers.
+#
+# Two things have to survive it. The configuration and state, because they belong to the
+# deployment rather than to the edition; and the systemd wiring, because the outgoing unit's
+# `enable` symlink outlives the unit file it points at. Measured before `preremove.sh` existed:
+# switching left a dangling multi-user.target.wants entry, the new edition not enabled, and
+# nothing starting at boot.
+switch_editions() {
+  from="$1" to="$2" label="$3"
+  out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+    set -uo pipefail
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq systemd /pkg/'"$from"' >/dev/null 2>&1 || { echo "FIRST_INSTALL_FAILED"; exit 1; }
+
+    # What a configured deployment looks like, in the two places that must outlive the switch.
+    echo "DATABASE_URL=postgres://kept:secret@db:5432/yorishiro" >> /etc/yorishiro/yorishiro.env
+    mkdir -p /var/lib/yorishiro && echo kept > /var/lib/yorishiro/marker
+
+    # `enable`, by hand: there is no running systemd in this container to do it.
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    for u in /lib/systemd/system/yorishiro*.service; do
+      ln -sf "$u" "/etc/systemd/system/multi-user.target.wants/$(basename "$u")"
+    done
+
+    apt-get install -y -qq /pkg/'"$to"' >/dev/null 2>&1 || { echo "SWITCH_FAILED"; exit 1; }
+
+    grep -q "kept:secret" /etc/yorishiro/yorishiro.env && echo CONFIG_KEPT
+    [ "$(cat /var/lib/yorishiro/marker 2>/dev/null)" = kept ] && echo STATE_KEPT
+    [ "$(dpkg -l | grep -c "^ii  yorishiro")" = 1 ] && echo ONE_PACKAGE
+    # Both editions ship the same unit name, so a switch replaces the file the symlink points
+    # at rather than removing it. A dangling link here would mean that stopped being true.
+    for l in /etc/systemd/system/multi-user.target.wants/yorishiro*.service; do
+      [ -e "$l" ] || echo "DANGLING:$(basename "$l")"
+    done
+    [ -L /etc/systemd/system/multi-user.target.wants/yorishiro.service ] && echo STILL_ENABLED
+    echo SWITCHED' 2>&1)
+
+  if ! grep -q SWITCHED <<<"$out"; then
+    bad "$label: the switch did not complete: $(echo "$out" | tr '\n' ' ')"
+    return
+  fi
+  for want in CONFIG_KEPT STATE_KEPT ONE_PACKAGE; do
+    case "$out" in
+      *"$want"*) ok "$label: $want" ;;
+      *) bad "$label: $want (output: $(echo "$out" | tr '\n' ' '))" ;;
+    esac
+  done
+  if grep -q DANGLING: <<<"$out"; then
+    bad "$label: a dead enable symlink survived: $(grep -o 'DANGLING:[^ ]*' <<<"$out" | tr '\n' ' ')"
+  elif ! grep -q STILL_ENABLED <<<"$out"; then
+    bad "$label: the service is no longer enabled after the switch"
+  else
+    ok "$label: still enabled, no dead symlink"
+  fi
+}
+switch_editions "$(basename "$(deb_ce)")" "$(basename "$(deb)")" "ce -> ee"
+switch_editions "$(basename "$(deb)")" "$(basename "$(deb_ce)")" "ee -> ce"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

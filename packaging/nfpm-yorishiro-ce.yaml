@@ -39,19 +39,19 @@ overrides:
 # Conflicts rather than Replaces: the two editions would install services pointing at one
 # database, and the point of this package is that the other one's code is absent.
 conflicts:
-  - yorishiro
+  - yorishiro-ee
 
 contents:
   - src: ./target/release/yorishiro-ce-server
-    dst: /usr/bin/yorishiro-ce-server
-  - src: ./packaging/yorishiro-ce.service
-    dst: /lib/systemd/system/yorishiro-ce.service
+    dst: /usr/bin/yorishiro-server
+  - src: ./packaging/yorishiro.service
+    dst: /lib/systemd/system/yorishiro.service
   # In /etc rather than /usr/share/doc: the same dpkg `path-exclude` that drops LICENSE would
   # drop this, and an example configuration is only useful if it is next to the real one.
   - src: ./config.example.yml
-    dst: /etc/yorishiro-ce/config.example.yml
+    dst: /etc/yorishiro/config.example.yml
     type: config
-  # See the note in nfpm-yorishiro.yaml: `copyright` is the name dpkg's default
+  # See the note in nfpm-yorishiro-ee.yaml: `copyright` is the name dpkg's default
   # `path-include` keeps when `/usr/share/doc/*` is excluded.
   - src: ./LICENSE
     dst: /usr/share/doc/yorishiro-ce/copyright

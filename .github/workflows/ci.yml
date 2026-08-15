@@ -176,7 +176,7 @@ jobs:
             done
           }
 
-          check target/release/yorishiro-server    packaging/nfpm-yorishiro.yaml
+          check target/release/yorishiro-server packaging/nfpm-yorishiro-ee.yaml
           check target/release/yorishiro-ce-server packaging/nfpm-yorishiro-ce.yaml
           exit "$status"
 
@@ -244,7 +244,7 @@ jobs:
       - name: Build the packages
         run: |
           mkdir -p dist
-          for cfg in packaging/nfpm-yorishiro.yaml packaging/nfpm-yorishiro-ce.yaml; do
+          for cfg in packaging/nfpm-yorishiro-ee.yaml packaging/nfpm-yorishiro-ce.yaml; do
             for pkg in deb rpm; do
               nfpm package --config "$cfg" --packager "$pkg" --target dist/
             done

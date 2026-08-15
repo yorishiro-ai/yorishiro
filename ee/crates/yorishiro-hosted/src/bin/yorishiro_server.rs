@@ -13,8 +13,8 @@ use yorishiro_server::{
     build_embedding_provider, database_url_from_env, shutdown_signal,
 };
 
-/// The Yorishiro server. A plain start runs the HTTP server and serves the web UI;
-/// `yorishiro-server admin ...` runs one-off administrative commands. Migrations are
+/// The Yorishiro server, enterprise edition. A plain start runs the HTTP server and serves the
+/// web UI; `yorishiro-server admin ...` runs one-off administrative commands. Migrations are
 /// applied on startup either way. Paid features need a licence key in `YORISHIRO_LICENSE_KEY`;
 /// without one the server runs normally and those features answer 404.
 #[derive(Parser)]

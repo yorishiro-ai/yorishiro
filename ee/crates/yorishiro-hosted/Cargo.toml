@@ -8,8 +8,11 @@ license-file = "../../LICENSE"
 autotests = false
 publish = false
 
-# The crate keeps its name; the binary does not need one that distinguishes it from a
-# counterpart that no longer exists.
+# Both editions install their binary as `yorishiro-server`, and both ship the same
+# `yorishiro.service` -- the packages conflict, so a machine has exactly one of each. The
+# edition is carried by the package name and the file on the release page; everything on disk
+# is edition-neutral, which is what makes switching editions a file swap rather than a
+# migration of unit names, ExecStart paths and runbooks.
 [[bin]]
 name = "yorishiro-server"
 path = "src/bin/yorishiro_server.rs"

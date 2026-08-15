@@ -10,7 +10,7 @@ Set them via `environment:` in docker compose, `docker compose exec -e`, `Enviro
 
 Every variable is named `YORISHIRO_*`.
 The old `YSR_*` names are still accepted: the server copies each onto its replacement at startup and prints a warning naming both.
-The same applies to the `YORISHIRO_HOSTED_*` names, which distinguished a second binary that no longer exists — `YSR_WEB_DIR` and `YORISHIRO_HOSTED_WEB_DIR` both become `YORISHIRO_WEB_DIR`.
+The `YORISHIRO_HOSTED_*` names are accepted the same way: `YSR_WEB_DIR` and `YORISHIRO_HOSTED_WEB_DIR` both mean `YORISHIRO_WEB_DIR`.
 Setting the new name alongside an old one uses the new value.
 
 The rename happens before `config.yml` is read, so an exported old name still beats a value in the file, exactly as the new name would.
@@ -59,7 +59,7 @@ Every response carries an `x-request-id` header -- a UUID the server generates i
 The same value tags the tracing span for that request, so any `warn`/`error` line logged while handling it (an authentication rejection, a rate-limit hit, an internal error) carries the same `request_id` field as the access log line for that request.
 Useful for tying a specific failed request to its server-side log lines when following up on an incident report.
 
-Rejected requests (bad/missing API key, insufficient scope, rate limit exceeded) are logged at `warn` with the caller's IP and the request path, but never the presented credential -- previously these surfaced only as an anonymous 401/403/429 in the access log.
+Rejected requests (bad/missing API key, insufficient scope, rate limit exceeded) are logged at `warn` with the caller's IP and the request path, but never the presented credential.
 
 ## Logging
 
@@ -112,7 +112,7 @@ To move a workspace to another model, point the deployment at it and re-embed:
 $ yorishiro-server admin resync-embeddings --workspace <id>
 ```
 
-Workspaces created before this stamp existed carry none, and accept whatever the deployment produces — which is what they have always done.
+A workspace with no stamp accepts whatever the deployment produces.
 
 ### When `YORISHIRO_EMBEDDING_PROVIDER=openai` (e.g. Ollama, LM Studio, OpenAI)
 
