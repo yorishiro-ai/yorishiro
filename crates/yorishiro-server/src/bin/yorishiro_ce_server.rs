@@ -75,7 +75,10 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let database_url = database_url_from_env()?;
+    // Not `?`: see the paid binary. An absent DATABASE_URL exits 78 so the unit stops instead of
+    // retrying forever; a database that is merely not up yet still exits 1 and is retried.
+    let database_url =
+        database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;
     sqlx::migrate!("../../migrations")
         .run(&identity_pool)

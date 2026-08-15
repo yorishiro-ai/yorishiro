@@ -129,7 +129,20 @@ note "an unconfigured start says what to do"
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-  su -s /bin/sh yorishiro -c "/usr/bin/yorishiro-server" 2>&1' 2>&1)
+  su -s /bin/sh yorishiro -c "/usr/bin/yorishiro-server" 2>&1
+  echo "EXIT:$?"' 2>&1)
+
+# 78 (EX_CONFIG), not 1. The units set `RestartPreventExitStatus=78`, so this number is what
+# stops an unconfigured `enable --now` from restarting every five seconds forever while
+# `systemctl is-failed` answers `activating` -- measured at 15 restarts in 45 seconds before it
+# existed. A database that is merely not up yet must keep exiting 1 and keep being retried, so
+# the two cases have to stay distinguishable; `a missing database still retries` below is the
+# other half of that pair.
+if grep -q '^EXIT:78$' <<<"$out"; then
+  ok "an absent DATABASE_URL exits 78 (EX_CONFIG)"
+else
+  bad "expected exit 78 for missing config, got: $(grep -o 'EXIT:[0-9]*' <<<"$out")"
+fi
 if grep -q '/etc/yorishiro/yorishiro.env' <<<"$out"; then
   ok "names the file to edit"
 else
@@ -139,6 +152,24 @@ if grep -qE 'panicked at|RUST_BACKTRACE' <<<"$out"; then
   bad "still prints a Rust panic at an operator"
 else
   ok "no panic, no source path"
+fi
+
+# The other half of the pair above. If an unreachable database also exited 78 the units would
+# stop retrying it, turning a boot-order race with a same-host postgres -- which resolves itself
+# in seconds -- into a permanently failed unit. Verified live: with the database arriving late,
+# the service self-heals on its sixth restart.
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
+  # Set inside the -c string: `su` does not carry the caller environment across.
+  su -s /bin/sh yorishiro -c \
+    "DATABASE_URL=postgres://nobody:nope@127.0.0.1:59999/nodb /usr/bin/yorishiro-server" \
+    >/dev/null 2>&1
+  echo "EXIT:$?"' 2>&1)
+if grep -q '^EXIT:1$' <<<"$out"; then
+  ok "an unreachable database still exits 1, so it keeps being retried"
+else
+  bad "expected exit 1 for an unreachable database, got: $(grep -o 'EXIT:[0-9]*' <<<"$out")"
 fi
 
 # --------------------------------------------------------------------------------------------
@@ -274,6 +305,12 @@ note "the systemd units are valid"
 # ExecStart, so a unit checked without its binary reports a missing command -- a failure about
 # the test environment rather than about the unit. The two packages conflict, so this is also
 # the only way to have each binary present for its own unit.
+#
+# The same container also checks that every absolute path the unit *names* exists, comments
+# included. `systemd-analyze` reads directives and ignores comments, so it was silent while both
+# units pointed at a `config.example.yml` under `/usr/share/doc/` that had moved to `/etc/` --
+# an operator following the unit's own instructions would have found nothing there. A path in a
+# comment is documentation the package ships, so it is checked like the rest of the package.
 verify_unit() {
   pkg="$1" unit="$2"
   out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
@@ -284,6 +321,36 @@ verify_unit() {
     ok "systemd-analyze verify is silent on $unit"
   else
     bad "systemd-analyze verify complained about $unit: $(echo "$out" | head -3 | tr '\n' ' ')"
+  fi
+
+  # Every absolute path, not a list of prefixes: a unit naming `/opt/...` or `/run/...` would
+  # otherwise be scanned and reported complete without that path having been looked at.
+  # `set -euo pipefail` so a half-finished install -- unit written, postinstall failed -- cannot
+  # reach the `CHECKED` receipt and read as a pass.
+  #
+  # Two exclusions, both because the path is not a file the package ships: systemd's own
+  # `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory),
+  # and anything under `/proc` or `/sys`. Neither appears in these units today; they are listed
+  # so a future directive that does use them fails on its own merits rather than here.
+  out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+    set -euo pipefail
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq /pkg/'"$pkg"' >/dev/null 2>&1
+    unit=/lib/systemd/system/'"$unit"'
+    [ -f "$unit" ] || { echo "NO_UNIT"; exit 1; }
+    grep -oE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" "$unit" \
+      | sed -e "s/^[[:space:]=\"]//" -e "s/[.,]$//" \
+      | grep -vE "^/(proc|sys)(/|$)" \
+      | sort -u | while read -r p; do
+        [ -e "$p" ] || echo "MISSING:$p"
+      done
+    echo CHECKED' 2>&1)
+  if ! grep -q CHECKED <<<"$out"; then
+    bad "could not check the paths $unit names: $(echo "$out" | tr '\n' ' ')"
+  elif grep -q MISSING: <<<"$out"; then
+    bad "$unit names paths the package does not install: $(grep -o 'MISSING:[^ ]*' <<<"$out" | tr '\n' ' ')"
+  else
+    ok "every path $unit names exists after install"
   fi
 }
 verify_unit "$(basename "$(deb)")" yorishiro.service

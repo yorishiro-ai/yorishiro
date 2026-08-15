@@ -1,7 +1,7 @@
 # Installed by the `yorishiro` package. Enable with `systemctl enable --now yorishiro`.
 #
 # Configuration goes in /etc/yorishiro/yorishiro.env as KEY=value lines; at minimum
-# DATABASE_URL. See /usr/share/doc/yorishiro/config.example.yml for the file-based alternative.
+# DATABASE_URL. See /etc/yorishiro/config.example.yml for the file-based alternative.
 [Unit]
 Description=Yorishiro server
 After=network.target
@@ -14,6 +14,12 @@ WorkingDirectory=/var/lib/yorishiro
 EnvironmentFile=/etc/yorishiro/yorishiro.env
 ExecStart=/usr/bin/yorishiro-server
 Restart=on-failure
+# 78 is EX_CONFIG, which the binary uses for "configuration is absent or unusable" and nothing
+# else. Without this, an operator who runs `enable --now` before setting DATABASE_URL gets a
+# five-second crashloop that never ends, and `systemctl is-failed` answers `activating` rather
+# than `failed` -- so monitoring that watches unit state never sees it. Every other failure
+# still retries, which is what a database that has not finished starting needs.
+RestartPreventExitStatus=78
 RestartSec=5s
 
 # The process needs no write access outside its own state directory, and no new privileges.
