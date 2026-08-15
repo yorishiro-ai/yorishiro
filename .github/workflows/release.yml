@@ -225,6 +225,13 @@ jobs:
       - name: Build
         run: cargo build --release -p yorishiro-hosted
 
+      # The community binary carries no code from `ee/`, for a deployment that cannot hold
+      # proprietary code at all. Built only on Linux: it exists for the distribution packages
+      # below, and the tarball/zip line ships the default edition.
+      - name: Build the community binary
+        if: runner.os == 'Linux'
+        run: cargo build --release -p yorishiro-server --bin yorishiro-ce-server
+
       - name: Package (Linux)
         if: runner.os == 'Linux'
         env:
@@ -234,6 +241,50 @@ jobs:
           mkdir -p dist
           tar -czf "dist/yorishiro-server-${TAG}-linux-${ARCH}.tar.gz" \
             -C target/release yorishiro-server
+          tar -czf "dist/yorishiro-ce-server-${TAG}-linux-${ARCH}.tar.gz" \
+            -C target/release yorishiro-ce-server
+
+      # Installed from the release tarball rather than an action: the version is pinned here in
+      # plain sight, and nfpm publishes static binaries for both architectures this matrix runs.
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        env:
+          NFPM_VERSION: 2.47.0
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # nfpm names its amd64 asset `x86_64`, which is not what this matrix calls the arch.
+          case "$ARCH" in
+            amd64) asset_arch=x86_64 ;;
+            arm64) asset_arch=arm64 ;;
+            *) echo "no nfpm asset known for arch '$ARCH'" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/nfpm.tar.gz \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${asset_arch}.tar.gz"
+          tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
+          sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
+          nfpm --version
+
+      # Two package lines, the same split GitLab draws: `yorishiro` carries the paid features
+      # (inactive without a licence key) and is what most deployments want; `yorishiro-ce` holds
+      # no proprietary code and is therefore headless. They Conflict, since both would run a
+      # service against one database.
+      - name: Package (deb and rpm)
+        if: runner.os == 'Linux'
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # nfpm wants the bare version, not the v-prefixed tag.
+          export VERSION="${TAG#v}"
+          for edition in yorishiro yorishiro-ce; do
+            for pkg in deb rpm; do
+              nfpm package \
+                --config "packaging/nfpm-${edition}.yaml" \
+                --packager "$pkg" \
+                --target dist/
+            done
+          done
+          ls -1 dist/
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

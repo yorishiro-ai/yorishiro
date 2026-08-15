@@ -1,0 +1,52 @@
+# The default package. Contains the paid features, which stay inactive until a licence key is
+# set -- the same arrangement GitLab's `-ee` package has, and the one to install unless you
+# specifically need no proprietary code on the machine.
+name: yorishiro
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Yorishiro Contributors <noreply@yotsunagi.dev>
+description: |
+  An MCP-native, multi-tenant knowledge store with user-defined schemas.
+  Includes the paid features (billing, SSO, marketplace, LLM-backed fill) and the web UI.
+  Those stay disabled until YORISHIRO_LICENSE_KEY is set; everything else works without one.
+vendor: Yotsunagi
+homepage: https://github.com/yotsunagi/yorishiro
+license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
+
+depends:
+  - ca-certificates
+
+overrides:
+  deb:
+    depends:
+      - ca-certificates
+      - libstdc++6
+  rpm:
+    depends:
+      - ca-certificates
+      - libstdc++
+
+# Conflicts rather than Replaces: the two editions install the same unit name and state
+# directory, so having both would leave two services fighting over one database.
+conflicts:
+  - yorishiro-ce
+
+contents:
+  - src: ./target/release/yorishiro-server
+    dst: /usr/bin/yorishiro-server
+  - src: ./packaging/yorishiro.service
+    dst: /lib/systemd/system/yorishiro.service
+  - src: ./config.example.yml
+    dst: /usr/share/doc/yorishiro/config.example.yml
+    type: config
+  - src: ./LICENSE
+    dst: /usr/share/doc/yorishiro/LICENSE
+  - src: ./ee/LICENSE
+    dst: /usr/share/doc/yorishiro/LICENSE.ee
+
+scripts:
+  preinstall: ./packaging/preinstall.sh
+  postinstall: ./packaging/postinstall.sh
