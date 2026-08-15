@@ -159,6 +159,31 @@ case "$out" in
   *) ok "ce does not ship the paid licence" ;;
 esac
 
+# The same markers `check` scans in the build tree, re-checked on the installed binary. CI
+# proves the artifact it built is clean; this proves the artifact a user receives is, which is
+# a different claim once packaging sits between them.
+#
+# `binutils` is installed for `strings` and its absence is fatal rather than silent: without
+# it every marker reports clean and a check that scanned nothing is indistinguishable from one
+# that found nothing.
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq binutils /pkg/'"$(basename "$(deb_ce)")"' >/dev/null 2>&1
+  command -v strings >/dev/null || { echo "NO_STRINGS"; exit 1; }
+  for m in hosted/stripe yorishiro_hosted api/marketplace LICENSE_KEY infer-fill; do
+    strings -a /usr/bin/yorishiro-ce-server | grep -q -- "$m" && echo "LEAK:$m"
+  done
+  echo "SCANNED"' 2>&1)
+# `SCANNED` is the receipt that the loop actually ran; an install failure or a missing
+# `strings` both land here as its absence.
+if ! grep -q SCANNED <<<"$out"; then
+  bad "the installed-binary marker scan did not run: $(echo "$out" | tr '\n' ' ')"
+elif grep -q LEAK: <<<"$out"; then
+  bad "paid markers in the installed ce binary: $(grep -o 'LEAK:[^ ]*' <<<"$out" | tr '\n' ' ')"
+else
+  ok "the installed ce binary carries no paid marker"
+fi
+
 # --------------------------------------------------------------------------------------------
 note "install → configure → first-run wizard, against a real database"
 # --------------------------------------------------------------------------------------------
