@@ -199,6 +199,10 @@ jobs:
   #
   # The script is the same one that runs locally (`packaging/test-install.sh`), so a failure here
   # reproduces without pushing a commit.
+  #
+  # It pulls five public images (four distributions plus postgres). A failure whose message is
+  # about pulling rather than about a package is Docker Hub's unauthenticated rate limit on a
+  # shared runner, not a packaging fault -- rerun, and authenticate the pulls if it recurs.
   package-install:
     runs-on: ubuntu-latest
     needs: check

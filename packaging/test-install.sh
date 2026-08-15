@@ -30,7 +30,9 @@ note() { printf '\n== %s ==\n' "$1"; }
 
 deb() { ls "$PKG_DIR"/yorishiro_*.deb | head -1; }
 deb_ce() { ls "$PKG_DIR"/yorishiro-ce_*.deb | head -1; }
+# The `[0-9]` is what keeps this from matching `yorishiro-ce-*.rpm`, which has its own accessor.
 rpm() { ls "$PKG_DIR"/yorishiro-[0-9]*.rpm | head -1; }
+rpm_ce() { ls "$PKG_DIR"/yorishiro-ce-[0-9]*.rpm | head -1; }
 
 # --------------------------------------------------------------------------------------------
 note "deb on ubuntu:24.04 — the supported case"
@@ -86,6 +88,21 @@ for want in RUNS COPYRIGHT USER; do
   case "$out" in
     *"$want"*) ok "fedora:39 $want" ;;
     *) bad "fedora:39 $want (output: $(echo "$out" | tr '\n' ' '))" ;;
+  esac
+done
+
+# The community rpm too. Four packages are built and it would otherwise be the only one never
+# installed anywhere -- the same gap the paid rpm had before this file existed. A separate
+# container because the two packages conflict.
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
+  dnf install -y -q /pkg/'"$(basename "$(rpm_ce)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
+  /usr/bin/yorishiro-ce-server --help >/dev/null 2>&1 && echo "RUNS"
+  [ -f /usr/share/doc/yorishiro-ce/copyright ] && echo "COPYRIGHT"
+' 2>&1)
+for want in RUNS COPYRIGHT; do
+  case "$out" in
+    *"$want"*) ok "fedora:39 ce $want" ;;
+    *) bad "fedora:39 ce $want (output: $(echo "$out" | tr '\n' ' '))" ;;
   esac
 done
 
