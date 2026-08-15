@@ -94,6 +94,8 @@ To run it yourself, build the packages first with `nfpm package --config packagi
 `nfpm` resolves `src:` against the working directory, so run it from the repository root.
 Build the binaries in a container rather than on the host unless the host's glibc is at or below the floor: a newer one produces a binary that needs symbols the packages do not declare.
 The script needs Docker, and CI runs this same script, so a CI failure reproduces locally without pushing a commit.
+`./packaging/test-systemd.sh dist` is the companion for the parts only systemd can exercise — that an unconfigured start stops at `failed` instead of retrying, that a configured one serves `/up`, and that the service returns by itself after a reboot.
+It needs a privileged container, which is why it is a separate script; CI runs it too.
 
 Two packages exist, and they conflict — install one:
 

@@ -245,6 +245,17 @@ jobs:
       - name: Install and check the packages
         run: ./packaging/test-install.sh dist
 
+      # Starting the service is a different claim from installing it, and nothing above makes
+      # it: `systemd-analyze verify` checks unit syntax, and every other case here runs the
+      # binary directly. Both defects this catches were invisible until systemd itself ran the
+      # unit -- a comment naming a path dpkg deletes, and an unconfigured start that retried
+      # every five seconds forever while `is-failed` answered `activating`.
+      #
+      # Same job rather than its own, so the packages built above are reused; only this step
+      # needs a privileged container, and `test-install.sh` stays runnable without one.
+      - name: Start the service under systemd
+        run: ./packaging/test-systemd.sh dist
+
   security:
     runs-on: ubuntu-latest
     steps:
