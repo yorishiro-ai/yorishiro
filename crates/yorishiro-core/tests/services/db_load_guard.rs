@@ -91,6 +91,10 @@ static LOAD_GUARD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct LoadGuardEnv {
     _lock: std::sync::MutexGuard<'static, ()>,
+    /// What each variable held before this guard ran, so `Drop` puts it back. Removing them
+    /// unconditionally would delete a value the test process was started with, and the next
+    /// test to read either one would see a different deployment than the one it was run under.
+    previous: [(&'static str, Option<std::ffi::OsString>); 2],
 }
 
 impl LoadGuardEnv {
@@ -100,6 +104,16 @@ impl LoadGuardEnv {
         let lock = LOAD_GUARD_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+        let previous = [
+            (
+                "YORISHIRO_DB_LOAD_THRESHOLD",
+                std::env::var_os("YORISHIRO_DB_LOAD_THRESHOLD"),
+            ),
+            (
+                "YORISHIRO_DB_LOAD_POLL_SECS",
+                std::env::var_os("YORISHIRO_DB_LOAD_POLL_SECS"),
+            ),
+        ];
         // SAFETY: serialized by LOAD_GUARD_ENV_LOCK, and nothing else touches these keys.
         unsafe {
             std::env::set_var("YORISHIRO_DB_LOAD_THRESHOLD", "10");
@@ -108,16 +122,23 @@ impl LoadGuardEnv {
                 None => std::env::remove_var("YORISHIRO_DB_LOAD_POLL_SECS"),
             }
         }
-        Self { _lock: lock }
+        Self {
+            _lock: lock,
+            previous,
+        }
     }
 }
 
 impl Drop for LoadGuardEnv {
     fn drop(&mut self) {
-        // SAFETY: serialized by LOAD_GUARD_ENV_LOCK, and nothing else touches these keys.
-        unsafe {
-            std::env::remove_var("YORISHIRO_DB_LOAD_THRESHOLD");
-            std::env::remove_var("YORISHIRO_DB_LOAD_POLL_SECS");
+        for (key, value) in &self.previous {
+            // SAFETY: serialized by LOAD_GUARD_ENV_LOCK, and nothing else touches these keys.
+            unsafe {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
         }
     }
 }
