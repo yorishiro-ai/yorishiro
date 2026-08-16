@@ -37,6 +37,7 @@ reqwest.workspace = true
 sea-query.workspace = true
 sea-query-binder.workspace = true
 serde.workspace = true
+serde_yaml_ng.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true

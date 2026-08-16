@@ -3,8 +3,8 @@
 //! The default artifact is the one `ee/` builds, which runs exactly this feature set until a
 //! licence key is present. This binary exists for the deployment that cannot have proprietary
 //! code on disk at all — a distribution policy, a redistribution requirement, an audit that
-//! reads the package rather than the configuration. GitLab draws the same line between its
-//! `-ce` and `-ee` packages, and recommends the `-ee` one to everybody else.
+//! reads the package rather than the configuration. Everyone else wants the `-ee` package,
+//! which is a superset and behaves identically without a licence key.
 //!
 //! **It is headless.** The web UI is the paid edition's SPA and is licensed with it, so there
 //! is nothing here to serve at `/` — the fallback answers `404`. The REST API, the MCP server,

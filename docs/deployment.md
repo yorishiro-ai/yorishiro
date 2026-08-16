@@ -36,7 +36,7 @@ $ docker build -t yorishiro .
 ### systemd, without the package
 
 The `.deb` and `.rpm` install a unit of their own and enable it with `systemctl enable --now yorishiro`, so this section is only for a binary taken [out of the package](setup.md#running-the-binary-outside-the-package) and placed somewhere else.
-Unlike a plain shell, systemd's `EnvironmentFile=` loads `.env` directly, no `source`/`set -a` needed.
+Point `YORISHIRO_CONFIG_PATH` at the config file, the way the packaged unit does.
 The unit name here is your own choice, since this one is not the package's.
 
 ```ini
@@ -48,12 +48,12 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/yorishiro
 ExecStart=/opt/yorishiro/yorishiro-server
-EnvironmentFile=/opt/yorishiro/.env
+Environment=YORISHIRO_CONFIG_PATH=/opt/yorishiro/config.yml
 Restart=on-failure
 # 78 is EX_CONFIG, which the server uses for "configuration is absent or unusable" and nothing
-# else. Without this a start with no DATABASE_URL retries every five seconds forever, and
-# `systemctl is-failed` answers `activating` rather than `failed` -- so nothing watching unit
-# state ever sees it. Other failures still retry, which is what a database still starting needs.
+# else. Without this a start with no database configured retries every five seconds forever,
+# and `systemctl is-failed` answers `activating` rather than `failed` -- so nothing watching
+# unit state ever sees it. Other failures still retry, which a database still starting needs.
 RestartPreventExitStatus=78
 User=yorishiro
 

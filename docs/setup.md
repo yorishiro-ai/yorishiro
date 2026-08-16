@@ -90,7 +90,7 @@ Both install `/usr/bin/yorishiro-server`, both ship `yorishiro.service`, and bot
 
 ```console
 $ sudo dpkg -i yorishiro-ee_X.Y.Z_amd64.deb  # or: sudo rpm -i yorishiro-ee-X.Y.Z-1.x86_64.rpm
-$ sudoedit /etc/yorishiro/yorishiro.env      # at minimum, DATABASE_URL
+$ sudoedit /etc/yorishiro/config.yml         # at minimum, database_url
 $ sudo systemctl enable --now yorishiro
 ```
 
@@ -145,7 +145,7 @@ There is no standalone tarball — a release attaches the eight packages (two ed
 
 To run the binary from somewhere other than `/usr/bin`, take it out of the package (`dpkg-deb -x`, `rpm2cpio | cpio -id`) and put the `models/` directory from step 1 beside it.
 The file to extract is `usr/bin/yorishiro-server`, whichever edition the package is.
-Configure it with a `config.yml` next to the binary (read directly — see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)) or with environment variables, then start it.
+Configure it with a `config.yml` in the directory the server runs from, or point `YORISHIRO_CONFIG_PATH` at one elsewhere (see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)), then start it.
 [deployment.md](deployment.md#running-in-the-background) covers keeping it running across reboots when the package's own unit is not being used.
 
 ## Run from source (Docker Compose)
@@ -189,8 +189,8 @@ Migrations are applied automatically on startup, for all three methods above.
 Deployments where `YORISHIRO_MAX_TENANTS` resolves to an actual cap (the default: unset means `1`) serve a setup wizard at `http://localhost:8080/`.
 No admin CLI needed.
 
-The wizard is served over HTTP, so it starts one step later than GitLab's does: a database has to be reachable before there is anything to serve it from.
-A server started with no `DATABASE_URL` exits and tells you which file to set it in, rather than launching a configuration wizard the way `gitlab-ctl reconfigure` does for an unconfigured `gitlab.rb`.
+The wizard is served over HTTP, so a database has to be reachable before there is anything to serve it from.
+A server started with no database configured exits and names the file to set it in.
 Set the connection string, start the server, and the wizard covers everything after that.
 
 On first visit, since no tenant exists yet, the browser shows a form for an email and password (plus an optional display name and an optional schema template to bootstrap the `default` workspace with).

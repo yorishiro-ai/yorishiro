@@ -201,3 +201,41 @@ fn the_example_config_parses_with_every_key_enabled() {
         parsed.err()
     );
 }
+
+/// `license_key` belongs to the paid edition, and both editions parse this struct, which is
+/// `deny_unknown_fields`. So the field has to exist here or a config carrying the key refuses
+/// to start on the community build -- an operator switching editions would meet that.
+///
+/// The field is otherwise unused, which makes it exactly the kind of thing a later cleanup
+/// removes. This is the contract that says it cannot be.
+#[test]
+fn a_licence_key_in_the_config_is_accepted() {
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_config(dir.path(), "license_key: a-token\nbind: 127.0.0.1:9000\n");
+    // SAFETY: serialized by ENV_LOCK via EnvGuard.
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", &path) };
+
+    unsafe { load_and_apply_env_overrides() }.unwrap();
+
+    // Parsed, so the settings beside it took effect.
+    assert_eq!(std::env::var("YORISHIRO_BIND").unwrap(), "127.0.0.1:9000");
+}
+
+/// And it must not reach the environment from here.
+///
+/// This loader is compiled into the community binary. Applying the key would put the string
+/// `YORISHIRO_LICENSE_KEY` into that artifact, which the release gate scans for and rejects --
+/// the build is meant to carry no trace of the paid edition. `ee/` reads the file itself.
+#[test]
+fn a_licence_key_in_the_config_is_not_applied_to_the_environment() {
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_LICENSE_KEY"]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_config(dir.path(), "license_key: a-token\n");
+    // SAFETY: serialized by ENV_LOCK via EnvGuard.
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", &path) };
+
+    unsafe { load_and_apply_env_overrides() }.unwrap();
+
+    assert!(std::env::var("YORISHIRO_LICENSE_KEY").is_err());
+}

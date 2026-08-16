@@ -1,56 +1,191 @@
-# Optional alternative to .env.example. Every setting below has an equivalent environment
-# variable (named in the comments); a set environment variable always wins over the value here.
-# Copy this file to config.yml (or point YORISHIRO_CONFIG_PATH elsewhere) and fill in what you need --
-# a missing file, or a missing key within it, is not an error.
+# Yorishiro configuration.
+#
+# Copy this file to config.yml and edit it. Every setting is commented out and shows its
+# default, so an uncommented line is a deliberate change from stock behaviour -- and a stock
+# deployment needs exactly one of them, `database_url`.
+#
+# Where this file goes:
+#   package install   /etc/yorishiro/config.yml   (the unit already points here)
+#   otherwise         config.yml in the working directory, or wherever YORISHIRO_CONFIG_PATH names
+#
+# A missing file is not an error, and neither is a missing key -- the default applies. An
+# unrecognised key IS an error: the server refuses to start rather than run with a setting you
+# believe is in effect. That is deliberate, and it means a typo is caught at boot.
+#
+# Environment variables of the same name (given after each setting) still work and take
+# precedence over this file, which is what makes container deployments and one-off overrides
+# possible without editing anything. Nothing requires them.
+#
+# Reload: this file is read once at startup. Restart the service after editing it.
 
-# database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro  # DATABASE_URL
-# bind: 0.0.0.0:8080                                                    # YORISHIRO_BIND
-# cors_origins: ""                                                      # YORISHIRO_CORS_ORIGINS
 
-# Deployment-wide cap on the number of tenants `admin create-tenant` may create. Defaults to 1
-# (single-tenant) if unset -- set to 0 for unlimited, or to a higher number to allow that many
-# tenants. See .env.example for the full explanation (same setting, YORISHIRO_MAX_TENANTS).
+### Database ###############################################################################
+
+# The one setting with no working default. PostgreSQL 18 or newer, with the `vector` and
+# `pg_trgm` extensions available; the server creates its own schemas and roles on first start
+# and applies migrations on every start.
+#
+# Starting the server without this is not a degraded mode: it prints the path to this file and
+# exits 78 (EX_CONFIG), which the packaged systemd unit treats as "do not retry".
+#
+#   DATABASE_URL
+# database_url: postgres://yorishiro:PASSWORD@localhost:5432/yorishiro
+
+# Running only the database in Docker is a common shape -- the server from a package,
+# PostgreSQL from an image, nothing else containerised:
+#
+#   docker run -d --name yorishiro-db --restart unless-stopped \
+#     -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=PASSWORD -e POSTGRES_DB=yorishiro \
+#     -p 127.0.0.1:5432:5432 -v yorishiro-pgdata:/var/lib/postgresql/data \
+#     pgvector/pgvector:pg18
+#
+# Then `database_url: postgres://yorishiro:PASSWORD@127.0.0.1:5432/yorishiro`. The image bundles
+# pgvector, so nothing else needs installing; bind to 127.0.0.1 unless the database is meant to
+# be reachable from other hosts. The named volume is what makes the data outlive the container.
+
+
+### Server #################################################################################
+
+# Listen address. The port every document, compose file and healthcheck here expects.
+#   YORISHIRO_BIND
+# bind: 0.0.0.0:8080
+
+# Browser origins allowed to call the REST API, comma-separated. Empty rejects every
+# cross-origin request, which is right for a deployment whose UI is the built-in one.
+#   YORISHIRO_CORS_ORIGINS
+# cors_origins: ""
+
+# How many tenants `admin create-tenant` may create. 1 is a single-tenant deployment; 0 is
+# unlimited. This also gates the first-run setup wizard at `/` -- the wizard is offered only
+# while the cap is an actual limit, so a deployment that sets 0 provisions through the admin
+# CLI or an invite instead. `POST /auth/signup` redeems invites into an existing tenant and is
+# unaffected either way.
+#   YORISHIRO_MAX_TENANTS
 # max_tenants: 1
 
-# The setup/login web UI's static files are compiled into the binary and served at "/" by
-# default. Set this to serve them from a real directory on disk instead (e.g. to iterate on
-# web/ without rebuilding).
-# web_dir: web                                                          # YORISHIRO_WEB_DIR
+# Serve the web UI from a directory instead of the copy compiled into the binary. For working
+# on the UI without rebuilding; a normal deployment leaves this unset.
+#   YORISHIRO_WEB_DIR
+# web_dir: web
 
-# rust_log: info                                                        # RUST_LOG
 
-# auth_rate_limit:
-#   max: 10                                                             # YORISHIRO_AUTH_RATE_LIMIT_MAX
-#   window_secs: 60                                                     # YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS
+### Embeddings #############################################################################
 
-# search_tokens_per_minute: 100000                                      # YORISHIRO_SEARCH_TOKENS_PER_MINUTE
-
-# Days a batch migration stays undoable; 0 keeps every before-image forever.
-# snapshot_retention_days: 30                                           # YORISHIRO_SNAPSHOT_RETENTION_DAYS
-
+# `local` runs an ONNX model in-process and needs no external service. `openai` calls an
+# OpenAI-compatible API -- Ollama, LM Studio, OpenAI itself.
+#
+# Note the indentation: everything from here to the end of the section is one `embedding:`
+# block, so uncommenting a single line means uncommenting `embedding:` above it too.
+#
+#   YORISHIRO_EMBEDDING_PROVIDER
 # embedding:
-#   provider: local                                                     # YORISHIRO_EMBEDDING_PROVIDER
-#   dimensions: 1024                                                    # YORISHIRO_EMBEDDING_DIMENSIONS (must match model output)
-#   # --- when provider: local (ONNX export, the default) ---
-#   onnx_model_path: models/model.onnx                                  # YORISHIRO_ONNX_MODEL_PATH
-#   onnx_tokenizer_path: models/tokenizer.json                          # YORISHIRO_ONNX_TOKENIZER_PATH
-#   onnx_max_sequence_length: 512                                       # YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH
-#   onnx_pooling: mean                                                  # YORISHIRO_ONNX_POOLING (mean | last_token)
-#   onnx_query_instruction: Retrieve relevant documents                 # YORISHIRO_ONNX_QUERY_INSTRUCTION (queries only)
-#   # --- when provider: openai (e.g. Ollama, LM Studio, OpenAI) ---
-#   base_url: http://localhost:11434/v1                                 # YORISHIRO_EMBEDDING_BASE_URL
-#   model: nomic-embed-text                                             # YORISHIRO_EMBEDDING_MODEL
-#   api_key: ""                                                         # YORISHIRO_EMBEDDING_API_KEY
-#   send_dimensions_param: true                                         # YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM
+#   provider: local
+#
+#   # Vector width, which must equal what the model emits. Wrong here means either a startup
+#   # failure or silently useless search, so it is checked against the provider at boot.
+#   # Common values: 384, 768, 1024, 1536.
+#   #   YORISHIRO_EMBEDDING_DIMENSIONS
+#   dimensions: 1024
+#
+#   ## provider: local ##
+#   #
+#   # Download `onnx/model_quantized.onnx` and `tokenizer.json` from
+#   # https://huggingface.co/Xenova/multilingual-e5-large to the paths below -- which are
+#   # already the defaults, so with the files in place no embedding setting needs touching at
+#   # all. The server will not start without them; there is no fallback.
+#   #   YORISHIRO_ONNX_MODEL_PATH / YORISHIRO_ONNX_TOKENIZER_PATH
+#   onnx_model_path: models/model.onnx
+#   onnx_tokenizer_path: models/tokenizer.json
+#
+#   # Tokens per input. Longer inputs are truncated.
+#   #   YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH
+#   onnx_max_sequence_length: 512
+#
+#   # `mean` or `last_token`. A property of the model, not a preference: sentence-transformers
+#   # exports want `mean`, Qwen3-Embedding wants `last_token`. The wrong one does not fail --
+#   # it degrades search quality quietly, which is the worst way for a setting to be wrong.
+#   #   YORISHIRO_ONNX_POOLING
+#   onnx_pooling: mean
+#
+#   # Prepended to search queries and never to stored documents. Qwen3-Embedding expects an
+#   # instruction here; symmetric models want it left unset.
+#   #   YORISHIRO_ONNX_QUERY_INSTRUCTION
+#   onnx_query_instruction: Retrieve relevant documents
+#
+#   ## provider: openai ##
+#   #
+#   #   YORISHIRO_EMBEDDING_BASE_URL / _MODEL / _API_KEY
+#   base_url: http://localhost:11434/v1
+#   model: nomic-embed-text
+#   api_key: ""
+#
+#   # Some OpenAI-compatible servers reject a request carrying a `dimensions` parameter. Set
+#   # false for those.
+#   #   YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM
+#   send_dimensions_param: true
+
+
+### Rate limits ############################################################################
+
+# Per-client-IP limit on the endpoints reachable without a bearer token: `/auth/signup`,
+# `/auth/login` and `/setup`. These are the endpoints an attacker can reach unauthenticated,
+# so the limit is on IP rather than on account.
+#   YORISHIRO_AUTH_RATE_LIMIT_MAX / _WINDOW_SECS
+# auth_rate_limit:
+#   max: 10
+#   window_secs: 60
+
+# Search is metered in tokens per workspace per minute, because one search can cost far more
+# than one write. Everything else is counted in requests.
+#   YORISHIRO_SEARCH_TOKENS_PER_MINUTE
+# search_tokens_per_minute: 100000
+
+
+### Retention ##############################################################################
+
+# How many days a batch migration stays undoable. The before-images it writes are swept on the
+# next migration in that workspace. 0 keeps them forever, which costs a workspace that migrates
+# often more storage than it uses for entities.
+#   YORISHIRO_SNAPSHOT_RETENTION_DAYS
+# snapshot_retention_days: 30
+
+
+### Load shedding ##########################################################################
 
 # Drops the deployment to read-only while the database is under sustained load, and restores it
-# when the load falls away. Off unless threshold is a positive number.
+# by itself when the load falls away. Off entirely unless `threshold` is positive.
+#
+# `threshold` counts active connections. `sustain_secs` is how long it must stay exceeded
+# before switching, so a momentary spike does not trip it.
+#   YORISHIRO_DB_LOAD_THRESHOLD / _SUSTAIN_SECS / _POLL_SECS
 # db_load_guard:
-#   threshold: 0                                                        # YORISHIRO_DB_LOAD_THRESHOLD (0 disables)
-#   sustain_secs: 30                                                    # YORISHIRO_DB_LOAD_SUSTAIN_SECS
-#   poll_secs: 5                                                        # YORISHIRO_DB_LOAD_POLL_SECS
+#   threshold: 0
+#   sustain_secs: 30
+#   poll_secs: 5
 
+
+### Logging ################################################################################
+
+# Verbosity, in `tracing` filter syntax: `info`, `debug`, or per-module such as
+# `info,yorishiro_core=debug`.
+#   RUST_LOG
+# rust_log: info
+
+# `stdout` suits systemd and containers, where the supervisor collects the output -- with the
+# packaged unit, `journalctl -u yorishiro` is the log. `single` and `daily` write files under
+# `dir`; `daily` rotates. `syslog` is Unix-only and fails at startup elsewhere rather than
+# quietly falling back.
+#   YORISHIRO_LOG_TARGET / YORISHIRO_LOG_DIR / YORISHIRO_SYSLOG_SOCKET
 # logging:
-#   target: stdout                                                      # YORISHIRO_LOG_TARGET (stdout | single | daily | syslog)
-#   dir: .                                                               # YORISHIRO_LOG_DIR (when target: single or daily)
-#   syslog_socket: /dev/log                                             # YORISHIRO_SYSLOG_SOCKET (when target: syslog)
+#   target: stdout
+#   dir: .
+#   syslog_socket: /dev/log
+
+
+### Enterprise edition #####################################################################
+
+# An RS256-signed JWT. Unset, empty, malformed and expired all mean the same thing: the paid
+# features stay off and their endpoints answer 404, while everything else runs normally. The
+# community package ignores this setting entirely.
+#   YORISHIRO_LICENSE_KEY
+# license_key: ""

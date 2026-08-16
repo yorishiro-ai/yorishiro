@@ -114,3 +114,67 @@ fn an_active_licence_permits_a_gated_feature() {
     assert!(state.is_active());
     assert!(state.require_active().is_ok());
 }
+
+/// The licence may be configured in `config.yml` rather than the environment, and this is the
+/// half that reads it. `deny_unknown_fields` is deliberately absent: the file it parses is the
+/// server's whole configuration, so every key that belongs to another struct has to pass
+/// through rather than fail the parse.
+#[test]
+fn the_licence_key_is_read_from_a_config_file() {
+    use crate::services::licence::licence_key_in;
+
+    assert_eq!(
+        licence_key_in("database_url: postgres://x\nlicense_key: a-token\n"),
+        Some("a-token".into()),
+        "a key alongside unrelated settings"
+    );
+    assert_eq!(
+        licence_key_in("database_url: postgres://x\n"),
+        None,
+        "absent"
+    );
+    assert_eq!(
+        licence_key_in("license_key: \"\"\n"),
+        None,
+        "empty is absent"
+    );
+    assert_eq!(
+        licence_key_in(": : not yaml\n"),
+        None,
+        "unparseable is absent, not a panic"
+    );
+}
+
+/// The environment wins over the config file, and **set-but-empty is the environment winning**
+/// -- not an absence that lets the file through.
+///
+/// Without that, `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file,
+/// which is the opposite of what "the environment takes precedence" means. Every other setting
+/// behaves this way: the shared loader skips the file whenever the variable exists at all.
+#[test]
+fn an_empty_environment_key_does_not_fall_through_to_the_file() {
+    use crate::services::licence::resolve_licence_key;
+
+    let from_file = || Some("from-file".to_string());
+
+    assert_eq!(
+        resolve_licence_key(Some("from-env".into()), from_file),
+        Some("from-env".into()),
+        "a value in the environment wins"
+    );
+    assert_eq!(
+        resolve_licence_key(Some(String::new()), from_file),
+        None,
+        "empty means no licence, and the file is not consulted"
+    );
+    assert_eq!(
+        resolve_licence_key(None, from_file),
+        Some("from-file".into()),
+        "absent is what lets the file through"
+    );
+    assert_eq!(
+        resolve_licence_key(None, || None),
+        None,
+        "neither source configured"
+    );
+}

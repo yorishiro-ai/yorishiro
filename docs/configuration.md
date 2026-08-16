@@ -1,10 +1,17 @@
-# Environment Variable Reference
+# Configuration Reference
 
 **English** | [日本語](ja/configuration.md)
 
-The full list of variables, with comments, lives in [`.env.example`](../.env.example).
-Variables are passed to the server **as process environment variables** -- there is no mechanism that automatically reads a `.env` file.
-Set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or similar.
+Configuration lives in a single YAML file.
+[`config.example.yml`](../config.example.yml) lists every setting with its default and what it does; copy it to `config.yml` and edit.
+A package install puts it at `/etc/yorishiro/config.yml`, which the unit already points at; otherwise the server reads `config.yml` from its working directory, or wherever `YORISHIRO_CONFIG_PATH` names.
+
+A missing file is not an error, and neither is a missing key.
+An unrecognised key is: the server refuses to start rather than run with a setting you believe is in effect.
+
+Every setting also has an environment variable, named in `config.example.yml` beside it, and an environment variable takes precedence over the file.
+That is what makes container deployments and one-off overrides work without editing anything — set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or the shell.
+Nothing requires them.
 
 ## The `YSR_` prefix is deprecated
 
