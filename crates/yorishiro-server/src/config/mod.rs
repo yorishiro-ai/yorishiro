@@ -124,12 +124,13 @@ pub const PACKAGED_CONFIG_PATH: &str = "/etc/yorishiro/config.yml";
 /// the operator happened to be in and report the database as unconfigured while the service
 /// beside it ran normally against that exact file.
 ///
-/// Split out as a pure function so the precedence is testable without touching the process
-/// environment or the filesystem root.
 /// `explicit` is an `OsString` rather than a `String` because `std::env::var` reports a
 /// non-UTF-8 value as `NotUnicode`, and `.ok()` would flatten that into "unset". A path this
 /// process cannot render as UTF-8 is still a path the operator named, and treating it as unset
 /// would fall back to a different file: the one case this function exists to rule out.
+///
+/// Split out as a pure function so the precedence is testable without touching the process
+/// environment or the filesystem root.
 pub(crate) fn config_path_from(
     explicit: Option<OsString>,
     exists: impl Fn(&Path) -> bool,
