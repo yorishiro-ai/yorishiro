@@ -264,45 +264,103 @@ EOF"
     return 1
   }
 
-  install_edition ce \
-    && ok "swap: ce starts on a fresh database" \
-    || bad "swap: ce did not come up on a fresh database"
+  # Entities through the running service's own REST API, not rows through psql. A marker row
+  # written and read by psql proves the database survived the swap; it does not prove either
+  # edition can read what the other wrote, which is the claim being made. Going through the API
+  # exercises the migrator, the schema, the row's JSONB shape and the deserializer in the binary
+  # that is actually installed.
+  api() {
+    docker exec "$APP" curl -s -o /dev/null -w '%{http_code}' \
+      -H "Authorization: Bearer $KEY" "$@" 2>/dev/null
+  }
+  write_entity() {
+    docker exec "$APP" curl -s -o /dev/null -w '%{http_code}' \
+      -X POST http://127.0.0.1:8081/api/entities \
+      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+      -d "{\"schema_name\":\"task-management\",\"entity_type\":\"task\",\"data\":{\"title\":\"$1\",\"done\":false,\"priority\":\"medium\"}}" 2>/dev/null
+  }
+  entity_titles() {
+    docker exec "$APP" curl -s -H "Authorization: Bearer $KEY" \
+      http://127.0.0.1:8081/api/entities 2>/dev/null \
+      | grep -o '"title":"[^"]*"' | sed 's/"title":"//;s/"$//' | sort | tr '\n' ' '
+  }
+
+  if install_edition ce; then
+    ok "swap: ce starts on a fresh database"
+  else
+    bad "swap: ce did not come up on a fresh database"
+  fi
   first=$(migration_state)
-  [ "${first%%:*}" -gt 0 ] 2>/dev/null \
-    && ok "swap: ce applied its migrations ($first)" \
-    || bad "swap: no migrations recorded after ce started ($first)"
+  if [ "${first%%:*}" -gt 0 ] 2>/dev/null; then
+    ok "swap: ce applied its migrations ($first)"
+  else
+    bad "swap: no migrations recorded after ce started ($first)"
+  fi
 
-  # A row only this deployment could have written, so "the data is still there" is a claim about
-  # content rather than about the tables existing.
-  docker exec "$PG" psql -U yorishiro -d yorishiro \
-    -c "CREATE TABLE IF NOT EXISTS swap_marker (note text); INSERT INTO swap_marker VALUES ('written-under-ce');" >/dev/null 2>&1
+  # Provisioned through the community binary's own admin CLI, which is also the only way in on
+  # ce: it is headless, so there is no setup wizard to click through.
+  docker exec "$APP" /usr/bin/yorishiro-server admin create-tenant swap --template task-management >/dev/null 2>&1
+  WS=$(docker exec "$APP" bash -c '/usr/bin/yorishiro-server admin list-tenants 2>/dev/null | head -40' \
+    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
+  KEY=$(docker exec "$APP" /usr/bin/yorishiro-server admin create-api-key "$WS" schema 2>/dev/null \
+    | grep -oE 'ysr_[A-Za-z0-9_]+' | head -1)
+  if [ -n "$KEY" ]; then
+    ok "swap: provisioned a workspace and key through ce's admin CLI"
+  else
+    bad "swap: could not issue an API key from ce (workspace='$WS')"
+  fi
 
-  install_edition ee \
-    && ok "swap: ee starts on the database ce created" \
-    || bad "swap: ee did not come up on ce's database"
+  if [ "$(write_entity written-under-ce)" = "201" ]; then
+    ok "swap: ce wrote an entity through its own API"
+  else
+    bad "swap: ce could not write an entity"
+  fi
+
+  if install_edition ee; then
+    ok "swap: ee starts on the database ce created"
+  else
+    bad "swap: ee did not come up on ce's database"
+  fi
   after_ee=$(migration_state)
-  [ "$after_ee" = "$first" ] \
-    && ok "swap: ce -> ee left the migration set untouched" \
-    || bad "swap: ce -> ee changed the migration set ($first -> $after_ee)"
-  [ "$(docker exec "$PG" psql -U yorishiro -d yorishiro -tAc \
-        "SELECT note FROM swap_marker" 2>/dev/null | tr -d ' \r')" = "written-under-ce" ] \
-    && ok "swap: the data written under ce survived" \
-    || bad "swap: the row written under ce is gone after switching to ee"
+  if [ "$after_ee" = "$first" ]; then
+    ok "swap: ce to ee left the migration set untouched"
+  else
+    bad "swap: ce to ee changed the migration set ($first -> $after_ee)"
+  fi
+  if [ "$(entity_titles)" = "written-under-ce " ]; then
+    ok "swap: ee reads the entity ce wrote"
+  else
+    bad "swap: ee does not read ce's entity (got '$(entity_titles)')"
+  fi
+  if [ "$(write_entity written-under-ee)" = "201" ]; then
+    ok "swap: ee wrote an entity of its own"
+  else
+    bad "swap: ee could not write an entity"
+  fi
 
-  docker exec "$PG" psql -U yorishiro -d yorishiro \
-    -c "INSERT INTO swap_marker VALUES ('written-under-ee');" >/dev/null 2>&1
-
-  install_edition ce \
-    && ok "swap: ce starts again on the database ee wrote to" \
-    || bad "swap: ce did not come back up after ee had run"
+  if install_edition ce; then
+    ok "swap: ce starts again on the database ee wrote to"
+  else
+    bad "swap: ce did not come back up after ee had run"
+  fi
   after_ce=$(migration_state)
-  [ "$after_ce" = "$first" ] \
-    && ok "swap: ee -> ce left the migration set untouched" \
-    || bad "swap: ee -> ce changed the migration set ($first -> $after_ce)"
-  [ "$(docker exec "$PG" psql -U yorishiro -d yorishiro -tAc \
-        "SELECT count(*) FROM swap_marker" 2>/dev/null | tr -d ' \r')" = "2" ] \
-    && ok "swap: both editions' writes are readable from ce" \
-    || bad "swap: ce cannot see both rows after the round trip"
+  if [ "$after_ce" = "$first" ]; then
+    ok "swap: ee to ce left the migration set untouched"
+  else
+    bad "swap: ee to ce changed the migration set ($first -> $after_ce)"
+  fi
+  if [ "$(entity_titles)" = "written-under-ce written-under-ee " ]; then
+    ok "swap: ce reads both editions' entities"
+  else
+    bad "swap: ce does not read both entities (got '$(entity_titles)')"
+  fi
+  # The key ce issued still authenticates after two swaps, so the swap does not invalidate
+  # credentials an operator already handed out.
+  if [ "$(api http://127.0.0.1:8081/whoami)" = "200" ]; then
+    ok "swap: the API key ce issued still works after the round trip"
+  else
+    bad "swap: the API key stopped working across the swap"
+  fi
 
   cleanup_swap
 }
