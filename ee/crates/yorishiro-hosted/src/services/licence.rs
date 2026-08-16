@@ -35,6 +35,24 @@ pub struct LicenceClaims {
     pub exp: i64,
 }
 
+/// Which of the two sources wins, as a pure function so the precedence is testable without
+/// touching the process environment -- tests that set a variable race each other.
+///
+/// The file is consulted only when the variable is **absent**. Set-but-empty means the
+/// environment has spoken and the answer is "no licence", matching every other setting: the
+/// shared loader skips the file whenever the variable exists at all. Without that,
+/// `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file, despite the
+/// environment being what takes precedence.
+pub(crate) fn resolve_licence_key(
+    from_env: Option<String>,
+    from_file: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    match from_env {
+        Some(value) => Some(value).filter(|v| !v.is_empty()),
+        None => from_file(),
+    }
+}
+
 /// `license_key:` from the config file, read here rather than in `yorishiro-server`'s shared
 /// loader.
 ///
@@ -113,9 +131,10 @@ impl LicenceState {
     /// take down the free half over a paid-feature misconfiguration -- but it is logged at
     /// `warn`, since it almost certainly means someone expected paid features to be on.
     pub fn from_env() -> Self {
-        let Some(token) =
-            super::non_empty_env("YORISHIRO_LICENSE_KEY").or_else(licence_key_from_config)
-        else {
+        let from_env =
+            std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());
+
+        let Some(token) = resolve_licence_key(from_env, licence_key_from_config) else {
             tracing::info!("no licence key configured: paid features are disabled");
             return Self::default();
         };

@@ -6,7 +6,7 @@
 #
 # Where this file goes:
 #   package install   /etc/yorishiro/config.yml   (the unit already points here)
-#   otherwise         next to the binary, or wherever YORISHIRO_CONFIG_PATH names
+#   otherwise         config.yml in the working directory, or wherever YORISHIRO_CONFIG_PATH names
 #
 # A missing file is not an error, and neither is a missing key -- the default applies. An
 # unrecognised key IS an error: the server refuses to start rather than run with a setting you

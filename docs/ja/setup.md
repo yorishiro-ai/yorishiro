@@ -160,7 +160,7 @@ CIも同じ2本を実行するため、CIの失敗は手元で再現できます
 
 `/usr/bin`以外の場所でバイナリを動かしたい場合は、パッケージから取り出し(`dpkg-deb -x`、`rpm2cpio | cpio -id`)、手順1の`models/`をその隣に置いてください。
 取り出すのはどちらのエディションでも`usr/bin/yorishiro-server`です。
-設定はバイナリの隣の`config.yml`([configuration.md](configuration.md#configyml)と[`config.example.yml`](../../config.example.yml)参照)か環境変数で行います。
+設定は起動時の作業ディレクトリに置く`config.yml`、または`YORISHIRO_CONFIG_PATH`で別の場所を指定して行います([configuration.md](configuration.md#configyml)と[`config.example.yml`](../../config.example.yml)参照)。
 パッケージ同梱のunitを使わずに再起動をまたいで動かし続ける方法は[deployment.md](deployment.md#バックグラウンドで起動する)を参照してください。
 
 ## ソースから動かす(Docker Compose)

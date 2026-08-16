@@ -145,7 +145,7 @@ There is no standalone tarball — a release attaches the eight packages (two ed
 
 To run the binary from somewhere other than `/usr/bin`, take it out of the package (`dpkg-deb -x`, `rpm2cpio | cpio -id`) and put the `models/` directory from step 1 beside it.
 The file to extract is `usr/bin/yorishiro-server`, whichever edition the package is.
-Configure it with a `config.yml` next to the binary (read directly — see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)) or with environment variables, then start it.
+Configure it with a `config.yml` in the directory the server runs from, or point `YORISHIRO_CONFIG_PATH` at one elsewhere (see [configuration.md](configuration.md#configyml) and [`config.example.yml`](../config.example.yml)), then start it.
 [deployment.md](deployment.md#running-in-the-background) covers keeping it running across reboots when the package's own unit is not being used.
 
 ## Run from source (Docker Compose)

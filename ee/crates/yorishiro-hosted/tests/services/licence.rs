@@ -144,3 +144,37 @@ fn the_licence_key_is_read_from_a_config_file() {
         "unparseable is absent, not a panic"
     );
 }
+
+/// The environment wins over the config file, and **set-but-empty is the environment winning**
+/// -- not an absence that lets the file through.
+///
+/// Without that, `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file,
+/// which is the opposite of what "the environment takes precedence" means. Every other setting
+/// behaves this way: the shared loader skips the file whenever the variable exists at all.
+#[test]
+fn an_empty_environment_key_does_not_fall_through_to_the_file() {
+    use crate::services::licence::resolve_licence_key;
+
+    let from_file = || Some("from-file".to_string());
+
+    assert_eq!(
+        resolve_licence_key(Some("from-env".into()), from_file),
+        Some("from-env".into()),
+        "a value in the environment wins"
+    );
+    assert_eq!(
+        resolve_licence_key(Some(String::new()), from_file),
+        None,
+        "empty means no licence, and the file is not consulted"
+    );
+    assert_eq!(
+        resolve_licence_key(None, from_file),
+        Some("from-file".into()),
+        "absent is what lets the file through"
+    );
+    assert_eq!(
+        resolve_licence_key(None, || None),
+        None,
+        "neither source configured"
+    );
+}

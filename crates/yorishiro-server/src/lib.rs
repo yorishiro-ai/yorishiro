@@ -452,7 +452,7 @@ pub fn database_url_from_env() -> Result<String> {
         anyhow::anyhow!(
             "The database connection is not configured.\n\n\
              Set `database_url:` in /etc/yorishiro/config.yml (package installs) or in the \n\
-             config.yml beside the binary, then start the server again. For example:\n\n    \
+             config.yml in the working directory, then start the server again. For example:\n\n    \
              database_url: postgres://yorishiro:PASSWORD@localhost:5432/yorishiro\n\n\
              DATABASE_URL in the environment works too, and takes precedence.\n\n\
              The database must exist and the role must be able to create the schema; the server \n\
