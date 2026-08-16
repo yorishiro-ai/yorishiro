@@ -272,9 +272,9 @@ jobs:
           sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           nfpm --version
 
-      # Two package lines, the same split GitLab draws: `yorishiro` carries the paid features
-      # (inactive without a licence key) and is what most deployments want; `yorishiro-ce` holds
-      # no proprietary code and is therefore headless. They Conflict, since both would run a
+      # Two package lines, one per edition: `yorishiro-ee` carries the paid features (inactive
+      # without a licence key) and is what most deployments want; `yorishiro-ce` holds no
+      # proprietary code and is therefore headless. They Conflict, since both would run a
       # service against one database.
       - name: Package (deb and rpm)
         if: runner.os == 'Linux'
