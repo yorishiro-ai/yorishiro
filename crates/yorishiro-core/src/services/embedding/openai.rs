@@ -87,7 +87,14 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             })
             .send()
             .await
-            .internal()?;
+            // Not `.internal()`: a request that never reached the provider is a configuration
+            // or outage problem the operator can act on, and `internal server error` tells them
+            // nothing. `send` fails before any HTTP status exists, so this arm is exactly the
+            // "could not be reached" case and never a provider that answered.
+            .map_err(|err| YorishiroError::ProviderUnreachable {
+                url: self.base_url.clone(),
+                message: err.to_string(),
+            })?;
 
         let status = response.status();
         if !status.is_success() {

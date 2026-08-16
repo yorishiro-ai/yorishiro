@@ -43,6 +43,20 @@ pub enum YorishiroError {
         retry_after: std::time::Duration,
     },
 
+    /// An upstream provider could not be reached at all: connection refused, DNS failure,
+    /// timeout. Separate from both `ProviderBusy` and `Internal` because it is the one of the
+    /// three an operator can fix, and only if the response says so.
+    ///
+    /// A provider that answers `429` becomes `ProviderBusy` and reports the wait. A provider
+    /// that is not there at all used to fall through to `Internal`, so the case with an actual
+    /// remedy reported worse than the case without one: the log held
+    /// `error sending request for url ...` while the caller got `internal server error`.
+    ///
+    /// `url` is the configured base URL, not the caller's input, so naming it discloses nothing
+    /// the deployment's own operator did not set.
+    #[error("embedding provider unreachable at {url}: {message}")]
+    ProviderUnreachable { url: String, message: String },
+
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -113,6 +127,19 @@ impl YorishiroError {
                     "error": {
                         "message": message,
                         "retry_after_seconds": retry_after.as_secs(),
+                    }
+                }),
+            ),
+            // 502 rather than 503: this deployment is up and answering, and the thing that is
+            // not is behind it. 503 is already taken by `ProviderBusy`, where the provider did
+            // answer and asked for a wait -- a caller that retried this one on the same schedule
+            // would be waiting on a misconfiguration that no amount of waiting fixes.
+            Self::ProviderUnreachable { url, message } => (
+                502,
+                serde_json::json!({
+                    "error": {
+                        "message": format!("the embedding provider at {url} could not be reached: {message}"),
+                        "hint": "check that the provider is running and that YORISHIRO_EMBEDDING_BASE_URL points at it",
                     }
                 }),
             ),

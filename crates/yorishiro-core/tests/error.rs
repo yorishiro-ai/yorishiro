@@ -42,6 +42,53 @@ fn each_variant_maps_to_its_documented_status() {
     }
 }
 
+/// A provider that cannot be reached is the one failure of the three an operator can act on, so
+/// it has to say which endpoint failed. `502` rather than the `503` `ProviderBusy` uses: that one
+/// answered and asked for a wait, this one is a misconfiguration or an outage that waiting on the
+/// same schedule will not fix.
+#[test]
+fn an_unreachable_provider_names_the_endpoint() {
+    let (status, body) = YorishiroError::ProviderUnreachable {
+        url: "http://10.0.3.200:1234/v1".into(),
+        message: "error sending request".into(),
+    }
+    .into_http_parts();
+
+    assert_eq!(status, 502, "the deployment is up; its dependency is not");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("http://10.0.3.200:1234/v1"),
+        "the response must name the endpoint that failed, got: {message}"
+    );
+    assert!(
+        body["error"]["hint"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("YORISHIRO_EMBEDDING_BASE_URL"),
+        "the hint must name the setting that fixes it"
+    );
+}
+
+/// The two provider failures must not collapse onto one status. A caller retrying an unreachable
+/// provider on `ProviderBusy`'s schedule would be waiting out a configuration error.
+#[test]
+fn a_busy_provider_and_an_unreachable_one_differ() {
+    let (busy, _) = YorishiroError::ProviderBusy {
+        message: "rate limited".into(),
+        retry_after: std::time::Duration::from_secs(30),
+    }
+    .into_http_parts();
+    let (unreachable, _) = YorishiroError::ProviderUnreachable {
+        url: "http://localhost:1".into(),
+        message: "connection refused".into(),
+    }
+    .into_http_parts();
+
+    assert_eq!(busy, 503);
+    assert_eq!(unreachable, 502);
+    assert_ne!(busy, unreachable);
+}
+
 /// An internal error must never leak its cause to the client -- the detail goes to the log, and
 /// the body carries a fixed generic message.
 #[test]

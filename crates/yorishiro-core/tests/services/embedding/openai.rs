@@ -220,3 +220,26 @@ async fn a_rejected_request_is_not_treated_as_busy() {
         "a 400 is not a reason to come back: {err:?}"
     );
 }
+
+/// A provider that is not listening at all. This is the case an operator can fix, and the only
+/// way they can is if the response says which endpoint failed, so the error carries the base URL
+/// rather than collapsing into `internal server error`.
+///
+/// Port 1 on the loopback address: privileged, so an unprivileged test process could not have
+/// bound it, and nothing in the test environment does. The connection is refused immediately
+/// rather than hanging until the 30s timeout. Dropping a `MockServer` is not equivalent -- the
+/// port can still answer, and this test then fails on a 404 from whatever picked it up, which
+/// looks like the bug it is meant to catch.
+#[tokio::test]
+async fn an_unreachable_provider_is_not_an_internal_error() {
+    let uri = "http://127.0.0.1:1".to_string();
+
+    let err = provider(uri.clone()).embed("anything").await.unwrap_err();
+
+    match err {
+        YorishiroError::ProviderUnreachable { url, .. } => {
+            assert_eq!(url, uri, "the error must name the endpoint that failed");
+        }
+        other => panic!("expected ProviderUnreachable, got {other:?}"),
+    }
+}
