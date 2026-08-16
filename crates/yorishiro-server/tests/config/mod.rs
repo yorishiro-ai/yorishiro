@@ -267,7 +267,7 @@ fn the_working_directory_wins_over_the_packaged_path() {
 /// none: the process would start, on the wrong configuration.
 #[test]
 fn an_explicit_path_never_falls_back() {
-    let found = config_path_from(Some("/nowhere/config.yml".into()), |p| {
+    let found = config_path_from(Some(std::ffi::OsString::from("/nowhere/config.yml")), |p| {
         p == Path::new(PACKAGED_CONFIG_PATH)
     });
 
@@ -278,4 +278,65 @@ fn an_explicit_path_never_falls_back() {
 #[test]
 fn no_config_anywhere_reads_nothing() {
     assert_eq!(config_path_from(None, |_| false), None);
+}
+
+/// A path that is not valid UTF-8 is still a path the operator named. `std::env::var` reports it
+/// as `NotUnicode`, and flattening that to "unset" with `.ok()` would fall back to
+/// `/etc/yorishiro/config.yml` -- reading a different deployment's settings than the one asked
+/// for, which is the single outcome the explicit-path rule exists to prevent.
+///
+/// Unix-only: `OsStringExt::from_vec` takes arbitrary bytes, which is what makes the case
+/// constructible. Windows encodes its own way and has no equivalent here.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_explicit_path_is_still_honoured() {
+    use std::os::unix::ffi::OsStringExt;
+
+    // 0xff is not valid UTF-8 in any position.
+    let raw = std::ffi::OsString::from_vec(vec![b'/', b'x', 0xff, b'.', b'y', b'm', b'l']);
+    let named = std::path::PathBuf::from(&raw);
+
+    let found = config_path_from(Some(raw), |p| p == named);
+    assert_eq!(
+        found.as_deref(),
+        Some(named.as_path()),
+        "the named file must be read, not the packaged fallback"
+    );
+
+    // And when it is absent, nothing is read rather than the fallback.
+    let raw = std::ffi::OsString::from_vec(vec![b'/', b'x', 0xff, b'.', b'y', b'm', b'l']);
+    let found = config_path_from(Some(raw), |p| p == Path::new(PACKAGED_CONFIG_PATH));
+    assert_eq!(found, None);
+}
+
+/// The same rule at the boundary where it is actually decided.
+///
+/// `config_path_from` is a pure function and cannot see how the variable was read, so the test
+/// above passes whether the caller uses `var_os` or `var().ok()`. This one sets a non-UTF-8
+/// value in the real environment and asserts the file behind it is read, which is only true of
+/// `var_os`: with `var().ok()` the value flattens to "unset" and the loader silently reads
+/// something else, or nothing.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_path_in_the_environment_is_read() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
+    let dir = tempfile::tempdir().unwrap();
+
+    // A filename with a byte that is not valid UTF-8 in any position.
+    let mut name = dir.path().as_os_str().to_os_string().into_vec();
+    name.extend_from_slice(&[b'/', 0xff, b'.', b'y', b'm', b'l']);
+    let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(name));
+    std::fs::write(&path, "bind: 127.0.0.1:9999\n").unwrap();
+
+    // SAFETY: serialized by ENV_LOCK via EnvGuard.
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", path.as_os_str()) };
+    unsafe { load_and_apply_env_overrides() }.unwrap();
+
+    assert_eq!(
+        std::env::var("YORISHIRO_BIND").ok().as_deref(),
+        Some("127.0.0.1:9999"),
+        "the file the operator named must be the file that is read"
+    );
 }

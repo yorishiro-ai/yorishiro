@@ -14,6 +14,7 @@
 
 pub mod aliases;
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -125,8 +126,12 @@ pub const PACKAGED_CONFIG_PATH: &str = "/etc/yorishiro/config.yml";
 ///
 /// Split out as a pure function so the precedence is testable without touching the process
 /// environment or the filesystem root.
+/// `explicit` is an `OsString` rather than a `String` because `std::env::var` reports a
+/// non-UTF-8 value as `NotUnicode`, and `.ok()` would flatten that into "unset". A path this
+/// process cannot render as UTF-8 is still a path the operator named, and treating it as unset
+/// would fall back to a different file: the one case this function exists to rule out.
 pub(crate) fn config_path_from(
-    explicit: Option<String>,
+    explicit: Option<OsString>,
     exists: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
     if let Some(named) = explicit {
@@ -152,7 +157,7 @@ pub(crate) fn config_path_from(
 /// See `apply_if_unset`: must be called from `main`'s synchronous prologue, before the tokio
 /// runtime starts.
 pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
-    let explicit = std::env::var("YORISHIRO_CONFIG_PATH").ok();
+    let explicit = std::env::var_os("YORISHIRO_CONFIG_PATH");
     let Some(path) = config_path_from(explicit, |p| p.exists()) else {
         return Ok(());
     };
