@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 
-use crate::config::load_and_apply_env_overrides;
+use std::path::Path;
+
+use crate::config::{PACKAGED_CONFIG_PATH, config_path_from, load_and_apply_env_overrides};
 
 // Env vars are process-wide state; serialize tests through this lock rather than racing
 // each other (same pattern as `yorishiro_core::repositories::tenancy`'s env tests).
@@ -238,4 +240,42 @@ fn a_licence_key_in_the_config_is_not_applied_to_the_environment() {
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
     assert!(std::env::var("YORISHIRO_LICENSE_KEY").is_err());
+}
+
+/// A packaged host runs the admin CLI from a shell, which has none of the unit's environment.
+/// Without this fallback the CLI looked in whatever directory the operator was standing in,
+/// found nothing, and reported the database as unconfigured while the service beside it ran
+/// normally against `/etc/yorishiro/config.yml`.
+#[test]
+fn the_packaged_path_is_used_when_the_working_directory_has_no_config() {
+    let found = config_path_from(None, |p| p == Path::new(PACKAGED_CONFIG_PATH));
+
+    assert_eq!(found.as_deref(), Some(Path::new(PACKAGED_CONFIG_PATH)));
+}
+
+/// A source checkout keeps reading its own file. The packaged path is a fallback, not an
+/// override: a developer with both present must not silently pick up a system-wide config.
+#[test]
+fn the_working_directory_wins_over_the_packaged_path() {
+    let found = config_path_from(None, |_| true);
+
+    assert_eq!(found.as_deref(), Some(Path::new("config.yml")));
+}
+
+/// An operator naming a file means that file. Falling back after an explicit path would read a
+/// different deployment's settings than the one they asked for, which is worse than reading
+/// none: the process would start, on the wrong configuration.
+#[test]
+fn an_explicit_path_never_falls_back() {
+    let found = config_path_from(Some("/nowhere/config.yml".into()), |p| {
+        p == Path::new(PACKAGED_CONFIG_PATH)
+    });
+
+    assert_eq!(found, None, "the named file is absent, so nothing is read");
+}
+
+/// Nothing anywhere is not an error: every setting stays as the environment has it.
+#[test]
+fn no_config_anywhere_reads_nothing() {
+    assert_eq!(config_path_from(None, |_| false), None);
 }

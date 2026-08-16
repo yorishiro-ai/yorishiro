@@ -14,7 +14,7 @@
 
 pub mod aliases;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -107,21 +107,56 @@ unsafe fn apply_if_unset(key: &str, value: Option<String>) {
     }
 }
 
-/// Loads `config.yml` (path overridable via `YORISHIRO_CONFIG_PATH`, defaulting to `config.yml` in
-/// the working directory) and materializes its settings into the process environment. A
-/// missing file is not an error -- it just means every setting stays exactly as the
-/// environment already has it, which is the same as if this function were never called.
+/// Where a package install puts the configuration, and where the unit points
+/// `YORISHIRO_CONFIG_PATH` at.
+pub const PACKAGED_CONFIG_PATH: &str = "/etc/yorishiro/config.yml";
+
+/// Which file to read, or `None` when there is nothing to read.
+///
+/// `YORISHIRO_CONFIG_PATH` wins outright when it is set: an operator naming a file means that
+/// file, and silently reading a different one would be worse than reading none.
+///
+/// Unset, the working directory comes first, so a source checkout keeps using its own
+/// `config.yml`. `/etc/yorishiro/config.yml` is the fallback, and it exists for the admin CLI:
+/// the unit exports the variable, but a shell has no such environment, so
+/// `yorishiro-server admin create-tenant` on a packaged host used to look in whatever directory
+/// the operator happened to be in and report the database as unconfigured while the service
+/// beside it ran normally against that exact file.
+///
+/// Split out as a pure function so the precedence is testable without touching the process
+/// environment or the filesystem root.
+pub(crate) fn config_path_from(
+    explicit: Option<String>,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if let Some(named) = explicit {
+        let named = PathBuf::from(named);
+        return exists(&named).then_some(named);
+    }
+    let local = PathBuf::from("config.yml");
+    if exists(&local) {
+        return Some(local);
+    }
+    let packaged = PathBuf::from(PACKAGED_CONFIG_PATH);
+    exists(&packaged).then_some(packaged)
+}
+
+/// Loads `config.yml` and materializes its settings into the process environment. A missing file
+/// is not an error: it means every setting stays exactly as the environment already has it,
+/// which is the same as if this function were never called.
+///
+/// See [`config_path_from`] for which file is read.
 ///
 /// # Safety
 ///
 /// See `apply_if_unset`: must be called from `main`'s synchronous prologue, before the tokio
 /// runtime starts.
 pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
-    let path = std::env::var("YORISHIRO_CONFIG_PATH").unwrap_or_else(|_| "config.yml".into());
-    let path = Path::new(&path);
-    if !path.exists() {
+    let explicit = std::env::var("YORISHIRO_CONFIG_PATH").ok();
+    let Some(path) = config_path_from(explicit, |p| p.exists()) else {
         return Ok(());
-    }
+    };
+    let path = path.as_path();
 
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file '{}'", path.display()))?;

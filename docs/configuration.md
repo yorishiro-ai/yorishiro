@@ -26,7 +26,9 @@ The rename happens before `config.yml` is read, so an exported old name still be
 
 Every setting below can also go in a `config.yml` file instead.
 See [`config.example.yml`](../config.example.yml) for the full key list (nested under `embedding:`, `logging:`, and `auth_rate_limit:` for those groups).
-By default the server looks for `config.yml` in its working directory; set `YORISHIRO_CONFIG_PATH` to point elsewhere.
+By default the server looks for `config.yml` in its working directory, then falls back to `/etc/yorishiro/config.yml`; set `YORISHIRO_CONFIG_PATH` to point elsewhere.
+The fallback is what makes `yorishiro-server admin ...` work from a shell on a packaged host: the unit exports the path, a shell does not, and without it the CLI reports the database as unconfigured while the service beside it runs normally.
+An explicit `YORISHIRO_CONFIG_PATH` never falls back: a named file that is absent means nothing is read, rather than a different deployment's settings being picked up silently.
 
 A missing file, or a missing key within it, is not an error -- that setting just falls back to its usual default.
 **A set environment variable always wins over the equivalent `config.yml` key.**
@@ -39,7 +41,7 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string (required) |
-| `YORISHIRO_CONFIG_PATH` | Path to the `config.yml` file described below (default: `config.yml` in the working directory) |
+| `YORISHIRO_CONFIG_PATH` | Path to the `config.yml` file described below. Unset, the working directory's `config.yml` is tried first and `/etc/yorishiro/config.yml` second |
 | `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8080`) |
 | `YORISHIRO_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector) -- release builds never do this |
 | `YORISHIRO_MAX_TENANTS` | Deployment-wide cap on tenants `admin create-tenant` may create. Defaults to `1` (single-tenant). Set `0` for unlimited, or a higher number for that many. `POST /auth/signup` never creates a tenant (it just redeems an invite), so it's unaffected. Also gates the first-run setup wizard (see [setup.md](setup.md#first-run-setup)), enabled only when the cap isn't `0` |
