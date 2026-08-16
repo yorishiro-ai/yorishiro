@@ -212,10 +212,7 @@ fn the_example_config_parses_with_every_key_enabled() {
 fn a_licence_key_in_the_config_is_accepted() {
     let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
     let dir = tempfile::tempdir().unwrap();
-    let path = write_config(
-        dir.path(),
-        "license_key: a-token\nbind: 127.0.0.1:9000\n",
-    );
+    let path = write_config(dir.path(), "license_key: a-token\nbind: 127.0.0.1:9000\n");
     // SAFETY: serialized by ENV_LOCK via EnvGuard.
     unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", &path) };
 
