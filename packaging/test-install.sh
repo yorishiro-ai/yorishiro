@@ -461,5 +461,51 @@ switch_editions() {
 switch_editions "$(basename "$(deb_ce)")" "$(basename "$(deb)")" "ce -> ee"
 switch_editions "$(basename "$(deb)")" "$(basename "$(deb_ce)")" "ee -> ce"
 
+# --------------------------------------------------------------------------------------------
+note "upgrading from a release that configured through the environment"
+# --------------------------------------------------------------------------------------------
+# The path every existing deployment takes on its next upgrade, and the one where getting it
+# wrong is silent: the unit stops reading the environment file, so a machine configured that
+# way comes back up unconfigured and stops at 78 with nothing pointing at the cause.
+#
+# `dpkg -i` rather than apt, because the locally built package is version 0.0.0~rc0 and so
+# sorts *below* the released one -- apt would decline the "downgrade". The install scripts run
+# either way, which is what this exercises.
+#
+# Skipped rather than failed when the old package is not present: it comes from a GitHub
+# release, and a test that needs the network is not one to fail an offline run on.
+PREV_DEB="$(ls "$PKG_DIR"/yorishiro-ee_0.4*.deb 2>/dev/null | grep -v '0\.0\.0' | head -1)"
+if [ -z "$PREV_DEB" ]; then
+  echo "  SKIP no previous release in $PKG_DIR (fetch one with: gh release download vX.Y.Z -p 'yorishiro-ee_*amd64.deb')"
+else
+  out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
+    set -uo pipefail
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq /pkg/'"$(basename "$PREV_DEB")"' >/dev/null 2>&1 || { echo "OLD_INSTALL_FAILED"; exit 1; }
+
+    # Configured the way that release documented.
+    echo "DATABASE_URL=postgres://kept:secret@db:5432/yorishiro" >> /etc/yorishiro/yorishiro.env
+
+    dpkg -i /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1 || { echo "UPGRADE_FAILED"; exit 1; }
+
+    [ -f /etc/yorishiro/config.yml ] && echo CONFIG_CREATED
+    grep -q "yorishiro.env" /etc/yorishiro/config.yml && echo NOTE_ADDED
+    # The old file is left alone: it is the only copy of what the deployment was running.
+    grep -q "kept:secret" /etc/yorishiro/yorishiro.env && echo OLD_FILE_KEPT
+    grep -q EnvironmentFile /lib/systemd/system/yorishiro.service || echo UNIT_CLEAN
+    echo UPGRADED' 2>&1)
+
+  if ! grep -q UPGRADED <<<"$out"; then
+    bad "the upgrade did not complete: $(echo "$out" | tr '\n' ' ')"
+  else
+    for want in CONFIG_CREATED NOTE_ADDED OLD_FILE_KEPT UNIT_CLEAN; do
+      case "$out" in
+        *"$want"*) ok "upgrade: $want" ;;
+        *) bad "upgrade: $want (output: $(echo "$out" | tr '\n' ' '))" ;;
+      esac
+    done
+  fi
+fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

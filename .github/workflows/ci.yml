@@ -301,7 +301,7 @@ jobs:
           docker run --rm yorishiro:ci --help >/dev/null
           docker run --rm yorishiro:ci >/tmp/out 2>&1 && { echo "::error::expected a nonzero exit" >&2; exit 1; }
           code=$?
-          grep -q 'DATABASE_URL is not set' /tmp/out \
+          grep -q 'database connection is not configured' /tmp/out \
             || { echo "::error::the image did not print the configuration error" >&2; exit 1; }
           [ "$code" = 78 ] || { echo "::error::expected exit 78, got $code" >&2; exit 1; }
           echo "image runs, and exits 78 unconfigured"
