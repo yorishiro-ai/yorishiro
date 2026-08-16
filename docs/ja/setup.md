@@ -134,6 +134,16 @@ $ curl -LO https://github.com/yotsunagi/yorishiro/releases/download/vX.Y.Z/check
 $ sha256sum --check --ignore-missing checksums.txt
 ```
 
+これはファイルが公開物と同一であることの確認です。
+**どこで作られたか**——どのワークフローが、どのコミットからビルドしたか——は、各パッケージに付随するbuild provenanceで確認できます。
+
+```console
+$ gh attestation verify yorishiro-ee_X.Y.Z_amd64.deb --repo yotsunagi/yorishiro
+```
+
+鍵の取り込みは不要です。
+attestationは公開されたtransparency logに記録され、`gh`がこのリポジトリと突き合わせます。
+
 ### 動作環境
 
 パッケージは**glibc 2.38以降**を要求します(Ubuntu 24.04・Debian 13・Fedora 39以降)。
