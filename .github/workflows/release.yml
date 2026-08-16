@@ -30,6 +30,11 @@ env:
 permissions:
   contents: write
   packages: write
+  # Build provenance: `id-token` mints the short-lived OIDC token that identifies this workflow
+  # to the transparency log, `attestations` records the result. Both are required by
+  # actions/attest-build-provenance and neither is used anywhere else here.
+  id-token: write
+  attestations: write
 
 jobs:
   prepare:
@@ -489,6 +494,17 @@ jobs:
         run: |
           ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
           cat dist/checksums.txt
+
+      # What the packages are and where they came from, without a signing key to distribute,
+      # rotate or have anyone trust. `gh attestation verify <file> --repo yotsunagi/yorishiro`
+      # answers "this artifact was built by this workflow, from this commit" -- which is the
+      # question a signature would answer, minus the key management that made GPG not worth it
+      # for a project with no package repository.
+      #
+      # checksums.txt stays: it needs no tooling beyond sha256sum and works offline.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/*.deb, dist/*.rpm'
 
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
