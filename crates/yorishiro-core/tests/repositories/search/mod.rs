@@ -430,6 +430,12 @@ async fn enforces_tenant_isolation(pool: PgPool) {
 /// would pass either way, and the failure this guards against is a query plan, not a slow
 /// machine. `enable_seqscan = off` makes the planner state its preference rather than fall back
 /// to a scan that is genuinely cheaper on a few rows.
+///
+/// `enable_bitmapscan = off` closes the other way out, and is not optional: with only the
+/// sequential scan disabled the planner can still reach every row through a bitmap index scan
+/// on `entities_workspace_type_idx` and sort the results, which costs less than the HNSW walk
+/// at this size and satisfies the query without touching the index under test. That is a
+/// planner preference rather than a wrong answer, so it surfaced as an intermittent failure.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -466,10 +472,9 @@ async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("SET enable_seqscan = off")
-        .execute(&mut *conn)
-        .await
-        .unwrap();
+    for setting in ["SET enable_seqscan = off", "SET enable_bitmapscan = off"] {
+        sqlx::query(setting).execute(&mut *conn).await.unwrap();
+    }
 
     let plan: Vec<(String,)> = sqlx::query_as(
         "EXPLAIN (COSTS OFF) \
