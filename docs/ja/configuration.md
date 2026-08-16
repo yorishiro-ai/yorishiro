@@ -65,7 +65,7 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 |---|---|
 | `YORISHIRO_DB_LOAD_THRESHOLD` | この接続数を超えると読み取り専用になる。未設定または`0`でガード自体が無効 |
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | 閾値超過が何秒続いたら切り替えるか(既定: `30`)。瞬間的なスパイクで切り替わらないようにする |
-| `YORISHIRO_DB_LOAD_POLL_SECS` | 接続数を確認する間隔(既定: `5`) |
+| `YORISHIRO_DB_LOAD_POLL_SECS` | 接続数を確認する間隔(既定: `5`)。`0`は無効化ではなく既定値に戻る——ガードの無効化は`YORISHIRO_DB_LOAD_THRESHOLD=0`を使う |
 
 ## リクエスト相関
 

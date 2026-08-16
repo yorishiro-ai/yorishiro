@@ -156,7 +156,8 @@
 # by itself when the load falls away. Off entirely unless `threshold` is positive.
 #
 # `threshold` counts active connections. `sustain_secs` is how long it must stay exceeded
-# before switching, so a momentary spike does not trip it.
+# before switching, so a momentary spike does not trip it. `threshold: 0` is the only off
+# switch -- `poll_secs: 0` is not one, and falls back to 5.
 #   YORISHIRO_DB_LOAD_THRESHOLD / _SUSTAIN_SECS / _POLL_SECS
 # db_load_guard:
 #   threshold: 0
