@@ -5,9 +5,8 @@
 //! (`YORISHIRO_LICENSE_KEY`).
 //!
 //! **This check is removable.** The verifying code ships in source form, so anyone can delete
-//! these lines and rebuild. That is deliberate and is the same position GitLab takes: the
-//! protection is `ee/LICENSE`, which makes using such a build a licence violation, not this
-//! function. Do not add obfuscation here under the impression it changes that.
+//! these lines and rebuild. That is deliberate: the protection is `ee/LICENSE`, which makes
+//! using such a build a licence violation, not this function. Do not add obfuscation here under the impression it changes that.
 //!
 //! No key means the paid features are disabled, never that the process refuses to start -- a
 //! deployment that only wants the free half must keep working with no licence configured at all.
@@ -34,6 +33,35 @@ pub struct LicenceClaims {
     /// Expiry, as a Unix timestamp. Checked at verification *and* again at each gate, so a key
     /// that lapses while the process runs stops working without a restart.
     pub exp: i64,
+}
+
+/// `license_key:` from the config file, read here rather than in `yorishiro-server`'s shared
+/// loader.
+///
+/// That loader copies every setting it parses into the environment, and doing so for this one
+/// would put the string `YORISHIRO_LICENSE_KEY` into the community binary -- which the release
+/// gate scans for and rejects, correctly: that build is meant to carry no trace of the paid
+/// edition. The shared struct therefore accepts the key and ignores it, and the edition that
+/// actually uses it reads the file itself.
+///
+/// Environment first, file second, matching every other setting.
+fn licence_key_from_config() -> Option<String> {
+    let path = std::env::var("YORISHIRO_CONFIG_PATH").unwrap_or_else(|_| "config.yml".into());
+    licence_key_in(&std::fs::read_to_string(path).ok()?)
+}
+
+/// The parse [`licence_key_from_config`] wraps, split out so it is testable without a file or
+/// the process environment -- tests that set `YORISHIRO_CONFIG_PATH` would race each other.
+pub fn licence_key_in(yaml: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct JustTheLicence {
+        license_key: Option<String>,
+    }
+
+    // Not `deny_unknown_fields`: this reads one key out of a file whose other keys belong to a
+    // different struct, so everything else has to pass through rather than be rejected.
+    let parsed: JustTheLicence = serde_yaml_ng::from_str(yaml).ok()?;
+    parsed.license_key.filter(|k| !k.is_empty())
 }
 
 /// Verifies a licence key against a PEM-encoded RSA public key.
@@ -85,7 +113,9 @@ impl LicenceState {
     /// take down the free half over a paid-feature misconfiguration -- but it is logged at
     /// `warn`, since it almost certainly means someone expected paid features to be on.
     pub fn from_env() -> Self {
-        let Some(token) = super::non_empty_env("YORISHIRO_LICENSE_KEY") else {
+        let Some(token) =
+            super::non_empty_env("YORISHIRO_LICENSE_KEY").or_else(licence_key_from_config)
+        else {
             tracing::info!("no licence key configured: paid features are disabled");
             return Self::default();
         };

@@ -97,7 +97,7 @@ debにはライセンス欄が無いため、パッケージ名と説明文が�
 
 ```console
 $ sudo dpkg -i yorishiro-ee_X.Y.Z_amd64.deb  # または: sudo rpm -i yorishiro-ee-X.Y.Z-1.x86_64.rpm
-$ sudoedit /etc/yorishiro/yorishiro.env      # 最低限 DATABASE_URL
+$ sudoedit /etc/yorishiro/config.yml         # 最低限 database_url
 $ sudo systemctl enable --now yorishiro
 ```
 
@@ -205,9 +205,9 @@ Docker、Docker Compose、makeが必要です。
 `YORISHIRO_MAX_TENANTS`が実際の上限として解決されるデプロイ(既定は未設定で`1`)は、`http://localhost:8080/`でセットアップウィザードを配信します。
 管理CLIは不要です。
 
-ウィザードはHTTP経由で配信するため、GitLabより1段階あとから始まります。
+ウィザードはHTTP経由で配信します。
 配信する主体を起動するのに、まずデータベースへ到達できる必要があるからです。
-`DATABASE_URL`が未設定のまま起動したサーバーは、未設定の`gitlab.rb`に対する`gitlab-ctl reconfigure`のように設定ウィザードを立ち上げるのではなく、どのファイルに設定すべきかを示して終了します。
+データベースが未設定のまま起動したサーバーは、どのファイルに設定すべきかを示して終了します。
 接続文字列を設定して起動すれば、そこから先はウィザードがカバーします。
 
 まだテナントが存在しない初回アクセス時は、メールアドレスとパスワードに加えて、任意入力の表示名と、`default`ワークスペースの元になる任意選択のスキーマテンプレートを入力するフォームが表示されます。

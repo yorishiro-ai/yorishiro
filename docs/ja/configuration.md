@@ -1,11 +1,20 @@
-# 環境変数リファレンス
+# 設定リファレンス
 
 [English](../configuration.md) | **日本語**
 
-全変数の一覧と説明は[`.env.example`](../../.env.example)を参照してください。
-変数はプロセス環境変数としてサーバへ渡します。
-`.env`ファイルを自動で読む仕組みはありません。
-docker composeの`environment:`や`docker compose exec -e`、systemdの`Environment=`などで設定してください。
+設定は1つのYAMLファイルにまとまっています。
+[`config.example.yml`](../../config.example.yml)に全設定の既定値と説明があるので、`config.yml`にコピーして編集してください。
+パッケージからの導入では`/etc/yorishiro/config.yml`に置かれ、unitが既にそこを指しています。
+それ以外では、作業ディレクトリの`config.yml`、または`YORISHIRO_CONFIG_PATH`が示すパスを読みます。
+
+ファイルが無いこともキーが無いことも、エラーにはなりません。
+未知のキーはエラーです。
+設定したつもりの値が効かないまま動くより、起動を拒否します。
+
+各設定には環境変数も用意してあり(`config.example.yml`に併記)、環境変数がファイルの値より優先されます。
+これによりコンテナ配備や一時的な上書きをファイル編集なしで行えます。
+docker composeの`environment:`や`docker compose exec -e`、systemdの`Environment=`、シェルなどで設定してください。
+必須ではありません。
 
 ## `YSR_`接頭辞は非推奨
 

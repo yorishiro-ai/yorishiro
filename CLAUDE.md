@@ -120,7 +120,7 @@
 - Squash merge is the default merge strategy.
 - Every PR that changes source code must also update docs (English + Japanese).
   The `doc-check` workflow warns automatically if this is missing.
-- Every PR that adds/changes config must update `.env.example`, `config.example.yml`, and `docs/configuration.md` (English + Japanese).
+- Every PR that adds/changes config must update `config.example.yml` and `docs/configuration.md` (English + Japanese).
 
 ## Versioning
 

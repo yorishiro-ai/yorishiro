@@ -99,7 +99,7 @@ run_edition() {
     || bad "expected 0 restarts, got: $(grep -o 'restarts=[0-9]*' <<<"$state")"
 
   journal=$(docker exec "$APP" journalctl -u yorishiro --no-pager -n 40 2>&1)
-  grep -q '/etc/yorishiro/yorishiro.env' <<<"$journal" \
+  grep -q '/etc/yorishiro/config.yml' <<<"$journal" \
     && ok "the journal names the file to edit" \
     || bad "the journal does not name the env file"
 
@@ -114,13 +114,16 @@ run_edition() {
   # lookups stop working -- an artefact of running systemd in Docker, not something an operator
   # meets on a real host. /etc/hosts would work equally well; the address is simpler.
   PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-  docker exec "$APP" bash -c "cat >> /etc/yorishiro/yorishiro.env <<EOF
-  DATABASE_URL=postgres://yorishiro:secret@$PGIP:5432/yorishiro
-  YORISHIRO_BIND=0.0.0.0:8081
-  YORISHIRO_EMBEDDING_PROVIDER=openai
-  YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1
-  YORISHIRO_EMBEDDING_MODEL=unused
-  EOF"
+  # Written without leading whitespace: YAML gives indentation meaning, so the heredoc body
+  # cannot be indented to match the surrounding shell the way the env file could be.
+  docker exec "$APP" bash -c "cat >> /etc/yorishiro/config.yml <<EOF
+database_url: postgres://yorishiro:secret@$PGIP:5432/yorishiro
+bind: 0.0.0.0:8081
+embedding:
+  provider: openai
+  base_url: http://localhost:1
+  model: unused
+EOF"
 
   docker exec "$APP" bash -c '
     systemctl reset-failed yorishiro

@@ -40,11 +40,7 @@ jobs:
             const migrationChanged = files.some(f =>
               f.filename.startsWith('migrations/')
             );
-            const configChanged = files.some(f =>
-              f.filename.includes('config') ||
-              f.filename === '.env.example' ||
-              f.filename === 'config.example.yml'
-            );
+            const configChanged = files.some(f => f.filename.includes('config'));
 
             const warnings = [];
 
@@ -57,7 +53,7 @@ jobs:
             }
 
             if (configChanged && !docsChanged) {
-              warnings.push('⚠️ **Configuration changed but no docs updated.** New env vars should be documented in `docs/configuration.md` (English + Japanese), `.env.example`, and `config.example.yml`.');
+              warnings.push('⚠️ **Configuration changed but no docs updated.** New settings should be documented in `docs/configuration.md` (English + Japanese) and `config.example.yml`.');
             }
 
             // Check i18n sync: if English docs changed, Japanese should too

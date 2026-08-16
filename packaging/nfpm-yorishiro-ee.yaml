@@ -1,6 +1,5 @@
 # The default package. Contains the paid features, which stay inactive until a licence key is
-# set -- the same arrangement GitLab's `-ee` package has, and the one to install unless you
-# specifically need no proprietary code on the machine.
+# set. Install this one unless the machine specifically may not hold proprietary code.
 name: yorishiro-ee
 arch: ${ARCH}
 platform: linux

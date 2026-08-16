@@ -35,7 +35,7 @@ $ docker build -t yorishiro .
 ### systemd(パッケージを使わない場合)
 
 `.deb`と`.rpm`は自前のunitを同梱し`systemctl enable --now yorishiro`で有効化するため、この節は[パッケージの外に取り出した](setup.md#パッケージの外でバイナリを動かす)バイナリを別の場所で動かす場合のものです。
-プレーンなシェルと異なり、systemdの`EnvironmentFile=`は`.env`を直接読み込むため、`source`/`set -a`は不要です。
+パッケージ同梱のunitと同じく、`YORISHIRO_CONFIG_PATH`で設定ファイルを指します。
 このunit名はパッケージのものではないため任意に決められます。
 
 ```ini
@@ -47,10 +47,10 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/yorishiro
 ExecStart=/opt/yorishiro/yorishiro-server
-EnvironmentFile=/opt/yorishiro/.env
+Environment=YORISHIRO_CONFIG_PATH=/opt/yorishiro/config.yml
 Restart=on-failure
 # 78 は EX_CONFIG。サーバは「設定が無い/使えない」場合にのみこの値で終了する。
-# これが無いと DATABASE_URL 未設定の起動が5秒ごとに永久再試行し、`systemctl is-failed` は
+# これが無いとデータベース未設定の起動が5秒ごとに永久再試行し、`systemctl is-failed` は
 # `failed` ではなく `activating` を返すため、unit の状態を見る監視からは障害が見えない。
 # それ以外の失敗は従来どおり再試行される(起動途中のデータベースはそれで復帰する)。
 RestartPreventExitStatus=78
