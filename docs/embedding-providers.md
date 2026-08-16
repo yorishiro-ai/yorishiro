@@ -45,7 +45,8 @@ The embedding sync waits the `Retry-After` the provider asked for, capped at 60 
 Anything else (a `400`, say) is a request the provider will never accept, and is not retried: spending the attempts on it would not help, and the error says so in the log.
 
 This matters because embedding happens after the response.
-An entity whose embedding is lost to a rate limit is written and durable, but absent from semantic search until a resync. The retry is what keeps a busy minute at the provider from quietly costing you that.
+An entity whose embedding is lost to a rate limit is written and durable, but absent from semantic search until a resync.
+The retry is what keeps a busy minute at the provider from quietly costing you that.
 
 ### When the provider cannot be reached
 
