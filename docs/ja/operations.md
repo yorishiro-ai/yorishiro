@@ -94,7 +94,22 @@ $ yorishiro-server admin maintenance off
 `--reason`は汎用メッセージの代わりに呼び出し元へ表示されます。
 「バックアップから復旧中、09:00 復帰予定」と書けば、ステータスコードだけでは生じる問い合わせを減らせます。
 
-**`/up`と`/health`はどのモードでも応答します。** これらを拒否すると、オーケストレータが「意図的に止めているサーバ」を再起動してしまい、再起動しても状態はDBにあるため解消せず、ループが収束しません。
+ホストにシェルが無い場合は、同じ切り替えをRESTでも行えます。
+
+```console
+$ curl -X PUT http://localhost:8080/api/system/maintenance \
+    -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+    -d '{"mode":"read-only","retry_after":60,"reason":"migrating schemas"}'
+$ curl http://localhost:8080/api/system/maintenance -H "Authorization: Bearer $KEY"
+```
+
+いずれも`migration`スコープのキーを要します。
+一括移行を守るスコープと同じであり、どちらも既に保存済みのデータに作用するためです(スキーマ登録は、まだ何も書き込まれていないバージョンを増やすだけです)。
+`retry_after`と`reason`は省略可能で、CLIの同名フラグと同じ意味です。
+
+**`/up`・`/health`・`/api/system/maintenance`はどのモードでも応答します。**
+プローブを拒否すると、オーケストレータが「意図的に止めているサーバ」を再起動してしまい、再起動しても状態はDBにあるため解消せず、ループが収束しません。
+切り替え口を拒否すると、RESTで入れたfull-lockをCLIでしか解除できなくなり、シェルに届かない者にとって一方通行の扉になります。
 
 read-onlyの判定はHTTPメソッドで行うため、**`POST /mcp`は読取ツールでも書込として扱われます**。
 どのツールかを知るにはリクエストボディを読む必要があり、ここで消費したボディはハンドラが受け取れなくなるためです。

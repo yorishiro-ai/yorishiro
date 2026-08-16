@@ -8,6 +8,7 @@ mod relations;
 mod schemas;
 mod search;
 mod setup;
+mod system;
 mod template_library;
 pub(crate) mod whoami;
 mod workspaces;
@@ -122,8 +123,12 @@ impl Modify for SecurityAddon {
         template_library::update_template,
         template_library::delete_template,
         template_library::fork_template,
+        system::get_maintenance,
+        system::set_maintenance,
     ),
     components(schemas(
+        system::MaintenanceResponse,
+        system::SetMaintenanceRequest,
         identity::SignupRequest,
         identity::SignupResponse,
         identity::WorkspaceSummary,
@@ -169,6 +174,7 @@ impl Modify for SecurityAddon {
         (name = "search", description = "Vector similarity search"),
         (name = "export", description = "Bulk data export/import"),
         (name = "template-library", description = "Tenant-scoped, DB-backed schema template library (create/delete are owner/admin only)"),
+        (name = "system", description = "Deployment-wide controls (maintenance). Requires a migration-scoped key"),
     ),
     info(
         title = "Yorishiro API",
@@ -205,6 +211,13 @@ pub fn router(
         .route(
             "/api/members",
             post(members::add_member).get(members::list_members),
+        )
+        // Deployment-wide, so it sits outside every tenant and workspace path. Both methods on
+        // one `.route`: a path defined here takes that path entirely, and a method left out
+        // would answer 405 rather than falling through.
+        .route(
+            "/api/system/maintenance",
+            get(system::get_maintenance).put(system::set_maintenance),
         )
         .route(
             "/api/workspaces",

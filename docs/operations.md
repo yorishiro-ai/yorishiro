@@ -87,8 +87,21 @@ $ yorishiro-server admin maintenance off
 
 `--reason` is shown to callers in place of the generic message; an operator saying "restoring from backup, back by 09:00" answers the question a bare status code provokes.
 
-`/up` and `/health` answer in every mode.
-Refusing them would have an orchestrator restart a server that is deliberately paused, and a restart does not clear the state, so the loop would not converge.
+The same switch over REST, for an operator with no shell on the host:
+
+```console
+$ curl -X PUT http://localhost:8080/api/system/maintenance \
+    -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+    -d '{"mode":"read-only","retry_after":60,"reason":"migrating schemas"}'
+$ curl http://localhost:8080/api/system/maintenance -H "Authorization: Bearer $KEY"
+```
+
+Both need a `migration`-scoped key, the same scope that guards batch migration: each acts on data already stored, where a schema registration only adds a version nothing has been written against yet.
+`retry_after` and `reason` are optional and mean what the CLI's flags mean.
+
+`/up`, `/health` and `/api/system/maintenance` answer in every mode.
+Refusing the probes would have an orchestrator restart a server that is deliberately paused, and a restart does not clear the state, so the loop would not converge.
+Refusing the switch would make a full lock entered over REST leavable only over the CLI, which is a one-way door for whoever cannot reach a shell.
 
 Read-only decides by HTTP method, so `POST /mcp` is treated as a write even when the tool called is a read: the middleware would have to consume the request body to know which tool it is, and a body consumed there is one the handler no longer has.
 It errs toward refusing a read rather than admitting a write.

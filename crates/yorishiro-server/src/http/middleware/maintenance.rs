@@ -16,9 +16,14 @@ use crate::state::AppState;
 ///
 /// `/up` and `/health` are how an orchestrator decides whether the process is alive. Refusing
 /// them would have the scheduler restart a server that is deliberately paused, and restarting
-/// it would not clear the state — it lives in the database — so the loop would not converge.
+/// it would not clear the state, which lives in the database, so the loop would not converge.
+///
+/// `/api/system/maintenance` is the switch itself. Behind the guard, a full lock entered over
+/// REST could only be left over the CLI, making the endpoint a one-way door for anyone without
+/// shell access to the host. Being served is not being open: reaching the handler still needs a
+/// `migration`-scoped key, exactly as it does when the deployment is serving normally.
 fn always_served(path: &str) -> bool {
-    matches!(path, "/up" | "/health")
+    matches!(path, "/up" | "/health" | "/api/system/maintenance")
 }
 
 /// Whether the request intends to change something.
