@@ -58,7 +58,7 @@ Off unless a threshold is set: dropping a deployment to read-only uninvited is a
 |---|---|
 | `YORISHIRO_DB_LOAD_THRESHOLD` | Active connections above which the deployment goes read-only. Unset or `0` disables the guard entirely |
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | How long the threshold must be exceeded before switching (default: `30`). Stops a momentary spike from tripping it |
-| `YORISHIRO_DB_LOAD_POLL_SECS` | How often the connection count is sampled (default: `5`) |
+| `YORISHIRO_DB_LOAD_POLL_SECS` | How often the connection count is sampled (default: `5`). `0` is not an off switch and falls back to the default -- disabling the guard is `YORISHIRO_DB_LOAD_THRESHOLD=0` |
 
 ## Request correlation
 

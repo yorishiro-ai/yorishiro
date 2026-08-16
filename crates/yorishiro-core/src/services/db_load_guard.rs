@@ -63,10 +63,15 @@ impl LoadGuardConfig {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(30),
             ),
+            // `.filter(|v| *v > 0)` rather than `unwrap_or` alone: `tokio::time::interval`
+            // panics on a zero period, and `0` is what an operator writes when they mean "off".
+            // Falling back to the default keeps the guard running at 5s instead of taking the
+            // process down -- turning it off is what `YORISHIRO_DB_LOAD_THRESHOLD=0` is for.
             poll: Duration::from_secs(
                 std::env::var("YORISHIRO_DB_LOAD_POLL_SECS")
                     .ok()
                     .and_then(|v| v.parse().ok())
+                    .filter(|v| *v > 0)
                     .unwrap_or(5),
             ),
         })
