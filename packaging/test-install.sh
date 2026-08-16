@@ -212,10 +212,16 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get install -y -qq /pkg/'"$(basename "$(deb_ce)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro-server --help >/dev/null 2>&1 && echo "RUNS"
   [ -f /usr/share/doc/yorishiro-ce/copyright ] && echo "COPYRIGHT"
-  [ -f /usr/share/doc/yorishiro-ce/copyright.ee ] && echo "HAS_EE_LICENCE"
-  dpkg -s yorishiro-ce 2>/dev/null | grep -qi "^Conflicts: yorishiro" && echo "CONFLICTS"
+  [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "HAS_EE_LICENCE"
+  # Anchored at both ends: `Conflicts: yorishiro` also matches `yorishiro-ee` as a prefix, so
+  # the loose form kept passing after the package was renamed while asserting nothing.
+  dpkg -s yorishiro-ce 2>/dev/null | grep -qiE "^Conflicts: yorishiro-ee *$" && echo "CONFLICTS"
+  # The community binary has to answer for itself, not merely respond to --help: it is a
+  # different executable at the same path, headless, with none of `ee/` composed in.
+  su -s /bin/sh yorishiro -c "/usr/bin/yorishiro-server" >/dev/null 2>&1
+  [ "$?" = 78 ] && echo "EXITS_78"
 ' 2>&1)
-for want in RUNS COPYRIGHT CONFLICTS; do
+for want in RUNS COPYRIGHT CONFLICTS EXITS_78; do
   case "$out" in
     *"$want"*) ok "ce $want" ;;
     *) bad "ce $want (output: $(echo "$out" | tr '\n' ' '))" ;;
