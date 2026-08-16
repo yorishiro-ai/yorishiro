@@ -277,6 +277,35 @@ jobs:
   # and its unit/integration tests pass -- `check` above never starts the real `main()`, so a
   # startup-only failure (a panicking `.expect()` in config/provider construction, a missing
   # env var only main.rs reads) would otherwise ship unnoticed until a real deploy.
+  # The release builds this image; nothing before it did, so a Dockerfile that no longer
+  # matches the binaries it copies only failed at release time -- which is exactly what
+  # happened when the binary was renamed and three lines here were not.
+  #
+  # amd64 only, and no push: this is asking whether the file still describes a buildable,
+  # runnable image, not reproducing the release's multi-arch publish.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        run: docker build -t yorishiro:ci .
+
+      # Built is not runnable: a wrong ENTRYPOINT builds fine and dies on first start. The
+      # unconfigured exit is 78 (EX_CONFIG), the same contract the packaged unit relies on.
+      - name: The image starts
+        run: |
+          docker run --rm yorishiro:ci --help >/dev/null
+          docker run --rm yorishiro:ci >/tmp/out 2>&1 && { echo "::error::expected a nonzero exit" >&2; exit 1; }
+          code=$?
+          grep -q 'DATABASE_URL is not set' /tmp/out \
+            || { echo "::error::the image did not print the configuration error" >&2; exit 1; }
+          [ "$code" = 78 ] || { echo "::error::expected exit 78, got $code" >&2; exit 1; }
+          echo "image runs, and exits 78 unconfigured"
+
   package-smoke:
     runs-on: ubuntu-latest
     # A cold `cargo build` here pulls in ort/tokenizers same as `check`'s clippy/test steps do,
