@@ -266,7 +266,7 @@ $ make admin ARGS="list-tenants"
 
 `create-tenant <name> [--max-workspaces <n>] [--template <id>]` creates the tenant only, by default.
 `--max-workspaces` caps the number of workspaces the tenant may create (omit for unlimited).
-To start working, create a schema first -- from a built-in template (REST API, MCP, the Web UI, or `--template` above) or a custom definition (REST API or MCP only; the Web UI can only apply a built-in template, not register an arbitrary definition) -- then create a workspace with `--schema-id` to link it.
+To start working, create a schema first -- from a built-in template or from a definition of your own, either way through the REST API, MCP or the Web UI ("Create Custom Schema" on the schemas page) -- then create a workspace with `--schema-id` to link it.
 Each workspace uses exactly one schema (1:1 relationship).
 The plaintext API key is shown only once, at issuance time.
 
