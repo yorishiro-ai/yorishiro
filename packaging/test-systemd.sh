@@ -184,5 +184,205 @@ EOF"
 run_edition ee
 run_edition ce
 
+# --------------------------------------------------------------------------------------------
+# Switching editions keeps the database
+# --------------------------------------------------------------------------------------------
+# `run_edition` gives each edition its own Postgres, so it says nothing about the case an
+# operator actually meets: the same database, before and after a package swap. That works only
+# because one `migrations/` directory serves both binaries. The paid tables are in the initial
+# migration, and the licence key rather than the schema is what gates the paid half. If that ever
+# stopped being true, a swap would strand a deployment's data behind a migration the other
+# edition does not have, and nothing here would have said so.
+#
+# Both directions, because they fail differently: ce to ee could apply something extra, and
+# ee to ce could find something it cannot read.
+swap_editions() {
+  NET="ysr-swap-$$" APP="ysr-swap-app-$$" PG="ysr-swap-pg-$$"
+  printf "\n######## edition swap, one database ########\n"
+
+  cleanup_swap() {
+    docker rm -f "$APP" "$PG" >/dev/null 2>&1
+    docker network rm "$NET" >/dev/null 2>&1
+  }
+  trap cleanup_swap EXIT INT TERM
+
+  docker network create "$NET" >/dev/null 2>&1
+  docker run -d --name "$PG" --network "$NET" \
+    -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=yorishiro \
+    pgvector/pgvector:pg18 >/dev/null
+  docker run -d --name "$APP" --network "$NET" --privileged --cgroupns=host \
+    --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro ubuntu:24.04 \
+    bash -c 'apt-get update -qq >/dev/null 2>&1
+             apt-get install -y -qq systemd systemd-sysv curl >/dev/null 2>&1
+             exec /lib/systemd/systemd' >/dev/null
+
+  for _ in $(seq 1 60); do
+    case "$(docker exec "$APP" systemctl is-system-running 2>/dev/null)" in
+      running|degraded) break ;;
+    esac
+    sleep 3
+  done
+  for _ in $(seq 1 30); do
+    docker exec "$PG" pg_isready -U yorishiro >/dev/null 2>&1 && break
+    sleep 2
+  done
+  docker exec "$PG" psql -U yorishiro -d yorishiro \
+    -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
+
+  PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+
+  # The fingerprint that has to survive a swap: which migrations ran, and their checksums. A
+  # count alone would miss an edition rewriting one in place.
+  migration_state() {
+    docker exec "$PG" psql -U yorishiro -d yorishiro -tAc \
+      "SELECT count(*) || ':' || coalesce(md5(string_agg(version::text || encode(checksum, 'hex'), ',' ORDER BY version)), 'none') FROM _sqlx_migrations" 2>/dev/null | tr -d ' \r'
+  }
+
+  install_edition() {
+    deb=$(basename "$(ls "$PKG_DIR"/yorishiro-"$1"_*.deb | head -1)")
+    docker exec "$APP" bash -c "
+      systemctl stop yorishiro >/dev/null 2>&1
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades /pkg/$deb >/dev/null 2>&1" || return 1
+    # Appended after the install so the first edition writes it and the second inherits it.
+    # The same file surviving the swap is half of what is being tested.
+    docker exec "$APP" bash -c "grep -q '^database_url:' /etc/yorishiro/config.yml || cat >> /etc/yorishiro/config.yml <<EOF
+database_url: postgres://yorishiro:secret@$PGIP:5432/yorishiro
+bind: 0.0.0.0:8081
+embedding:
+  provider: openai
+  base_url: http://localhost:1
+  model: unused
+EOF"
+    docker exec "$APP" bash -c '
+      systemctl reset-failed yorishiro >/dev/null 2>&1
+      systemctl daemon-reload
+      systemctl enable --now yorishiro' >/dev/null 2>&1
+    for _ in $(seq 1 60); do
+      docker exec "$APP" curl -fsS http://127.0.0.1:8081/up >/dev/null 2>&1 && return 0
+      sleep 3
+    done
+    return 1
+  }
+
+  # Entities through the running service's own REST API, not rows through psql. A marker row
+  # written and read by psql proves the database survived the swap; it does not prove either
+  # edition can read what the other wrote, which is the claim being made. Going through the API
+  # exercises the migrator, the schema, the row's JSONB shape and the deserializer in the binary
+  # that is actually installed.
+  api() {
+    docker exec "$APP" curl -s -o /dev/null -w '%{http_code}' \
+      -H "Authorization: Bearer $KEY" "$@" 2>/dev/null
+  }
+  write_entity() {
+    docker exec "$APP" curl -s -o /dev/null -w '%{http_code}' \
+      -X POST http://127.0.0.1:8081/api/entities \
+      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+      -d "{\"schema_name\":\"task-management\",\"entity_type\":\"task\",\"data\":{\"title\":\"$1\",\"done\":false,\"priority\":\"medium\"}}" 2>/dev/null
+  }
+  entity_titles() {
+    docker exec "$APP" curl -s -H "Authorization: Bearer $KEY" \
+      http://127.0.0.1:8081/api/entities 2>/dev/null \
+      | grep -o '"title":"[^"]*"' | sed 's/"title":"//;s/"$//' | sort | tr '\n' ' '
+  }
+
+  if install_edition ce; then
+    ok "swap: ce starts on a fresh database"
+  else
+    bad "swap: ce did not come up on a fresh database"
+  fi
+  first=$(migration_state)
+  if [ "${first%%:*}" -gt 0 ] 2>/dev/null; then
+    ok "swap: ce applied its migrations ($first)"
+  else
+    bad "swap: no migrations recorded after ce started ($first)"
+  fi
+
+  # Provisioned through the community binary's own admin CLI, which is also the only way in on
+  # ce: it is headless, so there is no setup wizard to click through.
+  #
+  # The workspace id comes out of `create-tenant` itself, from the two lines it prints under
+  # "default workspace created". Reading it back from `list-tenants` instead returns the TENANT
+  # id, which `create-api-key` rejects, and the failure surfaces three assertions later as an
+  # empty entity list rather than as a bad id.
+  # YORISHIRO_CONFIG_PATH is passed explicitly: the unit exports it, but `docker exec` starts a
+  # shell that has none of the unit's environment, so the CLI would otherwise look for a
+  # config.yml in the working directory and report the database as unconfigured. Naming the file
+  # is what an operator does too, and it keeps this test independent of the fallback.
+  admin() {
+    docker exec -e YORISHIRO_CONFIG_PATH=/etc/yorishiro/config.yml "$APP" \
+      /usr/bin/yorishiro-server admin "$@" 2>&1
+  }
+  provision=$(admin create-tenant swap --template task-management)
+  WS=$(sed -n '/default workspace created/,$p' <<<"$provision" \
+    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+  if [ -n "$WS" ]; then
+    ok "swap: ce provisioned a tenant and workspace"
+  else
+    bad "swap: no workspace id in create-tenant's output: $(tr '\n' ' ' <<<"$provision" | tail -c 200)"
+  fi
+  KEY=$(admin create-api-key "$WS" schema | grep -oE 'ysr_[A-Za-z0-9_]+' | head -1)
+  if [ -n "$KEY" ]; then
+    ok "swap: provisioned a workspace and key through ce's admin CLI"
+  else
+    bad "swap: could not issue an API key from ce (workspace='$WS')"
+  fi
+
+  if [ "$(write_entity written-under-ce)" = "201" ]; then
+    ok "swap: ce wrote an entity through its own API"
+  else
+    bad "swap: ce could not write an entity"
+  fi
+
+  if install_edition ee; then
+    ok "swap: ee starts on the database ce created"
+  else
+    bad "swap: ee did not come up on ce's database"
+  fi
+  after_ee=$(migration_state)
+  if [ "$after_ee" = "$first" ]; then
+    ok "swap: ce to ee left the migration set untouched"
+  else
+    bad "swap: ce to ee changed the migration set ($first -> $after_ee)"
+  fi
+  if [ "$(entity_titles)" = "written-under-ce " ]; then
+    ok "swap: ee reads the entity ce wrote"
+  else
+    bad "swap: ee does not read ce's entity (got '$(entity_titles)')"
+  fi
+  if [ "$(write_entity written-under-ee)" = "201" ]; then
+    ok "swap: ee wrote an entity of its own"
+  else
+    bad "swap: ee could not write an entity"
+  fi
+
+  if install_edition ce; then
+    ok "swap: ce starts again on the database ee wrote to"
+  else
+    bad "swap: ce did not come back up after ee had run"
+  fi
+  after_ce=$(migration_state)
+  if [ "$after_ce" = "$first" ]; then
+    ok "swap: ee to ce left the migration set untouched"
+  else
+    bad "swap: ee to ce changed the migration set ($first -> $after_ce)"
+  fi
+  if [ "$(entity_titles)" = "written-under-ce written-under-ee " ]; then
+    ok "swap: ce reads both editions' entities"
+  else
+    bad "swap: ce does not read both entities (got '$(entity_titles)')"
+  fi
+  # The key ce issued still authenticates after two swaps, so the swap does not invalidate
+  # credentials an operator already handed out.
+  if [ "$(api http://127.0.0.1:8081/whoami)" = "200" ]; then
+    ok "swap: the API key ce issued still works after the round trip"
+  else
+    bad "swap: the API key stopped working across the swap"
+  fi
+
+  cleanup_swap
+}
+
+swap_editions
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
