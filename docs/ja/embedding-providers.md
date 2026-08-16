@@ -49,3 +49,24 @@ YORISHIRO_EMBEDDING_MODEL=nomic-embed-text
 これが要るのは、**埋め込みがレスポンス後に行われる**ためです。
 レート制限で埋め込みを失ったエンティティは、書き込み自体は成功していても**resyncするまで意味検索に出てきません**。
 再試行は、プロバイダが混んだ数分間が静かにその代償を生むのを防ぎます。
+
+### プロバイダに到達できないとき
+
+そもそも応答が返らない場合(プロセスが落ちている、ポートが違う、名前解決できない)は`502 Bad Gateway`とし、設定されているベースURLを添えて返します。
+
+```json
+{
+  "error": {
+    "message": "the embedding provider at http://localhost:11434/v1 could not be reached: error sending request",
+    "hint": "check that the provider is running and that YORISHIRO_EMBEDDING_BASE_URL points at it"
+  }
+}
+```
+
+上の`503`と分けているのは意図的です。
+`503`はプロバイダが応答したうえで待つよう求めた状態なので、その指示どおり再試行するのが正しい対応です。
+`502`は応答する相手がそもそも居なかった状態であり、待っても解消しません。
+設定の誤りか障害のどちらかであり、どのエンドポイントに失敗したかを示すことで、検索クエリ側の不具合と区別できます。
+
+`GET /api/search`で表面化することが多くなります。
+検索はクエリを埋め込んでからでないと実行できないためです。
