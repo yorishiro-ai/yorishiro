@@ -4,9 +4,9 @@
 //! `router()`'s routes (the dashboard, the Stripe webhook, and `/auth/oauth/status`) are
 //! deliberately outside it; every route in both sub-routers still gets the 2 MiB body cap.
 //! These tests build the same layered shape `main` does, rather than going through
-//! `crate::router()` directly, since the routing crate itself is not allowed to
-//! depend on `yorishiro-server` (see CLAUDE.md) and so cannot apply either layer itself -- only
-//! the binary can.
+//! `crate::router()` directly: the layers are applied where the sub-routers are composed with
+//! the community edition's own, which happens in the binary and nowhere else. Calling
+//! `crate::router()` here would exercise an unlayered shape that never serves a request.
 
 use std::time::Duration;
 
