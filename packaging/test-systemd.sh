@@ -304,8 +304,15 @@ EOF"
   # "default workspace created". Reading it back from `list-tenants` instead returns the TENANT
   # id, which `create-api-key` rejects, and the failure surfaces three assertions later as an
   # empty entity list rather than as a bad id.
-  provision=$(docker exec "$APP" /usr/bin/yorishiro-server admin \
-    create-tenant swap --template task-management 2>&1)
+  # YORISHIRO_CONFIG_PATH is passed explicitly: the unit exports it, but `docker exec` starts a
+  # shell that has none of the unit's environment, so the CLI would otherwise look for a
+  # config.yml in the working directory and report the database as unconfigured. Naming the file
+  # is what an operator does too, and it keeps this test independent of the fallback.
+  admin() {
+    docker exec -e YORISHIRO_CONFIG_PATH=/etc/yorishiro/config.yml "$APP" \
+      /usr/bin/yorishiro-server admin "$@" 2>&1
+  }
+  provision=$(admin create-tenant swap --template task-management)
   WS=$(sed -n '/default workspace created/,$p' <<<"$provision" \
     | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
   if [ -n "$WS" ]; then
@@ -313,8 +320,7 @@ EOF"
   else
     bad "swap: no workspace id in create-tenant's output: $(tr '\n' ' ' <<<"$provision" | tail -c 200)"
   fi
-  KEY=$(docker exec "$APP" /usr/bin/yorishiro-server admin create-api-key "$WS" schema 2>&1 \
-    | grep -oE 'ysr_[A-Za-z0-9_]+' | head -1)
+  KEY=$(admin create-api-key "$WS" schema | grep -oE 'ysr_[A-Za-z0-9_]+' | head -1)
   if [ -n "$KEY" ]; then
     ok "swap: provisioned a workspace and key through ce's admin CLI"
   else
