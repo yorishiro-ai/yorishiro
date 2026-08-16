@@ -37,10 +37,11 @@ use state::HostedState;
 /// already (`/hosted/tenant/overview`), is a Stripe-signature-verified webhook that must never
 /// be rate-limited (dropping a legitimate billing event on `429` is worse than not rate-limiting
 /// it), or is `/auth/oauth/status`, deliberately unlimited because the Web UI's login page polls
-/// it on every load. `apply_rate_limit_layer` itself lives in `yorishiro-server`, which this
-/// crate's lib is not allowed to depend on (see CLAUDE.md) -- so the split exists here, and
-/// `yorishiro-server`'s `main` is what actually applies the layer, the same way it's the
-/// only place in this crate that's allowed to call into `yorishiro-server`'s public API.
+/// it on every load. `apply_rate_limit_layer` itself lives in `yorishiro-server`, and a layer
+/// can only be applied where the routers are composed -- which is `yorishiro-server`'s `main`,
+/// since that is what merges these two sub-routers with the community edition's own. Applying
+/// it here instead would give the OAuth routes a second `RateLimiter`, so the same client would
+/// get two independent quotas rather than the one shared with `/auth/login`.
 pub fn router() -> Router<HostedState> {
     Router::new()
         .route("/hosted/stripe/webhook", post(stripe::stripe_webhook))
