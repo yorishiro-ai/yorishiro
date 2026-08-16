@@ -299,10 +299,21 @@ EOF"
 
   # Provisioned through the community binary's own admin CLI, which is also the only way in on
   # ce: it is headless, so there is no setup wizard to click through.
-  docker exec "$APP" /usr/bin/yorishiro-server admin create-tenant swap --template task-management >/dev/null 2>&1
-  WS=$(docker exec "$APP" bash -c '/usr/bin/yorishiro-server admin list-tenants 2>/dev/null | head -40' \
-    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
-  KEY=$(docker exec "$APP" /usr/bin/yorishiro-server admin create-api-key "$WS" schema 2>/dev/null \
+  #
+  # The workspace id comes out of `create-tenant` itself, from the two lines it prints under
+  # "default workspace created". Reading it back from `list-tenants` instead returns the TENANT
+  # id, which `create-api-key` rejects, and the failure surfaces three assertions later as an
+  # empty entity list rather than as a bad id.
+  provision=$(docker exec "$APP" /usr/bin/yorishiro-server admin \
+    create-tenant swap --template task-management 2>&1)
+  WS=$(sed -n '/default workspace created/,$p' <<<"$provision" \
+    | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+  if [ -n "$WS" ]; then
+    ok "swap: ce provisioned a tenant and workspace"
+  else
+    bad "swap: no workspace id in create-tenant's output: $(tr '\n' ' ' <<<"$provision" | tail -c 200)"
+  fi
+  KEY=$(docker exec "$APP" /usr/bin/yorishiro-server admin create-api-key "$WS" schema 2>&1 \
     | grep -oE 'ysr_[A-Za-z0-9_]+' | head -1)
   if [ -n "$KEY" ]; then
     ok "swap: provisioned a workspace and key through ce's admin CLI"
