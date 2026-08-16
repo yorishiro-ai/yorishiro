@@ -32,7 +32,12 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 以下の設定はすべて`config.yml`ファイルでも指定できます。
 キー一覧は[`config.example.yml`](../../config.example.yml)を参照してください(`embedding:`・`logging:`・`auth_rate_limit:`はグループごとにネストします)。
 デフォルトでは作業ディレクトリの`config.yml`を読み込みます。
+見つからない場合は`/etc/yorishiro/config.yml`にフォールバックします。
+このフォールバックにより、パッケージ導入したホストでシェルから`yorishiro-server admin ...`を実行できます。
+パスはunitが渡していてシェルには無いため、これが無いと隣で動いているサービスと同じ設定があるのにCLIだけが「データベース未設定」と報告します。
 別の場所を使う場合は`YORISHIRO_CONFIG_PATH`で指定してください。
+明示指定した場合はフォールバックしません。
+指定したファイルが無ければ何も読まず、別の配備の設定を黙って拾うことはありません。
 
 ファイルが存在しない場合や、ファイル内に該当キーがない場合はエラーにならず、通常のデフォルト値にフォールバックします。
 **環境変数が設定されている場合は、対応する`config.yml`のキーより常に優先されます。**
@@ -45,7 +50,7 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 | 変数 | 内容 |
 |---|---|
 | `DATABASE_URL` | PostgreSQL接続文字列(必須) |
-| `YORISHIRO_CONFIG_PATH` | 後述の`config.yml`ファイルのパス(既定: 作業ディレクトリの`config.yml`) |
+| `YORISHIRO_CONFIG_PATH` | 後述の`config.yml`ファイルのパス。未設定時は作業ディレクトリの`config.yml`、次に`/etc/yorishiro/config.yml`を探す |
 | `YORISHIRO_BIND` | リッスンアドレス(既定: `0.0.0.0:8080`) |
 | `YORISHIRO_CORS_ORIGINS` | ブラウザからアクセスする場合の許可オリジン(カンマ区切り。例: 別オリジンで動くダッシュボードが`/auth/login`/`/api/members`を呼べるようにする)。未設定時はクロスオリジン読み取り不可。デバッグビルド限定で、未設定のまま`http://localhost:*`/`http://127.0.0.1:*`(任意ポート)からのアクセスを自動許可する(MCP Inspector等の開発ツール向け)。リリースビルドではこの自動許可は無効 |
 | `YORISHIRO_MAX_TENANTS` | `admin create-tenant`が作成できるテナント数の上限。未設定時は既定で`1`(シングルテナント)。無制限にするには`0`を、複数許可するにはその上限数を設定する。`POST /auth/signup`はテナントを作成しない(既存テナントへ招待を引き換えるだけ)ため影響を受けない。初回セットアップウィザード([setup.md](setup.md#初回セットアップ)参照)もこの変数で有効/無効が決まり、上限が`0`でない場合のみ有効化される |

@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 
-use crate::config::load_and_apply_env_overrides;
+use std::path::Path;
+
+use crate::config::{PACKAGED_CONFIG_PATH, config_path_from, load_and_apply_env_overrides};
 
 // Env vars are process-wide state; serialize tests through this lock rather than racing
 // each other (same pattern as `yorishiro_core::repositories::tenancy`'s env tests).
@@ -238,4 +240,103 @@ fn a_licence_key_in_the_config_is_not_applied_to_the_environment() {
     unsafe { load_and_apply_env_overrides() }.unwrap();
 
     assert!(std::env::var("YORISHIRO_LICENSE_KEY").is_err());
+}
+
+/// A packaged host runs the admin CLI from a shell, which has none of the unit's environment.
+/// Without this fallback the CLI looked in whatever directory the operator was standing in,
+/// found nothing, and reported the database as unconfigured while the service beside it ran
+/// normally against `/etc/yorishiro/config.yml`.
+#[test]
+fn the_packaged_path_is_used_when_the_working_directory_has_no_config() {
+    let found = config_path_from(None, |p| p == Path::new(PACKAGED_CONFIG_PATH));
+
+    assert_eq!(found.as_deref(), Some(Path::new(PACKAGED_CONFIG_PATH)));
+}
+
+/// A source checkout keeps reading its own file. The packaged path is a fallback, not an
+/// override: a developer with both present must not silently pick up a system-wide config.
+#[test]
+fn the_working_directory_wins_over_the_packaged_path() {
+    let found = config_path_from(None, |_| true);
+
+    assert_eq!(found.as_deref(), Some(Path::new("config.yml")));
+}
+
+/// An operator naming a file means that file. Falling back after an explicit path would read a
+/// different deployment's settings than the one they asked for, which is worse than reading
+/// none: the process would start, on the wrong configuration.
+#[test]
+fn an_explicit_path_never_falls_back() {
+    let found = config_path_from(Some(std::ffi::OsString::from("/nowhere/config.yml")), |p| {
+        p == Path::new(PACKAGED_CONFIG_PATH)
+    });
+
+    assert_eq!(found, None, "the named file is absent, so nothing is read");
+}
+
+/// Nothing anywhere is not an error: every setting stays as the environment has it.
+#[test]
+fn no_config_anywhere_reads_nothing() {
+    assert_eq!(config_path_from(None, |_| false), None);
+}
+
+/// A path that is not valid UTF-8 is still a path the operator named. `std::env::var` reports it
+/// as `NotUnicode`, and flattening that to "unset" with `.ok()` would fall back to
+/// `/etc/yorishiro/config.yml` -- reading a different deployment's settings than the one asked
+/// for, which is the single outcome the explicit-path rule exists to prevent.
+///
+/// Unix-only: `OsStringExt::from_vec` takes arbitrary bytes, which is what makes the case
+/// constructible. Windows encodes its own way and has no equivalent here.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_explicit_path_is_still_honoured() {
+    use std::os::unix::ffi::OsStringExt;
+
+    // 0xff is not valid UTF-8 in any position.
+    let raw = std::ffi::OsString::from_vec(vec![b'/', b'x', 0xff, b'.', b'y', b'm', b'l']);
+    let named = std::path::PathBuf::from(&raw);
+
+    let found = config_path_from(Some(raw), |p| p == named);
+    assert_eq!(
+        found.as_deref(),
+        Some(named.as_path()),
+        "the named file must be read, not the packaged fallback"
+    );
+
+    // And when it is absent, nothing is read rather than the fallback.
+    let raw = std::ffi::OsString::from_vec(vec![b'/', b'x', 0xff, b'.', b'y', b'm', b'l']);
+    let found = config_path_from(Some(raw), |p| p == Path::new(PACKAGED_CONFIG_PATH));
+    assert_eq!(found, None);
+}
+
+/// The same rule at the boundary where it is actually decided.
+///
+/// `config_path_from` is a pure function and cannot see how the variable was read, so the test
+/// above passes whether the caller uses `var_os` or `var().ok()`. This one sets a non-UTF-8
+/// value in the real environment and asserts the file behind it is read, which is only true of
+/// `var_os`: with `var().ok()` the value flattens to "unset" and the loader silently reads
+/// something else, or nothing.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_path_in_the_environment_is_read() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
+    let dir = tempfile::tempdir().unwrap();
+
+    // A filename with a byte that is not valid UTF-8 in any position.
+    let mut name = dir.path().as_os_str().to_os_string().into_vec();
+    name.extend_from_slice(&[b'/', 0xff, b'.', b'y', b'm', b'l']);
+    let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(name));
+    std::fs::write(&path, "bind: 127.0.0.1:9999\n").unwrap();
+
+    // SAFETY: serialized by ENV_LOCK via EnvGuard.
+    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", path.as_os_str()) };
+    unsafe { load_and_apply_env_overrides() }.unwrap();
+
+    assert_eq!(
+        std::env::var("YORISHIRO_BIND").ok().as_deref(),
+        Some("127.0.0.1:9999"),
+        "the file the operator named must be the file that is read"
+    );
 }
