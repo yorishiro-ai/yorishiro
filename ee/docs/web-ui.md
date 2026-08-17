@@ -58,7 +58,7 @@ Flow and graph views remain on React Flow: these panels do not replace them.
 
 A `Stat` given a `limit` colours itself by how close it is: neutral below 75% of the quota, amber from 75%, destructive from 90% and anything beyond (`thresholdClass`, pinned by `thresholds.test.ts`).
 `UsageBar` renders the same ratio as a bar and **renders nothing when the limit is `null`**: an unlimited quota has no bar to fill, and a full-width bar would read as "at capacity".
-This is what puts `max_workspaces` and a workspace's `max_entities` on screen; both are fetched and both were previously unused.
+This is what puts `max_workspaces` and a workspace's `max_entities` on screen.
 
 ## Schema version switching (`/ws/:wsId/schema`, `/ws/:wsId/schema/io`)
 
