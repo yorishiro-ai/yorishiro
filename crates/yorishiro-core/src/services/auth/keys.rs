@@ -9,10 +9,8 @@ use super::{
     ApiKeyScope, ApiKeys, CreatedApiKey, KEY_PREFIX_BYTES, KEY_SECRET_BYTES, hash_key, random_hex,
 };
 
-/// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part
-/// (192 bits) is the actual credential. SHA-256 is sufficient here rather than a slow KDF
-/// like bcrypt/argon2, since API keys already carry enough entropy that offline
-/// brute-forcing isn't a realistic threat.
+/// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
+/// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
 pub async fn create_api_key(
     conn: &mut PgConnection,
     workspace_id: Uuid,

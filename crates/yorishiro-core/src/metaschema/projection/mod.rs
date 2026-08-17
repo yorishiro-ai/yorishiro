@@ -4,8 +4,7 @@ use serde_json::{Map, Value, json};
 
 use super::types::{EntityTypeDef, FieldDef, FieldTypeName};
 
-/// Builds a JSON Schema from an EntityTypeDef that's used both for validating
-/// entity `data` and generating the MCP inputSchema.
+/// Builds a JSON Schema from an EntityTypeDef that's used both for validating entity `data` and generating the MCP inputSchema.
 /// The metaschema is the sole source for this schema; adapters only consume the result.
 pub fn entity_type_to_json_schema(entity_type: &EntityTypeDef) -> Value {
     properties_to_json_schema(&entity_type.fields)

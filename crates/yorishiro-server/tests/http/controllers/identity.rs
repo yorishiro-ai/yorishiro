@@ -203,8 +203,7 @@ async fn login_resolves_the_workspace_automatically_when_the_account_has_exactly
     .await;
     assert_eq!(response.status(), StatusCode::CREATED);
 
-    // workspace_id omitted -- the account is only a member of one tenant with one
-    // workspace, so it should resolve unambiguously.
+    // workspace_id omitted: the account is only a member of one tenant with one workspace, so it should resolve unambiguously.
     let response = rest_request(
         &app,
         "POST",
@@ -224,8 +223,7 @@ async fn login_resolves_the_workspace_automatically_when_the_account_has_exactly
 #[sqlx::test(migrations = "../../migrations")]
 #[allow(clippy::await_holding_lock)]
 async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_one(pool: PgPool) {
-    // Creating a second tenant requires lifting the default single-tenant cap -- see
-    // `crate::max_tenants_env_lock` for why this is a shared, crate-wide lock.
+    // Creating a second tenant requires lifting the default single-tenant cap: see `crate::max_tenants_env_lock` for why this is a shared, crate-wide lock.
     let _guard = crate::max_tenants_env_lock::LOCK.lock().unwrap();
     crate::max_tenants_env_lock::set(Some("0"));
 
@@ -308,9 +306,7 @@ async fn login_rejects_an_account_with_no_tenant_membership(pool: PgPool) {
 async fn auth_endpoints_are_rate_limited_per_caller(pool: PgPool) {
     let app = build_app(test_state(pool), no_static_fallback());
 
-    // The test driver never populates `ConnectInfo`, so every call here falls back to the
-    // same shared bucket -- exercising the same "no requester info" path a request behind
-    // an unconfigured proxy would take, while still proving the middleware is wired in.
+    // The test driver never populates `ConnectInfo`, so every call here falls back to the same shared bucket, exercising the same "no requester info" path a request behind an unconfigured proxy would take, while still proving the middleware is wired in.
     let mut saw_too_many_requests = false;
     for _ in 0..15 {
         let response = rest_request(

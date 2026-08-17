@@ -38,10 +38,7 @@ fn relation_columns() -> [Relations; 8] {
 }
 
 /// Validates that relation_type doesn't conflict with the source/target entity_types.
-/// The metaschema definition is resolved against the schema the source entity was actually
-/// created with (the row `entities.schema_id` points to) — as with `entities::update`, so
-/// existing relationships between entities don't silently break even as the active schema
-/// evolves.
+/// The metaschema definition is resolved against the schema the source entity was actually created with (the row `entities.schema_id` points to), as with `entities::update`, so existing relationships between entities don't silently break even as the active schema evolves.
 async fn validate_relation_type(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -75,8 +72,7 @@ async fn validate_relation_type(
     Ok(())
 }
 
-/// Creates a new relation: verifies both the source and target entities exist and that
-/// relation_type matches the metaschema's source/target constraint, then persists it.
+/// Creates a new relation: verifies both the source and target entities exist and that relation_type matches the metaschema's source/target constraint, then persists it.
 pub async fn create(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -121,9 +117,8 @@ pub async fn create(
                     input.relation_type, input.source_id, input.target_id
                 ),
             },
-            // There's a TOCTOU window between checking source/target existence and the INSERT,
-            // during which another transaction could delete the entity. An FK violation is that
-            // race surfacing, so it's treated as NotFound just like the upfront check.
+            // There's a TOCTOU window between checking source/target existence and the INSERT, during which another transaction could delete the entity.
+            // An FK violation is that race surfacing, so it's treated as NotFound just like the upfront check.
             Some(db_err) if db_err.is_foreign_key_violation() => {
                 YorishiroError::not_found(format!(
                     "source '{}' or target '{}' no longer exists",
@@ -153,8 +148,8 @@ pub async fn get(
         .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
 }
 
-/// Moves a relation to another state. Retiring a relation this way keeps the record that it
-/// existed, which deleting it does not; traversal stops following it either way.
+/// Moves a relation to another state.
+/// Retiring a relation this way keeps the record that it existed, which deleting it does not; traversal stops following it either way.
 pub async fn set_status(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -169,7 +164,7 @@ pub async fn set_status(
                 problem: format!("expected one of {}", RELATION_STATUSES.join(", ")),
             }],
             hint: format!(
-                "use one of {} — traversal follows '{RELATION_STATUS_ACTIVE}' only",
+                "use one of {}: traversal follows '{RELATION_STATUS_ACTIVE}' only",
                 RELATION_STATUSES.join(", ")
             ),
         });
@@ -328,8 +323,7 @@ impl NeighborRow {
     }
 }
 
-/// Same shape as [`NeighborRow`] plus the pivot id that produced it, for [`neighbors_batch`]'s
-/// `CROSS JOIN LATERAL` result where multiple pivots' rows come back in a single result set.
+/// Same shape as [`NeighborRow`] plus the pivot id that produced it, for [`neighbors_batch`]'s `CROSS JOIN LATERAL` result where multiple pivots' rows come back in a single result set.
 #[derive(sqlx::FromRow)]
 struct BatchNeighborRow {
     pivot_id: Uuid,
@@ -337,8 +331,7 @@ struct BatchNeighborRow {
     relation_type: String,
     direction: String,
     properties: Value,
-    // Only used to drive the SQL-level ORDER BY; not read on the Rust side (same convention as
-    // `NeighborRow::relation_created_at`).
+    // Only used to drive the SQL-level ORDER BY; not read on the Rust side (same convention as `NeighborRow::relation_created_at`).
     #[allow(dead_code)]
     relation_created_at: DateTime<Utc>,
     entity_id: Uuid,
@@ -376,9 +369,8 @@ impl BatchNeighborRow {
     }
 }
 
-/// Returns the entities directly connected to `entity_id` by a relation, in either
-/// direction, together with the relation_type and direction of each connection. Ordered by
-/// the relation's creation time, most recent first.
+/// Returns the entities directly connected to `entity_id` by a relation, in either direction, together with the relation_type and direction of each connection.
+/// Ordered by the relation's creation time, most recent first.
 pub async fn neighbors(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -387,13 +379,8 @@ pub async fn neighbors(
 ) -> Result<Vec<Neighbor>, YorishiroError> {
     let limit = limit.clamp(1, 200);
 
-    // sea-query can express a UNION ALL of two joined SELECTs and an ORDER BY/LIMIT applied to
-    // the union, but only by building each branch as a full, separate `Query::select()` and
-    // combining them -- for a query already this wide (14 aliased output columns each side,
-    // two joins, a computed direction literal), that ends up materially harder to read than
-    // the plain SQL below, with no behavioral upside. Kept raw as a deliberate readability
-    // call, not because it's structurally inexpressible (contrast the `db.rs`/`auth.rs`
-    // session-command and SECURITY DEFINER cases, which have no builder form at all).
+    // sea-query can express a UNION ALL of two joined SELECTs and an ORDER BY/LIMIT applied to the union, but only by building each branch as a full, separate `Query::select()` and combining them: for a query already this wide (14 aliased output columns each side, two joins, a computed direction literal), that ends up materially harder to read than the plain SQL below, with no behavioral upside.
+    // Kept raw as a deliberate readability call, not because it's structurally inexpressible (contrast the `db.rs`/`auth.rs` session-command and SECURITY DEFINER cases, which have no builder form at all).
     let rows = sqlx::query_as::<_, NeighborRow>(
         "SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
                 r.created_at AS relation_created_at, \
@@ -424,16 +411,10 @@ pub async fn neighbors(
     Ok(rows.into_iter().map(NeighborRow::into_neighbor).collect())
 }
 
-/// Batched form of [`neighbors`]: looks up up to `limit` neighbors of every id in `pivot_ids` in
-/// one round trip instead of one `neighbors()` call per id, via `CROSS JOIN LATERAL` so each
-/// pivot still gets its own `limit`-bounded result (a plain `WHERE source_id = ANY(...) LIMIT n`
-/// would apply `limit` across the whole batch instead of per pivot, which is not the same query).
-/// Same truncation convention as `neighbors`: pass `desired_limit + 1` in and compare the
-/// returned count against `desired_limit` to detect truncation.
-/// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from
-/// the map rather than present with an empty vec. A duplicate id in `pivot_ids` contributes only
-/// once (deduped before querying) -- `unnest` would otherwise drive the lateral subquery twice
-/// for that id and double its entry in the result map.
+/// Batched form of [`neighbors`]: looks up up to `limit` neighbors of every id in `pivot_ids` in one round trip instead of one `neighbors()` call per id, via `CROSS JOIN LATERAL` so each pivot still gets its own `limit`-bounded result (a plain `WHERE source_id = ANY(...) LIMIT n` would apply `limit` across the whole batch instead of per pivot, which is not the same query).
+/// Same truncation convention as `neighbors`: pass `desired_limit + 1` in and compare the returned count against `desired_limit` to detect truncation.
+/// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from the map rather than present with an empty vec.
+/// A duplicate id in `pivot_ids` contributes only once (deduped before querying): `unnest` would otherwise drive the lateral subquery twice for that id and double its entry in the result map.
 pub async fn neighbors_batch(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -451,14 +432,9 @@ pub async fn neighbors_batch(
         return Ok(std::collections::HashMap::new());
     }
 
-    // For each pivot, the lateral subquery is the same UNION ALL/ORDER BY/LIMIT as `neighbors`,
-    // just correlated against `pivot.id` instead of a single bound parameter -- `source_id`
-    // drives the 'out' branch and `target_id` drives the 'in' branch, exactly as in `neighbors`,
-    // so per-pivot direction semantics are unchanged. The lateral's own ORDER BY/LIMIT already
-    // picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY is what then
-    // guarantees those rows come back to Rust in per-pivot, most-recent-first order too --
-    // `CROSS JOIN LATERAL` doesn't otherwise promise the driving/inner join order is preserved
-    // across pivots, and `recall_context` relies on that order when it truncates.
+    // For each pivot, the lateral subquery is the same UNION ALL/ORDER BY/LIMIT as `neighbors`, just correlated against `pivot.id` instead of a single bound parameter: `source_id` drives the 'out' branch and `target_id` drives the 'in' branch, exactly as in `neighbors`, so per-pivot direction semantics are unchanged.
+    // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY is what then guarantees those rows come back to Rust in per-pivot, most-recent-first order too:
+    // `CROSS JOIN LATERAL` doesn't otherwise promise the driving/inner join order is preserved across pivots, and `recall_context` relies on that order when it truncates.
     let rows = sqlx::query_as::<_, BatchNeighborRow>(
         "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \
                 n.properties, n.relation_created_at, n.entity_id, n.entity_tenant_id, \

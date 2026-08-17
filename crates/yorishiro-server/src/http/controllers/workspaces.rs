@@ -15,10 +15,7 @@ use crate::http::controllers::require_tenant_admin;
 use crate::http::middleware::auth::AuthContext;
 use crate::state::AppState;
 
-/// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or
-/// act on another tenant's workspace by guessing its id -- `identity.workspaces` has no RLS of
-/// its own (it's read through the admin `identity_pool`), so this check is the only thing
-/// enforcing that boundary for these handlers.
+/// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or act on another tenant's workspace by guessing its id: `identity.workspaces` has no RLS of its own (it's read through the admin `identity_pool`), so this check is the only thing enforcing that boundary for these handlers.
 async fn get_workspace_in_tenant(
     state: &AppState,
     tenant_id: Uuid,
@@ -53,9 +50,11 @@ pub async fn list_workspaces(
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateWorkspaceRequest {
     pub name: String,
-    /// Cap on the number of entities this workspace may hold. Omit for unlimited.
+    /// Cap on the number of entities this workspace may hold.
+    /// Omit for unlimited.
     pub max_entities: Option<i32>,
-    /// Schema to associate with this workspace. Omit to leave it unset.
+    /// Schema to associate with this workspace.
+    /// Omit to leave it unset.
     #[serde(default)]
     pub schema_id: Option<Uuid>,
 }
@@ -104,8 +103,7 @@ pub struct WorkspaceDetail {
     pub created_at: DateTime<Utc>,
     pub entity_count: i64,
     pub relation_count: i64,
-    /// Currently *active* schemas only (one per distinct schema name) -- not a raw row count,
-    /// which would also include archived versions.
+    /// Currently *active* schemas only (one per distinct schema name): not a raw row count, which would also include archived versions.
     pub schema_count: i64,
 }
 
@@ -170,9 +168,7 @@ pub async fn delete_workspace(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
     get_workspace_in_tenant(&state, ctx.tenant_id, id).await?;
 
-    // A tenant with zero workspaces has no way to issue itself a new API key through this
-    // server's own REST API (login/create-workspace both require one), so this would be a
-    // self-lockout rather than a reversible mistake.
+    // A tenant with zero workspaces has no way to issue itself a new API key through this server's own REST API (login/create-workspace both require one), so this would be a self-lockout rather than a reversible mistake.
     let remaining = tenancy::list_workspaces(&state.identity_pool, ctx.tenant_id).await?;
     if remaining.len() <= 1 {
         return Err(YorishiroError::Conflict {

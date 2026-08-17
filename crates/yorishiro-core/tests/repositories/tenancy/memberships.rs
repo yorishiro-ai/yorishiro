@@ -62,8 +62,7 @@ async fn get_membership_role_resolves_and_defaults_to_none(pool: PgPool) {
 
 #[test]
 fn max_scope_mirrors_role_privilege_order() {
-    // Both reach `migration`: the spec puts an owner at `audit`, which does not exist yet, so
-    // the two arms coincide until it does.
+    // Both reach `migration`: the spec puts an owner at `audit`, which does not exist yet, so the two arms coincide until it does.
     assert_eq!(MembershipRole::Owner.max_scope(), ApiKeyScope::Migration);
     assert_eq!(MembershipRole::Admin.max_scope(), ApiKeyScope::Migration);
     assert_eq!(MembershipRole::Member.max_scope(), ApiKeyScope::Write);
@@ -82,13 +81,8 @@ async fn add_member_rejects_unknown_tenant(pool: PgPool) {
     assert!(matches!(err, YorishiroError::NotFound { .. }));
 }
 
-/// The whole reason `create_user`/`add_member` take `&mut PgConnection` (rather than `&PgPool`,
-/// like most of this module) is so a caller can compose them into one transaction -- see
-/// `create_user`'s doc comment. This proves that composition actually prevents the bug it's
-/// meant to prevent: if `add_member` fails partway through a transaction that already ran
-/// `create_user`, rolling back the transaction must leave no orphaned user row behind (an
-/// orphan would be a user nobody can ever add to a tenant -- signup expects the email not to
-/// exist yet, `admin add-member` expects the user to already exist).
+/// The whole reason `create_user`/`add_member` take `&mut PgConnection` (rather than `&PgPool`, like most of this module) is so a caller can compose them into one transaction: see `create_user`'s doc comment.
+/// This proves that composition actually prevents the bug it's meant to prevent: if `add_member` fails partway through a transaction that already ran `create_user`, rolling back the transaction must leave no orphaned user row behind (an orphan would be a user nobody can ever add to a tenant: signup expects the email not to exist yet, `admin add-member` expects the user to already exist).
 #[sqlx::test(migrations = "../../migrations")]
 async fn create_user_and_add_member_roll_back_together_on_failure(pool: PgPool) {
     let mut tx = pool.begin().await.unwrap();

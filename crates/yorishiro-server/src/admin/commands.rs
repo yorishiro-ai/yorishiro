@@ -106,8 +106,7 @@ pub async fn list_api_keys(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<ApiK
     Ok(rows)
 }
 
-/// Authentication looks up the key in the database on every request, so deleting the row
-/// revokes it immediately.
+/// Authentication looks up the key in the database on every request, so deleting the row revokes it immediately.
 pub async fn revoke_api_key(pool: &PgPool, key_id: Uuid) -> Result<()> {
     let (sql, values) = Query::delete()
         .from_table((Alias::new("identity"), ApiKeys::Table))
@@ -126,9 +125,8 @@ pub struct ResyncReport {
     pub failed: usize,
 }
 
-/// Re-syncs embeddings for entities whose `embedding` column is still NULL. An operational
-/// recovery command for entities that fell out of search due to a failed background sync
-/// (e.g. a transient embedding API outage or a process killed mid-deploy).
+/// Re-syncs embeddings for entities whose `embedding` column is still NULL.
+/// An operational recovery command for entities that fell out of search due to a failed background sync (e.g. a transient embedding API outage or a process killed mid-deploy).
 pub async fn resync_embeddings(
     pool: &PgPool,
     workspace_id: Uuid,

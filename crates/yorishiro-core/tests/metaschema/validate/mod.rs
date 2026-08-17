@@ -144,8 +144,7 @@ fn accepts_valid_object_nesting() {
 
 #[test]
 fn rejects_object_nesting_beyond_max_depth() {
-    // Builds a chain of nested objects `object.properties.child` repeated
-    // MAX_OBJECT_DEPTH + 1 times, exceeding the allowed nesting depth.
+    // Builds a chain of nested objects `object.properties.child` repeated MAX_OBJECT_DEPTH + 1 times, exceeding the allowed nesting depth.
     let mut field = json!({ "type": "string" });
     for _ in 0..=MAX_OBJECT_DEPTH {
         field = json!({

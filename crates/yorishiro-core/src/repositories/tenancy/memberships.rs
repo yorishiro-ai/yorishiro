@@ -19,9 +19,8 @@ pub(super) enum TenantMemberships {
 
 /// Adds (or updates the role of) a user's membership in a tenant.
 ///
-/// Takes `&mut PgConnection` (rather than `&PgPool`) so a caller can compose this with
-/// `create_user` (and anything else) in one transaction -- see `create_user`'s doc comment for
-/// why. Pass `&mut pool.acquire().await?` for a standalone call.
+/// Takes `&mut PgConnection` (rather than `&PgPool`) so a caller can compose this with `create_user` (and anything else) in one transaction: see `create_user`'s doc comment for why.
+/// Pass `&mut pool.acquire().await?` for a standalone call.
 pub async fn add_member(
     conn: &mut PgConnection,
     tenant_id: Uuid,

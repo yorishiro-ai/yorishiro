@@ -1,10 +1,7 @@
-//! RFC 3164 syslog writer for the `syslog` log target. `SyslogMakeWriter` hands
-//! `tracing-subscriber` one `SyslogWriter` per event; each buffers the formatted line and
-//! sends it as a single `/dev/log` datagram on drop, with a priority derived from the event's
-//! level.
+//! RFC 3164 syslog writer for the `syslog` log target.
+//! `SyslogMakeWriter` hands `tracing-subscriber` one `SyslogWriter` per event; each buffers the formatted line and sends it as a single `/dev/log` datagram on drop, with a priority derived from the event's level.
 //!
-//! `/dev/log` is a Unix domain socket, so this whole module is unix-only; the `syslog` log
-//! target itself is rejected at startup on other platforms (see `logging::init`).
+//! `/dev/log` is a Unix domain socket, so this whole module is unix-only; the `syslog` log target itself is rejected at startup on other platforms (see `logging::init`).
 #![cfg(unix)]
 
 use std::io;
@@ -13,8 +10,7 @@ use std::sync::Arc;
 
 use tracing_subscriber::fmt::MakeWriter;
 
-/// RFC 3164 facility code for "user-level messages", the conventional facility for
-/// applications that aren't a system daemon.
+/// RFC 3164 facility code for "user-level messages", the conventional facility for applications that aren't a system daemon.
 const FACILITY_USER: u8 = 1;
 
 #[derive(Clone)]
@@ -36,8 +32,7 @@ impl<'a> MakeWriter<'a> for SyslogMakeWriter {
 
 /// Maps a tracing level to its RFC 5424 severity number.
 ///
-/// `pub` (rather than private) solely so the crate-root `tests/` integration tests -- which
-/// only see this crate's public API -- can exercise this mapping directly.
+/// `pub` (rather than private) solely so the crate-root `tests/` integration tests (which only see this crate's public API) can exercise this mapping directly.
 pub fn severity_for_level(level: tracing::Level) -> u8 {
     match level {
         tracing::Level::ERROR => 3,
@@ -48,8 +43,7 @@ pub fn severity_for_level(level: tracing::Level) -> u8 {
 }
 
 impl SyslogMakeWriter {
-    /// `pub` (rather than private) solely so `tests/` can construct a writer at a specific
-    /// severity directly, rather than only through the `MakeWriter` trait.
+    /// `pub` (rather than private) solely so `tests/` can construct a writer at a specific severity directly, rather than only through the `MakeWriter` trait.
     pub fn writer_for_severity(&self, severity: u8) -> SyslogWriter {
         SyslogWriter {
             socket: self.socket.clone(),
@@ -59,10 +53,8 @@ impl SyslogMakeWriter {
     }
 }
 
-/// One instance is created per log event (via `make_writer_for`) and dropped right after
-/// `tracing-subscriber` finishes formatting into it. Buffering until that drop, rather than
-/// sending on every `write` call, guarantees the whole formatted line goes out as a single
-/// syslog datagram instead of being split across several.
+/// One instance is created per log event (via `make_writer_for`) and dropped right after `tracing-subscriber` finishes formatting into it.
+/// Buffering until that drop, rather than sending on every `write` call, guarantees the whole formatted line goes out as a single syslog datagram instead of being split across several.
 pub struct SyslogWriter {
     socket: Arc<UnixDatagram>,
     severity: u8,

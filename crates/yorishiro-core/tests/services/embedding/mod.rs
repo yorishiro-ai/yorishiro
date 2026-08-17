@@ -33,8 +33,7 @@ impl EmbeddingProvider for EmptyProvider {
     }
 }
 
-/// `embed` is a provided method: every implementor gets it for free by delegating to
-/// `embed_batch`, so the delegation itself is what needs covering.
+/// `embed` is a provided method: every implementor gets it for free by delegating to `embed_batch`, so the delegation itself is what needs covering.
 #[tokio::test]
 async fn embed_delegates_to_embed_batch_and_returns_the_first_vector() {
     let embedded = StubProvider.embed("abcd").await.unwrap();
@@ -42,8 +41,7 @@ async fn embed_delegates_to_embed_batch_and_returns_the_first_vector() {
     assert_eq!(embedded, vec![4.0, 0.0, 0.0]);
 }
 
-/// A provider returning nothing would otherwise surface as a panic or a silently wrong vector;
-/// the default implementation turns it into an `Internal` error instead.
+/// A provider returning nothing would otherwise surface as a panic or a silently wrong vector; the default implementation turns it into an `Internal` error instead.
 #[tokio::test]
 async fn embed_reports_an_internal_error_when_the_provider_returns_nothing() {
     let error = EmptyProvider.embed("anything").await.unwrap_err();

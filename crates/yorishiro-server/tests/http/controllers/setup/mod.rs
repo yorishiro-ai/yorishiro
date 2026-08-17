@@ -55,9 +55,8 @@ fn app(pool: PgPool) -> Router {
     build_app(state, no_static_fallback())
 }
 
-/// `sqlx::test` runs each test on its own single-threaded runtime, so holding a non-`Send`
-/// `MutexGuard` across an `.await` is sound here. See `crate::max_tenants_env_lock`
-/// for why this lock is shared crate-wide rather than private to this module.
+/// `sqlx::test` runs each test on its own single-threaded runtime, so holding a non-`Send` `MutexGuard` across an `.await` is sound here.
+/// See `crate::max_tenants_env_lock` for why this lock is shared crate-wide rather than private to this module.
 #[sqlx::test(migrations = "../../migrations")]
 #[allow(clippy::await_holding_lock)]
 async fn status_reports_setup_not_required_when_wizard_disabled(pool: PgPool) {

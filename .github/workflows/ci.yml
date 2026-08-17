@@ -46,7 +46,7 @@ jobs:
           components: rustfmt, clippy
 
       # The SPA is embedded into the binary from `ee/web/dist`, which is a build output and is
-      # not committed -- so it has to be built before any cargo step, or `embeds_a_built_spa`
+      # not committed: it has to be built before any cargo step, or `embeds_a_built_spa`
       # fails and every other web test passes against an empty embed. `pnpm run check` is the
       # web side's own gate (lint, format, typecheck, vitest) and ends in the build, so one step
       # covers both.
@@ -78,13 +78,12 @@ jobs:
           # default cache targets (~/.cargo, ./target), so without caching this the linker
           # fails to find the library on the second and later warm-cache CI runs.
           cache-directories: ~/.cache/ort.pyke.io
-          # Shared with clippy-suggestions.yml (same shared-key) so that workflow -- which never
-          # runs on master and so can never save under its own job-scoped key -- can still
+          # Shared with clippy-suggestions.yml (same shared-key): that workflow never
+          # runs on master and so can never save under its own job-scoped key, but can still
           # restore the cache master writes here.
           shared-key: rust
-          # PRs can only ever restore from master's cache and their own -- never write back to
-          # master's key -- so only master needs to save. Letting every PR save left a growing
-          # pile of per-branch caches that never got cleaned up until GitHub's 7-day/10GB evictions.
+          # PRs can only ever restore from master's cache and their own, never write back to
+          # master's key, so only master needs to save.
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache
@@ -182,7 +181,7 @@ jobs:
 
       # Handed to `package-install` rather than rebuilt there: these are the same release
       # binaries the two steps above just scanned, so the job that installs them tests the
-      # artifact the gates passed -- and skips a second cold ort/tokenizers build.
+      # artifact the gates passed, and skips a second cold ort/tokenizers build.
       - uses: actions/upload-artifact@v4
         with:
           name: release-binaries
@@ -202,7 +201,7 @@ jobs:
   #
   # It pulls five public images (four distributions plus postgres). A failure whose message is
   # about pulling rather than about a package is Docker Hub's unauthenticated rate limit on a
-  # shared runner, not a packaging fault -- rerun, and authenticate the pulls if it recurs.
+  # shared runner, not a packaging fault: rerun, and authenticate the pulls if it recurs.
   package-install:
     runs-on: ubuntu-latest
     needs: check
@@ -226,7 +225,7 @@ jobs:
 
       # Pinned: an unpinned install makes nfpm's next release able to break this job on a
       # commit that changed nothing. Checksum-verified as well, the same way release.yml does
-      # it -- a pinned version still trusts whatever that URL serves, and this builds the
+      # it: a pinned version still trusts whatever that URL serves, and this builds the
       # artifacts the release publishes. Keep the version in step with release.yml's
       # NFPM_VERSION, so CI tests the packager that ships.
       - name: Install nfpm
@@ -256,9 +255,9 @@ jobs:
 
       # Starting the service is a different claim from installing it, and nothing above makes
       # it: `systemd-analyze verify` checks unit syntax, and every other case here runs the
-      # binary directly. Both defects this catches were invisible until systemd itself ran the
-      # unit -- a comment naming a path dpkg deletes, and an unconfigured start that retried
-      # every five seconds forever while `is-failed` answered `activating`.
+      # binary directly. Both defects this catches stay invisible unless systemd itself runs the
+      # unit: a comment naming a path dpkg deletes, and an unconfigured start that retries
+      # forever while `is-failed` answers `activating`.
       #
       # Same job rather than its own, so the packages built above are reused; only this step
       # needs a privileged container, and `test-install.sh` stays runnable without one.
@@ -274,12 +273,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   # Verifies the built binary actually boots and serves traffic, not just that it compiles
-  # and its unit/integration tests pass -- `check` above never starts the real `main()`, so a
+  # and its unit/integration tests pass: `check` above never starts the real `main()`, so a
   # startup-only failure (a panicking `.expect()` in config/provider construction, a missing
   # env var only main.rs reads) would otherwise ship unnoticed until a real deploy.
-  # The release builds this image; nothing before it did, so a Dockerfile that no longer
-  # matches the binaries it copies only failed at release time -- which is exactly what
-  # happened when the binary was renamed and three lines here were not.
+  # The release builds this image; nothing before it does. Without this job, a Dockerfile
+  # that no longer matches the binaries it copies would only fail at release time.
   #
   # amd64 only, and no push: this is asking whether the file still describes a buildable,
   # runnable image, not reproducing the release's multi-arch publish.
@@ -309,8 +307,8 @@ jobs:
   package-smoke:
     runs-on: ubuntu-latest
     # A cold `cargo build` here pulls in ort/tokenizers same as `check`'s clippy/test steps do,
-    # but doesn't reuse their compiled artifacts (debug profile, different step) -- generous
-    # even with the warm shared-key cache so a slow cold run doesn't misread as a real failure.
+    # but doesn't reuse their compiled artifacts (debug profile, different step). The timeout
+    # stays generous even with the warm shared-key cache, so a slow cold run doesn't misread as a real failure.
     timeout-minutes: 15
 
     services:
@@ -331,9 +329,9 @@ jobs:
     env:
       DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
       # The default "local" provider requires ONNX model files that aren't checked into git
-      # (docker-compose mounts them from disk instead -- see models/ in .gitignore), so a bare
-      # CI checkout can't load it. "openai" only builds an HTTP client at startup -- it never
-      # connects until an actual embed() call, which this smoke test never makes -- so a
+      # (docker-compose mounts them from disk instead, see models/ in .gitignore), so a bare
+      # CI checkout can't load it. "openai" only builds an HTTP client at startup: it never
+      # connects until an actual embed() call, which this smoke test never makes, so a
       # non-resolving placeholder URL is enough to boot without needing a real endpoint.
       YORISHIRO_EMBEDDING_PROVIDER: openai
       YORISHIRO_EMBEDDING_BASE_URL: http://localhost:1
@@ -352,7 +350,7 @@ jobs:
           shared-key: rust
           save-if: false
 
-      # After rust-cache -- see the note in the `check` job above.
+      # After rust-cache: see the note in the `check` job above.
       - name: Route rustc through sccache
         run: |
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"

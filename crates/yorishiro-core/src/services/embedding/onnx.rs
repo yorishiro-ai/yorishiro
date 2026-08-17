@@ -11,59 +11,48 @@ use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 use super::{EmbedKind, EmbeddingProvider};
 use crate::error::YorishiroError;
 
-/// Lower bound for `max_sequence_length`. tokenizers subtracts the number of
-/// special tokens (2-3 for BERT-family models) from `max_length` during
-/// truncation, so a value below that underflows (in release builds this wraps
-/// around, silently disabling truncation). There's no practical use for an
-/// extremely short sequence length either, so we reject with a comfortable margin.
+/// Lower bound for `max_sequence_length`.
+/// tokenizers subtracts the number of special tokens (2-3 for BERT-family models) from `max_length` during truncation, so a value below that underflows (in release builds this wraps around, silently disabling truncation).
+/// There's no practical use for an extremely short sequence length either, so we reject with a comfortable margin.
 const MIN_SEQUENCE_LENGTH: usize = 16;
 
-/// Upper bound on wait time for a single embed call. Inference is serialized
-/// within the process, so this guards against unbounded waits when prior
-/// requests pile up (the local equivalent of the OpenAI-compatible provider's
-/// HTTP timeout).
+/// Upper bound on wait time for a single embed call.
+/// Inference is serialized within the process, so this guards against unbounded waits when prior requests pile up (the local equivalent of the OpenAI-compatible provider's HTTP timeout).
 const EMBED_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct LocalOnnxConfig {
     pub model_path: PathBuf,
     pub tokenizer_path: PathBuf,
     /// Expected output dimensionality (e.g. 768 for all-mpnet-base-v2).
-    /// `load` runs a probe inference and fails startup if the model's actual
-    /// output dimension doesn't match.
+    /// `load` runs a probe inference and fails startup if the model's actual output dimension doesn't match.
     pub dimensions: usize,
-    /// Maximum sequence length for tokenization. Text longer than this is truncated.
+    /// Maximum sequence length for tokenization.
+    /// Text longer than this is truncated.
     pub max_sequence_length: usize,
-    /// How token embeddings are reduced to one vector. Must match what the model was trained
-    /// with; see [`Pooling`].
+    /// How token embeddings are reduced to one vector.
+    /// Must match what the model was trained with; see [`Pooling`].
     pub pooling: Pooling,
-    /// Instruction prefixed to search queries, and to queries only. Qwen3-Embedding expects
-    /// `Instruct: {task}\nQuery:{text}`; symmetric models want this unset. `None` embeds
-    /// queries exactly as documents.
+    /// Instruction prefixed to search queries, and to queries only.
+    /// Qwen3-Embedding expects `Instruct: {task}\nQuery:{text}`; symmetric models want this unset.
+    /// `None` embeds queries exactly as documents.
     pub query_instruction: Option<String>,
 }
 
-/// Provider that generates embeddings using a local ONNX model (BERT-family
-/// encoder). Has no runtime dependency on external services, making it
-/// suitable for closed/offline environments.
+/// Provider that generates embeddings using a local ONNX model (BERT-family encoder).
+/// Has no runtime dependency on external services, making it suitable for closed/offline environments.
 ///
-/// Note: because of the `ort` crate's default `download-binaries` feature,
-/// **building** this crate downloads the onnxruntime binary from cdn.pyke.io.
-/// If even the build environment must be closed off, point `ORT_LIB_LOCATION`
-/// at a pre-provisioned onnxruntime instead (see README).
+/// Note: because of the `ort` crate's default `download-binaries` feature, **building** this crate downloads the onnxruntime binary from cdn.pyke.io.
+/// If even the build environment must be closed off, point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime instead (see README).
 ///
 /// Model requirements:
-/// - Inputs: `input_ids` and `attention_mask` (both int64). `token_type_ids`
-///   is only passed if the model declares it.
-/// - Output: the first output must be a `[batch, seq, hidden]` last_hidden_state,
-///   the shape produced by sentence-transformers ONNX exports.
+/// - Inputs: `input_ids` and `attention_mask` (both int64).
+///   `token_type_ids` is only passed if the model declares it.
+/// - Output: the first output must be a `[batch, seq, hidden]` last_hidden_state, the shape produced by sentence-transformers ONNX exports.
 ///
-/// Token embeddings are aggregated into a sentence vector via mean pooling
-/// weighted by the attention mask, then L2-normalized for stable cosine-distance
-/// search.
+/// Token embeddings are aggregated into a sentence vector via mean pooling weighted by the attention mask, then L2-normalized for stable cosine-distance search.
 pub struct LocalOnnxProvider {
     // `Session::run` requires `&mut self`, hence the Mutex for serialization.
-    // Inference itself already uses intra-op parallelism across CPU cores, so
-    // serializing inference within the process costs little throughput.
+    // Inference itself already uses intra-op parallelism across CPU cores, so serializing inference within the process costs little throughput.
     inner: Arc<Inner>,
 }
 
@@ -83,9 +72,8 @@ fn internal(message: impl std::fmt::Display) -> YorishiroError {
 }
 
 impl LocalOnnxProvider {
-    /// Loads the model and tokenizer from files, validating output
-    /// dimensionality via a probe inference. This blocks for hundreds of ms to
-    /// a few seconds, so call it once at startup only.
+    /// Loads the model and tokenizer from files, validating output dimensionality via a probe inference.
+    /// This blocks for hundreds of ms to a few seconds, so call it once at startup only.
     pub fn load(config: LocalOnnxConfig) -> Result<Self, YorishiroError> {
         if config.max_sequence_length < MIN_SEQUENCE_LENGTH {
             return Err(internal(format!(
@@ -126,8 +114,7 @@ impl LocalOnnxProvider {
             .inputs()
             .iter()
             .any(|outlet| outlet.name() == "token_type_ids");
-        // Decoder-style exports (Qwen3-Embedding among them) declare position_ids and fail the
-        // whole inference without it, where encoder exports derive positions internally.
+        // Decoder-style exports (Qwen3-Embedding among them) declare position_ids and fail the whole inference without it, where encoder exports derive positions internally.
         let needs_position_ids = session
             .inputs()
             .iter()
@@ -149,9 +136,8 @@ impl LocalOnnxProvider {
             query_instruction: config.query_instruction,
         };
 
-        // Dimension mismatches must be caught here (at server startup). If
-        // undetected until the first entity write, embeddings would silently
-        // keep failing in production.
+        // Dimension mismatches must be caught here (at server startup).
+        // If undetected until the first entity write, embeddings would silently keep failing in production.
         inner.embed_blocking(&["dimension probe".to_string()])?;
 
         Ok(Self {
@@ -204,17 +190,14 @@ impl Inner {
             inputs.push(("token_type_ids".into(), to_tensor(token_type_ids)?.into()));
         }
         if self.needs_position_ids {
-            // 0..seq per row. Padding is right-side, so every real token sits at the position
-            // it would have unpadded and the trailing pad positions are never attended to.
+            // 0..seq per row.
+            // Padding is right-side, so every real token sits at the position it would have unpadded and the trailing pad positions are never attended to.
             let position_ids: Vec<i64> = (0..batch).flat_map(|_| 0..seq as i64).collect();
             inputs.push(("position_ids".into(), to_tensor(position_ids)?.into()));
         }
 
-        // Recovers from poisoning: even if a panic occurs while the lock is
-        // held, the Session carries no state across inferences (`&mut` is only
-        // an artifact of ort's API), so the invariant isn't actually broken.
-        // Permanently disabling embedding until a process restart over a
-        // poison would cause more harm.
+        // Recovers from poisoning: even if a panic occurs while the lock is held, the Session carries no state across inferences (`&mut` is only an artifact of ort's API), so the invariant isn't actually broken.
+        // Permanently disabling embedding until a process restart over a poison would cause more harm.
         let mut session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
         let outputs = session
             .run(inputs)
@@ -255,18 +238,14 @@ impl Inner {
 }
 
 /// Averages only tokens where the attention mask is 1, then L2-normalizes.
-/// Returns a zero vector if every token is masked (this doesn't happen in
-/// practice since special tokens are always present).
+/// Returns a zero vector if every token is masked (this doesn't happen in practice since special tokens are always present).
 ///
-/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
-/// it directly; `#[doc(hidden)]` keeps it out of the public API docs.
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call it directly; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 /// How token embeddings are reduced to one sentence vector.
 ///
-/// This is a property of the model, not a preference: a model trained with one and read with
-/// the other returns vectors that are still the right shape and still normalize, so nothing
-/// fails — the search results just quietly get worse. Sentence-transformers exports (BERT-style,
-/// bge-small, multilingual-e5) want `Mean`; the Qwen3-Embedding family wants `LastToken`.
+/// This is a property of the model, not a preference: a model trained with one and read with the other returns vectors that are still the right shape and still normalize, so nothing fails: the search results just quietly get worse.
+/// Sentence-transformers exports (BERT-style, bge-small, multilingual-e5) want `Mean`; the Qwen3-Embedding family wants `LastToken`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Pooling {
     /// Mean of the unmasked token embeddings.
@@ -277,9 +256,8 @@ pub enum Pooling {
 }
 
 impl Pooling {
-    /// Parses the `YORISHIRO_ONNX_POOLING` value. Unknown values are rejected rather than defaulted:
-    /// silently falling back to `Mean` is exactly the quiet degradation this type exists to
-    /// prevent.
+    /// Parses the `YORISHIRO_ONNX_POOLING` value.
+    /// Unknown values are rejected rather than defaulted: silently falling back to `Mean` is exactly the quiet degradation this type exists to prevent.
     pub fn parse(value: &str) -> Result<Self, YorishiroError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "mean" => Ok(Self::Mean),
@@ -301,9 +279,8 @@ fn l2_normalize(vector: &mut [f32]) {
     }
 }
 
-/// Takes the last unmasked token's embedding. Padding is right-side for these models, so the
-/// last unmasked position is the end of the actual text; falling back to position 0 for an
-/// all-masked row keeps the function total.
+/// Takes the last unmasked token's embedding.
+/// Padding is right-side for these models, so the last unmasked position is the end of the actual text; falling back to position 0 for an all-masked row keeps the function total.
 pub fn last_token_pool_normalized(
     token_embeddings: &[f32],
     attention_mask: &[i64],
@@ -369,19 +346,17 @@ impl EmbeddingProvider for LocalOnnxProvider {
         self.inner.dimensions
     }
 
-    /// Counted exactly: this provider already holds the tokenizer the model uses, so the
-    /// number is the one the model will actually see rather than an estimate of it.
+    /// Counted exactly: this provider already holds the tokenizer the model uses, so the number is the one the model will actually see rather than an estimate of it.
     fn count_tokens(&self, text: &str) -> u32 {
         match self.inner.tokenizer.encode(text, false) {
             Ok(encoding) => u32::try_from(encoding.len()).unwrap_or(u32::MAX),
-            // A text this tokenizer cannot encode is one the model could not embed either;
-            // the request is about to fail on its own, so fall back rather than decide here.
+            // A text this tokenizer cannot encode is one the model could not embed either; the request is about to fail on its own, so fall back rather than decide here.
             Err(_) => u32::try_from(text.len().div_ceil(4)).unwrap_or(u32::MAX),
         }
     }
 
-    /// Prefixes the configured instruction to queries, and only to queries. With no instruction
-    /// configured this is exactly `embed`, which is what every symmetric model wants.
+    /// Prefixes the configured instruction to queries, and only to queries.
+    /// With no instruction configured this is exactly `embed`, which is what every symmetric model wants.
     async fn embed_as(&self, kind: EmbedKind, text: &str) -> Result<Vec<f32>, YorishiroError> {
         match (kind, self.inner.query_instruction.as_deref()) {
             (EmbedKind::Query, Some(instruction)) => {
@@ -393,11 +368,8 @@ impl EmbeddingProvider for LocalOnnxProvider {
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        // ONNX inference is CPU-bound and blocks for tens to hundreds of ms, so
-        // it's offloaded to the blocking pool to avoid stalling tokio worker
-        // threads. On timeout, the blocking task itself still runs to
-        // completion (it can't be cancelled), but the caller returns an error
-        // immediately instead of waiting, freeing up whatever resources it holds.
+        // ONNX inference is CPU-bound and blocks for tens to hundreds of ms, so it's offloaded to the blocking pool to avoid stalling tokio worker threads.
+        // On timeout, the blocking task itself still runs to completion (it can't be cancelled), but the caller returns an error immediately instead of waiting, freeing up whatever resources it holds.
         let texts: Vec<String> = texts.iter().map(|text| text.to_string()).collect();
         let inner = Arc::clone(&self.inner);
         let task = tokio::task::spawn_blocking(move || inner.embed_blocking(&texts));

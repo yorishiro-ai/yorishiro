@@ -28,8 +28,8 @@ services:
       YORISHIRO_BIND: 0.0.0.0:8080
       RUST_LOG: info
       # Lets a dashboard SPA served from a different origin call this API cross-origin.
-      # Deployments that never need that can leave this unset -- an empty value disables CORS
-      # entirely, same as before this existed.
+      # Deployments that never need that can leave this unset: an empty value disables CORS
+      # entirely.
       YORISHIRO_CORS_ORIGINS: http://localhost:8080
       # These already match the binary's built-in defaults (single-tenant cap that also gates
       # the first-run setup wizard, local ONNX embedding provider reading models/model.onnx +

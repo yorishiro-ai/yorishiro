@@ -64,12 +64,9 @@ impl InviteRow {
     }
 }
 
-/// Creates an invite token for `email` to join `tenant_id` with `role`. Returns the record
-/// alongside the plaintext token: like API keys, only its SHA-256 hash is persisted (a KDF
-/// like argon2 isn't needed here either, for the same reason -- the token already carries
-/// enough entropy that offline brute-forcing isn't realistic), so this is the only place the
-/// plaintext is ever available. Callers must surface it themselves (e.g. print it, or send it
-/// by email once a transactional-email integration exists).
+/// Creates an invite token for `email` to join `tenant_id` with `role`.
+/// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted (a KDF like argon2 isn't needed here either, for the same reason: the token already carries enough entropy that offline brute-forcing isn't realistic), so this is the only place the plaintext is ever available.
+/// Callers must surface it themselves (e.g. print it, or send it by email once a transactional-email integration exists).
 pub async fn create_invite(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -111,10 +108,8 @@ pub async fn create_invite(
     Ok((row.into_record()?, token))
 }
 
-/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it
-/// grants, or `None` if the token doesn't match any invite, is already used, or has expired.
-/// The lookup and the `used_at` update happen in a single statement so two concurrent
-/// redemptions of the same token can't both succeed.
+/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it grants, or `None` if the token doesn't match any invite, is already used, or has expired.
+/// The lookup and the `used_at` update happen in a single statement so two concurrent redemptions of the same token can't both succeed.
 pub async fn redeem_invite(
     pool: &PgPool,
     raw_token: &str,

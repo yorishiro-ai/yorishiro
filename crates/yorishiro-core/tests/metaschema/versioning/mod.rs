@@ -293,8 +293,7 @@ fn description_only_change_is_non_breaking() {
     assert!(!d.is_breaking, "reasons: {:?}", d.reasons);
 }
 
-/// Builds a two-version pair of the same single field, so a test only has to state the two
-/// attribute sets it cares about.
+/// Builds a two-version pair of the same single field, so a test only has to state the two attribute sets it cares about.
 fn diff_field(
     old_attrs: serde_json::Value,
     new_attrs: serde_json::Value,
@@ -313,13 +312,11 @@ fn diff_field(
     diff(&build(old_attrs), &build(new_attrs))
 }
 
-/// Every constraint that can invalidate data which was valid a moment ago. A schema author who
-/// tightens one of these and is told the change is compatible will overwrite the live version in
-/// place, and existing records stop validating with no new version to roll back to.
+/// Every constraint that can invalidate data which was valid a moment ago.
+/// A schema author who tightens one of these and is told the change is compatible will overwrite the live version in place, and existing records stop validating with no new version to roll back to.
 ///
-/// `maximum`/`maxLength`/`maxItems` are here for a reason that the "raised its minimum" cases do
-/// not share: those three compare `new < old`, and `Option`'s ordering puts `None` *below* every
-/// `Some`, so `Some(10) < None` is false. Adding a ceiling where there was none went undetected.
+/// `maximum`/`maxLength`/`maxItems` are here for a reason that the "raised its minimum" cases do not share: those three compare `new < old`, and `Option`'s ordering puts `None` *below* every `Some`, so `Some(10) < None` is false.
+/// Adding a ceiling where there was none went undetected.
 #[test]
 fn tightening_a_constraint_is_breaking() {
     for (label, old_attrs, new_attrs) in [
@@ -390,8 +387,8 @@ fn tightening_a_constraint_is_breaking() {
     }
 }
 
-/// The mirror image. Widening a constraint can only make previously-invalid data valid, so it
-/// must not force a new version -- otherwise every relaxation costs a migration for nothing.
+/// The mirror image.
+/// Widening a constraint can only make previously-invalid data valid, so it must not force a new version: otherwise every relaxation costs a migration for nothing.
 #[test]
 fn loosening_a_constraint_is_non_breaking() {
     for (label, old_attrs, new_attrs) in [

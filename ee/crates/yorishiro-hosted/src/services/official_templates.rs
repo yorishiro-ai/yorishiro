@@ -6,17 +6,17 @@ use yorishiro_core::error::YorishiroError;
 
 /// The tenant that owns the officially published templates.
 ///
-/// A fixed id rather than a lookup by name, so re-running the seed finds the same row and a
-/// deployment that renames it does not end up with two publishers.
+/// A fixed id rather than a lookup by name, so re-running the seed finds the same row and a deployment that renames it does not end up with two publishers.
 pub const OFFICIAL_TENANT_ID: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0001);
 
-/// Shown as the listing's author. `identity.templates.author` is free text, so this does not
-/// require a user account.
+/// Shown as the listing's author.
+/// `identity.templates.author` is free text, so this does not require a user account.
 pub const OFFICIAL_AUTHOR: &str = "Yorishiro";
 
 const OFFICIAL_TENANT_NAME: &str = "Yorishiro Official";
 
-/// What one seeding run did. Callers report it; nothing branches on it.
+/// What one seeding run did.
+/// Callers report it; nothing branches on it.
 #[derive(Debug, Default)]
 pub struct SeedOutcome {
     pub published: Vec<String>,
@@ -26,16 +26,12 @@ pub struct SeedOutcome {
 
 /// Publishes the community edition's built-in templates as official marketplace listings.
 ///
-/// The publisher is a tenant row with **no members and no workspaces**: `identity.templates`
-/// requires a `tenant_id`, and the marketplace scopes ownership by it, so a listing has to
-/// belong to some tenant. Nobody can log into this one -- there is no membership to log in
-/// through -- and it holds no data of its own. It exists to satisfy the foreign key and to give
-/// official listings a stable owner, not to be used.
+/// The publisher is a tenant row with **no members and no workspaces**: `identity.templates` requires a `tenant_id`, and the marketplace scopes ownership by it, so a listing has to belong to some tenant.
+/// Nobody can log into this one (there is no membership to log in through) and it holds no data of its own.
+/// It exists to satisfy the foreign key and to give official listings a stable owner, not to be used.
 ///
-/// Idempotent, and safe to run on every deployment: a template is matched by
-/// `(tenant_id, name)`, and a new version is published only when the built-in definition
-/// differs from the latest one already published. Re-running with unchanged built-ins writes
-/// nothing.
+/// Idempotent, and safe to run on every deployment: a template is matched by `(tenant_id, name)`, and a new version is published only when the built-in definition differs from the latest one already published.
+/// Re-running with unchanged built-ins writes nothing.
 pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, YorishiroError> {
     ensure_official_tenant(pool).await?;
 
@@ -53,9 +49,7 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
         )
         .await?;
 
-        // Compare against the newest version of any status, not just `stable`: publishing a
-        // fresh version every run would otherwise walk the version number up forever while the
-        // definition stayed the same.
+        // Compare against the newest version of any status, not just `stable`: publishing a fresh version every run would otherwise walk the version number up forever while the definition stayed the same.
         let latest: Option<(i32, serde_json::Value)> = sqlx::query(
             "SELECT version, definition FROM identity.template_versions \
              WHERE template_id = $1 ORDER BY version DESC LIMIT 1",
@@ -81,15 +75,11 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
             None => outcome.published.push(summary.id.clone()),
         }
 
-        // Same read-then-write race as `marketplace::publish_version`, and the same remedy: the
-        // version is read by `max(version) + 1` inside the inserting statement, which locks no
-        // range at READ COMMITTED. Two deployments seeding at once -- a rolling restart is
-        // enough -- would otherwise both compute the same number and one would fail on
-        // `UNIQUE (template_id, version)`.
+        // Same read-then-write race as `marketplace::publish_version`, and the same remedy: the version is read by `max(version) + 1` inside the inserting statement, which locks no range at READ COMMITTED.
+        // Two deployments seeding at once (a rolling restart is enough) would otherwise both compute the same number and one would fail on `UNIQUE (template_id, version)`.
         //
-        // `stable` rather than `draft`: a draft is visible only to its owning tenant, and this
-        // tenant has no members to view it. An official template that nobody can see is the
-        // same as not publishing it.
+        // `stable` rather than `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
+        // An official template that nobody can see is the same as not publishing it.
         let mut tx = pool.begin().await.internal()?;
         db::lock_for_update(&mut tx, &format!("template-version:{template_id}"))
             .await
@@ -113,9 +103,8 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
 }
 
 async fn ensure_official_tenant(pool: &PgPool) -> Result<(), YorishiroError> {
-    // Written directly rather than through `create_tenant`, which enforces
-    // `YORISHIRO_MAX_TENANTS`. The publisher is infrastructure, not a customer, and a
-    // deployment sitting at its tenant cap still needs its official templates.
+    // Written directly rather than through `create_tenant`, which enforces `YORISHIRO_MAX_TENANTS`.
+    // The publisher is infrastructure, not a customer, and a deployment sitting at its tenant cap still needs its official templates.
     sqlx::query(
         "INSERT INTO identity.tenants (id, name) VALUES ($1, $2) \
          ON CONFLICT (id) DO NOTHING",

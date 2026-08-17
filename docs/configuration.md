@@ -13,14 +13,7 @@ Every setting also has an environment variable, named in `config.example.yml` be
 That is what makes container deployments and one-off overrides work without editing anything: set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or the shell.
 Nothing requires them.
 
-## The `YSR_` prefix is deprecated
-
 Every variable is named `YORISHIRO_*`.
-The old `YSR_*` names are still accepted: the server copies each onto its replacement at startup and prints a warning naming both.
-The `YORISHIRO_HOSTED_*` names are accepted the same way: `YSR_WEB_DIR` and `YORISHIRO_HOSTED_WEB_DIR` both mean `YORISHIRO_WEB_DIR`.
-Setting the new name alongside an old one uses the new value.
-
-The rename happens before `config.yml` is read, so an exported old name still beats a value in the file, exactly as the new name would.
 
 ## config.yml
 

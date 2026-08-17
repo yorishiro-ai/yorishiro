@@ -16,7 +16,8 @@ use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateEntityArgs {
-    /// Name of the schema this entity conforms to. The tenant's current active version is used.
+    /// Name of the schema this entity conforms to.
+    /// The tenant's current active version is used.
     pub schema_name: String,
     /// entity_type name declared in the schema.
     pub entity_type: String,
@@ -32,7 +33,8 @@ pub struct GetEntityArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateEntityArgs {
     pub id: Uuid,
-    /// Replacement entity body. Validated against the schema version in effect when the entity was created.
+    /// Replacement entity body.
+    /// Validated against the schema version in effect when the entity was created.
     pub data: Value,
 }
 
@@ -181,7 +183,7 @@ impl YorishiroMcpServer {
         description = "Count what migrating a schema's entities to its active version would \
                            face, without doing it (requires read scope). Reports how many are \
                            current, how many are behind but still valid, and how many lack a \
-                           field the active version requires — the last being the work a \
+                           field the active version requires: the last being the work a \
                            migration would have to fill in."
     )]
     pub async fn migration_dry_run(

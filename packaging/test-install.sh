@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
 # Installs the packages in the distributions they claim to support, and checks what an operator
-# actually gets. Every case here is a bug that shipped: a package that installed and then could
-# not start, a licence file dpkg deleted on install, an unconfigured start that printed a Rust
-# panic naming a source file.
+# actually gets: a package that installs and then cannot start, a licence file dpkg deletes on
+# install, an unconfigured start that prints a Rust panic naming a source file.
 #
-# None of that is visible from the package contents -- all three passed inspection. The test is
-# the install.
+# None of that is visible from the package contents: a package passes inspection and still fails
+# the install. The test is the install.
 #
 #   ./packaging/test-install.sh <directory holding the .deb and .rpm files>
 #
@@ -67,8 +66,8 @@ note "every file the package declares survives the install"
 # `path-exclude=/usr/share/doc/*` deletes at unpack, silently, so a package can contain a file
 # it does not deliver.
 #
-# It found one. `ee/LICENSE` shipped as `/usr/share/doc/yorishiro-ee/copyright.ee`, and the
-# `path-include` covers the name `copyright` exactly -- so the enterprise edition delivered
+# `ee/LICENSE` shipping as `/usr/share/doc/yorishiro-ee/copyright.ee` is exactly that case: the
+# `path-include` covers the name `copyright` exactly, so the enterprise edition would deliver
 # everything except the licence it is distributed under, on every minimal image.
 check_declared_files() {
   pkg="$1" label="$2"
@@ -111,7 +110,7 @@ note "rpm on fedora:39 — glibc $GLIBC_FLOOR exactly, the tightest supported ca
 # --------------------------------------------------------------------------------------------
 # The rpm's *positive* path had no coverage at all: it was only ever seen refusing on Rocky 9.
 #
-# fedora:39 specifically, because its glibc is 2.38 -- the floor exactly, so this is the
+# fedora:39 specifically, because its glibc is 2.38: the floor exactly, so this is the
 # tightest system the packages claim to support. Replacing it needs a distro at whatever the
 # floor then is, not merely a newer Fedora, or the boundary stops being tested. The image is
 # EOL and its repositories may be gone; installing a local rpm whose dependencies are already
@@ -130,8 +129,7 @@ for want in RUNS COPYRIGHT USER; do
 done
 
 # The community rpm too. Four packages are built and it would otherwise be the only one never
-# installed anywhere -- the same gap the paid rpm had before this file existed. A separate
-# container because the two packages conflict.
+# installed anywhere. A separate container because the two packages conflict.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm_ce)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro-server --help >/dev/null 2>&1 && echo "RUNS"
@@ -166,10 +164,9 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
 
 # 78 (EX_CONFIG), not 1. The units set `RestartPreventExitStatus=78`, so this number is what
 # stops an unconfigured `enable --now` from restarting every five seconds forever while
-# `systemctl is-failed` answers `activating` -- measured at 15 restarts in 45 seconds before it
-# existed. A database that is merely not up yet must keep exiting 1 and keep being retried, so
-# the two cases have to stay distinguishable; `a missing database still retries` below is the
-# other half of that pair.
+# `systemctl is-failed` still answers `activating`. A database that is merely not up yet must
+# keep exiting 1 and keep being retried, so the two cases have to stay distinguishable;
+# `a missing database still retries` below is the other half of that pair.
 if grep -q '^EXIT:78$' <<<"$out"; then
   ok "an absent DATABASE_URL exits 78 (EX_CONFIG)"
 else
@@ -187,9 +184,9 @@ else
 fi
 
 # The other half of the pair above. If an unreachable database also exited 78 the units would
-# stop retrying it, turning a boot-order race with a same-host postgres -- which resolves itself
-# in seconds -- into a permanently failed unit. Verified live: with the database arriving late,
-# the service self-heals on its sixth restart.
+# stop retrying it, turning a boot-order race with a same-host postgres (which resolves itself
+# in seconds) into a permanently failed unit. With the database arriving late, the service
+# self-heals on its sixth restart.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
@@ -214,7 +211,7 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   [ -f /usr/share/doc/yorishiro-ce/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "HAS_EE_LICENCE"
   # Anchored at both ends: `Conflicts: yorishiro` also matches `yorishiro-ee` as a prefix, so
-  # the loose form kept passing after the package was renamed while asserting nothing.
+  # an unanchored form would pass while asserting nothing.
   dpkg -s yorishiro-ce 2>/dev/null | grep -qiE "^Conflicts: yorishiro-ee *$" && echo "CONFLICTS"
   # The community binary has to answer for itself, not merely respond to --help: it is a
   # different executable at the same path, headless, with none of `ee/` composed in.
@@ -341,15 +338,15 @@ docker network rm "$NET" >/dev/null 2>&1
 note "the systemd units are valid"
 # --------------------------------------------------------------------------------------------
 # Each unit is verified inside its own package's container. `systemd-analyze` resolves
-# ExecStart, so a unit checked without its binary reports a missing command -- a failure about
+# ExecStart, so a unit checked without its binary reports a missing command: a failure about
 # the test environment rather than about the unit. The two packages conflict, so this is also
 # the only way to have each binary present for its own unit.
 #
 # The same container also checks that every absolute path the unit *names* exists, comments
-# included. `systemd-analyze` reads directives and ignores comments, so it was silent while both
-# units pointed at a `config.example.yml` under `/usr/share/doc/` that had moved to `/etc/` --
-# an operator following the unit's own instructions would have found nothing there. A path in a
-# comment is documentation the package ships, so it is checked like the rest of the package.
+# included. `systemd-analyze` reads directives and ignores comments, so a path named only in a
+# comment is unverified by it: an operator following the unit's own instructions would find
+# nothing there if that path were wrong. A path in a comment is documentation the package
+# ships, so it is checked like the rest of the package.
 verify_unit() {
   pkg="$1" unit="$2"
   out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
@@ -364,12 +361,12 @@ verify_unit() {
 
   # Every absolute path, not a list of prefixes: a unit naming `/opt/...` or `/run/...` would
   # otherwise be scanned and reported complete without that path having been looked at.
-  # `set -euo pipefail` so a half-finished install -- unit written, postinstall failed -- cannot
+  # `set -euo pipefail` so a half-finished install (unit written, postinstall failed) cannot
   # reach the `CHECKED` receipt and read as a pass.
   #
   # Three exclusions, each because the path is not a file the package ships: systemd's own
   # `WantedBy=` targets (`multi-user.target` is a unit name, and appears without a directory),
-  # anything under `/proc` or `/sys`, and `/etc/yorishiro/config.yml` -- the optional config the
+  # anything under `/proc` or `/sys`, and `/etc/yorishiro/config.yml`: the optional config the
   # unit points `YORISHIRO_CONFIG_PATH` at. That last one is deliberately absent after install:
   # a deployment configured entirely through the env file never creates it, and shipping an
   # empty one would make `deny_unknown_fields` parse a file nobody wrote. The example beside it
@@ -402,7 +399,7 @@ verify_unit "$(basename "$(deb_ce)")" yorishiro.service
 note "switching editions keeps the machine working"
 # --------------------------------------------------------------------------------------------
 # The two packages conflict, so moving between editions is a remove and an install in one
-# transaction -- a path an operator takes deliberately (evaluating the paid features, or
+# transaction: a path an operator takes deliberately (evaluating the paid features, or
 # dropping back) and one nothing else here covers.
 #
 # Two things have to survive it. The configuration and state, because they belong to the
@@ -469,7 +466,7 @@ note "upgrading from a release that configured through the environment"
 # way comes back up unconfigured and stops at 78 with nothing pointing at the cause.
 #
 # `dpkg -i` rather than apt, because the locally built package is version 0.0.0~rc0 and so
-# sorts *below* the released one -- apt would decline the "downgrade". The install scripts run
+# sorts *below* the released one: apt would decline the "downgrade". The install scripts run
 # either way, which is what this exercises.
 #
 # Skipped rather than failed when the old package is not present: it comes from a GitHub

@@ -85,7 +85,7 @@ CREATE TABLE identity.tenant_memberships (
   UNIQUE (tenant_id, user_id)
 );
 
--- `schema_id` is added after `content.schemas` exists -- the reference is circular, since a
+-- `schema_id` is added after `content.schemas` exists: the reference is circular, since a
 -- schema also names its workspace.
 CREATE TABLE identity.workspaces (
   id           UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -97,7 +97,7 @@ CREATE TABLE identity.workspaces (
   status       TEXT NOT NULL DEFAULT 'schema_pending'
                  CHECK (status IN ('schema_pending', 'active')),
   -- The model a workspace's vectors were produced by, and their width. NULL means the
-  -- deployment default -- recorded so a workspace whose model changed can be told from one
+  -- deployment default, recorded so a workspace whose model changed can be told from one
   -- provisioned under a different one.
   embedding_model      TEXT,
   embedding_dimensions INTEGER CHECK (embedding_dimensions IS NULL OR embedding_dimensions > 0),
@@ -166,8 +166,8 @@ CREATE TABLE identity.maintenance (
 
 INSERT INTO identity.maintenance (id) VALUES (TRUE);
 
--- The LLM-backed fill path. This table and `content.fill_proposals` are on their way out --
--- Yorishiro makes no outbound model calls -- but the code still queries them at this version,
+-- The LLM-backed fill path. This table and `content.fill_proposals` are on their way out:
+-- Yorishiro makes no outbound model calls, but the code still queries them at this version,
 -- and a migration that omitted a table the code reads would refuse to boot. A later migration
 -- drops both.
 CREATE TABLE identity.workspace_llm_keys (
@@ -195,7 +195,7 @@ CREATE TABLE content.schemas (
   definition   JSONB NOT NULL,
   status       TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
   -- Where this schema came from, and whether it still follows it. A hand-written schema is
-  -- `detached` and has never been linked -- told apart from an orphan by `origin_template_id`
+  -- `detached` and has never been linked, told apart from an orphan by `origin_template_id`
   -- having never been set. `origin_snapshot` is the definition as copied, which is what a
   -- three-way comparison needs as its base.
   origin_template_id UUID REFERENCES identity.templates(id) ON DELETE SET NULL,
@@ -312,31 +312,30 @@ CREATE INDEX fill_proposals_job_idx
 --------------------------------------------------------------------------------
 --
 -- ENABLE, deliberately without FORCE. `ENABLE` alone already constrains `yorishiro_app`, which
--- is not the owner, so tenant isolation does not depend on FORCE at all -- verified in both
--- directions: scoped to one tenant the app role sees only that tenant's rows, and with no
--- tenant named it sees nothing (the strict `current_setting` below raises rather than
--- filtering, so the failure is loud).
+-- is not the owner, so tenant isolation does not depend on FORCE at all: scoped to one tenant
+-- the app role sees only that tenant's rows, and with no tenant named it sees nothing (the
+-- strict `current_setting` below raises rather than filtering, so the failure is loud).
 --
 -- FORCE would additionally subject the *owner* to the policies, and the owner must not be:
 --
 --   * `identity.authenticate_api_key` runs as the owner precisely because no workspace is known
---     yet -- there is nothing to scope to until the key resolves one. Under FORCE it evaluates
+--     yet: there is nothing to scope to until the key resolves one. Under FORCE it evaluates
 --     an unset `app.current_workspace` and raises `unrecognized configuration parameter`, so no
 --     request can authenticate at all.
 --   * The admin CLI creates tenants, workspaces, memberships and invites as the owner, before
 --     the ids those policies compare against exist.
 --
 -- Both are broken only when the owner is *not* a superuser, since a superuser bypasses RLS
--- whatever FORCE says -- so FORCE has never taken effect in any deployment here, and the first
--- environment where it would (a non-superuser CI database) is the one it stops working.
+-- whatever FORCE says, so FORCE takes no effect in a superuser deployment, and a non-superuser
+-- database (such as CI) is where it would stop working.
 --
 -- Making the policies lenient instead does not fix it: with the GUCs unset a lenient policy
 -- matches no rows, so `authenticate_api_key` returns nothing for a *valid* key and every
--- request fails authentication silently. Measured, not reasoned.
+-- request fails authentication silently.
 --
 -- `identity.templates` is deliberately absent. Template queries run as the owner through the
 -- repository layer, which scopes by tenant in the query, because a policy would have to read
--- the table the app role holds no grant on -- and a policy the role cannot evaluate fails the
+-- the table the app role holds no grant on, and a policy the role cannot evaluate fails the
 -- query rather than filtering it.
 
 ALTER TABLE identity.tenants             ENABLE ROW LEVEL SECURITY;
@@ -376,9 +375,9 @@ CREATE POLICY tenant_isolation ON identity.invites
 -- control-plane pool reaches them over a connection that sets neither variable.
 --
 -- Everything else uses the strict form on purpose. `yorishiro_app` sets both GUCs on every
--- connection, so reaching one of those tables without a workspace is a bug -- and raising
+-- connection, so reaching one of those tables without a workspace is a bug, and raising
 -- surfaces it, where matching zero rows would look like an empty workspace. Unifying on the
--- lenient form was measured and is worse: it would make an unset GUC return no rows for a
+-- lenient form would be worse: it would make an unset GUC return no rows for a
 -- *valid* API key, so every request would fail authentication with nothing logged anywhere.
 CREATE POLICY workspace_isolation ON content.schemas
   USING (workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid);
@@ -447,8 +446,7 @@ GRANT EXECUTE ON FUNCTION identity.authenticate_api_key(bytea) TO yorishiro_app;
 -- OAuth identity
 --------------------------------------------------------------------------------
 --
--- Applied after the table it alters, which is what the two-pass ordering used to guarantee
--- and what a single file makes structural.
+-- Applied after the table it alters. A single file makes that ordering structural.
 
 
 ALTER TABLE identity.users
@@ -459,7 +457,7 @@ ALTER TABLE identity.users
   ADD COLUMN oauth_subject_id TEXT;
 
 -- Every row is either password-authenticated (password_hash set, oauth_* both NULL) or
--- OAuth-provisioned (oauth_provider + oauth_subject_id set, password_hash may be NULL) -- never
+-- OAuth-provisioned (oauth_provider + oauth_subject_id set, password_hash may be NULL), never
 -- a mix, and never neither (a user login method must be determinable at a glance).
 ALTER TABLE identity.users
   ADD CONSTRAINT users_auth_method_check CHECK (
@@ -468,7 +466,7 @@ ALTER TABLE identity.users
   );
 
 -- The subject id ("sub" claim) an identity provider issues is only unique within that provider,
--- so the lookup/uniqueness key is the pair, not either column alone -- otherwise two different
+-- so the lookup/uniqueness key is the pair, not either column alone: otherwise two different
 -- providers that happen to both hand out subject id "1" would collide.
 CREATE UNIQUE INDEX users_oauth_identity_idx
   ON identity.users (oauth_provider, oauth_subject_id)
@@ -510,7 +508,7 @@ CREATE TABLE identity.tenant_billing (
 
 -- Webhook events for subscription updated/deleted carry only the Stripe customer id, so that is
 -- the lookup key on the inbound path. UNIQUE above already provides the index; this comment
--- records why the column is UNIQUE rather than merely indexed -- two tenants sharing one Stripe
+-- records why the column is UNIQUE rather than merely indexed: two tenants sharing one Stripe
 -- customer would make that lookup ambiguous.
 
 -- ON DELETE CASCADE: deleting a tenant removes its billing row. The Stripe-side subscription is
@@ -530,7 +528,7 @@ UPDATE identity.api_keys k
  WHERE w.id = k.workspace_id;
 
 -- Derived from the workspace when the inserter did not supply it. The community edition's own
--- `create_api_key` knows nothing about this column -- it is added here -- so an insert coming
+-- `create_api_key` knows nothing about this column (it is added here), so an insert coming
 -- through it would otherwise violate the NOT NULL below. Both editions write to this table
 -- through that function, so the trigger is what lets the column be mandatory without making the
 -- community edition's inserts fail.
@@ -578,7 +576,7 @@ ALTER TABLE identity.api_keys
 -- caller: an unknown key, a tenant key with no workspace requested, and a tenant key naming
 -- someone else's workspace are all indistinguishable to the client, which is the intent.
 -- No DEFAULT on the second argument, deliberately. With one, a single-argument call matches
--- *both* overloads and Postgres refuses it as ambiguous ("function is not unique") -- which
+-- *both* overloads and Postgres refuses it as ambiguous ("function is not unique"), which
 -- breaks every community-edition caller rather than leaving them alone. Requiring both makes the
 -- arity unambiguous, so the one-argument form below keeps resolving to the community edition's.
 CREATE OR REPLACE FUNCTION identity.authenticate_api_key(
@@ -612,18 +610,18 @@ GRANT EXECUTE ON FUNCTION identity.authenticate_api_key(bytea, uuid) TO yorishir
 -- place. Postgres overloads on arity, so the two-argument form above is an addition rather than
 -- a replacement, and the community edition's own binary keeps working against the same database.
 --
--- That function INNER JOINs `identity.workspaces`, so a tenant-scoped key -- whose `workspace_id`
--- is NULL -- resolves to no row through it. A community-edition process reading this database
+-- That function INNER JOINs `identity.workspaces`, so a tenant-scoped key (whose `workspace_id`
+-- is NULL) resolves to no row through it. A community-edition process reading this database
 -- therefore rejects a tenant-scoped key rather than mis-resolving it, which is the correct
 -- answer for a process that has no way to be told which workspace was meant.
 
 -- The existing policy compares `workspace_id` against the session's workspace, and a
--- tenant-scoped key's is NULL -- `NULL = <uuid>` is NULL rather than true, so such a key's own
+-- tenant-scoped key's is NULL: `NULL = <uuid>` is NULL rather than true, so such a key's own
 -- row is invisible to the very session authenticated by it. `last_used_at` would then never be
 -- recorded for exactly the keys that span workspaces, and `admin list-api-keys` could not show
 -- them at all.
 --
--- A tenant-scoped key is instead visible to any session in its tenant -- the scope the key
+-- A tenant-scoped key is instead visible to any session in its tenant: the scope the key
 -- itself has.
 DROP POLICY workspace_isolation ON identity.api_keys;
 
@@ -690,7 +688,7 @@ CREATE INDEX IF NOT EXISTS template_reviews_template_idx
 --
 -- Adding policies here would be worse than redundant. They would have to reference
 -- `identity.templates` to know whether a template is community-visible, and a policy the app
--- role cannot evaluate -- because it cannot read the table the policy joins to -- fails the
+-- role cannot evaluate (because it cannot read the table the policy joins to) fails the
 -- query rather than filtering it.
 --
 -- What the service layer must therefore enforce, since the database will not:
@@ -743,7 +741,7 @@ CREATE POLICY workspace_isolation ON content.fill_proposals
 -- `content.fill_proposals` only. **`identity.workspace_llm_keys` deliberately gets no GRANT**:
 -- it holds a workspace's API key in plaintext, and the repository reaches it through the
 -- migration-role pool rather than the request role. Without a grant, a query that arrived on a
--- request connection fails at the permission check -- which is a stronger guarantee than an RLS
+-- request connection fails at the permission check, which is a stronger guarantee than an RLS
 -- policy being written correctly, and does not silently weaken if a policy is later edited. The
 -- community initial granted `content` wholesale and this table not at all; that asymmetry is
 -- the design, not an oversight, so it is reproduced rather than tidied up.

@@ -56,8 +56,7 @@ async fn embed_delegates_to_embed_batch() {
 #[tokio::test]
 async fn empty_batch_short_circuits_without_a_request() {
     let server = MockServer::start().await;
-    // `expect(0)` means an actual request would panic when the mock server
-    // is dropped, catching a regression here.
+    // `expect(0)` means an actual request would panic when the mock server is dropped, catching a regression here.
     Mock::given(method("POST"))
         .and(path("/embeddings"))
         .respond_with(ResponseTemplate::new(200))
@@ -128,8 +127,7 @@ async fn rejects_non_success_status() {
 }
 
 /// A rate-limited provider is telling the caller to come back, not that the request is wrong.
-/// Reported as its own variant so the embedding sync waits instead of dropping the work — an
-/// embedding lost to a 429 leaves the entity out of search until someone runs a resync.
+/// Reported as its own variant so the embedding sync waits instead of dropping the work: an embedding lost to a 429 leaves the entity out of search until someone runs a resync.
 #[tokio::test]
 async fn a_rate_limited_provider_is_reported_as_busy_with_its_own_delay() {
     let server = MockServer::start().await;
@@ -177,8 +175,8 @@ async fn a_busy_provider_without_a_header_still_gets_a_delay() {
     }
 }
 
-/// An hour-long Retry-After is capped. The work is recoverable by a resync; a task sleeping
-/// for an hour is not something to hold the process open for.
+/// An hour-long Retry-After is capped.
+/// The work is recoverable by a resync; a task sleeping for an hour is not something to hold the process open for.
 #[tokio::test]
 async fn an_extravagant_retry_after_is_capped() {
     let server = MockServer::start().await;
@@ -202,8 +200,8 @@ async fn an_extravagant_retry_after_is_capped() {
     }
 }
 
-/// A request the provider will never accept stays an internal error. Retrying a 400 would
-/// spend the budget on something that cannot succeed.
+/// A request the provider will never accept stays an internal error.
+/// Retrying a 400 would spend the budget on something that cannot succeed.
 #[tokio::test]
 async fn a_rejected_request_is_not_treated_as_busy() {
     let server = MockServer::start().await;
@@ -221,15 +219,12 @@ async fn a_rejected_request_is_not_treated_as_busy() {
     );
 }
 
-/// A provider that is not listening at all. This is the case an operator can fix, and the only
-/// way they can is if the response says which endpoint failed, so the error carries the base URL
-/// rather than collapsing into `internal server error`.
+/// A provider that is not listening at all.
+/// This is the case an operator can fix, and the only way they can is if the response says which endpoint failed, so the error carries the base URL rather than collapsing into `internal server error`.
 ///
-/// Port 1 on the loopback address: privileged, so an unprivileged test process could not have
-/// bound it, and nothing in the test environment does. The connection is refused immediately
-/// rather than hanging until the 30s timeout. Dropping a `MockServer` is not equivalent -- the
-/// port can still answer, and this test then fails on a 404 from whatever picked it up, which
-/// looks like the bug it is meant to catch.
+/// Port 1 on the loopback address: privileged, so an unprivileged test process could not have bound it, and nothing in the test environment does.
+/// The connection is refused immediately rather than hanging until the 30s timeout.
+/// Dropping a `MockServer` is not equivalent: the port can still answer, and this test then fails on a 404 from whatever picked it up, which looks like the bug it is meant to catch.
 #[tokio::test]
 async fn an_unreachable_provider_is_not_an_internal_error() {
     let uri = "http://127.0.0.1:1".to_string();

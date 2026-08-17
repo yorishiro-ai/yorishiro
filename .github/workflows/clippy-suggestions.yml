@@ -35,11 +35,10 @@ jobs:
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       # No DB service or migrations here: this repo has zero sqlx::query!/query_as! macros (all
-      # queries are built dynamically via sea-query + query_as_with), so clippy -- a compile-time
-      # lint that only needs the code to type-check, not a live Postgres -- never touches
-      # DATABASE_URL. Verified by running clippy with DATABASE_URL unset and no Postgres reachable
-      # before removing this job's db service/migration steps (they were copy-pasted from ci.yml's
-      # `check` job, where cargo test --all's #[sqlx::test] integration tests genuinely need one).
+      # queries are built dynamically via sea-query + query_as_with), so clippy (a compile-time
+      # lint that only needs the code to type-check, not a live Postgres) never touches
+      # DATABASE_URL, unlike ci.yml's `check` job, where cargo test --all's #[sqlx::test]
+      # integration tests genuinely need one.
       - uses: giraffate/clippy-action@v1
         with:
           reporter: github-pr-review

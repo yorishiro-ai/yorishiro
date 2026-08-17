@@ -14,9 +14,7 @@ use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ImportJsonlArgs {
-    /// JSON Lines document in the same format `export_jsonl`/`GET /api/export.jsonl`
-    /// produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per
-    /// line, newline-separated.
+    /// JSON Lines document in the same format `export_jsonl`/`GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line, newline-separated.
     pub jsonl: String,
 }
 

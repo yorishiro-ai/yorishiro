@@ -4,8 +4,7 @@ use std::path::Path;
 
 use crate::config::{PACKAGED_CONFIG_PATH, config_path_from, load_and_apply_env_overrides};
 
-// Env vars are process-wide state; serialize tests through this lock rather than racing
-// each other (same pattern as `yorishiro_core::repositories::tenancy`'s env tests).
+// Env vars are process-wide state; serialize tests through this lock rather than racing each other (same pattern as `yorishiro_core::repositories::tenancy`'s env tests).
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct EnvGuard {
@@ -15,9 +14,8 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn new(keys: Vec<&'static str>) -> Self {
-        // A test that panics while holding this poisons the mutex; a plain `unwrap()` would
-        // turn one real failure into a cascade of unrelated ones. `Drop` restores the vars
-        // either way, so the state behind the poisoned lock is not suspect.
+        // A test that panics while holding this poisons the mutex; a plain `unwrap()` would turn one real failure into a cascade of unrelated ones.
+        // `Drop` restores the vars either way, so the state behind the poisoned lock is not suspect.
         let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         for key in &keys {
             // SAFETY: serialized by ENV_LOCK, no other threads touch these keys.
@@ -133,9 +131,8 @@ fn unknown_key_is_a_hard_error() {
     assert!(err.to_string().contains("failed to parse config file"));
 }
 
-/// `config.example.yml` offers both of these, and `FileConfig` is `deny_unknown_fields` — so a
-/// key documented there but missing from the struct does not silently do nothing, it refuses to
-/// start. Covering them here keeps the example file and the loader from drifting apart.
+/// `config.example.yml` offers both of these, and `FileConfig` is `deny_unknown_fields`: so a key documented there but missing from the struct does not silently do nothing, it refuses to start.
+/// Covering them here keeps the example file and the loader from drifting apart.
 #[test]
 fn search_and_snapshot_settings_are_applied_and_overridable() {
     let _guard = EnvGuard::new(vec![
@@ -169,10 +166,8 @@ fn search_and_snapshot_settings_are_applied_and_overridable() {
     );
 }
 
-/// `config.example.yml` is `deny_unknown_fields`-parsed like any other config, so a key
-/// documented there but absent from `FileConfig` makes a copied example refuse to start. This
-/// parses the example with every key uncommented, which is the only way that mismatch shows up
-/// before a user hits it.
+/// `config.example.yml` is `deny_unknown_fields`-parsed like any other config, so a key documented there but absent from `FileConfig` makes a copied example refuse to start.
+/// This parses the example with every key uncommented, which is the only way that mismatch shows up before a user hits it.
 #[test]
 fn the_example_config_parses_with_every_key_enabled() {
     let example = include_str!("../../../../config.example.yml");
@@ -204,12 +199,11 @@ fn the_example_config_parses_with_every_key_enabled() {
     );
 }
 
-/// `license_key` belongs to the paid edition, and both editions parse this struct, which is
-/// `deny_unknown_fields`. So the field has to exist here or a config carrying the key refuses
-/// to start on the community build -- an operator switching editions would meet that.
+/// `license_key` belongs to the paid edition, and both editions parse this struct, which is `deny_unknown_fields`.
+/// So the field has to exist here or a config carrying the key refuses to start on the community build: an operator switching editions would meet that.
 ///
-/// The field is otherwise unused, which makes it exactly the kind of thing a later cleanup
-/// removes. This is the contract that says it cannot be.
+/// The field is otherwise unused, which makes it exactly the kind of thing a later cleanup removes.
+/// This is the contract that says it cannot be.
 #[test]
 fn a_licence_key_in_the_config_is_accepted() {
     let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_BIND"]);
@@ -226,9 +220,10 @@ fn a_licence_key_in_the_config_is_accepted() {
 
 /// And it must not reach the environment from here.
 ///
-/// This loader is compiled into the community binary. Applying the key would put the string
-/// `YORISHIRO_LICENSE_KEY` into that artifact, which the release gate scans for and rejects --
-/// the build is meant to carry no trace of the paid edition. `ee/` reads the file itself.
+/// This loader is compiled into the community binary.
+/// Applying the key would put the string `YORISHIRO_LICENSE_KEY` into that artifact, which the release gate scans for and rejects:
+/// the build is meant to carry no trace of the paid edition.
+/// `ee/` reads the file itself.
 #[test]
 fn a_licence_key_in_the_config_is_not_applied_to_the_environment() {
     let _guard = EnvGuard::new(vec!["YORISHIRO_CONFIG_PATH", "YORISHIRO_LICENSE_KEY"]);
@@ -243,9 +238,7 @@ fn a_licence_key_in_the_config_is_not_applied_to_the_environment() {
 }
 
 /// A packaged host runs the admin CLI from a shell, which has none of the unit's environment.
-/// Without this fallback the CLI looked in whatever directory the operator was standing in,
-/// found nothing, and reported the database as unconfigured while the service beside it ran
-/// normally against `/etc/yorishiro/config.yml`.
+/// Without this fallback the CLI looked in whatever directory the operator was standing in, found nothing, and reported the database as unconfigured while the service beside it ran normally against `/etc/yorishiro/config.yml`.
 #[test]
 fn the_packaged_path_is_used_when_the_working_directory_has_no_config() {
     let found = config_path_from(None, |p| p == Path::new(PACKAGED_CONFIG_PATH));
@@ -253,8 +246,8 @@ fn the_packaged_path_is_used_when_the_working_directory_has_no_config() {
     assert_eq!(found.as_deref(), Some(Path::new(PACKAGED_CONFIG_PATH)));
 }
 
-/// A source checkout keeps reading its own file. The packaged path is a fallback, not an
-/// override: a developer with both present must not silently pick up a system-wide config.
+/// A source checkout keeps reading its own file.
+/// The packaged path is a fallback, not an override: a developer with both present must not silently pick up a system-wide config.
 #[test]
 fn the_working_directory_wins_over_the_packaged_path() {
     let found = config_path_from(None, |_| true);
@@ -262,9 +255,8 @@ fn the_working_directory_wins_over_the_packaged_path() {
     assert_eq!(found.as_deref(), Some(Path::new("config.yml")));
 }
 
-/// An operator naming a file means that file. Falling back after an explicit path would read a
-/// different deployment's settings than the one they asked for, which is worse than reading
-/// none: the process would start, on the wrong configuration.
+/// An operator naming a file means that file.
+/// Falling back after an explicit path would read a different deployment's settings than the one they asked for, which is worse than reading none: the process would start, on the wrong configuration.
 #[test]
 fn an_explicit_path_never_falls_back() {
     let found = config_path_from(Some(std::ffi::OsString::from("/nowhere/config.yml")), |p| {
@@ -280,13 +272,11 @@ fn no_config_anywhere_reads_nothing() {
     assert_eq!(config_path_from(None, |_| false), None);
 }
 
-/// A path that is not valid UTF-8 is still a path the operator named. `std::env::var` reports it
-/// as `NotUnicode`, and flattening that to "unset" with `.ok()` would fall back to
-/// `/etc/yorishiro/config.yml` -- reading a different deployment's settings than the one asked
-/// for, which is the single outcome the explicit-path rule exists to prevent.
+/// A path that is not valid UTF-8 is still a path the operator named.
+/// `std::env::var` reports it as `NotUnicode`, and flattening that to "unset" with `.ok()` would fall back to `/etc/yorishiro/config.yml`: reading a different deployment's settings than the one asked for, which is the single outcome the explicit-path rule exists to prevent.
 ///
-/// Unix-only: `OsStringExt::from_vec` takes arbitrary bytes, which is what makes the case
-/// constructible. Windows encodes its own way and has no equivalent here.
+/// Unix-only: `OsStringExt::from_vec` takes arbitrary bytes, which is what makes the case constructible.
+/// Windows encodes its own way and has no equivalent here.
 #[cfg(unix)]
 #[test]
 fn a_non_utf8_explicit_path_is_still_honoured() {
@@ -311,11 +301,8 @@ fn a_non_utf8_explicit_path_is_still_honoured() {
 
 /// The same rule at the boundary where it is actually decided.
 ///
-/// `config_path_from` is a pure function and cannot see how the variable was read, so the test
-/// above passes whether the caller uses `var_os` or `var().ok()`. This one sets a non-UTF-8
-/// value in the real environment and asserts the file behind it is read, which is only true of
-/// `var_os`: with `var().ok()` the value flattens to "unset" and the loader silently reads
-/// something else, or nothing.
+/// `config_path_from` is a pure function and cannot see how the variable was read, so the test above passes whether the caller uses `var_os` or `var().ok()`.
+/// This one sets a non-UTF-8 value in the real environment and asserts the file behind it is read, which is only true of `var_os`: with `var().ok()` the value flattens to "unset" and the loader silently reads something else, or nothing.
 #[cfg(unix)]
 #[test]
 fn a_non_utf8_path_in_the_environment_is_read() {

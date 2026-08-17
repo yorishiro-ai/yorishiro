@@ -20,8 +20,7 @@ async fn enqueued_work_runs() {
     assert_eq!(ran.load(Ordering::SeqCst), 5);
 }
 
-/// The cap is the point: every task wants a database connection, and without a bound a burst
-/// of writes would ask for more than the pool has and starve the requests being served.
+/// The cap is the point: every task wants a database connection, and without a bound a burst of writes would ask for more than the pool has and starve the requests being served.
 #[tokio::test]
 async fn concurrency_is_bounded() {
     let queue = LocalQueue::new(2);
@@ -47,8 +46,8 @@ async fn concurrency_is_bounded() {
     );
 }
 
-/// Draining waits for accepted work. Dropping it would leave an entity written but never
-/// embedded — absent from search with nothing to say why.
+/// Draining waits for accepted work.
+/// Dropping it would leave an entity written but never embedded: absent from search with nothing to say why.
 #[tokio::test]
 async fn drain_waits_for_accepted_work() {
     let queue = LocalQueue::new(4);
@@ -64,8 +63,8 @@ async fn drain_waits_for_accepted_work() {
     assert_eq!(finished.load(Ordering::SeqCst), 1);
 }
 
-/// A task that hangs must not hold the process open. The work is recoverable by a resync;
-/// an unbounded wait is not recoverable at all.
+/// A task that hangs must not hold the process open.
+/// The work is recoverable by a resync; an unbounded wait is not recoverable at all.
 #[tokio::test]
 async fn drain_gives_up_rather_than_hanging() {
     let queue = LocalQueue::new(4);
@@ -83,8 +82,7 @@ async fn drain_gives_up_rather_than_hanging() {
     );
 }
 
-/// The switchover's three stages (FR-7-3), in order: new work goes to the new queue, the old
-/// one finishes what it already had, and only then is it removable.
+/// The switchover's three stages (FR-7-3), in order: new work goes to the new queue, the old one finishes what it already had, and only then is it removable.
 #[tokio::test]
 async fn a_switchover_sends_new_work_on_and_lets_the_old_queue_finish() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -133,8 +131,7 @@ async fn a_switchover_sends_new_work_on_and_lets_the_old_queue_finish() {
     );
 }
 
-/// Nothing sent through the switchover reaches the old queue — otherwise draining it would be
-/// chasing a target that keeps moving.
+/// Nothing sent through the switchover reaches the old queue: otherwise draining it would be chasing a target that keeps moving.
 #[tokio::test]
 async fn new_work_never_lands_on_the_old_queue() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -166,8 +163,7 @@ async fn new_work_never_lands_on_the_old_queue() {
     );
 }
 
-/// The distinction stage 3 depends on: a queue that ran out of time is not an empty queue, and
-/// removing it would drop the work still running on it.
+/// The distinction stage 3 depends on: a queue that ran out of time is not an empty queue, and removing it would drop the work still running on it.
 #[tokio::test]
 async fn a_drain_that_runs_out_of_time_says_so() {
     use std::time::Duration;

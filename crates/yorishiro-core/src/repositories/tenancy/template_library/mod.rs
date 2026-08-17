@@ -1,10 +1,7 @@
-//! CRUD for `identity.templates`, the user-contributed schema template library. Distinct from
-//! `crate::templates` (the built-in templates shipped with the binary and served from memory):
-//! these are tenant-scoped, DB-backed templates that a tenant's members create and manage
-//! through `/api/template-library`. Operates on `&PgPool` (the identity pool) rather than an
-//! RLS-scoped connection, matching the rest of this module -- `identity.templates` has no RLS
-//! of its own, so every function here takes a `tenant_id` and filters/checks ownership
-//! explicitly.
+//! CRUD for `identity.templates`, the user-contributed schema template library.
+//! Distinct from `crate::templates` (the built-in templates shipped with the binary and served from memory):
+//! these are tenant-scoped, DB-backed templates that a tenant's members create and manage through `/api/template-library`.
+//! Operates on `&PgPool` (the identity pool) rather than an RLS-scoped connection, matching the rest of this module: `identity.templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks ownership explicitly.
 
 use chrono::{DateTime, Utc};
 use sea_query::{Alias, Expr, Iden, Order, PostgresQueryBuilder, Query};
@@ -90,9 +87,7 @@ fn template_columns() -> [Templates; 13] {
     ]
 }
 
-/// Lists templates visible to `tenant_id`: its own templates plus any published with
-/// community visibility (cross-tenant sharing; not yet reachable through the API, but the
-/// query already honors it so nothing else needs to change when publishing ships).
+/// Lists templates visible to `tenant_id`: its own templates plus any published with community visibility (cross-tenant sharing; not yet reachable through the API, but the query already honors it so nothing else needs to change when publishing ships).
 pub async fn list_templates(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -142,8 +137,8 @@ pub async fn get_template(
         .into_record()
 }
 
-/// Creates a template owned by `tenant_id`. Every new template starts as tenant-private
-/// (`visibility = 'tenant'`); there is no public creation path for `community` visibility yet.
+/// Creates a template owned by `tenant_id`.
+/// Every new template starts as tenant-private (`visibility = 'tenant'`); there is no public creation path for `community` visibility yet.
 pub async fn create_template(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -197,8 +192,8 @@ pub async fn create_template(
     row.into_record()
 }
 
-/// Updates a template's editable fields. Only the owning tenant may update its own template
-/// (community-visible templates from other tenants are read-only to everyone but their owner).
+/// Updates a template's editable fields.
+/// Only the owning tenant may update its own template (community-visible templates from other tenants are read-only to everyone but their owner).
 pub async fn update_template(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -249,7 +244,8 @@ pub async fn update_template(
         .into_record()
 }
 
-/// Deletes a template. Only the owning tenant may delete it.
+/// Deletes a template.
+/// Only the owning tenant may delete it.
 pub async fn delete_template(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -275,8 +271,7 @@ pub async fn delete_template(
     }
 }
 
-/// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned
-/// by `tenant_id`, recording `fork_of` so the lineage is traceable.
+/// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned by `tenant_id`, recording `fork_of` so the lineage is traceable.
 pub async fn fork_template(
     pool: &PgPool,
     tenant_id: Uuid,

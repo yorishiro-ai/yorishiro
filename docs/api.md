@@ -35,7 +35,7 @@ $ curl -X PUT "localhost:8080/api/relations/$RELATION_ID/status" \
 $ curl "localhost:8080/api/relations?status=active" -H "Authorization: Bearer $YORISHIRO_KEY"
 
 # How an entity stands against the active version of its schema (read scope). Entities are
-# migrated lazily, so one written earlier simply lacks fields added since -- this tells that
+# migrated lazily, so one written earlier simply lacks fields added since. This tells that
 # apart from a field its author left blank.
 $ curl "localhost:8080/api/entities/$ENTITY_ID/drift" -H "Authorization: Bearer $YORISHIRO_KEY"
 

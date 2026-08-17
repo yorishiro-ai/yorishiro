@@ -115,9 +115,7 @@ async fn get_active_schema_reports_not_found_when_absent(pool: PgPool) {
     assert!(matches!(err, YorishiroError::NotFound { .. }));
 }
 
-/// **The isolation this change exists to provide.** Two workspaces under one tenant each get
-/// their own schema: creating one in the second workspace does not produce version 2 of the
-/// first, and neither can read the other's.
+/// **The isolation this change exists to provide.** Two workspaces under one tenant each get their own schema: creating one in the second workspace does not produce version 2 of the first, and neither can read the other's.
 #[sqlx::test(migrations = "../../migrations")]
 async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
     let tenant_id = test_support::seed_tenant(&pool, "iso-tenant").await;
@@ -143,8 +141,7 @@ async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
         .await
         .unwrap();
 
-    // Same name, but each workspace starts its own version 1 -- the second is not a new
-    // version of the first.
+    // Same name, but each workspace starts its own version 1: the second is not a new version of the first.
     assert_eq!(a.version, 1);
     assert_eq!(b.version, 1);
     assert_ne!(a.id, b.id);
@@ -160,8 +157,8 @@ async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
     assert_eq!(listed[0].id, b.id);
 }
 
-/// A schema written by hand claims no origin. "detached" here means never linked, not
-/// orphaned — told apart by origin_template_id having never been set.
+/// A schema written by hand claims no origin.
+/// "detached" here means never linked, not orphaned: told apart by origin_template_id having never been set.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_hand_written_schema_has_no_origin(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -204,9 +201,8 @@ async fn a_schema_from_a_template_records_its_origin(pool: PgPool) {
     assert_eq!(schema.origin_status, "linked");
 }
 
-/// The yank: deleting the template must not destroy the copy, and must stop it claiming to
-/// follow something that is no longer there. Enforced by a trigger, so a delete arriving from
-/// the admin CLI or a migration is covered too.
+/// The yank: deleting the template must not destroy the copy, and must stop it claiming to follow something that is no longer there.
+/// Enforced by a trigger, so a delete arriving from the admin CLI or a migration is covered too.
 #[sqlx::test(migrations = "../../migrations")]
 async fn deleting_the_template_detaches_the_schema_without_destroying_it(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -235,7 +231,7 @@ async fn deleting_the_template_detaches_the_schema_without_destroying_it(pool: P
 
     let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
 
-    // The definition survives -- this is the whole point of copying rather than referencing.
+    // The definition survives: this is the whole point of copying rather than referencing.
     assert_eq!(after.definition.name, schema.definition.name);
     // And it no longer claims to be following anything.
     assert!(after.origin_template_id.is_none());
@@ -297,7 +293,8 @@ async fn a_copy_keeps_the_definition_it_was_made_from(pool: PgPool) {
         .await
         .unwrap();
 
-    // The base does not. This is what lets a merge tell an upstream addition from a local one.
+    // The base does not.
+    // This is what lets a merge tell an upstream addition from a local one.
     let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
     let base = after.origin_snapshot.expect("still there");
     assert!(
@@ -306,8 +303,8 @@ async fn a_copy_keeps_the_definition_it_was_made_from(pool: PgPool) {
     );
 }
 
-/// No origin, no ancestor. A fabricated base would be worse than none, since a merge would
-/// treat every field as agreed-upon history.
+/// No origin, no ancestor.
+/// A fabricated base would be worse than none, since a merge would treat every field as agreed-upon history.
 #[sqlx::test(migrations = "../../migrations")]
 async fn creating_a_schema_names_it_on_the_workspace(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -337,8 +334,8 @@ async fn creating_a_schema_names_it_on_the_workspace(pool: PgPool) {
             .unwrap();
     assert_eq!(named, Some(first.id), "the first schema is the one named");
 
-    // A second version of the same schema, and then a differently-named one: neither takes the
-    // column. It means "this workspace's schema", not "the most recent one".
+    // A second version of the same schema, and then a differently-named one: neither takes the column.
+    // It means "this workspace's schema", not "the most recent one".
     let (second, _) = create_schema(&mut conn, tenant_id, workspace_id, task_schema(true))
         .await
         .unwrap();
@@ -359,10 +356,8 @@ async fn creating_a_schema_names_it_on_the_workspace(pool: PgPool) {
 
 /// The request path runs as `yorishiro_app`, and creating a schema writes `identity.workspaces`.
 ///
-/// Every other test here connects as the owner, where grants are implicit — which is why a
-/// missing `GRANT UPDATE` on that table shipped and made `POST /api/schemas` answer 500 on both
-/// editions while the whole suite stayed green. This one issues `SET ROLE` first, so it fails
-/// the way the server does.
+/// Every other test here connects as the owner, where grants are implicit: which is why a missing `GRANT UPDATE` on that table shipped and made `POST /api/schemas` answer 500 on both editions while the whole suite stayed green.
+/// This one issues `SET ROLE` first, so it fails the way the server does.
 #[sqlx::test(migrations = "../../migrations")]
 async fn creating_a_schema_works_as_the_request_role(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;

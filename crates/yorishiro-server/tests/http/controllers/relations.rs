@@ -61,8 +61,7 @@ async fn rest_relation_crud_round_trip(pool: PgPool) {
     .await;
     assert_eq!(response.status(), StatusCode::CONFLICT);
 
-    // A direction that contradicts the relation_type's declared source/target
-    // (project→task) is 422.
+    // A direction that contradicts the relation_type's declared source/target (project→task) is 422.
     let response = rest_request(
         &app,
         "POST",

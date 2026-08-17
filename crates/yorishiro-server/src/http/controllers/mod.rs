@@ -23,8 +23,8 @@ use yorishiro_core::repositories::tenancy::{self, MembershipRole};
 
 use crate::state::AppState;
 
-/// Parses a JSON-object query parameter (e.g. `?filter={"status":"active"}`) shared by the
-/// `entities` and `search` list endpoints. `None`/empty input means "no filter".
+/// Parses a JSON-object query parameter (e.g. `?filter={"status":"active"}`) shared by the `entities` and `search` list endpoints.
+/// `None`/empty input means "no filter".
 pub(crate) fn parse_filter_param(
     raw: Option<String>,
 ) -> Result<Option<serde_json::Value>, YorishiroError> {
@@ -38,10 +38,7 @@ pub(crate) fn parse_filter_param(
     })
 }
 
-/// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and
-/// stricter than) the presented API key's own scope -- a Member-role key can carry `write`
-/// scope for content operations while still having no business adding members or managing
-/// workspaces.
+/// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope: a Member-role key can carry `write` scope for content operations while still having no business adding members or managing workspaces.
 pub(crate) async fn require_tenant_admin(
     state: &AppState,
     tenant_id: Uuid,
@@ -58,10 +55,8 @@ pub(crate) async fn require_tenant_admin(
     Ok(())
 }
 
-/// Registers a single scheme named `bearer_auth` for sending the API key as a
-/// Bearer token. Individual `#[utoipa::path]` items don't carry `security(...)`;
-/// this registration plus `ApiDoc`'s top-level `security` attribute apply it to
-/// every endpoint at once.
+/// Registers a single scheme named `bearer_auth` for sending the API key as a Bearer token.
+/// Individual `#[utoipa::path]` items don't carry `security(...)`; this registration plus `ApiDoc`'s top-level `security` attribute apply it to every endpoint at once.
 struct SecurityAddon;
 
 impl Modify for SecurityAddon {
@@ -183,17 +178,13 @@ impl Modify for SecurityAddon {
 )]
 pub struct ApiDoc;
 
-/// REST API routing. Returned as `Router<AppState>` without state applied, so
-/// that `main.rs` can merge in the MCP routes and SwaggerUi before calling
-/// `with_state` at the end.
+/// REST API routing.
+/// Returned as `Router<AppState>` without state applied, so that `main.rs` can merge in the MCP routes and SwaggerUi before calling `with_state` at the end.
 ///
-/// `rate_limiter` protects `/auth/signup`, `/auth/login`, `/setup`, and `/setup/status` --
-/// this crate's own bearer-token-free endpoints, and therefore the ones an unauthenticated
-/// caller can brute-force (invite tokens, passwords). A downstream crate that adds its own
-/// unauthenticated routes (e.g. an OAuth login/callback pair) should rate-limit those too,
-/// via `crate::http::middleware::rate_limit::apply_rate_limit_layer` -- pass this same `Arc`
-/// to share one quota with these routes, or a fresh one for an independent quota. See
-/// `crate::build_app`'s doc comment for the full downstream-integration example.
+/// `rate_limiter` protects `/auth/signup`, `/auth/login`, `/setup`, and `/setup/status`:
+/// this crate's own bearer-token-free endpoints, and therefore the ones an unauthenticated caller can brute-force (invite tokens, passwords).
+/// A downstream crate that adds its own unauthenticated routes (e.g. an OAuth login/callback pair) should rate-limit those too, via `crate::http::middleware::rate_limit::apply_rate_limit_layer`: pass this same `Arc` to share one quota with these routes, or a fresh one for an independent quota.
+/// See `crate::build_app`'s doc comment for the full downstream-integration example.
 pub fn router(
     rate_limiter: std::sync::Arc<crate::http::middleware::rate_limit::RateLimiter>,
 ) -> Router<AppState> {
@@ -212,9 +203,8 @@ pub fn router(
             "/api/members",
             post(members::add_member).get(members::list_members),
         )
-        // Deployment-wide, so it sits outside every tenant and workspace path. Both methods on
-        // one `.route`: a path defined here takes that path entirely, and a method left out
-        // would answer 405 rather than falling through.
+        // Deployment-wide, so it sits outside every tenant and workspace path.
+        // Both methods on one `.route`: a path defined here takes that path entirely, and a method left out would answer 405 rather than falling through.
         .route(
             "/api/system/maintenance",
             get(system::get_maintenance).put(system::set_maintenance),

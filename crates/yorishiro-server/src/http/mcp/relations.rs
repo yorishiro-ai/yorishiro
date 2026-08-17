@@ -51,7 +51,8 @@ pub struct ListRelationsArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetRelationStatusArgs {
     pub id: Uuid,
-    /// "active", "deprecated" or "archived". Traversal follows "active" relations only.
+    /// "active", "deprecated" or "archived".
+    /// Traversal follows "active" relations only.
     pub status: String,
 }
 

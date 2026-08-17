@@ -26,9 +26,9 @@ impl Default for SearchQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SearchHit {
     pub entity: EntityRecord,
-    /// pgvector cosine distance (the `<=>` operator). Closer to 0 means more similar. `None`
-    /// when the entity has no embedding and was only surfaced through the pg_trgm fuzzy
-    /// text match on `query_text`.
+    /// pgvector cosine distance (the `<=>` operator).
+    /// Closer to 0 means more similar.
+    /// `None` when the entity has no embedding and was only surfaced through the pg_trgm fuzzy text match on `query_text`.
     pub distance: Option<f64>,
 }
 

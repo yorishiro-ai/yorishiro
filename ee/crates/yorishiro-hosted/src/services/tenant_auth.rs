@@ -9,22 +9,18 @@ pub const WORKSPACE_HEADER: &str = "x-workspace-id";
 
 /// Resolves a key that may be bound to a tenant rather than to one workspace.
 ///
-/// The community edition binds every key to exactly one workspace, which means a client working
-/// across several has to hold one key per workspace and swap between them. A key stored with a
-/// NULL `workspace_id` is instead bound to its tenant, and names the workspace per request with
-/// [`WORKSPACE_HEADER`].
+/// The community edition binds every key to exactly one workspace, which means a client working across several has to hold one key per workspace and swap between them.
+/// A key stored with a NULL `workspace_id` is instead bound to its tenant, and names the workspace per request with [`WORKSPACE_HEADER`].
 ///
-/// Installed with `AppState::with_authenticator`, so it is honoured on every authenticated path
-/// -- REST and MCP alike -- rather than only where a handler remembered to look.
+/// Installed with `AppState::with_authenticator`, so it is honoured on every authenticated path (REST and MCP alike) rather than only where a handler remembered to look.
 pub struct TenantScopedAuthenticator;
 
 /// The outcome of reading the workspace header.
 enum RequestedWorkspace {
     Absent,
     Present(Uuid),
-    /// Present but not a UUID. Distinct from `Absent` on purpose: treating an unparseable value
-    /// as "not sent" would send a request meant for one workspace to whichever one the key
-    /// happens to carry.
+    /// Present but not a UUID.
+    /// Distinct from `Absent` on purpose: treating an unparseable value as "not sent" would send a request meant for one workspace to whichever one the key happens to carry.
     Malformed,
 }
 
@@ -66,9 +62,8 @@ impl Authenticator for TenantScopedAuthenticator {
 
         let key_hash = yorishiro_core::services::auth::hash_key(presented_key);
 
-        // The two-argument overload this repo's migration adds. `p_requested_workspace` is only
-        // consulted for a key with no workspace of its own, and resolves only when the named
-        // workspace belongs to that key's tenant -- the tenant isolation boundary for these keys.
+        // The two-argument overload this repo's migration adds.
+        // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
         let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
             "SELECT id, workspace_id, tenant_id, scope, user_id \
              FROM identity.authenticate_api_key($1, $2)",
@@ -82,10 +77,8 @@ impl Authenticator for TenantScopedAuthenticator {
         let (api_key_id, workspace_id, tenant_id, scope_str, user_id) =
             row.ok_or(YorishiroError::Unauthenticated)?;
 
-        // A workspace-scoped key ignores the header, so a client that sends one naming a
-        // different workspace is asking for something it will not get. Rejecting says so;
-        // proceeding would act on the key's own workspace instead -- a write landing where the
-        // client never named, answered with a 2xx.
+        // A workspace-scoped key ignores the header, so a client that sends one naming a different workspace is asking for something it will not get.
+        // Rejecting says so; proceeding would act on the key's own workspace instead: a write landing where the client never named, answered with a 2xx.
         if let Some(requested) = requested
             && requested != workspace_id
         {
@@ -114,7 +107,8 @@ impl Authenticator for TenantScopedAuthenticator {
     }
 }
 
-/// A freshly issued tenant-scoped key. The plaintext exists only here -- only its hash is stored.
+/// A freshly issued tenant-scoped key.
+/// The plaintext exists only here: only its hash is stored.
 pub struct CreatedTenantApiKey {
     pub id: Uuid,
     pub plaintext: String,
@@ -122,10 +116,8 @@ pub struct CreatedTenantApiKey {
 
 /// Issues a tenant-scoped key.
 ///
-/// The community edition's `create_api_key` always records a workspace, so a key with none
-/// cannot be made through it -- this writes the row directly. The role cap is the same one that
-/// command applies: a key attributed to a user may not exceed what that user's tenant role
-/// permits, since the key can act as them.
+/// The community edition's `create_api_key` always records a workspace, so a key with none cannot be made through it: this writes the row directly.
+/// The role cap is the same one that command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
 pub async fn create_tenant_api_key(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -170,9 +162,8 @@ pub async fn create_tenant_api_key(
         }
     }
 
-    // Same shape as the community edition's own keys, so nothing downstream has to tell them
-    // apart by their text. The randomness is two v4 UUIDs: 122 bits each, from the same CSPRNG
-    // the community edition's own generator draws on, and `uuid` is already a dependency here.
+    // Same shape as the community edition's own keys, so nothing downstream has to tell them apart by their text.
+    // The randomness is two v4 UUIDs: 122 bits each, from the same CSPRNG the community edition's own generator draws on, and `uuid` is already a dependency here.
     let prefix = format!("ysr_{}", &Uuid::new_v4().simple().to_string()[..12]);
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let plaintext = format!("{prefix}_{secret}");

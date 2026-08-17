@@ -52,7 +52,7 @@ Environment=YORISHIRO_CONFIG_PATH=/opt/yorishiro/config.yml
 Restart=on-failure
 # 78 is EX_CONFIG, which the server uses for "configuration is absent or unusable" and nothing
 # else. Without this a start with no database configured retries every five seconds forever,
-# and `systemctl is-failed` answers `activating` rather than `failed` -- so nothing watching
+# and `systemctl is-failed` answers `activating` rather than `failed`, so nothing watching
 # unit state ever sees it. Other failures still retry, which a database still starting needs.
 RestartPreventExitStatus=78
 User=yorishiro

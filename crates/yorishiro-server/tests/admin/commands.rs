@@ -158,8 +158,7 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
     )
     .await
     .unwrap();
-    // core's create doesn't write the embedding (that's the adapter's background sync
-    // job), so this entity reproduces one left behind by a failed sync.
+    // core's create doesn't write the embedding (that's the adapter's background sync job), so this entity reproduces one left behind by a failed sync.
     let entity = yorishiro_core::repositories::entities::create(
         &mut conn,
         workspace_id,
@@ -216,9 +215,7 @@ async fn enforces_workspace_limit_on_create_workspace(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "capped", Some(1))
         .await
         .unwrap();
-    // create_tenant alone doesn't create a workspace here (unlike the CLI's CreateTenant
-    // handler, which additionally creates a "default" one); this test drives
-    // tenancy::create_workspace directly to check the cap.
+    // create_tenant alone doesn't create a workspace here (unlike the CLI's CreateTenant handler, which additionally creates a "default" one); this test drives tenancy::create_workspace directly to check the cap.
     tenancy::create_workspace(&pool, tenant.id, "first", None, None, None)
         .await
         .unwrap();

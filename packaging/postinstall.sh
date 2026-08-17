@@ -29,7 +29,7 @@ YAMLEOF
 fi
 
 # A machine carrying settings in the environment file needs to be told, in the file it will be
-# sent to, that the service does not read them -- otherwise it comes back up unconfigured and
+# sent to, that the service does not read them: otherwise it comes back up unconfigured and
 # stops at 78 with nothing pointing at the cause.
 #
 # Not migrated automatically: the env file is shell syntax with no schema, an aliased or
@@ -42,7 +42,7 @@ if [ -e "$LEGACY" ] && grep -qE '^[[:space:]]*[A-Z_]+=' "$LEGACY" 2>/dev/null; t
 # ---------------------------------------------------------------------------------------
 # /etc/yorishiro/yorishiro.env holds settings, and the service does not read that file.
 #
-# Move what it holds into this one. The names map directly -- lowercased, with the
+# Move what it holds into this one. The names map directly: lowercased, with the
 # YORISHIRO_ prefix dropped:
 #
 #   DATABASE_URL=postgres://...        ->  database_url: postgres://...

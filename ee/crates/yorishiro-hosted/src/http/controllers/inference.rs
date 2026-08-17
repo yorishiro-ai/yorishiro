@@ -1,10 +1,8 @@
-//! Inferring values for fields an entity is missing (§FR-8-2 mode B), and the per-workspace
-//! credentials it runs on.
+//! Inferring values for fields an entity is missing (§FR-8-2 mode B), and the per-workspace credentials it runs on.
 //!
-//! This product does not pay for inference (requirements §1.3), so a workspace brings its own
-//! key. A workspace with none configured gets a 422 rather than a fall back to `default` values
-//! -- a caller who asked for inference and silently received defaults would have no way to tell
-//! that nothing was inferred.
+//! This product does not pay for inference (requirements §1.3), so a workspace brings its own key.
+//! A workspace with none configured gets a 422 rather than a fall back to `default` values:
+//! a caller who asked for inference and silently received defaults would have no way to tell that nothing was inferred.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -24,9 +22,8 @@ use crate::services::inference::InferenceClient;
 use crate::services::llm_keys::{self, LlmKeyDescription};
 use crate::state::HostedState;
 
-/// The community edition's `Authorized<Scope>` extractor is not reachable from here, so the
-/// scope check is written out. Same comparison it makes: `ApiKeyScope` is ordered, and a key
-/// carrying a higher scope satisfies a lower requirement.
+/// The community edition's `Authorized<Scope>` extractor is not reachable from here, so the scope check is written out.
+/// Same comparison it makes: `ApiKeyScope` is ordered, and a key carrying a higher scope satisfies a lower requirement.
 fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope < needed {
         return Err(YorishiroError::ScopeInsufficient {
@@ -42,7 +39,8 @@ pub struct SetLlmKeyRequest {
     /// An OpenAI-compatible chat-completions endpoint, e.g. `https://api.openai.com/v1`.
     pub base_url: String,
     pub model: String,
-    /// Stored as given and never returned. `GET` reports only that one is configured.
+    /// Stored as given and never returned.
+    /// `GET` reports only that one is configured.
     pub api_key: String,
 }
 
@@ -145,9 +143,8 @@ pub async fn infer_fill(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<InferFillReport>, HostedApiError> {
-    // The server calls an LLM here, which is the definition of a paid feature. Checked before
-    // authentication so an unlicensed deployment answers the same 404 to everyone, rather than
-    // confirming to a valid key that the endpoint exists and is merely locked.
+    // The server calls an LLM here, which is the definition of a paid feature.
+    // Checked before authentication so an unlicensed deployment answers the same 404 to everyone, rather than confirming to a valid key that the endpoint exists and is merely locked.
     state.licence.require_active()?;
     let ctx = authz::authenticate_workspace(&state, &headers).await?;
     require_scope(&ctx, ApiKeyScope::Schema)?;
@@ -158,8 +155,7 @@ pub async fn infer_fill(
         .await
         .internal()?;
 
-    // Refuse before doing any work: a caller with no key gets one clear error rather than a
-    // scan that reports zero proposals and reads as "nothing to infer".
+    // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero proposals and reads as "nothing to infer".
     let config = llm_keys::get(&state.identity_pool, workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {
@@ -175,8 +171,8 @@ pub async fn infer_fill(
     let mut proposed = 0i64;
     let mut skipped = 0i64;
 
-    // The same set `fill-defaults` walks: entities on a version older than the active one. An
-    // entity already on the active version has nothing the schema says is missing.
+    // The same set `fill-defaults` walks: entities on a version older than the active one.
+    // An entity already on the active version has nothing the schema says is missing.
     let rows: Vec<(Uuid, String, serde_json::Value)> = sqlx::query_as(
         "SELECT e.id, e.entity_type, e.data \
          FROM content.entities e \

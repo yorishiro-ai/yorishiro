@@ -1,8 +1,7 @@
 //! Deployment-wide controls, as opposed to anything scoped to a tenant or a workspace.
 //!
-//! Only maintenance lives here. It is deployment-wide by nature: one row in
-//! `identity.maintenance` decides whether every caller is served, and there is no per-tenant
-//! version of it.
+//! Only maintenance lives here.
+//! It is deployment-wide by nature: one row in `identity.maintenance` decides whether every caller is served, and there is no per-tenant version of it.
 
 use axum::Json;
 use axum::extract::State;
@@ -14,16 +13,16 @@ use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, MigrationScope};
 use crate::state::AppState;
 
-/// The state as the API reports it. `MaintenanceState` is the repository's own type and is not
-/// serialisable, so the wire shape is declared here rather than deriving onto core's model: the
-/// two are free to differ, and this one is a published contract.
+/// The state as the API reports it.
+/// `MaintenanceState` is the repository's own type and is not serialisable, so the wire shape is declared here rather than deriving onto core's model: the two are free to differ, and this one is a published contract.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MaintenanceResponse {
     /// `off`, `read-only` or `full-lock`.
     pub mode: String,
     /// Seconds a refused caller is told to wait, sent as `Retry-After` on the refusal itself.
     pub retry_after: u32,
-    /// Why, when whoever set it said. Absent when nothing was given.
+    /// Why, when whoever set it said.
+    /// Absent when nothing was given.
     pub reason: Option<String>,
 }
 
@@ -52,9 +51,8 @@ pub struct SetMaintenanceRequest {
 /// The CLI's default, repeated here so the two entry points do not drift.
 const DEFAULT_RETRY_AFTER: u32 = 300;
 
-/// Accepts what an operator types at the CLI. `MaintenanceMode::from_db_str` parses the stored
-/// spelling (`read_only`), while clap renders the same variants kebab-cased (`read-only`), and
-/// an operator moving between the two entry points should not have to know which is which.
+/// Accepts what an operator types at the CLI.
+/// `MaintenanceMode::from_db_str` parses the stored spelling (`read_only`), while clap renders the same variants kebab-cased (`read-only`), and an operator moving between the two entry points should not have to know which is which.
 /// Both spellings are taken; anything else is refused rather than read as `off`.
 pub(crate) fn parse_mode(value: &str) -> Option<MaintenanceMode> {
     match value {
@@ -112,10 +110,8 @@ pub async fn set_maintenance(
             hint: "one of: off, read-only, full-lock".into(),
         })?;
 
-    // `maintenance::set` takes the pool rather than the request's connection because the request
-    // role has SELECT only on this table: entering maintenance is an operator action, and the
-    // GRANT says so. Authorization has already happened above, in the extractor, and the pool is
-    // handed straight to the repository rather than used to compose anything here.
+    // `maintenance::set` takes the pool rather than the request's connection because the request role has SELECT only on this table: entering maintenance is an operator action, and the GRANT says so.
+    // Authorization has already happened above, in the extractor, and the pool is handed straight to the repository rather than used to compose anything here.
     let updated = maintenance::set(
         &state.identity_pool,
         mode,

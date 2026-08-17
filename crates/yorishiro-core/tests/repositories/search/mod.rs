@@ -22,8 +22,8 @@ fn unit_vector(index: usize) -> Vec<f32> {
     v
 }
 
-/// A fake provider that lets each test explicitly fix the text→vector mapping. Panics
-/// if given unregistered text, catching broken test assumptions immediately.
+/// A fake provider that lets each test explicitly fix the text→vector mapping.
+/// Panics if given unregistered text, catching broken test assumptions immediately.
 struct MapProvider {
     vectors: HashMap<String, Vec<f32>>,
 }
@@ -278,8 +278,7 @@ async fn surfaces_entities_without_an_embedding_via_trigram_fuzzy_match(pool: Pg
     .await
     .unwrap();
 
-    // embedding stays NULL since sync_embedding is never called; only a close text
-    // match on `data` can surface this entity.
+    // embedding stays NULL since sync_embedding is never called; only a close text match on `data` can surface this entity.
     let entity = entities::create(
         &mut conn,
         workspace_id,
@@ -420,22 +419,15 @@ async fn enforces_tenant_isolation(pool: PgPool) {
 
 /// The vector half must reach the HNSW index.
 ///
-/// This is what the two-query shape exists for. A single statement that ranks vector hits ahead
-/// of trigram-only ones needs `ORDER BY (embedding IS NULL), distance`, and that leading key
-/// takes the index out of play entirely — pgvector serves `ORDER BY embedding <=> $q LIMIT k`
-/// and nothing else. Measured before the split: a sequential scan over every row in the
-/// workspace, at any size.
+/// This is what the two-query shape exists for.
+/// A single statement that ranks vector hits ahead of trigram-only ones needs `ORDER BY (embedding IS NULL), distance`, and that leading key takes the index out of play entirely: pgvector serves `ORDER BY embedding <=> $q LIMIT k` and nothing else.
+/// Measured before the split: a sequential scan over every row in the workspace, at any size.
 ///
-/// Asserting on the plan rather than on timing: a wall-clock assertion at test-suite scale
-/// would pass either way, and the failure this guards against is a query plan, not a slow
-/// machine. `enable_seqscan = off` makes the planner state its preference rather than fall back
-/// to a scan that is genuinely cheaper on a few rows.
+/// Asserting on the plan rather than on timing: a wall-clock assertion at test-suite scale would pass either way, and the failure this guards against is a query plan, not a slow machine.
+/// `enable_seqscan = off` makes the planner state its preference rather than fall back to a scan that is genuinely cheaper on a few rows.
 ///
-/// `enable_bitmapscan = off` closes the other way out, and is not optional: with only the
-/// sequential scan disabled the planner can still reach every row through a bitmap index scan
-/// on `entities_workspace_type_idx` and sort the results, which costs less than the HNSW walk
-/// at this size and satisfies the query without touching the index under test. That is a
-/// planner preference rather than a wrong answer, so it surfaced as an intermittent failure.
+/// `enable_bitmapscan = off` closes the other way out, and is not optional: with only the sequential scan disabled the planner can still reach every row through a bitmap index scan on `entities_workspace_type_idx` and sort the results, which costs less than the HNSW walk at this size and satisfies the query without touching the index under test.
+/// That is a planner preference rather than a wrong answer, so it surfaced as an intermittent failure.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -464,10 +456,8 @@ async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     .await
     .unwrap();
 
-    // On the pool, not on `conn`: the scoped connection runs as `yorishiro_app`, which cannot
-    // ANALYZE a table it does not own -- Postgres answers with a WARNING and skips it, so the
-    // statistics never update and the planner has no reason to prefer the index. Production
-    // analyses as the owner (autovacuum, or an operator), which is what this reproduces.
+    // On the pool, not on `conn`: the scoped connection runs as `yorishiro_app`, which cannot ANALYZE a table it does not own: Postgres answers with a WARNING and skips it, so the statistics never update and the planner has no reason to prefer the index.
+    // Production analyses as the owner (autovacuum, or an operator), which is what this reproduces.
     sqlx::query("ANALYZE content.entities")
         .execute(&pool)
         .await

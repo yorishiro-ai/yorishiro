@@ -1,8 +1,7 @@
 //! Deployment-wide maintenance state.
 //!
-//! One row, read on every request that could be refused and written only by an operator. It
-//! lives in the database rather than in the process because a flag held in memory would put
-//! one replica in maintenance while its siblings kept serving.
+//! One row, read on every request that could be refused and written only by an operator.
+//! It lives in the database rather than in the process because a flag held in memory would put one replica in maintenance while its siblings kept serving.
 
 use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
@@ -42,9 +41,9 @@ impl MaintenanceMode {
         }
     }
 
-    /// Parses the stored value. Unknown values are rejected rather than treated as `Off`:
-    /// reading a row this crate does not understand and concluding "serve everything" would
-    /// turn a corrupt row into an outage of the protection itself.
+    /// Parses the stored value.
+    /// Unknown values are rejected rather than treated as `Off`:
+    /// reading a row this crate does not understand and concluding "serve everything" would turn a corrupt row into an outage of the protection itself.
     pub fn from_db_str(value: &str) -> Option<Self> {
         match value {
             "off" => Some(Self::Off),
@@ -63,8 +62,8 @@ pub struct MaintenanceState {
 }
 
 impl MaintenanceState {
-    /// The error to refuse a request with, or `None` when it may proceed. `is_write` decides
-    /// whether read-only applies; full lock refuses either way.
+    /// The error to refuse a request with, or `None` when it may proceed.
+    /// `is_write` decides whether read-only applies; full lock refuses either way.
     pub fn refusal(&self, is_write: bool) -> Option<YorishiroError> {
         let (refuse, read_only) = match self.mode {
             MaintenanceMode::Off => (false, false),
@@ -97,8 +96,8 @@ fn columns() -> [Maintenance; 3] {
     ]
 }
 
-/// Reads the current state. Runs on the request connection, so the row is readable by the
-/// application role.
+/// Reads the current state.
+/// Runs on the request connection, so the row is readable by the application role.
 pub async fn get(conn: &mut PgConnection) -> Result<MaintenanceState, YorishiroError> {
     let (sql, values) = Query::select()
         .columns(columns())
@@ -132,8 +131,8 @@ pub async fn get(conn: &mut PgConnection) -> Result<MaintenanceState, YorishiroE
     })
 }
 
-/// Sets the state. Takes the pool the migration role connects with: the request role has
-/// SELECT only, since entering maintenance is an operator action.
+/// Sets the state.
+/// Takes the pool the migration role connects with: the request role has SELECT only, since entering maintenance is an operator action.
 pub async fn set(
     pool: &PgPool,
     mode: MaintenanceMode,

@@ -17,14 +17,12 @@ use crate::services::plan::{Plan, StripePriceMapping};
 use crate::services::{hmac_sign, non_empty_env};
 use crate::state::HostedState;
 
-/// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible
-/// replay. Stripe's own guidance uses 5 minutes.
+/// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible replay.
+/// Stripe's own guidance uses 5 minutes.
 const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
-/// Configuration for the Stripe integration. Both fields are absent by default -- a deployment
-/// with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of
-/// silently accepting unverifiable requests, matching this session's deferral of real Stripe
-/// credentials.
+/// Configuration for the Stripe integration.
+/// Both fields are absent by default: a deployment with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of silently accepting unverifiable requests, matching this session's deferral of real Stripe credentials.
 #[derive(Debug, Clone, Default)]
 pub struct StripeConfig {
     pub webhook_secret: Option<String>,
@@ -40,15 +38,10 @@ impl StripeConfig {
     }
 }
 
-/// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`),
-/// checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches
-/// the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret. Both checks are
-/// required -- the timestamp check alone doesn't authenticate anything, and the signature check
-/// alone doesn't prevent a captured request from being replayed indefinitely.
+/// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`), checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret.
+/// Both checks are required: the timestamp check alone doesn't authenticate anything, and the signature check alone doesn't prevent a captured request from being replayed indefinitely.
 ///
-/// `pub(crate)`: the only caller is `stripe_webhook` below, and the tests reach it as
-/// `crate::http::controllers::stripe::verify_stripe_signature` since they compile inside this
-/// crate. It was `pub` + `#[doc(hidden)]` back when `tests/` could only see the public surface.
+/// `pub(crate)`: the only caller is `stripe_webhook` below, and the tests reach it as `crate::http::controllers::stripe::verify_stripe_signature` since they compile inside this crate.
 pub(crate) fn verify_stripe_signature(
     payload: &[u8],
     signature_header: &str,
@@ -89,9 +82,7 @@ struct StripeEvent {
     id: String,
     #[serde(rename = "type")]
     event_type: String,
-    /// Unix timestamp of when Stripe created this event -- used to detect a delayed/retried
-    /// delivery that arrives after a newer event for the same customer has already landed (see
-    /// `is_stale_for_customer`).
+    /// Unix timestamp of when Stripe created this event: used to detect a delayed/retried delivery that arrives after a newer event for the same customer has already landed (see `is_stale_for_customer`).
     created: i64,
     data: StripeEventData,
 }
@@ -101,13 +92,10 @@ struct StripeEventData {
     object: serde_json::Value,
 }
 
-/// The single public HTTP entry point for Stripe webhooks. Returns 501 without a configured
-/// secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has
-/// been applied (or was simply not one we act on).
+/// The single public HTTP entry point for Stripe webhooks.
+/// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
-/// Intentionally returns `impl IntoResponse` with raw status codes rather than
-/// `Result<_, HostedApiError>`: Stripe expects plain-text error bodies from webhooks, not the
-/// JSON `{"error": {...}}` envelope the dashboard API uses.
+/// Intentionally returns `impl IntoResponse` with raw status codes rather than `Result<_, HostedApiError>`: Stripe expects plain-text error bodies from webhooks, not the JSON `{"error": {...}}` envelope the dashboard API uses.
 #[utoipa::path(
     post,
     path = "/hosted/stripe/webhook",
@@ -123,7 +111,7 @@ struct StripeEventData {
         (status = 200, description = "Event verified and applied, or of a type this deployment does not act on. A repeat of an already-recorded event id is also accepted here so Stripe stops retrying it", body = String),
         (status = 400, description = "Missing/invalid `Stripe-Signature`, or a malformed JSON body", body = String),
         (status = 500, description = "The event was valid but applying it failed", body = String),
-        (status = 501, description = "`YORISHIRO_STRIPE_WEBHOOK_SECRET` is unset -- Stripe billing is opt-in, and unverifiable requests are refused rather than accepted", body = String),
+        (status = 501, description = "`YORISHIRO_STRIPE_WEBHOOK_SECRET` is unset: Stripe billing is opt-in, and unverifiable requests are refused rather than accepted", body = String),
     ),
     tag = "hosted",
 )]
@@ -182,9 +170,8 @@ enum StripeProcessedEvents {
     StripeCreated,
 }
 
-/// Whether `event_id` has already been applied. Stripe retries a webhook delivery on a slow or
-/// failed response, so the same event can arrive more than once; `event_id` is the primary key
-/// of `identity.stripe_processed_events`, so this is a plain existence check.
+/// Whether `event_id` has already been applied.
+/// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `identity.stripe_processed_events`, so this is a plain existence check.
 async fn is_event_processed(pool: &PgPool, event_id: &str) -> Result<bool, YorishiroError> {
     let (sql, values) = Query::select()
         .expr(Expr::val(1))
@@ -199,9 +186,8 @@ async fn is_event_processed(pool: &PgPool, event_id: &str) -> Result<bool, Yoris
     Ok(row.is_some())
 }
 
-/// Whether `created` is older than the most recently applied event's `created` for the same
-/// `customer_id`. Stripe does not guarantee delivery order, so a delayed/retried delivery of a
-/// stale event must not be allowed to undo a newer one that already landed for that customer.
+/// Whether `created` is older than the most recently applied event's `created` for the same `customer_id`.
+/// Stripe does not guarantee delivery order, so a delayed/retried delivery of a stale event must not be allowed to undo a newer one that already landed for that customer.
 async fn is_stale_for_customer(
     pool: &PgPool,
     customer_id: &str,
@@ -222,25 +208,17 @@ async fn is_stale_for_customer(
     Ok(row.is_some_and(|(latest,)| created < latest))
 }
 
-/// Records that `event_id` has been applied, so a later retry or reorder of the same or an older
-/// event for `customer_id` is rejected by [`is_event_processed`]/[`is_stale_for_customer`].
+/// Records that `event_id` has been applied, so a later retry or reorder of the same or an older event for `customer_id` is rejected by [`is_event_processed`]/[`is_stale_for_customer`].
 ///
-/// `ON CONFLICT (event_id) DO NOTHING`: `apply_stripe_event`'s [`is_event_processed`] check and
-/// this insert are not wrapped in a shared transaction, so two truly concurrent deliveries of the
-/// same brand-new event id can both pass that check and both dispatch (harmless -- the handlers
-/// below are idempotent, e.g. `set_tenant_plan` just sets the same plan twice). Without the
-/// conflict clause, the loser's insert would then fail on the `event_id` primary key and surface
-/// as a spurious `500`; Stripe would retry, and the retry's own `is_event_processed` check would
-/// find the winner's already-recorded row and correctly skip re-dispatch. The conflict clause
-/// just avoids that unnecessary `500`/retry round trip.
+/// `ON CONFLICT (event_id) DO NOTHING`: `apply_stripe_event`'s [`is_event_processed`] check and this insert are not wrapped in a shared transaction, so two truly concurrent deliveries of the same brand-new event id can both pass that check and both dispatch (harmless, the handlers below are idempotent, e.g. `set_tenant_plan` just sets the same plan twice).
+/// Without the conflict clause, the loser's insert would then fail on the `event_id` primary key and surface as a spurious `500`; Stripe would retry, and the retry's own `is_event_processed` check would find the winner's already-recorded row and correctly skip re-dispatch.
+/// The conflict clause just avoids that unnecessary `500`/retry round trip.
 ///
-/// `event_type` is written but never read back by any query here, which makes it look removable
-/// -- it isn't. This table is the billing audit trail: when a tenant's plan or cap ends up wrong,
-/// the only record of which Stripe event types actually landed (and in what order, via
-/// `stripe_created`/`processed_at`) is these rows. Dropping the column would leave an
-/// investigator able to see *that* an event was applied but not *what it did*, right when that
-/// distinction matters most. It also mirrors the `match event.event_type` dispatch below, so
-/// keeping it stops the recorded history and the branching logic from drifting apart.
+/// `event_type` is written but never read back by any query here, which makes it look removable.
+/// It isn't.
+/// This table is the billing audit trail: when a tenant's plan or cap ends up wrong, the only record of which Stripe event types actually landed (and in what order, via `stripe_created`/`processed_at`) is these rows.
+/// Dropping the column would leave an investigator able to see *that* an event was applied but not *what it did*, right when that distinction matters most.
+/// It also mirrors the `match event.event_type` dispatch below, so keeping it stops the recorded history and the branching logic from drifting apart.
 async fn record_processed_event(
     pool: &PgPool,
     event_id: &str,
@@ -276,9 +254,7 @@ async fn record_processed_event(
     Ok(())
 }
 
-/// The tenant a subscription event's `customer` field resolves to, or `None` (logged by the
-/// caller as appropriate) when the object has no `customer` field or that customer isn't linked
-/// to any tenant yet.
+/// The tenant a subscription event's `customer` field resolves to, or `None` (logged by the caller as appropriate) when the object has no `customer` field or that customer isn't linked to any tenant yet.
 async fn resolve_tenant_by_customer(
     pool: &PgPool,
     object: &serde_json::Value,
@@ -291,19 +267,12 @@ async fn resolve_tenant_by_customer(
         .map(|record| record.tenant_id))
 }
 
-/// Applies a verified Stripe event to our tenant model. Only the handful of event types needed
-/// to keep a tenant's plan/cap in sync are handled; anything else (e.g. invoice events used only
-/// for record-keeping on Stripe's side) is accepted but ignored.
+/// Applies a verified Stripe event to our tenant model.
+/// Only the handful of event types needed to keep a tenant's plan/cap in sync are handled; anything else (e.g. invoice events used only for record-keeping on Stripe's side) is accepted but ignored.
 ///
-/// The Stripe object's linkage to our tenant is intentionally simple for this skeleton: the
-/// checkout session that starts a subscription is expected to have been created with
-/// `client_reference_id` set to our tenant id, which is recorded (`link_stripe_customer`) so
-/// later subscription events -- keyed only by Stripe customer id -- can be traced back to it.
+/// The Stripe object's linkage to our tenant is intentionally simple for this skeleton: the checkout session that starts a subscription is expected to have been created with `client_reference_id` set to our tenant id, which is recorded (`link_stripe_customer`) so later subscription events (keyed only by Stripe customer id) can be traced back to it.
 ///
-/// Idempotency and ordering are enforced up front (see `identity.stripe_processed_events`,
-/// `is_event_processed`/`is_stale_for_customer`): a duplicate delivery of an event already
-/// applied, or a delayed delivery of an event older than one already applied for the same
-/// customer, is accepted (so Stripe doesn't retry it forever) but not re-applied.
+/// Idempotency and ordering are enforced up front (see `identity.stripe_processed_events`, `is_event_processed`/`is_stale_for_customer`): a duplicate delivery of an event already applied, or a delayed delivery of an event older than one already applied for the same customer, is accepted (so Stripe doesn't retry it forever) but not re-applied.
 async fn apply_stripe_event(state: &HostedState, event: StripeEvent) -> Result<(), YorishiroError> {
     let pool = &state.identity_pool;
 
@@ -323,11 +292,8 @@ async fn apply_stripe_event(state: &HostedState, event: StripeEvent) -> Result<(
         );
         return Ok(());
     };
-    // Only the subscription events are ordered per customer. `checkout.session.completed` also
-    // carries a `customer` field, but it's a one-time link event with no ordering relationship to
-    // the subscription stream -- recording it here would set a staleness floor that can reject a
-    // `customer.subscription.created` for the same purchase if it happens to arrive first with an
-    // earlier `created` (Stripe does not guarantee delivery order between the two).
+    // Only the subscription events are ordered per customer.
+    // `checkout.session.completed` also carries a `customer` field, but it's a one-time link event with no ordering relationship to the subscription stream, recording it here would set a staleness floor that can reject a `customer.subscription.created` for the same purchase if it happens to arrive first with an earlier `created` (Stripe does not guarantee delivery order between the two).
     let customer_id = matches!(
         event.event_type.as_str(),
         "customer.subscription.created"

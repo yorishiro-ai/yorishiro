@@ -27,8 +27,7 @@ async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
     test_support::seed_tenant_and_workspace(pool).await
 }
 
-/// Renders an `ExportRecord` list to the JSONL text `import_jsonl` reads, exactly as
-/// `GET /api/export.jsonl` does.
+/// Renders an `ExportRecord` list to the JSONL text `import_jsonl` reads, exactly as `GET /api/export.jsonl` does.
 fn to_jsonl(records: &[crate::repositories::export::ExportRecord]) -> String {
     let mut body = String::new();
     for record in records {
@@ -121,8 +120,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
     let dest_records = export_all(&mut dest_conn, dest_workspace).await.unwrap();
     assert_eq!(dest_records.len(), 4);
 
-    // Relation endpoints were remapped to the newly generated entity IDs, not the
-    // originals (which don't even exist in this workspace).
+    // Relation endpoints were remapped to the newly generated entity IDs, not the originals (which don't even exist in this workspace).
     let imported_relation = dest_records
         .iter()
         .find_map(|r| match r {
@@ -153,8 +151,8 @@ async fn import_is_all_or_nothing_on_a_bad_relation_reference(pool: PgPool) {
         .await
         .unwrap();
 
-    // A schema line followed by a relation line whose endpoints don't exist. The schema
-    // insert should be rolled back along with the failing relation.
+    // A schema line followed by a relation line whose endpoints don't exist.
+    // The schema insert should be rolled back along with the failing relation.
     let schema_json = serde_json::to_value(task_schema()).unwrap();
     let jsonl = format!(
         "{}\n{}\n",

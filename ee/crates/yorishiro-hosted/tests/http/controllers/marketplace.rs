@@ -1,6 +1,5 @@
-//! The licence gate on the marketplace routes. The marketplace's own behaviour -- publishing,
-//! forking, reviews, visibility -- is covered at the service level in `tests/services/marketplace.rs`;
-//! what is asserted here is only that the gate opens and closes, which needs the HTTP layer.
+//! The licence gate on the marketplace routes.
+//! The marketplace's own behaviour (publishing, forking, reviews, visibility) is covered at the service level in `tests/services/marketplace.rs`; what is asserted here is only that the gate opens and closes, which needs the HTTP layer.
 
 use crate::http::controllers::marketplace::list_marketplace;
 use crate::state::HostedState;
@@ -72,13 +71,13 @@ async fn without_a_licence_the_marketplace_is_not_served(pool: PgPool) {
 
     let status = get_marketplace(unlicensed_hosted_state(pool), &key).await;
 
-    // 404, not 402 or 403: the deployment genuinely does not serve this. The same answer a
-    // deployment gets for the setup wizard it has disabled.
+    // 404, not 402 or 403: the deployment genuinely does not serve this.
+    // The same answer a deployment gets for the setup wizard it has disabled.
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-/// The gate runs before authentication, so an unlicensed deployment cannot be probed for which
-/// paid features it would have had. A 401 here would confirm the route exists.
+/// The gate runs before authentication, so an unlicensed deployment cannot be probed for which paid features it would have had.
+/// A 401 here would confirm the route exists.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key(pool: PgPool) {
     let status = get_marketplace(unlicensed_hosted_state(pool), "ysr_not_a_real_key").await;
@@ -86,8 +85,8 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key(pool: PgP
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-/// A licensed deployment still authenticates. Without this, "gated" and "open to anyone" would
-/// look the same in the test above.
+/// A licensed deployment still authenticates.
+/// Without this, "gated" and "open to anyone" would look the same in the test above.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_licence_does_not_replace_authentication(pool: PgPool) {
     let status = get_marketplace(hosted_state(pool), "ysr_not_a_real_key").await;
@@ -95,8 +94,7 @@ async fn a_licence_does_not_replace_authentication(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-/// A key that lapsed while the process was running closes the gate on the next request, without
-/// a restart -- the state holds claims, not a boolean captured at boot.
+/// A key that lapsed while the process was running closes the gate on the next request, without a restart: the state holds claims, not a boolean captured at boot.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_licence_that_expired_mid_run_closes_the_gate(pool: PgPool) {
     use crate::services::licence::{LicenceClaims, LicenceState};

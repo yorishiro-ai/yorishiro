@@ -10,16 +10,16 @@ use yorishiro_core::services::auth::ApiKeyScope;
 
 use commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key};
 
-/// Subcommands under `yorishiro-server admin`. API keys are stored only as SHA-256 hashes and
-/// user passwords only as argon2 hashes, so neither can be provisioned by hand in SQL — this
-/// CLI is the only bootstrap mechanism.
+/// Subcommands under `yorishiro-server admin`.
+/// API keys are stored only as SHA-256 hashes and user passwords only as argon2 hashes, so neither can be provisioned by hand in SQL: this CLI is the only bootstrap mechanism.
 #[derive(Subcommand)]
 pub enum AdminCommand {
-    /// Create a new tenant. With --template, also creates a schema from the template
-    /// and a default workspace linked to it (required for login to work).
+    /// Create a new tenant.
+    /// With --template, also creates a schema from the template and a default workspace linked to it (required for login to work).
     CreateTenant {
         name: String,
-        /// Cap on the number of workspaces this tenant may create. Omit for unlimited.
+        /// Cap on the number of workspaces this tenant may create.
+        /// Omit for unlimited.
         #[arg(long)]
         max_workspaces: Option<i32>,
         /// Built-in template ID to bootstrap a schema and default workspace.
@@ -33,10 +33,12 @@ pub enum AdminCommand {
     CreateWorkspace {
         tenant_id: Uuid,
         name: String,
-        /// Cap on the number of entities this workspace may hold. Omit for unlimited.
+        /// Cap on the number of entities this workspace may hold.
+        /// Omit for unlimited.
         #[arg(long)]
         max_entities: Option<i32>,
-        /// Schema to associate with this workspace. Omit to leave it unset.
+        /// Schema to associate with this workspace.
+        /// Omit to leave it unset.
         #[arg(long)]
         schema_id: Option<Uuid>,
     },
@@ -57,24 +59,23 @@ pub enum AdminCommand {
     },
     /// List a tenant's members.
     ListMembers { tenant_id: Uuid },
-    /// Create an invite token for an email to join a tenant with a given role. Signup is
-    /// invite-only; there is no self-service, unauthenticated account creation.
+    /// Create an invite token for an email to join a tenant with a given role.
+    /// Signup is invite-only; there is no self-service, unauthenticated account creation.
     CreateInvite {
         tenant_id: Uuid,
         email: String,
         role: RoleArg,
-        /// How long the invite stays redeemable. Defaults to 7 days.
+        /// How long the invite stays redeemable.
+        /// Defaults to 7 days.
         #[arg(long, default_value_t = 168)]
         ttl_hours: i64,
     },
-    /// Issue a new API key for a workspace (see `admin list-workspaces <tenant-id>` for the
-    /// workspace ID).
+    /// Issue a new API key for a workspace (see `admin list-workspaces <tenant-id>` for the workspace ID).
     CreateApiKey {
         workspace_id: Uuid,
         scope: ScopeArg,
-        /// Attribute the key to a specific user (see `admin list-members <tenant-id>`). The
-        /// requested scope is capped by that user's tenant role (owner/admin: schema,
-        /// member: write, viewer: read); omit for an unattributed service key.
+        /// Attribute the key to a specific user (see `admin list-members <tenant-id>`).
+        /// The requested scope is capped by that user's tenant role (owner/admin: schema, member: write, viewer: read); omit for an unattributed service key.
         #[arg(long)]
         user: Option<Uuid>,
     },
@@ -86,9 +87,8 @@ pub enum AdminCommand {
     ResyncEmbeddings { workspace_id: Uuid },
     /// Put the deployment into maintenance, or take it out.
     ///
-    /// `read-only` refuses writes with 423; `full-lock` refuses everything with 503; `off`
-    /// serves normally. The state is shared by every node, and `/up`/`/health` keep answering
-    /// so an orchestrator does not restart a server that is deliberately paused.
+    /// `read-only` refuses writes with 423; `full-lock` refuses everything with 503; `off` serves normally.
+    /// The state is shared by every node, and `/up`/`/health` keep answering so an orchestrator does not restart a server that is deliberately paused.
     Maintenance {
         #[arg(value_enum)]
         mode: MaintenanceArg,
@@ -158,10 +158,8 @@ impl From<RoleArg> for MembershipRole {
     }
 }
 
-/// Entry point for the admin subcommands. Unlike a plain server start (no args), this
-/// operates on the database directly using the DATABASE_URL connection role (the admin
-/// role that can run migrations and is the only role with write access to `identity.tenants`/
-/// `identity.users`/`identity.tenant_memberships`).
+/// Entry point for the admin subcommands.
+/// Unlike a plain server start (no args), this operates on the database directly using the DATABASE_URL connection role (the admin role that can run migrations and is the only role with write access to `identity.tenants`/ `identity.users`/`identity.tenant_memberships`).
 pub async fn run(command: AdminCommand) -> Result<()> {
     let database_url =
         std::env::var("DATABASE_URL").context("DATABASE_URL must be set for admin commands")?;
@@ -178,9 +176,8 @@ pub async fn run(command: AdminCommand) -> Result<()> {
 
 /// Execute an admin command against a pool whose migrations have already been applied.
 pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
-    // What a workspace created here gets stamped with. Built from the environment rather than
-    // from a running provider: the admin commands do not start one, and loading a local ONNX
-    // model to read one number off it would make `create-tenant` wait on a model it never uses.
+    // What a workspace created here gets stamped with.
+    // Built from the environment rather than from a running provider: the admin commands do not start one, and loading a local ONNX model to read one number off it would make `create-tenant` wait on a model it never uses.
     let embedding_stamp: Option<(String, i32)> = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .ok()
         .and_then(|d| d.parse::<i32>().ok())
@@ -202,9 +199,8 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             if let Some(template_id) = template {
                 let definition = yorishiro_core::templates::get_template(&template_id)?;
 
-                // Workspace first, then its schema. A schema belongs to a workspace, so the
-                // workspace has to exist to own it; the workspace's own `schema_id` is linked
-                // afterwards, once there is a schema to point at.
+                // Workspace first, then its schema.
+                // A schema belongs to a workspace, so the workspace has to exist to own it; the workspace's own `schema_id` is linked afterwards, once there is a schema to point at.
                 let workspace = tenancy::create_workspace(
                     pool,
                     tenant.id,
@@ -356,7 +352,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             )
             .await
             .map_err(anyhow::Error::from)?;
-            println!("invite created (the plaintext token is shown ONLY once — send it now)");
+            println!("invite created (the plaintext token is shown ONLY once, send it now)");
             println!("  token:      {token}");
             println!("  invite id:  {}", invite.id);
             println!("  tenant id:  {}", invite.tenant_id);
@@ -374,7 +370,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
         } => {
             let scope = ApiKeyScope::from(scope);
             let created = create_api_key(pool, workspace_id, scope, user).await?;
-            println!("api key created (the plaintext key is shown ONLY once — store it now)");
+            println!("api key created (the plaintext key is shown ONLY once, store it now)");
             println!("  key:          {}", created.plaintext);
             println!("  key id:       {}", created.id);
             println!("  workspace id: {}", created.workspace_id);

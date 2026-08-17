@@ -138,10 +138,7 @@ async fn require_scope_rejects_insufficient_scope(pool: PgPool) {
     assert!(matches!(err, YorishiroError::ScopeInsufficient { .. }));
 }
 
-/// Verifies that `authenticate_api_key` is actually needed: authentication must still
-/// succeed over a connection that went through the same `SET ROLE yorishiro_app` that
-/// `TenantDb::connect` uses in production (which can't bypass RLS and has no
-/// `app.current_tenant`/`app.current_workspace` set).
+/// Verifies that `authenticate_api_key` is actually needed: authentication must still succeed over a connection that went through the same `SET ROLE yorishiro_app` that `TenantDb::connect` uses in production (which can't bypass RLS and has no `app.current_tenant`/`app.current_workspace` set).
 #[sqlx::test(migrations = "../../migrations")]
 async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -158,7 +155,7 @@ async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
         .max_connections(1)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                // Same session-control statement as `db.rs`'s `TenantDb::connect` --
+                // Same session-control statement as `db.rs`'s `TenantDb::connect`:
                 // no query-builder form, stays raw SQL.
                 sqlx::query("SET ROLE yorishiro_app")
                     .execute(&mut *conn)
@@ -203,8 +200,7 @@ async fn authorize_returns_a_usable_connection_for_a_sufficient_scope(pool: PgPo
 
     assert_eq!(ctx.tenant_id, tenant_id);
     assert_eq!(ctx.workspace_id, workspace_id);
-    // The returned connection already has its RLS context set, so it can read this
-    // workspace's own api_keys row without issue.
+    // The returned connection already has its RLS context set, so it can read this workspace's own api_keys row without issue.
     let (sql, values) = Query::select()
         .expr(sea_query::Func::count(Expr::col(sea_query::Asterisk)))
         .from((Alias::new("identity"), ApiKeys::Table))
@@ -296,11 +292,8 @@ fn hex_decode_accepts_uppercase() {
     assert_eq!(hex_decode("DEADBEEF").unwrap(), [0xde, 0xad, 0xbe, 0xef]);
 }
 
-/// Every adapter that authenticates a request routes its `Authorization` header through this,
-/// so the shapes it accepts and rejects are the shapes the whole server accepts and rejects.
-/// The empty-credential case is why this is shared at all: `Authorization: Bearer ` used to be
-/// rejected by one caller and accepted -- then hashed into a lookup that could never match --
-/// by the REST and MCP paths, which is the disagreement a shared helper exists to prevent.
+/// Every adapter that authenticates a request routes its `Authorization` header through this, so the shapes it accepts and rejects are the shapes the whole server accepts and rejects.
+/// The empty-credential case is why this is shared at all: `Authorization: Bearer ` with nothing after it must be rejected the same way by every caller, since hashing the empty string into a lookup can never match and a caller that instead accepted it would disagree silently with every other path.
 #[test]
 fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
     assert_eq!(
@@ -311,9 +304,9 @@ fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
     for rejected in [
         None,
         Some(""),
-        // A `Bearer` with nothing after it. Hashing the empty string is a lookup that cannot
-        // match any key, so accepting it only costs a query -- but two adapters disagreeing on
-        // the same request is the thing worth preventing.
+        // A `Bearer` with nothing after it.
+        // Hashing the empty string is a lookup that cannot match any key, so accepting it only costs a query.
+        // But two adapters disagreeing on the same request is the thing worth preventing.
         Some("Bearer "),
         Some("Bearer"),
         // Another scheme entirely.
@@ -331,9 +324,7 @@ fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
     }
 }
 
-/// Whitespace inside the credential is preserved rather than trimmed -- an API key never
-/// contains a space, so a token that has one is wrong and must fail the key lookup rather than
-/// be silently repaired into a different string.
+/// Whitespace inside the credential is preserved rather than trimmed: an API key never contains a space, so a token that has one is wrong and must fail the key lookup rather than be silently repaired into a different string.
 #[test]
 fn bearer_credential_does_not_trim_the_token() {
     assert_eq!(bearer_credential(Some("Bearer  padded")), Some(" padded"));
@@ -341,9 +332,8 @@ fn bearer_credential_does_not_trim_the_token() {
 
 /// `migration` sits above `schema`, and round-trips through the column.
 ///
-/// The operations it guards -- running a batch migration, undoing one -- rewrite rows already
-/// stored, where registering a schema adds a version nothing has been written against yet. A
-/// `schema` key must not reach them.
+/// The operations it guards (running a batch migration, undoing one) rewrite rows already stored, where registering a schema adds a version nothing has been written against yet.
+/// A `schema` key must not reach them.
 #[test]
 fn migration_outranks_schema_and_round_trips() {
     assert!(ApiKeyScope::Migration > ApiKeyScope::Schema);

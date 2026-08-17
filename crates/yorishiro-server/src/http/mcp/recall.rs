@@ -18,8 +18,7 @@ pub struct RecallContextArgs {
     pub entity_id: Uuid,
     /// Maximum number of relations/neighbors to include per hop (defaults to 20 if omitted).
     pub limit: Option<i64>,
-    /// When true, neighbor entities include every field instead of only `x-embed` fields
-    /// (defaults to false).
+    /// When true, neighbor entities include every field instead of only `x-embed` fields (defaults to false).
     pub full: Option<bool>,
     /// How many hops to traverse outward from the entity (defaults to 1, max 3).
     pub depth: Option<i64>,

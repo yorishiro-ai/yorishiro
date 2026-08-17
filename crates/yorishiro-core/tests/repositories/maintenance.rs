@@ -10,8 +10,8 @@ fn state(mode: MaintenanceMode) -> MaintenanceState {
     }
 }
 
-/// The table that decides who is refused. Reads pass in read-only, writes do not, and full
-/// lock takes both.
+/// The table that decides who is refused.
+/// Reads pass in read-only, writes do not, and full lock takes both.
 #[test]
 fn refusal_follows_the_mode_and_the_request_kind() {
     assert!(state(MaintenanceMode::Off).refusal(false).is_none());
@@ -24,8 +24,7 @@ fn refusal_follows_the_mode_and_the_request_kind() {
     assert!(state(MaintenanceMode::FullLock).refusal(true).is_some());
 }
 
-/// Read-only is 423 and full lock is 503. The distinction is the point: 423 says the resource
-/// is locked while the server is fine, 503 says the server is not serving.
+/// Read-only is 423 and full lock is 503. The distinction is the point: 423 says the resource is locked while the server is fine, 503 says the server is not serving.
 #[test]
 fn each_mode_maps_to_its_own_status() {
     let (status, body) = state(MaintenanceMode::ReadOnly)
@@ -42,8 +41,7 @@ fn each_mode_maps_to_its_own_status() {
     assert_eq!(status, 503);
 }
 
-/// An operator's reason reaches the caller; without one the message still says which mode it
-/// is, rather than leaving a bare status code to be interpreted.
+/// An operator's reason reaches the caller; without one the message still says which mode it is, rather than leaving a bare status code to be interpreted.
 #[test]
 fn the_operators_reason_is_what_the_caller_reads() {
     let with_reason = MaintenanceState {
@@ -70,8 +68,8 @@ fn the_operators_reason_is_what_the_caller_reads() {
     );
 }
 
-/// A value this crate does not understand is an error, not "off". Treating a corrupt row as
-/// "serve everything" would turn it into an outage of the protection itself.
+/// A value this crate does not understand is an error, not "off".
+/// Treating a corrupt row as "serve everything" would turn it into an outage of the protection itself.
 #[test]
 fn an_unknown_stored_mode_is_not_read_as_off() {
     assert_eq!(

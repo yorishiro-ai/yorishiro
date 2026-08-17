@@ -1,7 +1,6 @@
 use super::*;
 
-/// Provisioning has to tell a genuine email collision apart from any other failure: the first is
-/// something the user can act on ("that address already has an account"), the second is not.
+/// Provisioning has to tell a genuine email collision apart from any other failure: the first is something the user can act on ("that address already has an account"), the second is not.
 /// A single opaque error would force the caller to string-match.
 #[test]
 fn a_unique_violation_is_distinguishable_from_other_failures() {
@@ -24,10 +23,8 @@ fn a_unique_violation_is_distinguishable_from_other_failures() {
     );
 }
 
-/// The doc comment on `UniqueViolation` reasons that only the email constraint can fire, because
-/// an advisory lock rules out a concurrent insert of the same identity. That reasoning is what
-/// makes the variant safe to report as an email collision, so the variant carries no constraint
-/// name to disambiguate -- pinned here so a future change that needs one is a deliberate choice.
+/// The doc comment on `UniqueViolation` reasons that only the email constraint can fire, because an advisory lock rules out a concurrent insert of the same identity.
+/// That reasoning is what makes the variant safe to report as an email collision, so the variant carries no constraint name to disambiguate: pinned here so a future change that needs one is a deliberate choice.
 #[test]
 fn the_unique_violation_variant_carries_no_payload() {
     let error = CreateOauthUserError::UniqueViolation;
@@ -35,14 +32,10 @@ fn the_unique_violation_variant_carries_no_payload() {
     assert!(matches!(error, CreateOauthUserError::UniqueViolation));
 }
 
-/// `resolve_embedding_stamp` duplicates `yorishiro_server::embedding_model_name()` rather than
-/// calling it, because this crate's lib must not depend on the server crate. This pins the
-/// duplication: the stamp is what tells a workspace whose model changed apart from one
-/// provisioned under a different one, so a default that drifts from the server's makes that
-/// comparison meaningless.
+/// `resolve_embedding_stamp` duplicates `yorishiro_server::embedding_model_name()` rather than calling it, because this crate's lib must not depend on the server crate.
+/// This pins the duplication: the stamp is what tells a workspace whose model changed apart from one provisioned under a different one, so a default that drifts from the server's makes that comparison meaningless.
 ///
-/// The first pass of the v0.42.0 lockstep shipped `"local"` here where the server resolves
-/// `"multilingual-e5-large"`, so this is a regression test, not a hypothetical.
+/// The first pass of the v0.42.0 lockstep shipped `"local"` here where the server resolves `"multilingual-e5-large"`, so this is a regression test, not a hypothetical.
 #[test]
 fn the_stamp_matches_what_the_server_would_resolve() {
     assert_eq!(

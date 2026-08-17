@@ -374,8 +374,7 @@ async fn list_filters_by_data_field_value(pool: PgPool) {
     assert!(active.iter().all(|e| e.data["status"] == "active"));
 }
 
-/// Entities record the schema version they were written against and keep it when a newer
-/// version is created, so filtering by version selects what a given version actually produced.
+/// Entities record the schema version they were written against and keep it when a newer version is created, so filtering by version selects what a given version actually produced.
 /// The distinction only shows up once two versions exist and each has entities of its own.
 #[sqlx::test(migrations = "../../migrations")]
 async fn list_filters_by_schema_version(pool: PgPool) {
@@ -403,7 +402,8 @@ async fn list_filters_by_schema_version(pool: PgPool) {
     .await
     .unwrap();
 
-    // A second version of the same schema. The entity above keeps schema_version = 1.
+    // A second version of the same schema.
+    // The entity above keeps schema_version = 1.
     let (v2, _) =
         schemas::create_schema(&mut conn, workspace_id_tenant, workspace_id, task_schema())
             .await
@@ -466,8 +466,8 @@ async fn list_filters_by_schema_version(pool: PgPool) {
     assert_eq!(all.len(), 3);
 }
 
-/// A workspace with no schema refuses entity writes, and says that is why. Before the status
-/// column this failed too, but as a 404 on the schema name -- which reads as a typo.
+/// A workspace with no schema refuses entity writes, and says that is why.
+/// Before the status column this failed too, but as a 404 on the schema name: which reads as a typo.
 #[sqlx::test(migrations = "../../migrations")]
 async fn refuses_entity_creation_while_the_workspace_has_no_schema(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -544,8 +544,7 @@ async fn creating_the_first_schema_activates_the_workspace(pool: PgPool) {
     .unwrap();
 }
 
-/// A second schema version must not flip the workspace back or otherwise disturb it -- the
-/// activation runs on every create_schema call, so it has to be idempotent.
+/// A second schema version must not flip the workspace back or otherwise disturb it: the activation runs on every create_schema call, so it has to be idempotent.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_further_schema_version_leaves_the_workspace_active(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -584,8 +583,8 @@ fn task_schema_with_category() -> MetaSchemaDefinition {
     .unwrap()
 }
 
-/// The case the endpoint exists for: an entity written before a field existed. Without this a
-/// reader cannot tell the field was never available from the field being left blank.
+/// The case the endpoint exists for: an entity written before a field existed.
+/// Without this a reader cannot tell the field was never available from the field being left blank.
 #[sqlx::test(migrations = "../../migrations")]
 async fn drift_reports_fields_the_entity_predates(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -611,8 +610,7 @@ async fn drift_reports_fields_the_entity_predates(pool: PgPool) {
     .await
     .unwrap();
 
-    // Adding a required field is a breaking change, so this lands as a new version and the
-    // entity above stays on the old one.
+    // Adding a required field is a breaking change, so this lands as a new version and the entity above stays on the old one.
     schemas::create_schema(
         &mut conn,
         tenant_id,
@@ -640,8 +638,7 @@ async fn drift_reports_fields_the_entity_predates(pool: PgPool) {
     );
 }
 
-/// An entity on the active version has nothing to report, and says so with an empty list
-/// rather than by omitting the field.
+/// An entity on the active version has nothing to report, and says so with an empty list rather than by omitting the field.
 #[sqlx::test(migrations = "../../migrations")]
 async fn drift_is_empty_for_a_current_entity(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -675,10 +672,8 @@ async fn drift_is_empty_for_a_current_entity(pool: PgPool) {
     assert!(drift.missing_fields.is_empty());
 }
 
-/// Every create_schema call makes a new version, breaking or not, so an optional addition
-/// leaves earlier entities behind too. They are reported as missing but not required, which is
-/// the distinction a caller acts on: nothing is invalid, there is just newer structure
-/// available.
+/// Every create_schema call makes a new version, breaking or not, so an optional addition leaves earlier entities behind too.
+/// They are reported as missing but not required, which is the distinction a caller acts on: nothing is invalid, there is just newer structure available.
 #[sqlx::test(migrations = "../../migrations")]
 async fn drift_marks_an_optional_addition_as_not_required(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -733,8 +728,7 @@ async fn drift_marks_an_optional_addition_as_not_required(pool: PgPool) {
 }
 
 /// The number an operator acts on: entities lacking a field the active version requires.
-/// Entities merely behind, but still valid, are counted separately — conflating them would
-/// inflate the work a migration appears to need.
+/// Entities merely behind, but still valid, are counted separately: conflating them would inflate the work a migration appears to need.
 #[sqlx::test(migrations = "../../migrations")]
 async fn dry_run_separates_entities_that_need_values_from_ones_merely_behind(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -812,8 +806,7 @@ async fn dry_run_separates_entities_that_need_values_from_ones_merely_behind(poo
     );
 }
 
-/// Entities already on the active version are counted as current, and a workspace with
-/// nothing behind reports no work.
+/// Entities already on the active version are counted as current, and a workspace with nothing behind reports no work.
 #[sqlx::test(migrations = "../../migrations")]
 async fn dry_run_reports_nothing_to_do_when_everything_is_current(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -849,8 +842,8 @@ async fn dry_run_reports_nothing_to_do_when_everything_is_current(pool: PgPool) 
     assert!(report.by_entity_type.is_empty());
 }
 
-/// The point of a snapshot: what the row actually held, restorable afterwards. Entity updates
-/// are last-write-wins, so without this the previous data is simply gone.
+/// The point of a snapshot: what the row actually held, restorable afterwards.
+/// Entity updates are last-write-wins, so without this the previous data is simply gone.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -914,8 +907,7 @@ async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
     );
 }
 
-/// Undoing the same job twice would restore stale data over whatever came after, so the
-/// snapshots go with the undo and the second attempt finds nothing.
+/// Undoing the same job twice would restore stale data over whatever came after, so the snapshots go with the undo and the second attempt finds nothing.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_job_cannot_be_undone_twice(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -958,8 +950,8 @@ async fn a_job_cannot_be_undone_twice(pool: PgPool) {
     );
 }
 
-/// An entity deleted after its snapshot is counted, not fatal. Refusing the whole undo
-/// because one row is gone would leave every other entity in the job wrong.
+/// An entity deleted after its snapshot is counted, not fatal.
+/// Refusing the whole undo because one row is gone would leave every other entity in the job wrong.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_deleted_entity_is_counted_rather_than_failing_the_undo(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -1019,9 +1011,7 @@ fn task_schema_with_defaulted_field() -> MetaSchemaDefinition {
     .unwrap()
 }
 
-/// Mode A: a field added later, with a default, is filled into the entities that predate it —
-/// and those entities keep their own version, because filling a value is not migrating between
-/// definitions.
+/// Mode A: a field added later, with a default, is filled into the entities that predate it — and those entities keep their own version, because filling a value is not migrating between definitions.
 #[sqlx::test(migrations = "../../migrations")]
 async fn fill_defaults_fills_predating_entities_without_moving_their_version(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -1079,8 +1069,8 @@ async fn fill_defaults_fills_predating_entities_without_moving_their_version(poo
     );
 }
 
-/// A required field with no default is left alone and reported. Inventing a value would make
-/// it indistinguishable from one somebody chose.
+/// A required field with no default is left alone and reported.
+/// Inventing a value would make it indistinguishable from one somebody chose.
 #[sqlx::test(migrations = "../../migrations")]
 async fn fill_defaults_leaves_fields_with_no_default_alone(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -1198,9 +1188,8 @@ async fn a_fill_can_be_undone_as_one_job(pool: PgPool) {
     }
 }
 
-/// Snapshots age out, so a workspace that migrates repeatedly does not accumulate before-images
-/// without bound. `YORISHIRO_SNAPSHOT_RETENTION_DAYS` defaults to 30; this backdates one past that and
-/// runs a second job, which is when the sweep happens.
+/// Snapshots age out, so a workspace that migrates repeatedly does not accumulate before-images without bound.
+/// `YORISHIRO_SNAPSHOT_RETENTION_DAYS` defaults to 30; this backdates one past that and runs a second job, which is when the sweep happens.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -1231,8 +1220,7 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
         .await
         .unwrap();
 
-    // Backdated rather than waited for: the sweep compares against `now()`, and a test cannot
-    // spend 31 days proving it.
+    // Backdated rather than waited for: the sweep compares against `now()`, and a test cannot spend 31 days proving it.
     sqlx::query(
         "UPDATE content.entity_snapshots SET created_at = now() - INTERVAL '31 days' \
          WHERE workspace_id = $1",
@@ -1242,7 +1230,8 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
     .await
     .unwrap();
 
-    // Any migration job runs the sweep. This one finds nothing to fill, which is enough.
+    // Any migration job runs the sweep.
+    // This one finds nothing to fill, which is enough.
     entities::fill_defaults(
         &mut conn,
         workspace_id,
@@ -1260,8 +1249,7 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
             .unwrap();
     assert_eq!(remaining, 0, "the sweep took the aged-out image");
 
-    // An expired window answers the same way a job that never existed does -- which is what
-    // "undoable for N days" means once the days are up.
+    // An expired window answers the same way a job that never existed does: which is what "undoable for N days" means once the days are up.
     let err = entities::undo_job(&mut conn, workspace_id, old_job)
         .await
         .unwrap_err();
@@ -1271,13 +1259,11 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
     );
 }
 
-/// A retention value that does not fit `make_interval(days => …)` must not reach it. Parsed as
-/// `i64` and cast, `2147483648` wraps negative — `now() - a negative interval` puts the cutoff in
-/// the *future*, and the sweep would delete the images it exists to preserve.
+/// A retention value that does not fit `make_interval(days => …)` must not reach it.
+/// Parsed as `i64` and cast, `2147483648` wraps negative: `now() - a negative interval` puts the cutoff in the *future*, and the sweep would delete the images it exists to preserve.
 #[test]
 fn an_out_of_range_retention_falls_back_to_the_default() {
-    // Serialized against the other env-reading tests in this crate is not needed: this reads a
-    // key nothing else touches, and reads it through the same function the sweep uses.
+    // Serialized against the other env-reading tests in this crate is not needed: this reads a key nothing else touches, and reads it through the same function the sweep uses.
     let restore = std::env::var_os("YORISHIRO_SNAPSHOT_RETENTION_DAYS");
 
     for value in ["2147483648", "9999999999999999999", "not-a-number", ""] {
@@ -1290,9 +1276,8 @@ fn an_out_of_range_retention_falls_back_to_the_default() {
         );
     }
 
-    // A negative value does parse. It is not clamped or rejected -- `prune_snapshots` treats
-    // anything `<= 0` as "keep everything", so it lands with `0` rather than reaching
-    // `make_interval` and moving the cutoff into the future.
+    // A negative value does parse.
+    // It is not clamped or rejected: `prune_snapshots` treats anything `<= 0` as "keep everything", so it lands with `0` rather than reaching `make_interval` and moving the cutoff into the future.
     // SAFETY: as above.
     unsafe { std::env::set_var("YORISHIRO_SNAPSHOT_RETENTION_DAYS", "-1") };
     assert!(entities::snapshot_retention_days() <= 0, "sweeping is off");

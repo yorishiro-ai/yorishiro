@@ -55,7 +55,7 @@
   },
   "ImportResult": {
     "type": "object",
-    "description": "Outcome of a successful `import_jsonl` call: how many records of each kind were\ninserted. Since the whole import runs in one transaction (see `import_jsonl`), a\nnon-empty `errors` here never coexists with partially-applied data -- either every\nrecord listed by `errors` (and everything after it) was rolled back along with it, or\n`errors` is empty and every counted record is committed.",
+    "description": "Outcome of a successful `import_jsonl` call: how many records of each kind were\ninserted. Since the whole import runs in one transaction (see `import_jsonl`), a\nnon-empty `errors` here never coexists with partially-applied data: either every\nrecord listed by `errors` (and everything after it) was rolled back along with it, or\n`errors` is empty and every counted record is committed.",
     "required": ["schemas", "entities", "relations", "errors"],
     "properties": {
       "entities": {

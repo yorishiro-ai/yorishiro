@@ -1,7 +1,7 @@
 use super::*;
 
-/// The status/body mapping is the one every axum error wrapper delegates to, so a change here
-/// silently changes the HTTP contract of every consumer. Each variant is pinned to its status.
+/// The status/body mapping is the one every axum error wrapper delegates to, so a change here silently changes the HTTP contract of every consumer.
+/// Each variant is pinned to its status.
 #[test]
 fn each_variant_maps_to_its_documented_status() {
     let cases = [
@@ -42,10 +42,8 @@ fn each_variant_maps_to_its_documented_status() {
     }
 }
 
-/// A provider that cannot be reached is the one failure of the three an operator can act on, so
-/// it has to say which endpoint failed. `502` rather than the `503` `ProviderBusy` uses: that one
-/// answered and asked for a wait, this one is a misconfiguration or an outage that waiting on the
-/// same schedule will not fix.
+/// A provider that cannot be reached is the one failure of the three an operator can act on, so it has to say which endpoint failed.
+/// `502` rather than the `503` `ProviderBusy` uses: that one answered and asked for a wait, this one is a misconfiguration or an outage that waiting on the same schedule will not fix.
 #[test]
 fn an_unreachable_provider_names_the_endpoint() {
     let (status, body) = YorishiroError::ProviderUnreachable {
@@ -69,8 +67,8 @@ fn an_unreachable_provider_names_the_endpoint() {
     );
 }
 
-/// The two provider failures must not collapse onto one status. A caller retrying an unreachable
-/// provider on `ProviderBusy`'s schedule would be waiting out a configuration error.
+/// The two provider failures must not collapse onto one status.
+/// A caller retrying an unreachable provider on `ProviderBusy`'s schedule would be waiting out a configuration error.
 #[test]
 fn a_busy_provider_and_an_unreachable_one_differ() {
     let (busy, _) = YorishiroError::ProviderBusy {
@@ -89,8 +87,7 @@ fn a_busy_provider_and_an_unreachable_one_differ() {
     assert_ne!(busy, unreachable);
 }
 
-/// An internal error must never leak its cause to the client -- the detail goes to the log, and
-/// the body carries a fixed generic message.
+/// An internal error must never leak its cause to the client: the detail goes to the log, and the body carries a fixed generic message.
 #[test]
 fn internal_errors_do_not_leak_their_cause() {
     let secret = "connection string with password";
@@ -102,8 +99,7 @@ fn internal_errors_do_not_leak_their_cause() {
     assert_eq!(body["error"]["message"], "internal server error");
 }
 
-/// `not_found` is the sanctioned constructor; it must produce the same shape as the struct
-/// literal it replaces.
+/// `not_found` is the sanctioned constructor; it must produce the same shape as the struct literal it replaces.
 #[test]
 fn not_found_carries_its_message_into_the_body() {
     let (status, body) = YorishiroError::not_found("schema 'x' was not found").into_http_parts();
@@ -112,8 +108,7 @@ fn not_found_carries_its_message_into_the_body() {
     assert_eq!(body["error"]["message"], "schema 'x' was not found");
 }
 
-/// A validation failure is the one response a caller is expected to act on, so both the
-/// per-field details and the hint have to survive into the body.
+/// A validation failure is the one response a caller is expected to act on, so both the per-field details and the hint have to survive into the body.
 #[test]
 fn validation_failures_carry_details_and_hint() {
     let error = YorishiroError::ValidationFailed {
@@ -133,8 +128,7 @@ fn validation_failures_carry_details_and_hint() {
     assert_eq!(body["error"]["hint"], "check the schema");
 }
 
-/// `ResultExt::internal()` exists so call sites never hand-write the `map_err` -- it must map an
-/// arbitrary error into `Internal` rather than into any other variant.
+/// `ResultExt::internal()` exists so call sites never hand-write the `map_err`: it must map an arbitrary error into `Internal` rather than into any other variant.
 #[test]
 fn result_ext_maps_arbitrary_errors_to_internal() {
     let result: Result<(), std::io::Error> = Err(std::io::Error::other("disk"));

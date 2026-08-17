@@ -16,9 +16,9 @@ use super::{YorishiroMcpServer, mcp_try, ok_json, verified};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {
-    /// Natural-language query text. Vectorized via the embedding provider and
-    /// matched against entities' `x-embed` field by cosine distance. Also used, as-is, for
-    /// an auxiliary pg_trgm fuzzy text match against entities that have no embedding.
+    /// Natural-language query text.
+    /// Vectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.
+    /// Also used, as-is, for an auxiliary pg_trgm fuzzy text match against entities that have no embedding.
     pub query_text: String,
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
@@ -46,9 +46,7 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        // Embedding generation happens before acquiring a DB connection, for the
-        // same reason as the REST adapter: don't hold a pool connection while
-        // waiting on the LocalOnnx provider's serialized inference.
+        // Embedding generation happens before acquiring a DB connection, for the same reason as the REST adapter: don't hold a pool connection while waiting on the LocalOnnx provider's serialized inference.
         let vector = mcp_try!(
             search::embed_query(self.state.embedding_provider.as_ref(), &args.query_text).await
         );

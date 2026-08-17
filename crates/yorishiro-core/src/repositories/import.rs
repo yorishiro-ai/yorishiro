@@ -12,27 +12,17 @@ use crate::repositories::schemas;
 pub use crate::models::export::ExportRecord;
 pub use crate::models::import::*;
 
-/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the
-/// same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 ///
-/// The whole read runs inside a single transaction, so it is all-or-nothing: the first
-/// malformed line or repository-level failure (e.g. an entity referencing an unknown
-/// schema, a relation referencing an unknown entity) rolls back everything imported so far
-/// and returns `Err` describing the problem. On success, `ImportResult.errors` is always
-/// empty.
+/// The whole read runs inside a single transaction, so it is all-or-nothing: the first malformed line or repository-level failure (e.g. an entity referencing an unknown schema, a relation referencing an unknown entity) rolls back everything imported so far and returns `Err` describing the problem.
+/// On success, `ImportResult.errors` is always empty.
 ///
-/// Schemas and entities are re-inserted with freshly generated IDs (`create_schema`/
-/// `entities::create` always mint a new one; entities are also re-validated against the
-/// *current* active schema rather than trusting the exported `schema_version`), so:
+/// Schemas and entities are re-inserted with freshly generated IDs (`create_schema`/`entities::create` always mint a new one; entities are also re-validated against the *current* active schema rather than trusting the exported `schema_version`), so:
 ///
-/// - an entity line resolves its schema by *name*, preferring a schema line this same
-///   import already processed over the (tenant-local, so likely meaningless here)
-///   exported `schema_id`;
-/// - a relation line's `source_id`/`target_id` are remapped through the entity lines this
-///   same import already processed.
+/// - an entity line resolves its schema by *name*, preferring a schema line this same import already processed over the (tenant-local, so likely meaningless here) exported `schema_id`;
+/// - a relation line's `source_id`/`target_id` are remapped through the entity lines this same import already processed.
 ///
-/// Because of this, a schema/entity line must appear before anything that references it --
-/// exactly the order `export::export_all` produces (schemas, then entities, then relations).
+/// Because of this, a schema/entity line must appear before anything that references it: exactly the order `export::export_all` produces (schemas, then entities, then relations).
 pub async fn import_jsonl(
     conn: &mut PgConnection,
     tenant_id: Uuid,
@@ -43,10 +33,8 @@ pub async fn import_jsonl(
 
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
-    // Exported `schema_id`s are only meaningful in the *source* tenant they came
-    // from -- `create_schema` always mints a fresh ID. So entity lines can't resolve their
-    // schema by re-querying the exported `schema_id` in the destination tenant; instead
-    // track name-by-old-id for every schema line this import itself has processed so far.
+    // Exported `schema_id`s are only meaningful in the *source* tenant they came from: `create_schema` always mints a fresh ID.
+    // So entity lines can't resolve their schema by re-querying the exported `schema_id` in the destination tenant; instead track name-by-old-id for every schema line this import itself has processed so far.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
 
     for (line_no, line) in reader.lines().enumerate() {
@@ -79,12 +67,9 @@ pub async fn import_jsonl(
             ExportRecord::Entity(entity) => {
                 let old_id = entity.id;
 
-                // `entities::create` takes a schema *name* (it always resolves against the
-                // tenant's currently active version), not a schema ID. Prefer the name
-                // of a schema line this same import just created; a `schema_id` exported
-                // from a different tenant means nothing here. Fall back to looking the
-                // ID up in the destination tenant, for the case of importing entities
-                // against a schema that already exists there (not part of this import).
+                // `entities::create` takes a schema *name* (it always resolves against the tenant's currently active version), not a schema ID.
+                // Prefer the name of a schema line this same import just created; a `schema_id` exported from a different tenant means nothing here.
+                // Fall back to looking the ID up in the destination tenant, for the case of importing entities against a schema that already exists there (not part of this import).
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {

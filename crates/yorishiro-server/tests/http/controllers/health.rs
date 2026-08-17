@@ -41,8 +41,7 @@ async fn health_response(pool: PgPool) -> axum::response::Response {
     get_response(pool, "/health").await
 }
 
-/// `/up` must stay healthy even when the database is unreachable, since it's a pure
-/// liveness probe — that's the property distinguishing it from `/health`.
+/// `/up` must stay healthy even when the database is unreachable, since it's a pure liveness probe: that's the property distinguishing it from `/health`.
 #[sqlx::test(migrations = "../../migrations")]
 async fn up_returns_ok_even_when_db_is_unreachable(pool: PgPool) {
     pool.close().await;
@@ -69,10 +68,8 @@ async fn health_returns_ok_when_db_is_reachable(pool: PgPool) {
     assert_eq!(json["status"], "ok");
 }
 
-/// `Pool::close()` affects every clone that shares the pool, and subsequent `acquire()`
-/// calls immediately return `Error::PoolClosed`. This is the easiest way to reproduce a
-/// real DB outage / pool exhaustion, so it's used here to exercise the path where an
-/// unreachable database results in a 503.
+/// `Pool::close()` affects every clone that shares the pool, and subsequent `acquire()` calls immediately return `Error::PoolClosed`.
+/// This is the easiest way to reproduce a real DB outage / pool exhaustion, so it's used here to exercise the path where an unreachable database results in a 503.
 #[sqlx::test(migrations = "../../migrations")]
 async fn health_returns_service_unavailable_when_db_is_unreachable(pool: PgPool) {
     pool.close().await;

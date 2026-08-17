@@ -216,8 +216,7 @@ async fn workspaces_endpoints_require_authentication(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 #[allow(clippy::await_holding_lock)]
 async fn workspace_endpoints_enforce_tenant_isolation(pool: PgPool) {
-    // Creating a second tenant requires lifting the default single-tenant cap -- see
-    // `crate::max_tenants_env_lock` for why this is a shared, crate-wide lock.
+    // Creating a second tenant requires lifting the default single-tenant cap: see `crate::max_tenants_env_lock` for why this is a shared, crate-wide lock.
     let _guard = crate::max_tenants_env_lock::LOCK.lock().unwrap();
     crate::max_tenants_env_lock::set(Some("0"));
 

@@ -24,15 +24,11 @@ enum Workspaces {
     CreatedAt,
 }
 
-/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap. `NULL`
-/// means unlimited, which is the default so self-hosted deployments are never capped unless an
-/// operator explicitly sets a limit.
+/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
+/// `NULL` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
 ///
-/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a
-/// later write produced by a different model can be refused where it happens rather than at
-/// query time -- mixing dimensions in one workspace makes its searches fail with
-/// `different vector dimensions`. `None` leaves the workspace on "whatever the deployment is
-/// configured for", which is what every workspace created before the stamp existed means.
+/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a later write produced by a different model can be refused where it happens rather than at query time: mixing dimensions in one workspace makes its searches fail with `different vector dimensions`.
+/// `None` leaves the workspace on "whatever the deployment is configured for", which is what every workspace created before the stamp existed means.
 pub async fn create_workspace(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -114,21 +110,17 @@ fn workspace_columns() -> [Workspaces; 9] {
 
 /// Marks a workspace active once it owns a schema, and names that schema if none was named yet.
 ///
-/// Idempotent, so the schema-creation path calls it unconditionally: a workspace already active
-/// stays active, and one that already names a schema keeps the one it names.
+/// Idempotent, so the schema-creation path calls it unconditionally: a workspace already active stays active, and one that already names a schema keeps the one it names.
 ///
-/// `schema_id` is only filled when it is NULL. The column names *the* schema of a workspace, from
-/// when a workspace had exactly one; a workspace may now hold several, and letting each new one
-/// claim the column would make it mean "the most recently created", which is not what anything
-/// reading it expects. Entity operations resolve by schema name and never consult it -- what does
-/// read it is the workspace listing, which is why leaving it stale showed the wrong schema there.
+/// `schema_id` is only filled when it is NULL.
+/// The column names *the* schema of a workspace, from when a workspace had exactly one; a workspace may now hold several, and letting each new one claim the column would make it mean "the most recently created", which is not what anything reading it expects.
+/// Entity operations resolve by schema name and never consult it: what does read it is the workspace listing, which is why leaving it stale showed the wrong schema there.
 pub async fn mark_active(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    // One statement: reading the column and then writing it would let two concurrent
-    // schema creations both see NULL, and the second would overwrite the first.
+    // One statement: reading the column and then writing it would let two concurrent schema creations both see NULL, and the second would overwrite the first.
     sqlx::query(
         "UPDATE identity.workspaces \
          SET status = $2, schema_id = COALESCE(schema_id, $3) \
@@ -179,9 +171,7 @@ pub async fn list_workspaces(
         .internal()
 }
 
-/// Every workspace `user_id` can log into, across all of their tenant memberships -- used to
-/// resolve `POST /auth/login`'s `workspace_id` automatically when the caller omits it and the
-/// answer is unambiguous (see `rest::identity::login`).
+/// Every workspace `user_id` can log into, across all of their tenant memberships: used to resolve `POST /auth/login`'s `workspace_id` automatically when the caller omits it and the answer is unambiguous (see `rest::identity::login`).
 pub async fn list_workspaces_for_user(
     pool: &PgPool,
     user_id: Uuid,
@@ -233,12 +223,9 @@ pub async fn get_workspace(
         })
 }
 
-/// Resolves the `tenant_id` a workspace belongs to. Schema repository functions (and other
-/// tenant-scoped queries) take `tenant_id` rather than `workspace_id` since the tenant-scoped
-/// schema refactor, so callers that only have a `workspace_id` in hand (e.g. an entity/relation
-/// repository function) use this to bridge the two. Takes a `PgConnection` (rather than the
-/// `PgPool` the rest of this module uses) so it can be called from within an existing
-/// transaction/connection instead of checking out a second one from the pool.
+/// Resolves the `tenant_id` a workspace belongs to.
+/// Schema repository functions (and other tenant-scoped queries) take `tenant_id` rather than `workspace_id` since the tenant-scoped schema refactor, so callers that only have a `workspace_id` in hand (e.g. an entity/relation repository function) use this to bridge the two.
+/// Takes a `PgConnection` (rather than the `PgPool` the rest of this module uses) so it can be called from within an existing transaction/connection instead of checking out a second one from the pool.
 pub async fn resolve_tenant_id(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -257,9 +244,8 @@ pub async fn resolve_tenant_id(
     }
 }
 
-/// Deletes a workspace and everything under it. `identity.workspaces`'s foreign keys from
-/// `content.entities`/`content.relations`/`content.schemas`/`identity.api_keys` are all
-/// `ON DELETE CASCADE` (see the initial migration), so this one statement is enough --
+/// Deletes a workspace and everything under it.
+/// `identity.workspaces`'s foreign keys from `content.entities`/`content.relations`/`content.schemas`/`identity.api_keys` are all `ON DELETE CASCADE` (see the initial migration), so this one statement is enough:
 /// callers don't need to delete those rows themselves first.
 pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), YorishiroError> {
     let (sql, values) = Query::delete()
@@ -287,9 +273,8 @@ mod tests;
 
 /// Points a workspace at the schema it uses.
 ///
-/// A schema is created against a workspace, so the workspace already exists by the time there
-/// is a schema to link -- this closes the loop the other way round. Applying a template runs
-/// both halves: create the schema for the workspace, then set it as the workspace's own.
+/// A schema is created against a workspace, so the workspace already exists by the time there is a schema to link: this closes the loop the other way round.
+/// Applying a template runs both halves: create the schema for the workspace, then set it as the workspace's own.
 pub async fn set_workspace_schema(
     pool: &PgPool,
     workspace_id: Uuid,

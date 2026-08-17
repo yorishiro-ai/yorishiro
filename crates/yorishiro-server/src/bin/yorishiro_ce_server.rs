@@ -1,17 +1,14 @@
 //! The community edition's binary: everything under BUSL-1.1, and nothing from `ee/`.
 //!
-//! The default artifact is the one `ee/` builds, which runs exactly this feature set until a
-//! licence key is present. This binary exists for the deployment that cannot have proprietary
-//! code on disk at all — a distribution policy, a redistribution requirement, an audit that
-//! reads the package rather than the configuration. Everyone else wants the `-ee` package,
-//! which is a superset and behaves identically without a licence key.
+//! The default artifact is the one `ee/` builds, which runs exactly this feature set until a licence key is present.
+//! This binary exists for the deployment that cannot have proprietary code on disk at all: a distribution policy, a redistribution requirement, an audit that reads the package rather than the configuration.
+//! Everyone else wants the `-ee` package, which is a superset and behaves identically without a licence key.
 //!
-//! **It is headless.** The web UI is the paid edition's SPA and is licensed with it, so there
-//! is nothing here to serve at `/` — the fallback answers `404`. The REST API, the MCP server,
-//! and the admin CLI are all present and behave identically.
+//! **It is headless.** The web UI is the paid edition's SPA and is licensed with it, so there is nothing here to serve at `/`: the fallback answers `404`.
+//! The REST API, the MCP server, and the admin CLI are all present and behave identically.
 //!
-//! Keep this file free of any path into `ee/`. That is the whole point of it, and a `use` line
-//! is all it would take to make the artifact unshippable for the audience it exists for.
+//! Keep this file free of any path into `ee/`.
+//! That is the whole point of it, and a `use` line is all it would take to make the artifact unshippable for the audience it exists for.
 
 use anyhow::Result;
 use axum::http::StatusCode;
@@ -23,9 +20,10 @@ use yorishiro_server::{
     shutdown_signal,
 };
 
-/// The Yorishiro server, community edition. A plain start runs the HTTP server;
-/// `yorishiro-ce-server admin ...` runs one-off administrative commands. Migrations are applied
-/// on startup either way. This build contains no paid features and serves no web UI.
+/// The Yorishiro server, community edition.
+/// A plain start runs the HTTP server; `yorishiro-ce-server admin ...` runs one-off administrative commands.
+/// Migrations are applied on startup either way.
+/// This build contains no paid features and serves no web UI.
 #[derive(Parser)]
 #[command(name = "yorishiro-ce-server")]
 struct Cli {
@@ -42,25 +40,20 @@ enum Command {
     },
 }
 
-/// Serves nothing: the SPA belongs to the paid edition, so this build has no assets to fall back
-/// to. A request for `/` gets a `404` rather than an empty page pretending a UI is coming.
+/// Serves nothing: the SPA belongs to the paid edition, so this build has no assets to fall back to.
+/// A request for `/` gets a `404` rather than an empty page pretending a UI is coming.
 fn no_web_ui() -> axum::routing::MethodRouter {
     axum::routing::any(|| async { StatusCode::NOT_FOUND })
 }
 
 fn main() -> Result<()> {
-    // Synchronous prologue: both calls below use `std::env::set_var`, which is unsound under
-    // concurrent env access. Doing them here, before the tokio runtime starts, is what makes
-    // them sound.
+    // Synchronous prologue: the calls below use `std::env::set_var`, which is unsound under concurrent env access.
+    // Doing them here, before the tokio runtime starts, is what makes them sound.
     //
     // SAFETY: no other thread exists at this point in `main`.
     unsafe {
-        // Before the config file: `load_and_apply_env_overrides` only sets a variable that is
-        // unset, so running the aliases second would let a file value beat an exported old name.
-        yorishiro_server::config::aliases::apply();
         yorishiro_server::config::load_and_apply_env_overrides()?;
-        // A self-hosted deployment is single-tenant unless it says otherwise, which is also what
-        // enables the first-run setup wizard's REST endpoints.
+        // A self-hosted deployment is single-tenant unless it says otherwise, which is also what enables the first-run setup wizard's REST endpoints.
         if std::env::var_os("YORISHIRO_MAX_TENANTS").is_none() {
             std::env::set_var("YORISHIRO_MAX_TENANTS", "1");
         }
@@ -75,8 +68,8 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    // Not `?`: see the paid binary. An absent DATABASE_URL exits 78 so the unit stops instead of
-    // retrying forever; a database that is merely not up yet still exits 1 and is retried.
+    // Not `?`: see the paid binary.
+    // An absent DATABASE_URL exits 78 so the unit stops instead of retrying forever; a database that is merely not up yet still exits 1 and is retried.
     let database_url =
         database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;
@@ -100,8 +93,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     let app = build_app(state, no_web_ui());
 
-    // Off unless `YORISHIRO_DB_LOAD_THRESHOLD` is set. A spawned task rather than a router layer,
-    // so `build_app` does not bring it along and the binary has to start it.
+    // Off unless `YORISHIRO_DB_LOAD_THRESHOLD` is set.
+    // A spawned task rather than a router layer, so `build_app` does not bring it along and the binary has to start it.
     if let Some(guard) = yorishiro_core::services::db_load_guard::LoadGuardConfig::from_env() {
         tracing::info!(
             threshold = guard.threshold,
@@ -121,10 +114,8 @@ async fn run(cli: Cli) -> Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
-    // Wait for the embedding sync of already-written entities before exiting, or recently
-    // created entities stay permanently missing from search. A second signal during that wait
-    // exits immediately -- without it an operator who interrupts again sees nothing happen until
-    // the 30s timeout, since the first signal's `ctrl_c()` has already resolved.
+    // Wait for the embedding sync of already-written entities before exiting, or recently created entities stay permanently missing from search.
+    // A second signal during that wait exits immediately: without it an operator who interrupts again sees nothing happen until the 30s timeout, since the first signal's `ctrl_c()` has already resolved.
     embedding_tasks.close();
     tokio::select! {
         result = tokio::time::timeout(std::time::Duration::from_secs(30), embedding_tasks.wait()) => {

@@ -22,7 +22,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # This workflow runs on a schedule against master, never on a PR, so it's always safe
-          # to save -- but pin the condition anyway for consistency with ci.yml/clippy-suggestions.yml.
+          # to save, but pin the condition anyway for consistency with ci.yml/clippy-suggestions.yml.
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Route rustc through sccache
         run: |
@@ -31,15 +31,14 @@ jobs:
       - name: Install tools
         run: cargo install cargo-audit cargo-outdated
       # `cargo audit` exits 0 when it ran and found nothing, and 1 when it ran and has something
-      # to report (an advisory, or a warning such as an unmaintained or yanked crate) -- valid
+      # to report (an advisory, or a warning such as an unmaintained or yanked crate): valid
       # JSON on stdout either way. A higher code means it never ran at all: a bad flag, a missing
       # Cargo.lock, a failed advisory-db fetch. Those leave stdout empty, which is why this step
       # gates on the report parsing rather than on the exit code alone.
       #
-      # This step used to pipe stderr to /dev/null and swallow the exit code, which made "no
-      # vulnerabilities" and "audit never ran" the same silent success. Now the third case fails
-      # the job and the reason stays in the log; a finding still exits 0 here so the issue below
-      # gets filed rather than turning the run red.
+      # This step distinguishes "no vulnerabilities" from "audit never ran": a failure to run
+      # fails the job and the reason stays in the log, while a finding exits 0 here so the
+      # issue below gets filed rather than turning the run red.
       - name: Run audit
         id: audit
         run: |
@@ -62,7 +61,7 @@ jobs:
       # so every jq expression here uses `-s` (slurp) to gather them before counting/flattening.
       #
       # `!cancelled()` rather than the default `success()` so a broken audit doesn't also suppress
-      # the outdated report -- the two checks are independent, and the issue-filing steps below
+      # the outdated report: the two checks are independent, and the issue-filing steps below
       # gate on their own step's output, so each half still reports whatever it collected.
       # `!cancelled()` rather than `always()` so cancelling the run actually stops it.
       - name: Run outdated
@@ -81,7 +80,7 @@ jobs:
             jq -sr '.[].dependencies[] | "- \(.name): \(.project) → \(.latest)"' /tmp/outdated.json > /tmp/outdated.txt
           fi
       # `!cancelled() &&` so that one half failing (or finding nothing) doesn't suppress the other
-      # half's issue -- each of these gates only on the output of the step it reports for -- while
+      # half's issue (each of these gates only on the output of the step it reports for), while
       # still not filing issues on a cancelled run, since creating one is an API write.
       - name: Create issue for vulnerabilities
         if: ${{ !cancelled() && steps.audit.outputs.has_vulns == 'true' }}

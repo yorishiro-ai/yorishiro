@@ -8,8 +8,7 @@ use yorishiro_core::services::embedding::EmbeddingProvider;
 
 use super::*;
 
-/// Counts how many calls are in flight at once and remembers the high-water mark, so a test can
-/// assert the semaphore actually bounded them rather than assert the constant it was built from.
+/// Counts how many calls are in flight at once and remembers the high-water mark, so a test can assert the semaphore actually bounded them rather than assert the constant it was built from.
 struct ConcurrencyProbe {
     in_flight: AtomicUsize,
     peak: AtomicUsize,
@@ -42,8 +41,8 @@ impl EmbeddingProvider for ConcurrencyProbe {
     }
 }
 
-/// Never returns, so a task holding a permit keeps holding it. Used to prove the permit is taken
-/// before a connection, not after.
+/// Never returns, so a task holding a permit keeps holding it.
+/// Used to prove the permit is taken before a connection, not after.
 struct HangingProvider;
 
 #[async_trait]
@@ -57,9 +56,8 @@ impl EmbeddingProvider for HangingProvider {
     }
 }
 
-/// Seeds a workspace whose schema has an `x-embed` field, and returns the ids plus a record
-/// shaped for it. Without a schema declaring `x-embed`, `sync_embedding_for_record` returns
-/// early and the provider is never called -- so these tests would pass while proving nothing.
+/// Seeds a workspace whose schema has an `x-embed` field, and returns the ids plus a record shaped for it.
+/// Without a schema declaring `x-embed`, `sync_embedding_for_record` returns early and the provider is never called, so these tests would pass while proving nothing.
 async fn seed_embeddable(
     pool: &PgPool,
 ) -> (
@@ -104,9 +102,8 @@ async fn seed_embeddable(
     (tenant_id, workspace_id, record)
 }
 
-/// The semaphore is what stops a burst of entity writes from opening an unbounded number of
-/// provider calls. Asserting the constant's value proves nothing -- this spawns more syncs than
-/// the cap allows and checks that no more than the cap ever ran at once.
+/// The semaphore is what stops a burst of entity writes from opening an unbounded number of provider calls.
+/// Asserting the constant's value proves nothing: this spawns more syncs than the cap allows and checks that no more than the cap ever ran at once.
 #[sqlx::test(migrations = "../../migrations")]
 async fn concurrent_embedding_syncs_never_exceed_the_cap(pool: PgPool) {
     let (tenant_id, workspace_id, record) = seed_embeddable(&pool).await;
@@ -134,10 +131,8 @@ async fn concurrent_embedding_syncs_never_exceed_the_cap(pool: PgPool) {
     );
 }
 
-/// `spawn_embedding_sync` acquires the permit *before* the connection, deliberately: reversing
-/// the two would let every waiting task hold a pool connection while queued, which is what the
-/// cap exists to prevent. With a provider that never returns, the tasks past the cap must be
-/// parked on the semaphore holding nothing -- so the pool still hands out connections.
+/// `spawn_embedding_sync` acquires the permit *before* the connection, deliberately: reversing the two would let every waiting task hold a pool connection while queued, which is what the cap exists to prevent.
+/// With a provider that never returns, the tasks past the cap must be parked on the semaphore holding nothing, so the pool still hands out connections.
 #[sqlx::test(migrations = "../../migrations")]
 async fn queued_syncs_do_not_hold_a_connection_while_waiting(pool: PgPool) {
     let (tenant_id, workspace_id, record) = seed_embeddable(&pool).await;
@@ -163,9 +158,8 @@ async fn queued_syncs_do_not_hold_a_connection_while_waiting(pool: PgPool) {
     );
 }
 
-/// Syncs are spawned through the `TaskTracker` so graceful shutdown can wait for an already
-/// written entity's embedding to land -- an immediate exit would leave that entity permanently
-/// missing from search. A sync spawned outside the tracker would not be waited for.
+/// Syncs are spawned through the `TaskTracker` so graceful shutdown can wait for an already written entity's embedding to land: an immediate exit would leave that entity permanently missing from search.
+/// A sync spawned outside the tracker would not be waited for.
 #[sqlx::test(migrations = "../../migrations")]
 async fn shutdown_waits_for_in_flight_syncs(pool: PgPool) {
     let (tenant_id, workspace_id, record) = seed_embeddable(&pool).await;
@@ -194,8 +188,8 @@ async fn shutdown_waits_for_in_flight_syncs(pool: PgPool) {
     );
 }
 
-/// The queue seam is reachable from AppState and drains what it accepted. Without this the
-/// trait would exist while nothing in the process could hand work to it.
+/// The queue seam is reachable from AppState and drains what it accepted.
+/// Without this the trait would exist while nothing in the process could hand work to it.
 #[sqlx::test(migrations = "../../migrations")]
 async fn app_state_runs_and_drains_queued_work(pool: PgPool) {
     use std::sync::atomic::{AtomicUsize, Ordering};

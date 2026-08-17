@@ -288,7 +288,7 @@ next steps:
   2. admin create-workspace 019f565d-f1e3-7afb-b876-b7003e43c230 <name> --schema-id <id>
 
 $ make admin ARGS="create-api-key <workspace-id> write"
-api key created (the plaintext key is shown ONLY once — store it now)
+api key created (the plaintext key is shown ONLY once, store it now)
   key:          ysr_928e48292888_ef72...
   ...
 
@@ -367,7 +367,7 @@ roleによる上限はかかりません。
 
    ```console
    $ make admin ARGS="create-invite 019f565d-f1e3-7afb-b876-b7003e43c230 newperson@example.com member"
-   invite created (the plaintext token is shown ONLY once — send it now)
+   invite created (the plaintext token is shown ONLY once, send it now)
      token:      c8b9ea1f...
      ...
      expires at: 2026-07-20 16:57 UTC

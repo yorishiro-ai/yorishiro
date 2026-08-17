@@ -9,7 +9,7 @@ autotests = false
 publish = false
 
 # Both editions install their binary as `yorishiro-server`, and both ship the same
-# `yorishiro.service` -- the packages conflict, so a machine has exactly one of each. The
+# `yorishiro.service`, and the packages conflict, so a machine has exactly one of each. The
 # edition is carried by the package name and the file on the release page; everything on disk
 # is edition-neutral, which is what makes switching editions a file swap rather than a
 # migration of unit names, ExecStart paths and runbooks.

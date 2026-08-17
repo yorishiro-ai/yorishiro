@@ -64,8 +64,7 @@ impl SchemaRow {
     }
 }
 
-/// Lists all of a tenant's schemas (every version, including archived) ordered by name
-/// and version.
+/// Lists all of a tenant's schemas (every version, including archived) ordered by name and version.
 pub async fn list(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -90,10 +89,8 @@ pub async fn list(
         .internal()
 }
 
-/// Counts a tenant's currently *active* schemas -- one row per distinct schema name, since
-/// `create_schema` archives the previous version before activating a new one. For
-/// tenant-detail summaries, this is a more meaningful "how many schemas does this tenant
-/// define" figure than counting every archived version too.
+/// Counts a tenant's currently *active* schemas: one row per distinct schema name, since `create_schema` archives the previous version before activating a new one.
+/// For tenant-detail summaries, this is a more meaningful "how many schemas does this tenant define" figure than counting every archived version too.
 pub async fn count_active(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -127,8 +124,7 @@ fn schema_columns() -> [Schemas; 11] {
     ]
 }
 
-/// Fetches the currently active schema (the latest version with status='active') for
-/// the given tenant and name.
+/// Fetches the currently active schema (the latest version with status='active') for the given tenant and name.
 pub async fn get_active_schema(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -156,8 +152,7 @@ pub async fn get_active_schema(
     }
 }
 
-/// Fetches a specific schema version by id (used to resolve the version an entity
-/// references).
+/// Fetches a specific schema version by id (used to resolve the version an entity references).
 pub async fn get_by_id(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -182,8 +177,7 @@ pub async fn get_by_id(
     }
 }
 
-/// Fetches every schema version for the tenant (including archived), with no pagination
-/// limit and the full `definition` body, for a full-tenant export.
+/// Fetches every schema version for the tenant (including archived), with no pagination limit and the full `definition` body, for a full-tenant export.
 pub async fn export_all(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -203,15 +197,11 @@ pub async fn export_all(
     rows.into_iter().map(SchemaRow::into_record).collect()
 }
 
-/// Registers a new schema definition, after validating it with `validate_definition`. If no
-/// schema of this name exists yet, creates version 1 as active; otherwise computes a
-/// a `versioning::diff`, archives the previous active version, and always inserts
-/// the new definition as the next version (reporting whether the diff is breaking).
+/// Registers a new schema definition, after validating it with `validate_definition`.
+/// If no schema of this name exists yet, creates version 1 as active; otherwise computes a a `versioning::diff`, archives the previous active version, and always inserts the new definition as the next version (reporting whether the diff is breaking).
 ///
 /// Concurrent creates for the same (workspace_id, name) are serialized with an advisory lock:
-/// without it, reading the active version and then archiving-it-plus-inserting the new one
-/// would race, letting concurrent calls fail on the UNIQUE(workspace_id, name, version)
-/// constraint or archive a version another call just committed as active.
+/// without it, reading the active version and then archiving-it-plus-inserting the new one would race, letting concurrent calls fail on the UNIQUE(workspace_id, name, version) constraint or archive a version another call just committed as active.
 pub async fn create_schema(
     conn: &mut PgConnection,
     tenant_id: Uuid,
@@ -223,15 +213,11 @@ pub async fn create_schema(
 
 /// As [`create_schema`], recording which library template the definition came from.
 ///
-/// Only a library template is passed: a built-in has no row to point at, and a definition
-/// posted inline came from nowhere. Both leave the origin unset, which is what `detached`
-/// means for them — never linked, rather than linked and since orphaned.
+/// Only a library template is passed: a built-in has no row to point at, and a definition posted inline came from nowhere.
+/// Both leave the origin unset, which is what `detached` means for them: never linked, rather than linked and since orphaned.
 ///
-/// The merge base is taken to be the definition itself, which holds when the definition *is*
-/// the template's. A caller writing something else against a template — a copy with edits
-/// already applied — must state the template's own definition with
-/// [`create_schema_with_base`], or the base will claim the edits came from upstream and a
-/// later merge will remove them as an upstream deletion.
+/// The merge base is taken to be the definition itself, which holds when the definition *is* the template's.
+/// A caller writing something else against a template (a copy with edits already applied) must state the template's own definition with [`create_schema_with_base`], or the base will claim the edits came from upstream and a later merge will remove them as an upstream deletion.
 pub async fn create_schema_from(
     conn: &mut PgConnection,
     tenant_id: Uuid,
@@ -253,14 +239,11 @@ pub async fn create_schema_from(
 
 /// As [`create_schema_from`], stating the merge base rather than deriving it.
 ///
-/// A copy's base is the copy itself, which is what [`create_schema_from`] records. A *merge*
-/// result's base is not: it is what upstream said at the moment of the merge. Recording the
-/// merged definition instead would leave the next merge reading this workspace's own edits as
-/// already present upstream, and dropping them as "unchanged here" — the exact failure the
-/// three-way base exists to prevent.
+/// A copy's base is the copy itself, which is what [`create_schema_from`] records.
+/// A *merge* result's base is not: it is what upstream said at the moment of the merge.
+/// Recording the merged definition instead would leave the next merge reading this workspace's own edits as already present upstream, and dropping them as "unchanged here": the exact failure the three-way base exists to prevent.
 ///
-/// `origin_snapshot` is only consulted when there is an origin at all; without one there is
-/// nothing for a base to be an ancestor of.
+/// `origin_snapshot` is only consulted when there is an origin at all; without one there is nothing for a base to be an ancestor of.
 pub async fn create_schema_with_base(
     conn: &mut PgConnection,
     tenant_id: Uuid,
@@ -275,9 +258,8 @@ pub async fn create_schema_with_base(
 
     let mut tx = conn.begin().await.internal()?;
 
-    // `pg_advisory_xact_lock(...)` is a lock-acquisition function call, not a table operation --
-    // no SELECT/INSERT/UPDATE/DELETE form exists for sea-query to build, same category as the
-    // session commands in `db.rs`/`auth.rs`.
+    // `pg_advisory_xact_lock(...)` is a lock-acquisition function call, not a table operation:
+    // no SELECT/INSERT/UPDATE/DELETE form exists for sea-query to build, same category as the session commands in `db.rs`/`auth.rs`.
     crate::db::lock_for_update(&mut tx, &format!("{workspace_id}:{name}"))
         .await
         .internal()?;
@@ -296,11 +278,8 @@ pub async fn create_schema_with_base(
         .await
         .internal()?;
 
-    // Only the first version of a name mints a base from its own definition. Every later one
-    // inherits the base it already had, unless the caller states a new one: editing a schema
-    // does not change what the template said when it was copied, and resetting the base to the
-    // edit would record this workspace's own fields as upstream's -- after which the next merge
-    // reads them as "unchanged here" and follows an upstream removal by deleting them.
+    // Only the first version of a name mints a base from its own definition.
+    // Every later one inherits the base it already had, unless the caller states a new one: editing a schema does not change what the template said when it was copied, and resetting the base to the edit would record this workspace's own fields as upstream's, after which the next merge reads them as "unchanged here" and follows an upstream removal by deleting them.
     let mut inherited_snapshot = None;
 
     let (next_version, diff) = match previous_row {
@@ -360,11 +339,8 @@ pub async fn create_schema_with_base(
             } else {
                 ORIGIN_STATUS_DETACHED.into()
             },
-            // The merge base, in order of authority: what the caller states (a merge knows the
-            // base moved to upstream), then what the previous version carried (an edit does
-            // not move it), then this definition itself (the first copy is its own ancestor).
-            // Only meaningful with an origin -- without one there is nothing to be an ancestor
-            // of.
+            // The merge base, in order of authority: what the caller states (a merge knows the base moved to upstream), then what the previous version carried (an edit does not move it), then this definition itself (the first copy is its own ancestor).
+            // Only meaningful with an origin: without one there is nothing to be an ancestor of.
             match (
                 origin_template_id,
                 origin_snapshot.as_ref().or(inherited_snapshot.as_ref()),
@@ -394,9 +370,8 @@ pub async fn create_schema_with_base(
             }
         })?;
 
-    // Inside the transaction: a workspace must not be left active by a schema insert that then
-    // rolls back. Unconditional and idempotent -- every version after the first finds it active
-    // already, and checking first would only add a round trip.
+    // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.
+    // Unconditional and idempotent: every version after the first finds it active already, and checking first would only add a round trip.
     crate::repositories::tenancy::mark_active(&mut tx, workspace_id, row.id).await?;
 
     tx.commit().await.internal()?;

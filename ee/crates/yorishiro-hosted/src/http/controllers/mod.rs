@@ -7,16 +7,11 @@ pub mod stripe;
 
 use utoipa::OpenApi;
 
-/// OpenAPI document for the routes *this* repo adds. Deliberately separate from the embedded
-/// community server's document rather than merged into it: that one is built by
-/// `yorishiro_server`'s own `ApiDoc`, which lives behind a `pub(crate) mod controllers` and so
-/// cannot be reached, extended, or re-served from here. `build_app` also already owns the
-/// `/api-docs/openapi.json` route, and `axum::Router::merge` panics on a duplicate path, so a
-/// single combined document is not something this side can produce.
+/// OpenAPI document for the routes *this* repo adds.
+/// Deliberately separate from the embedded community server's document rather than merged into it: that one is built by `yorishiro_server`'s own `ApiDoc`, which lives behind a `pub(crate) mod controllers` and so cannot be reached, extended, or re-served from here.
+/// `build_app` also already owns the `/api-docs/openapi.json` route, and `axum::Router::merge` panics on a duplicate path, so a single combined document is not something this side can produce.
 ///
-/// The result is two specs from one process, each canonical for its own half -- the community
-/// API at `/api-docs/openapi.json`, and this crate's own routes at
-/// `/api-docs/hosted-openapi.json`.
+/// The result is two specs from one process, each canonical for its own half: the community API at `/api-docs/openapi.json`, and this crate's own routes at `/api-docs/hosted-openapi.json`.
 /// Unifying them needs a `build_app` variant upstream that accepts an extra `OpenApi`.
 #[derive(OpenApi)]
 #[openapi(
@@ -75,8 +70,8 @@ use utoipa::OpenApi;
 )]
 pub struct HostedApiDoc;
 
-/// Declares the bearer scheme `tenant_overview` references. utoipa has no attribute form for
-/// this -- a security scheme has to be attached through a `Modify` implementation.
+/// Declares the bearer scheme `tenant_overview` references.
+/// utoipa has no attribute form for this: a security scheme has to be attached through a `Modify` implementation.
 struct BearerKeySecurity;
 
 impl utoipa::Modify for BearerKeySecurity {

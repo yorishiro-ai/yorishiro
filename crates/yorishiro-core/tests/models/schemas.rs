@@ -1,6 +1,6 @@
 use super::*;
 
-/// `SchemaSummary` is the listing shape MCP clients read first, so it must stay lightweight --
+/// `SchemaSummary` is the listing shape MCP clients read first, so it must stay lightweight:
 /// specifically it must not carry the `definition` body, which is the whole reason it exists.
 #[test]
 fn a_summary_omits_the_definition_body() {
@@ -20,8 +20,8 @@ fn a_summary_omits_the_definition_body() {
     assert_eq!(json["status"], "active");
 }
 
-/// A schema record travels through a JSONL export and back, carrying its parsed definition. The
-/// round trip is what `repositories::import` relies on.
+/// A schema record travels through a JSONL export and back, carrying its parsed definition.
+/// The round trip is what `repositories::import` relies on.
 #[test]
 fn a_schema_record_round_trips_with_its_parsed_definition() {
     let definition: crate::metaschema::MetaSchemaDefinition =

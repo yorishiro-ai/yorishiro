@@ -6,10 +6,10 @@
 # there must stay runnable without one. What it covers is what `systemd-analyze verify` cannot:
 # that a unit whose syntax is valid actually brings the service up.
 #
-# It found both of the defects it now guards. The units named a `config.example.yml` at a path
-# dpkg deletes -- valid syntax, wrong address, and `systemd-analyze` reads directives and
-# ignores comments. And an unconfigured start crashlooped every five seconds forever while
-# `systemctl is-failed` answered `activating`, so a permanently broken service never reported
+# It guards two defects. A unit naming `config.example.yml` at a path dpkg deletes has valid
+# syntax and a wrong address, which `systemd-analyze` cannot see: it reads directives and
+# ignores comments. And an unconfigured start can crashloop every five seconds forever while
+# `systemctl is-failed` answers `activating`, so a permanently broken service never reports
 # failed to anything watching unit state.
 #
 #   ./packaging/test-systemd.sh <directory holding the .deb files>
@@ -111,7 +111,7 @@ run_edition() {
 
   # By address, not by name. systemd-resolved takes over /etc/resolv.conf on boot and its stub
   # cannot reach Docker's embedded DNS from inside the container, so the container's own name
-  # lookups stop working -- an artefact of running systemd in Docker, not something an operator
+  # lookups stop working: an artefact of running systemd in Docker, not something an operator
   # meets on a real host. /etc/hosts would work equally well; the address is simpler.
   PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
   # Written without leading whitespace: YAML gives indentation meaning, so the heredoc body

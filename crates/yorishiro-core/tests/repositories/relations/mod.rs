@@ -496,8 +496,7 @@ async fn neighbors_batch_omits_pivots_with_no_relations(pool: PgPool) {
     assert!(batch.is_empty());
 }
 
-/// A duplicate id in `pivot_ids` must contribute its neighbors only once -- `unnest` would
-/// otherwise drive the lateral subquery twice for that id and double its entry in the result.
+/// A duplicate id in `pivot_ids` must contribute its neighbors only once: `unnest` would otherwise drive the lateral subquery twice for that id and double its entry in the result.
 #[sqlx::test(migrations = "../../migrations")]
 async fn neighbors_batch_dedups_a_repeated_pivot_id(pool: PgPool) {
     let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
@@ -552,8 +551,7 @@ async fn neighbors_batch_applies_limit_per_pivot_not_across_the_whole_batch(pool
     .await
     .unwrap();
 
-    // Two tasks, each linked to two of their own projects: if `limit` were applied across the
-    // whole batch instead of per pivot, one task's neighbors would starve the other's.
+    // Two tasks, each linked to two of their own projects: if `limit` were applied across the whole batch instead of per pivot, one task's neighbors would starve the other's.
     let mut task_ids = Vec::new();
     for task_name in ["task-a", "task-b"] {
         let task = entities::create(
@@ -605,10 +603,7 @@ async fn neighbors_batch_applies_limit_per_pivot_not_across_the_whole_batch(pool
     assert_eq!(batch[&task_ids[1]].len(), 2);
 }
 
-/// `neighbors_batch` groups its `CROSS JOIN LATERAL` rows into a per-pivot `Vec` in whatever
-/// order they arrive from Postgres; this pins that order to most-recent-first (matching
-/// `neighbors`' documented order) rather than leaving it as an accident of query planning, since
-/// `recall_context` relies on that order when it truncates to `limit`.
+/// `neighbors_batch` groups its `CROSS JOIN LATERAL` rows into a per-pivot `Vec` in whatever order they arrive from Postgres; this pins that order to most-recent-first (matching `neighbors`' documented order) rather than leaving it as an accident of query planning, since `recall_context` relies on that order when it truncates to `limit`.
 #[sqlx::test(migrations = "../../migrations")]
 async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: PgPool) {
     let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
@@ -639,8 +634,7 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
     .await
     .unwrap();
 
-    // Created in order alpha, beta, gamma -- relation_created_at is monotonically increasing,
-    // so the most-recent-first order is exactly the reverse of creation order.
+    // Created in order alpha, beta, gamma: relation_created_at is monotonically increasing, so the most-recent-first order is exactly the reverse of creation order.
     let mut project_ids = Vec::new();
     for name in ["alpha", "beta", "gamma"] {
         let project = entities::create(
@@ -670,9 +664,8 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
         project_ids.push(project.id);
     }
 
-    // limit=2 against 3 relations: truncation must drop the oldest (alpha), keeping gamma then
-    // beta -- the same outcome a single `neighbors(&mut conn, workspace_id, task.id, 2)` call
-    // would produce.
+    // limit=2 against 3 relations: truncation must drop the oldest (alpha), keeping gamma then beta.
+    // That is the same outcome a single `neighbors(&mut conn, workspace_id, task.id, 2)` call would produce.
     let batch = neighbors_batch(&mut conn, workspace_id, &[task.id], 2)
         .await
         .unwrap();
@@ -712,8 +705,7 @@ async fn relation_is_created_active(pool: PgPool) {
     assert_eq!(created.status, "active");
 }
 
-/// The point of the status column: a deprecated relation stops being traversed, in both
-/// directions and through both the single and the batched path, while the row itself stays.
+/// The point of the status column: a deprecated relation stops being traversed, in both directions and through both the single and the batched path, while the row itself stays.
 #[sqlx::test(migrations = "../../migrations")]
 async fn traversal_skips_non_active_relations(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -753,8 +745,7 @@ async fn traversal_skips_non_active_relations(pool: PgPool) {
         .unwrap();
     assert!(out.is_empty(), "deprecated relation is not traversed");
 
-    // Inbound, from the target -- the 'in' branch of the union is a separate WHERE clause and
-    // would keep returning the relation if only the 'out' branch had been filtered.
+    // Inbound, from the target: the 'in' branch of the union is a separate WHERE clause and would keep returning the relation if only the 'out' branch had been filtered.
     let inbound = neighbors(&mut conn, workspace_id, project.id, DEFAULT_NEIGHBORS_LIMIT)
         .await
         .unwrap();
@@ -800,8 +791,7 @@ async fn lists_by_status_and_defaults_to_every_state(pool: PgPool) {
         .await
         .unwrap();
 
-    // No status filter: an archived relation is still listed, so a caller that predates the
-    // column does not silently lose rows.
+    // No status filter: an archived relation is still listed, so a caller that predates the column does not silently lose rows.
     let all = list(&mut conn, workspace_id, ListRelationsQuery::default())
         .await
         .unwrap();
@@ -855,8 +845,7 @@ async fn rejects_unknown_status(pool: PgPool) {
     .await
     .unwrap();
 
-    // Validated in Rust, so this is a 422 naming the field rather than the check constraint
-    // surfacing as an Internal.
+    // Validated in Rust, so this is a 422 naming the field rather than the check constraint surfacing as an Internal.
     let err = set_status(&mut conn, workspace_id, relation.id, "retired")
         .await
         .unwrap_err();

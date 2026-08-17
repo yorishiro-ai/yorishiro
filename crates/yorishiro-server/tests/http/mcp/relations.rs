@@ -1,7 +1,6 @@
 use super::*;
 
-/// A relation needs both endpoints and a type; properties are optional because most relations
-/// carry none.
+/// A relation needs both endpoints and a type; properties are optional because most relations carry none.
 #[test]
 fn creating_a_relation_requires_both_endpoints_and_a_type() {
     assert!(
@@ -22,7 +21,7 @@ fn creating_a_relation_requires_both_endpoints_and_a_type() {
     assert!(args.properties.is_none());
 }
 
-/// Listing filters are all optional -- an agent asking for "the relations here" sends nothing.
+/// Listing filters are all optional: an agent asking for "the relations here" sends nothing.
 #[test]
 fn listing_relations_accepts_an_empty_object() {
     let args: ListRelationsArgs = serde_json::from_value(serde_json::json!({})).unwrap();

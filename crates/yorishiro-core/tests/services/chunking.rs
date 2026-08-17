@@ -42,8 +42,7 @@ fn the_window_is_the_one_the_spec_asks_for() {
     assert_eq!(MAX_CHUNK_TOKENS, 2_000);
 }
 
-/// The point of tracking indices rather than a count: an at-least-once queue redelivers, and a
-/// chunk acknowledged twice must not make a job of three look finished.
+/// The point of tracking indices rather than a count: an at-least-once queue redelivers, and a chunk acknowledged twice must not make a job of three look finished.
 #[test]
 fn a_redelivered_chunk_does_not_complete_the_job() {
     let mut progress = ChunkProgress::new(3);
@@ -60,8 +59,7 @@ fn a_redelivered_chunk_does_not_complete_the_job() {
     assert!(progress.outstanding().is_empty());
 }
 
-/// What a distributed driver hands back to the pool when its visibility timeout expires: the
-/// chunks nobody acknowledged, and only those.
+/// What a distributed driver hands back to the pool when its visibility timeout expires: the chunks nobody acknowledged, and only those.
 #[test]
 fn outstanding_names_exactly_what_was_never_acknowledged() {
     let mut progress = ChunkProgress::new(5);

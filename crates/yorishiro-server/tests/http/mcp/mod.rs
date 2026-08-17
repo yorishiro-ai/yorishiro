@@ -37,9 +37,8 @@ async fn mcp_tool_call_without_authorization_header_is_a_protocol_error(pool: Pg
     );
 }
 
-/// Mechanically verifies, for every tool enumerated by `tools/list`, that a missing
-/// Authorization header always produces a protocol error — so that an oversight in one
-/// tool's checks can't slip in unnoticed in the future.
+/// Mechanically verifies, for every tool enumerated by `tools/list`, that a missing Authorization header always produces a protocol error.
+/// This way an oversight in one tool's checks can't slip in unnoticed in the future.
 #[sqlx::test(migrations = "../../migrations")]
 async fn every_registered_tool_requires_an_authorization_header(pool: PgPool) {
     let app = build_app(test_state(pool), no_static_fallback());

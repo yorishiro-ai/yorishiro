@@ -1,20 +1,11 @@
 name: Release
 
-# One dispatch is the whole release: bump, tag, build, publish, verify.
+# One dispatch is the whole release: bump, tag, build, publish, verify. The tag is pushed
+# directly to master.
 #
-# This used to be two workflows. `release.yml` opened a bump PR, and merging that PR triggered
-# `release-publish.yml` on the Cargo.toml change. Two problems came out of that split:
-#
-#   - The PR was authored by `github-actions[bot]`, and GitHub requires manual approval in the
-#     Actions tab before a bot-authored PR's workflows run. Every release stalled waiting for a
-#     human to click Approve.
-#   - The bump and the publish were separate runs with no shared state, so `release-publish`
-#     had to re-derive the version from Cargo.toml and guess whether master's HEAD was still
-#     the bump commit. Its own comments documented the gap that left.
-#
-# Pushing the tag directly removes both. It is only safe because this repository has no branch
-# protection or ruleset on master (both verified disabled). If either is ever enabled, the push
-# step below starts failing and this needs a token that isn't `github-actions[bot]`.
+# This is only safe because this repository has no branch protection or ruleset on master
+# (both verified disabled). If either is ever enabled, the push step below starts failing and
+# this needs a token that isn't `github-actions[bot]`.
 
 on:
   workflow_dispatch:
@@ -44,7 +35,7 @@ jobs:
 
     steps:
       # workflow_dispatch runs against whatever ref the dispatcher selected, and the checkout
-      # below has no `ref:` pin -- so without this guard, dispatching from a branch that is a
+      # below has no `ref:` pin, so without this guard, dispatching from a branch that is a
       # fast-forward descendant of master would push that branch's content straight to master.
       # Fail loudly rather than silently pinning `ref: master`, which would build something
       # other than what the dispatcher chose.
@@ -74,7 +65,7 @@ jobs:
             exit 1
           fi
 
-      # A tag on its own does not mean the release shipped -- the GitHub Release, created last
+      # A tag on its own does not mean the release shipped: the GitHub Release, created last
       # after every artifact is pushed, is what marks it complete. The two together tell the
       # three cases apart:
       #
@@ -83,10 +74,8 @@ jobs:
       #   tag, but no release -> a previous run died partway. Skip the bump (the commit and tag
       #                          are already on master) and republish from the existing tag.
       #
-      # The resume path is the reason this check exists at all. The tag lands atomically with
-      # the bump, so before this, a publish that failed afterwards left the version unusable:
-      # re-dispatching hit "tag exists, abort", and the only way out was deleting the remote tag
-      # by hand or burning a patch number.
+      # The resume path exists so a failed publish can be re-dispatched at the same version,
+      # without deleting the remote tag by hand or burning a patch number.
       - name: Determine release state
         id: state
         env:
@@ -159,7 +148,7 @@ jobs:
             else
               git commit -m "Bump version to ${TAG}"
               git tag "$TAG"
-              # Atomic: master and the tag land together, or neither does -- avoids a bumped
+              # Atomic: master and the tag land together, or neither does. Avoids a bumped
               # master with no matching tag if the second of two separate pushes failed.
               git push --atomic origin HEAD:master "$TAG"
             fi
@@ -205,7 +194,7 @@ jobs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       # The SPA is embedded from `ee/web/dist`, a build output that is not committed, so it is
-      # built before cargo -- a release binary that links without it serves no UI.
+      # built before cargo: a release binary that links without it serves no UI.
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: ee/web/package.json
@@ -233,7 +222,7 @@ jobs:
 
       # No Linux tarball. The .deb and .rpm below carry the same binaries and additionally
       # create the service user, the state directory, the config directory and the systemd
-      # unit -- and they declare the glibc floor, so the package manager refuses a system the
+      # unit, and they declare the glibc floor, so the package manager refuses a system the
       # binary cannot run on instead of unpacking one that dies at first start. A tarball
       # offers none of that and works on exactly the same systems, the floor being a property
       # of the binary rather than of the packaging.
@@ -366,8 +355,8 @@ jobs:
 
   # Pulls the manifest that was just published and boots it against a real database. `ci.yml`'s
   # package-smoke covers the same ground for a debug build on every PR, but nothing until now
-  # checked the actual release artifact -- a release-profile-only fault, or a Dockerfile stage
-  # that only breaks in the published image, would have shipped unnoticed.
+  # checks the actual release artifact: a release-profile-only fault, or a Dockerfile stage
+  # that only breaks in the published image, would otherwise ship unnoticed.
   #
   # Runs before github-release deliberately: the GitHub Release is what marks a version as
   # published (see `prepare`), so a failure here leaves the version resumable rather than
@@ -398,15 +387,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The image refuses to start without an embedding model on disk (by design -- a missing
+      # The image refuses to start without an embedding model on disk (by design: a missing
       # model is a hard failure, not a degraded mode), so fetch the same one the docs tell
       # operators to use.
       #
       # This must stay in step with the default model and YORISHIRO_EMBEDDING_DIMENSIONS: the server
       # checks the loaded model's width against the configured one and refuses to start when
-      # they disagree. v0.25.0 failed here for exactly that reason -- the default moved to a
-      # 1024-wide model while this step still fetched a 768-wide one, and the smoke test caught
-      # it against the published image. Change the default, change this.
+      # they disagree. Change the default, change this.
       - name: Fetch the embedding model
         run: |
           mkdir -p models
@@ -463,12 +450,7 @@ jobs:
 
       # Count what is about to be published, before publishing it.
       #
-      # v0.46.0 shipped with no `.deb` and no `.rpm` at all. The packaging step built all eight
-      # and uploaded them to this job's artifact; the attachment list simply did not name them.
-      # Every job was green, and the release published half of what `docs/setup.md` tells people
-      # to download.
-      #
-      # A glob matching nothing is not an error to the upload action -- which is precisely why
+      # A glob matching nothing is not an error to the upload action, which is precisely why
       # the list below cannot be trusted to prove its own coverage, and this counts instead.
       - name: Every documented artifact is present
         run: |
@@ -497,7 +479,7 @@ jobs:
 
       # What the packages are and where they came from, without a signing key to distribute,
       # rotate or have anyone trust. `gh attestation verify <file> --repo yotsunagi/yorishiro`
-      # answers "this artifact was built by this workflow, from this commit" -- which is the
+      # answers "this artifact was built by this workflow, from this commit", which is the
       # question a signature would answer, minus the key management that made GPG not worth it
       # for a project with no package repository.
       #

@@ -27,8 +27,8 @@ async fn status_of(app: &axum::Router, method: &str, path: &str) -> (StatusCode,
     (response.status(), retry_after)
 }
 
-/// Read-only refuses writes and serves reads. The Retry-After header is the part agents act
-/// on, so its absence would leave them retrying immediately against a server shedding load.
+/// Read-only refuses writes and serves reads.
+/// The Retry-After header is the part agents act on, so its absence would leave them retrying immediately against a server shedding load.
 #[sqlx::test(migrations = "../../migrations")]
 async fn read_only_refuses_writes_with_423_and_a_retry_after(pool: PgPool) {
     let app = build_app(test_state(pool.clone()), no_static_fallback());
@@ -40,8 +40,7 @@ async fn read_only_refuses_writes_with_423_and_a_retry_after(pool: PgPool) {
     assert_eq!(status, StatusCode::LOCKED);
     assert_eq!(retry_after.as_deref(), Some("45"));
 
-    // A read is not a write, so it gets past the guard -- 401 here is the auth layer behind
-    // it, which is exactly what "the guard let this through" looks like.
+    // A read is not a write, so it gets past the guard: 401 here is the auth layer behind it, which is exactly what "the guard let this through" looks like.
     let (status, _) = status_of(&app, "GET", "/api/entities").await;
     assert_ne!(status, StatusCode::LOCKED);
 }
@@ -61,9 +60,9 @@ async fn full_lock_refuses_reads_too_with_503(pool: PgPool) {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }
 
-/// The probes answer even under full lock. Refusing them would have an orchestrator restart a
-/// server that is deliberately paused -- and restarting would not clear the state, which lives
-/// in the database, so the loop would never converge.
+/// The probes answer even under full lock.
+/// Refusing them would have an orchestrator restart a server that is deliberately paused.
+/// Restarting would not clear the state, which lives in the database, so the loop would never converge.
 #[sqlx::test(migrations = "../../migrations")]
 async fn liveness_probes_answer_under_full_lock(pool: PgPool) {
     let app = build_app(test_state(pool.clone()), no_static_fallback());
@@ -77,8 +76,7 @@ async fn liveness_probes_answer_under_full_lock(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
 }
 
-/// Turning it off is visible to the next request: the state is read per request rather than
-/// cached, so an operator does not wait out a TTL.
+/// Turning it off is visible to the next request: the state is read per request rather than cached, so an operator does not wait out a TTL.
 #[sqlx::test(migrations = "../../migrations")]
 async fn clearing_maintenance_takes_effect_immediately(pool: PgPool) {
     let app = build_app(test_state(pool.clone()), no_static_fallback());

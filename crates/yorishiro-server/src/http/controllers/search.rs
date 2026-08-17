@@ -31,8 +31,7 @@ pub struct SearchEntitiesParams {
 )]
 pub async fn search_entities(
     State(state): State<AppState>,
-    // `Verified`, not `Authorized`: no connection is acquired here, since one
-    // isn't needed until after the slow embedding call below.
+    // `Verified`, not `Authorized`: no connection is acquired here, since one isn't needed until after the slow embedding call below.
     verified: Verified<ReadScope>,
     Query(params): Query<SearchEntitiesParams>,
 ) -> Result<Json<Vec<SearchHit>>, ApiError> {
@@ -43,9 +42,8 @@ pub async fn search_entities(
         limit: params.limit.unwrap_or(default.limit),
     };
 
-    // Charged before embedding, since embedding is the work the budget protects. Counting is
-    // cheap here -- a query is short -- which is why search is metered in tokens while writes
-    // stay on request counts.
+    // Charged before embedding, since embedding is the work the budget protects.
+    // Counting is cheap here (a query is short), which is why search is metered in tokens while writes stay on request counts.
     let tokens = state.embedding_provider.count_tokens(&params.query_text);
     if !state
         .search_token_limiter
@@ -64,10 +62,8 @@ pub async fn search_entities(
         .into());
     }
 
-    // Embedding generation happens before acquiring a DB connection. The
-    // LocalOnnx provider serializes inference within the process, so holding a
-    // connection while waiting would let pool exhaustion spill over to other
-    // endpoints too.
+    // Embedding generation happens before acquiring a DB connection.
+    // The LocalOnnx provider serializes inference within the process, so holding a connection while waiting would let pool exhaustion spill over to other endpoints too.
     let vector = search::embed_query(state.embedding_provider.as_ref(), &params.query_text).await?;
 
     let workspace_id = verified.ctx.workspace_id;
