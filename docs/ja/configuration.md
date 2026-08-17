@@ -126,8 +126,7 @@ HTTPアクセスログ(method・path・status・latency)を含む全てのログ
 $ yorishiro-server admin resync-embeddings --workspace <id>
 ```
 
-この記録が導入される前に作られたワークスペースは記録を持たず、
-デプロイメントが生成するものをそのまま受け入れます(従来どおりの挙動)。
+記録を持たないワークスペースは、デプロイメントが生成するものをそのまま受け入れます。
 
 ### `YORISHIRO_EMBEDDING_PROVIDER=openai`の場合(例: Ollama, LM Studio, OpenAI)
 

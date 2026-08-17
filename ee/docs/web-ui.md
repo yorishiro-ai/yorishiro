@@ -120,8 +120,8 @@ Higher is a better match, which is the direction a reader expects from a search 
 ## Deep links
 
 Every route is reachable by URL, including on a full page load.
-`TenantScope` forgets the remembered workspace when a tenant-level route renders, and it must do that **without navigating**: when it navigated to `/dashboard`, a full load of `/marketplace`, `/schemas/:id` or `/schemas/templates/:id` bounced to the dashboard before rendering.
-Clicking through from inside the app hid it, because the effect does not re-run when only the child route changes.
+`TenantScope` forgets the remembered workspace when a tenant-level route renders, and it must do that **without navigating**: navigating would bounce a full load of `/marketplace`, `/schemas/:id` or `/schemas/templates/:id` to the dashboard before rendering.
+Clicking through from inside the app would not reveal this, because the effect does not re-run when only the child route changes.
 
 `useWorkspace` therefore exposes both: `clearWorkspace` forgets without navigating, and `leaveWorkspace` forgets *and* returns to the dashboard, which is what the sidebar's "Back" means.
 

@@ -1,7 +1,6 @@
 //! Shared HMAC-SHA256 sign/verify used by both the OAuth `state` token
 //! (`services::oauth::state_token`) and the Stripe webhook signature
-//! (`http::controllers::stripe`) -- the same primitive and verification style, previously
-//! duplicated in each module.
+//! (`http::controllers::stripe`): the same primitive and verification style for both.
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;

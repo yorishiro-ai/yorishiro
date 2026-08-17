@@ -1,8 +1,7 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
 //!
-//! Moved here from the community edition, which no longer serves these paths. Creating a schema
-//! from a template stayed there and is untouched; what moved is flowing the template's later
-//! edits into the copies.
+//! Creating a schema from a template is base's responsibility, untouched by this crate; flowing
+//! a template's later edits into the copies is this edition's.
 //!
 //! Two things differ from the community version, both forced rather than chosen:
 //!
@@ -11,8 +10,8 @@
 //!   through `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a
 //!   tenant-scoped one names it with `X-Workspace-Id` -- both work here, where the community
 //!   version only ever saw the first kind.
-//! * The scope check is explicit. The extractor used to enforce `read`/`schema` by type; here the
-//!   handler asks, because there is no extractor to carry it.
+//! * The scope check is explicit: the handler checks the scope itself, because there is no
+//!   extractor here to carry it.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -44,7 +43,7 @@ fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), Yorishiro
 }
 
 /// The response of a merge, matching the community edition's `CreateSchemaResponse` shape so a
-/// client written against the old endpoint needs no change.
+/// client written against that response shape needs no change.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MergeResponse {
     pub schema: SchemaRecord,

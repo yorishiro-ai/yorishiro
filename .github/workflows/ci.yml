@@ -277,9 +277,8 @@ jobs:
   # and its unit/integration tests pass -- `check` above never starts the real `main()`, so a
   # startup-only failure (a panicking `.expect()` in config/provider construction, a missing
   # env var only main.rs reads) would otherwise ship unnoticed until a real deploy.
-  # The release builds this image; nothing before it did, so a Dockerfile that no longer
-  # matches the binaries it copies only failed at release time -- which is exactly what
-  # happened when the binary was renamed and three lines here were not.
+  # The release builds this image; nothing before it does. Without this job, a Dockerfile
+  # that no longer matches the binaries it copies would only fail at release time.
   #
   # amd64 only, and no push: this is asking whether the file still describes a buildable,
   # runnable image, not reproducing the release's multi-arch publish.

@@ -62,7 +62,7 @@ fn web_dir_passes_through_a_real_value() {
 
 // Item 3: `rewrite_unspecified_host` must rewrite a genuinely all-interfaces bind address to
 // `localhost`, and must NOT be fooled by an address that merely contains the substring
-// "0.0.0.0" -- the bug this replaced was a blind `str::replace("0.0.0.0", "localhost")`.
+// "0.0.0.0".
 
 #[test]
 fn rewrites_the_all_interfaces_ipv4_address() {
@@ -113,9 +113,7 @@ fn leaves_an_unparseable_address_unchanged() {
 }
 
 // Item 2: `YORISHIRO_OAUTH_CLIENT_ID`/`YORISHIRO_OAUTH_CLIENT_SECRET` must reject an empty
-// string the same as unset. The old `env::var(...).expect(...)` only caught "unset" -- `FOO=`
-// satisfied it and let startup proceed with a blank client_secret, which is also the HMAC key
-// for the CSRF `state` token.
+// string the same as unset: `client_secret` is also the HMAC key for the CSRF `state` token.
 
 #[test]
 #[should_panic(expected = "YORISHIRO_OAUTH_CLIENT_SECRET must be set")]

@@ -74,9 +74,10 @@ pub enum CreateOauthUserError {
 ///
 /// Takes `&mut PgConnection` (rather than `&PgPool`) so `find_or_create` can run this on the same
 /// transaction as `tenancy::add_member`, mirroring how base's `yorishiro_core::repositories::
-/// tenancy::create_user`/`add_member` compose (see their doc comments) -- a crash between this
-/// insert and `add_member` used to leave an orphaned user row with no tenant membership, which
-/// every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
+/// tenancy::create_user`/`add_member` compose (see their doc comments): both must run in one
+/// transaction, or a crash between this insert and `add_member` would leave an orphaned user row
+/// with no tenant membership, and every later login for that identity would then resolve to a
+/// permanent `ScopeInsufficient`.
 ///
 /// `pub` (and re-exported from `oauth::mod`) purely so `crates/yorishiro-hosted/tests/` can
 /// exercise the same-transaction rollback directly, without going through the advisory-lock

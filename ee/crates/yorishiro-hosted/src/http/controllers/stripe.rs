@@ -48,7 +48,7 @@ impl StripeConfig {
 ///
 /// `pub(crate)`: the only caller is `stripe_webhook` below, and the tests reach it as
 /// `crate::http::controllers::stripe::verify_stripe_signature` since they compile inside this
-/// crate. It was `pub` + `#[doc(hidden)]` back when `tests/` could only see the public surface.
+/// crate.
 pub(crate) fn verify_stripe_signature(
     payload: &[u8],
     signature_header: &str,

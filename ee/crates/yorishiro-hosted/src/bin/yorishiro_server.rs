@@ -268,7 +268,7 @@ async fn run(cli: Cli) -> Result<()> {
     // endpoint the community edition defines.
     //
     // The community edition's own router still ends in its static-asset fallback, so an
-    // unmatched path reaches the SPA exactly as before: this crate's routes, then the community
+    // unmatched path reaches the SPA in this order: this crate's routes, then the community
     // edition's, then `index.html`.
     //
     // One consequence to keep in mind when adding a route here: overriding a path overrides

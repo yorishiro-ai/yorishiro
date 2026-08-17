@@ -2,8 +2,7 @@
 //! what other tenants thought of them.
 //!
 //! Distribution between tenants is an enterprise capability, so these routes live here rather
-//! than in the community edition. The paths and payloads are unchanged from when they did, so
-//! `web/`'s Marketplace pages need no edit -- and so does any client written against them.
+//! than in the community edition.
 //!
 //! Authentication differs from the community edition's version by necessity, not by design.
 //! There, handlers took `Authorized<ReadScope>` from `yorishiro-server`'s middleware; this

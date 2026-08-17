@@ -214,7 +214,7 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   [ -f /usr/share/doc/yorishiro-ce/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "HAS_EE_LICENCE"
   # Anchored at both ends: `Conflicts: yorishiro` also matches `yorishiro-ee` as a prefix, so
-  # the loose form kept passing after the package was renamed while asserting nothing.
+  # an unanchored form would pass while asserting nothing.
   dpkg -s yorishiro-ce 2>/dev/null | grep -qiE "^Conflicts: yorishiro-ee *$" && echo "CONFLICTS"
   # The community binary has to answer for itself, not merely respond to --help: it is a
   # different executable at the same path, headless, with none of `ee/` composed in.
@@ -346,10 +346,10 @@ note "the systemd units are valid"
 # the only way to have each binary present for its own unit.
 #
 # The same container also checks that every absolute path the unit *names* exists, comments
-# included. `systemd-analyze` reads directives and ignores comments, so it was silent while both
-# units pointed at a `config.example.yml` under `/usr/share/doc/` that had moved to `/etc/` --
-# an operator following the unit's own instructions would have found nothing there. A path in a
-# comment is documentation the package ships, so it is checked like the rest of the package.
+# included. `systemd-analyze` reads directives and ignores comments, so a path named only in a
+# comment is unverified by it: an operator following the unit's own instructions would find
+# nothing there if that path were wrong. A path in a comment is documentation the package
+# ships, so it is checked like the rest of the package.
 verify_unit() {
   pkg="$1" unit="$2"
   out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '

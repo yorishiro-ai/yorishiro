@@ -1,8 +1,6 @@
 //! Shared test-only helpers.
 //!
-//! A `COMBINED_MIGRATOR` used to live here, because `sqlx::test`'s `migrations = "<path>"` takes
-//! a single directory and the database needed two. One directory holds the whole schema now, so
-//! every test names it directly.
+//! One directory holds the whole schema, so every test names it directly.
 
 use crate::http::controllers::stripe::StripeConfig;
 use crate::services::licence::{LicenceClaims, LicenceState};

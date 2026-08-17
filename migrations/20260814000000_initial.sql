@@ -447,8 +447,7 @@ GRANT EXECUTE ON FUNCTION identity.authenticate_api_key(bytea) TO yorishiro_app;
 -- OAuth identity
 --------------------------------------------------------------------------------
 --
--- Applied after the table it alters, which is what the two-pass ordering used to guarantee
--- and what a single file makes structural.
+-- Applied after the table it alters. A single file makes that ordering structural.
 
 
 ALTER TABLE identity.users

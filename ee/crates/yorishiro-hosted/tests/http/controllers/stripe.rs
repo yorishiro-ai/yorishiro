@@ -184,9 +184,8 @@ async fn post_webhook(app: &Router, body: Vec<u8>) -> StatusCode {
     response.status()
 }
 
-/// Reads the tenant's plan from this repo's own billing table. `identity.tenants` no longer
-/// carries a plan column -- the community edition has no notion of one -- so the assertions
-/// below go through `billing` rather than through a tenant record.
+/// Reads the tenant's plan. It lives in this repo's `billing` table, not on `identity.tenants`,
+/// so the assertions below go through `billing` rather than through a tenant record.
 async fn tenant_plan(pool: &PgPool, tenant_id: uuid::Uuid) -> Option<String> {
     billing::get_billing(pool, tenant_id)
         .await

@@ -2,9 +2,9 @@
 //!
 //! Distributing a template's later edits into the schemas copied from it is an enterprise
 //! capability, so this lives here rather than in the community edition. Creating a schema from a
-//! template is *not* part of it and stayed there -- `template_id` on `POST /api/schemas` and the
-//! `origin_*` columns behave exactly as before. What moved is the machinery that flows a
-//! template's edits into copies afterwards.
+//! template is *not* part of it: base owns `template_id` on `POST /api/schemas` and the
+//! `origin_*` columns. This module owns the machinery that flows a template's edits into copies
+//! afterwards.
 //!
 //! These functions take both a connection and a pool, and the split is not incidental: the
 //! schema is workspace content, read over the RLS-scoped connection, while `identity.templates`

@@ -36,10 +36,9 @@ jobs:
       # Cargo.lock, a failed advisory-db fetch. Those leave stdout empty, which is why this step
       # gates on the report parsing rather than on the exit code alone.
       #
-      # This step used to pipe stderr to /dev/null and swallow the exit code, which made "no
-      # vulnerabilities" and "audit never ran" the same silent success. Now the third case fails
-      # the job and the reason stays in the log; a finding still exits 0 here so the issue below
-      # gets filed rather than turning the run red.
+      # This step distinguishes "no vulnerabilities" from "audit never ran": a failure to run
+      # fails the job and the reason stays in the log, while a finding exits 0 here so the
+      # issue below gets filed rather than turning the run red.
       - name: Run audit
         id: audit
         run: |

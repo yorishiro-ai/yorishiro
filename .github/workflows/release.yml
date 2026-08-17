@@ -1,20 +1,11 @@
 name: Release
 
-# One dispatch is the whole release: bump, tag, build, publish, verify.
+# One dispatch is the whole release: bump, tag, build, publish, verify. The tag is pushed
+# directly to master.
 #
-# This used to be two workflows. `release.yml` opened a bump PR, and merging that PR triggered
-# `release-publish.yml` on the Cargo.toml change. Two problems came out of that split:
-#
-#   - The PR was authored by `github-actions[bot]`, and GitHub requires manual approval in the
-#     Actions tab before a bot-authored PR's workflows run. Every release stalled waiting for a
-#     human to click Approve.
-#   - The bump and the publish were separate runs with no shared state, so `release-publish`
-#     had to re-derive the version from Cargo.toml and guess whether master's HEAD was still
-#     the bump commit. Its own comments documented the gap that left.
-#
-# Pushing the tag directly removes both. It is only safe because this repository has no branch
-# protection or ruleset on master (both verified disabled). If either is ever enabled, the push
-# step below starts failing and this needs a token that isn't `github-actions[bot]`.
+# This is only safe because this repository has no branch protection or ruleset on master
+# (both verified disabled). If either is ever enabled, the push step below starts failing and
+# this needs a token that isn't `github-actions[bot]`.
 
 on:
   workflow_dispatch:
@@ -404,9 +395,7 @@ jobs:
       #
       # This must stay in step with the default model and YORISHIRO_EMBEDDING_DIMENSIONS: the server
       # checks the loaded model's width against the configured one and refuses to start when
-      # they disagree. v0.25.0 failed here for exactly that reason -- the default moved to a
-      # 1024-wide model while this step still fetched a 768-wide one, and the smoke test caught
-      # it against the published image. Change the default, change this.
+      # they disagree. Change the default, change this.
       - name: Fetch the embedding model
         run: |
           mkdir -p models

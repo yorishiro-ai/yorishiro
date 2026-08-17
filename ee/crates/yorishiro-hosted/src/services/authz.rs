@@ -50,16 +50,15 @@ pub(crate) async fn authenticate_workspace(
 /// requirement**.
 ///
 /// The marketplace is the caller: publishing a version, reviewing and forking are all
-/// per-tenant acts that any valid key for that tenant may perform, exactly as they could in
-/// the community edition before the move. Requiring Owner/Admin here would silently narrow
-/// the feature rather than relocate it.
+/// per-tenant acts that any valid key for that tenant may perform. Requiring Owner/Admin here
+/// would silently narrow the feature rather than relocate it.
 ///
 /// Ownership is still enforced downstream — the service scopes every write by this
 /// `tenant_id`, and acting on another tenant's template answers `404` rather than `403`.
 ///
 /// Returns the attributed `user_id` alongside it, which is `None` for a service-only key.
 /// Publishing a version, reviewing and forking all record an author, and a key with no user
-/// behind it records none — the same as before the move.
+/// behind it records none.
 pub(crate) async fn authenticate_tenant(
     state: &HostedState,
     headers: &HeaderMap,

@@ -81,10 +81,10 @@ fn require_non_empty_env(key: &str) -> String {
 /// output, split out (and `pub`, re-exported from `oauth::mod`) so
 /// `crates/yorishiro-hosted/tests/` can exercise every case -- unset, set-but-empty, set --
 /// without mutating the process environment. The empty case is the one that matters: `raw` being
-/// `Some("")` used to satisfy the old `env::var(...).expect(...)` and let startup proceed with a
-/// blank `client_secret`, which is also the HMAC key for the CSRF `state` token. The `filter`
-/// below is redundant given `non_empty_env` already excludes empty strings at the real call
-/// site -- it's kept so `Some("")` remains a meaningful, directly assertable input for the tests.
+/// `Some("")` must be rejected exactly like unset, because `client_secret` is also the HMAC key
+/// for the CSRF `state` token. The `filter` below is redundant given `non_empty_env` already
+/// excludes empty strings at the real call site -- it's kept so `Some("")` remains a meaningful,
+/// directly assertable input for the tests.
 pub fn require_non_empty(key: &str, raw: Option<&str>) -> String {
     match raw.filter(|s| !s.is_empty()) {
         Some(value) => value.to_string(),

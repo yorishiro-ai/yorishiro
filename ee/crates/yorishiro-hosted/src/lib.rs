@@ -48,10 +48,10 @@ pub fn router() -> Router<HostedState> {
         .route("/hosted/tenant/overview", get(dashboard::tenant_overview))
         .route("/auth/oauth/status", get(oauth::status))
         .route("/api-docs/hosted-openapi.json", get(hosted_openapi))
-        // The marketplace moved here from the community edition, which no longer serves any of
-        // these paths -- so nothing is being shadowed. Each path still declares **every** method
-        // it needs in one `.route`, because a path defined on this router takes that path
-        // entirely: a method left out would answer 405 rather than falling through.
+        // The marketplace is an enterprise capability, so it lives here: the community edition
+        // serves none of these paths, so nothing is being shadowed. Each path still declares
+        // **every** method it needs in one `.route`, because a path defined on this router takes
+        // that path entirely: a method left out would answer 405 rather than falling through.
         .route("/api/marketplace", get(marketplace::list_marketplace))
         .route(
             "/api/marketplace/{id}/versions",
@@ -69,13 +69,13 @@ pub fn router() -> Router<HostedState> {
             "/api/marketplace/{id}/visibility",
             put(marketplace::set_visibility),
         )
-        // The origin/merge chain, also moved out of the community edition. These paths overlay
-        // base's surviving `/api/schemas` namespace, so the shadowing rule matters more here
-        // than it did for the marketplace: a path defined on this router takes that path
-        // entirely. `merge-preview` and `merge` are distinct trailing segments, so base's
-        // `/api/schemas/{schema_id}` is untouched. `/api/schemas/upstream-changes` is the one
-        // to watch -- base has no such literal path, and its `{schema_id}` route would
-        // otherwise catch the word as a UUID and answer 400; this router now takes it first.
+        // The origin/merge chain is also an enterprise capability. These paths overlay base's
+        // `/api/schemas` namespace, so the shadowing rule matters here: a path defined on this
+        // router takes that path entirely. `merge-preview` and `merge` are distinct trailing
+        // segments, so base's `/api/schemas/{schema_id}` is untouched. `/api/schemas/upstream-
+        // changes` is the one to watch: base has no such literal path, and its `{schema_id}`
+        // route would otherwise catch the word as a UUID and answer 400; this router takes it
+        // first.
         .route(
             "/api/schemas/upstream-changes",
             get(origin::list_upstream_changes),
@@ -85,9 +85,9 @@ pub fn router() -> Router<HostedState> {
             get(origin::merge_preview),
         )
         .route("/api/schemas/{schema_id}/merge", post(origin::merge_apply))
-        // Fill mode B, moved out of the community edition for the same reason as the rest: the
-        // server makes an outbound chat completion, and a bring-your-own-key design moves who
-        // pays for it without changing that.
+        // Fill mode B is an enterprise capability for the same reason as the rest: the server
+        // makes an outbound chat completion, and a bring-your-own-key design moves who pays for
+        // it without changing that.
         //
         // The shadowing rule applies again, across two namespaces. `infer-fill` is a distinct
         // trailing segment under `/api/schemas/active/{name}`, so base's own routes there are
