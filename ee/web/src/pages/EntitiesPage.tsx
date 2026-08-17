@@ -88,7 +88,7 @@ export function EntitiesPage() {
             types.add(t);
           }
         }
-        setEntityTypes(Array.from(types).sort());
+        setEntityTypes(Array.from(types).toSorted());
       } catch {
         // Non-fatal: filter dropdown just stays empty.
       }

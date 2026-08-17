@@ -195,11 +195,11 @@ jobs:
 
       # The SPA is embedded from `ee/web/dist`, a build output that is not committed, so it is
       # built before cargo: a release binary that links without it serves no UI.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           package_json_file: ee/web/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: pnpm
