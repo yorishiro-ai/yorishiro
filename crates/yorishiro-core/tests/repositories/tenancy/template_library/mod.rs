@@ -224,6 +224,41 @@ async fn forks_template_within_the_same_tenant(pool: PgPool) {
     assert_eq!(templates.len(), 2);
 }
 
+/// Both adapters resolve a `template_id` through this, so a library id and a built-in name have to come back distinguishable: only the library one carries an origin to record.
+///
+/// The MCP tool looked at built-ins only until this was shared, so an agent could browse the library through `list_template_library` and then build nothing from what it found.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_template_id_resolves_to_the_library_or_a_built_in(pool: PgPool) {
+    use crate::repositories::tenancy::resolve_template_definition;
+
+    let tenant = create_tenant(&pool, "acme", None).await.unwrap();
+    let created = create_template(&pool, tenant.id, None, sample_input("from-library"))
+        .await
+        .unwrap();
+
+    // A UUID means the library, and the origin is the template it came from.
+    let (definition, origin) =
+        resolve_template_definition(&pool, tenant.id, &created.id.to_string())
+            .await
+            .unwrap();
+    assert_eq!(origin, Some(created.id));
+    assert_eq!(definition.name, created.definition.name);
+
+    // Anything else means a built-in, which has no row to point at.
+    let (definition, origin) = resolve_template_definition(&pool, tenant.id, "general-notes")
+        .await
+        .unwrap();
+    assert_eq!(origin, None);
+    assert_eq!(definition.name, "general-notes");
+
+    // A well-formed UUID naming nothing reports the library's own not-found, rather than the
+    // built-in one. Written out rather than generated, since nothing in this codebase mints an id.
+    let err = resolve_template_definition(&pool, tenant.id, "00000000-0000-4000-8000-000000000000")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, YorishiroError::NotFound { .. }));
+}
+
 /// A template with the default `visibility = 'tenant'` is invisible to other tenants, so `fork_template` (which resolves its source through `get_template`) rejects forking another tenant's private template.
 #[sqlx::test(migrations = "../../migrations")]
 async fn fork_template_rejects_other_tenants_private_template(pool: PgPool) {

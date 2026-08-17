@@ -88,6 +88,15 @@ impl MembershipRole {
             MembershipRole::Viewer => ApiKeyScope::Read,
         }
     }
+
+    /// Whether this role administers the tenant itself: managing members and workspaces, as opposed to the content inside a workspace.
+    /// Independent of, and stricter than, the scope a role's key can carry: a Member-role key holds `write` for content operations while having no business adding a member.
+    pub fn administers_tenant(self) -> bool {
+        match self {
+            MembershipRole::Owner | MembershipRole::Admin => true,
+            MembershipRole::Member | MembershipRole::Viewer => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]

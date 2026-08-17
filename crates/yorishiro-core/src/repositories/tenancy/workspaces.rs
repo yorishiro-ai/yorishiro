@@ -38,7 +38,28 @@ pub async fn create_workspace(
     embedding: Option<(&str, i32)>,
 ) -> Result<WorkspaceRecord, YorishiroError> {
     let mut conn = pool.acquire().await.internal()?;
-    let tenant = get_tenant(&mut conn, tenant_id).await?;
+    create_workspace_on(
+        &mut conn,
+        tenant_id,
+        name,
+        max_entities,
+        schema_id,
+        embedding,
+    )
+    .await
+}
+
+/// `create_workspace` against a caller-supplied connection, so a bootstrap that also creates the
+/// tenant and its owner can run the whole sequence in one transaction.
+pub async fn create_workspace_on(
+    conn: &mut PgConnection,
+    tenant_id: Uuid,
+    name: &str,
+    max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
+    embedding: Option<(&str, i32)>,
+) -> Result<WorkspaceRecord, YorishiroError> {
+    let tenant = get_tenant(&mut *conn, tenant_id).await?;
 
     if let Some(max) = tenant.max_workspaces {
         let (sql, values) = Query::select()
@@ -47,7 +68,7 @@ pub async fn create_workspace(
             .and_where(Expr::col(Workspaces::TenantId).eq(tenant_id))
             .build_sqlx(PostgresQueryBuilder);
         let (count,): (i64,) = sqlx::query_as_with(&sql, values)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await
             .internal()?;
         if count >= i64::from(max) {
@@ -89,7 +110,7 @@ pub async fn create_workspace(
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, WorkspaceRecord, _>(&sql, values)
-        .fetch_one(pool)
+        .fetch_one(conn)
         .await
         .internal()
 }
@@ -247,23 +268,70 @@ pub async fn resolve_tenant_id(
 /// Deletes a workspace and everything under it.
 /// `identity.workspaces`'s foreign keys from `content.entities`/`content.relations`/`content.schemas`/`identity.api_keys` are all `ON DELETE CASCADE` (see the initial migration), so this one statement is enough:
 /// callers don't need to delete those rows themselves first.
+///
+/// A tenant's last workspace is refused: with none left, the tenant has no way to issue itself an
+/// API key through the REST API at all (login and workspace creation both need one), so this would
+/// be a self-lockout rather than a reversible mistake.
+///
+/// The count and the delete are serialized against other deletes for the same tenant with an
+/// advisory lock, the same TOCTOU guard `create_entity` uses for its quota.
+/// Writing it as one `DELETE ... WHERE EXISTS` is not enough: each transaction's `EXISTS` cannot
+/// see the others' uncommitted deletes, so eight concurrent requests each saw a spare workspace
+/// and emptied the tenant between them.
 pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), YorishiroError> {
-    let (sql, values) = Query::delete()
-        .from_table((Alias::new("identity"), Workspaces::Table))
-        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
+    let mut tx = pool.begin().await.internal()?;
 
-    let result = sqlx::query_with(&sql, values)
-        .execute(pool)
+    let row: Option<(Uuid,)> =
+        sqlx::query_as("SELECT tenant_id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .internal()?;
+
+    let Some((tenant_id,)) = row else {
+        return Err(YorishiroError::not_found(format!(
+            "workspace '{workspace_id}' was not found"
+        )));
+    };
+
+    crate::db::lock_for_update(&mut tx, &format!("workspace-delete:{tenant_id}"))
         .await
         .internal()?;
 
-    if result.rows_affected() == 0 {
-        Err(YorishiroError::not_found(format!(
+    let result = sqlx::query(
+        "DELETE FROM identity.workspaces w
+          WHERE w.id = $1
+            AND EXISTS (
+                  SELECT 1 FROM identity.workspaces other
+                   WHERE other.tenant_id = w.tenant_id AND other.id <> w.id
+                )",
+    )
+    .bind(workspace_id)
+    .execute(&mut *tx)
+    .await
+    .internal()?;
+
+    if result.rows_affected() > 0 {
+        tx.commit().await.internal()?;
+        return Ok(());
+    }
+
+    // Nothing was deleted, which is either "no such workspace" (another request won the race and
+    // removed it) or "it was the last one".
+    let exists: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .internal()?;
+
+    match exists {
+        Some(_) => Err(YorishiroError::Conflict {
+            message: "cannot delete a tenant's only remaining workspace".into(),
+        }),
+        None => Err(YorishiroError::not_found(format!(
             "workspace '{workspace_id}' was not found"
-        )))
-    } else {
-        Ok(())
+        ))),
     }
 }
 

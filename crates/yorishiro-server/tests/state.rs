@@ -212,3 +212,50 @@ async fn app_state_runs_and_drains_queued_work(pool: PgPool) {
     state.drain_queue(std::time::Duration::from_secs(5)).await;
     assert_eq!(ran.load(Ordering::SeqCst), 3);
 }
+
+/// The search token budget is charged per workspace and refuses once spent.
+///
+/// Asserted on `AppState` because that is the seam both adapters go through.
+/// The MCP tool did the same embedding work with no charge at all until this moved out of the REST
+/// handler, so a test entering only through `GET /api/search` would have passed the whole time.
+#[sqlx::test(migrations = "../../migrations")]
+async fn search_tokens_are_charged_per_workspace_and_run_out(pool: PgPool) {
+    use yorishiro_core::repositories::tenancy;
+
+    // Real workspaces, so the ids are the `DEFAULT uuidv7()` ones the database issues.
+    // Nothing in this process mints an id (see the technical spec: "アプリ側でのID生成はしない"),
+    // so a test that minted its own would be keying the limiter on a shape production never sees.
+    let tenant = tenancy::create_tenant(&pool, "budget", None).await.unwrap();
+    let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None, None)
+        .await
+        .unwrap()
+        .id;
+    let other = tenancy::create_workspace(&pool, tenant.id, "second", None, None, None)
+        .await
+        .unwrap()
+        .id;
+
+    let mut state = AppState::new(
+        yorishiro_core::db::TenantDb::new(pool.clone()),
+        pool,
+        Arc::new(ConcurrencyProbe::new()) as Arc<dyn EmbeddingProvider>,
+    );
+    // Set directly rather than through `YORISHIRO_SEARCH_TOKENS_PER_MINUTE`, which is process-wide
+    // and would race the other tests in this binary.
+    state.search_token_limiter = Arc::new(crate::http::middleware::rate_limit::RateLimiter::new(
+        8,
+        std::time::Duration::from_secs(60),
+    ));
+
+    // The default `count_tokens` is one token per four characters, so this is five.
+    let query = "a".repeat(20);
+
+    state.charge_search_tokens(workspace, &query).unwrap();
+    assert!(
+        state.charge_search_tokens(workspace, &query).is_err(),
+        "a second five-token query should exceed an eight-token budget"
+    );
+
+    // The budget is per workspace, so one spending it does not silence another.
+    state.charge_search_tokens(other, &query).unwrap();
+}

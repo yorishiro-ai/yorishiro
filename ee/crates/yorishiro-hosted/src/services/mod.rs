@@ -11,6 +11,7 @@ pub mod oauth;
 pub mod official_templates;
 pub mod origin;
 pub mod plan;
+pub mod stripe_events;
 pub mod tenant_auth;
 pub mod usage;
 

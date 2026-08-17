@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::validate_definition;
+use crate::metaschema::{MetaSchemaDefinition, validate_definition};
 use crate::models::tenancy::{CreateTemplateInput, TemplateRecord, UpdateTemplateInput};
 
 #[derive(Iden)]
@@ -135,6 +135,27 @@ pub async fn get_template(
 
     row.ok_or_else(|| YorishiroError::not_found(format!("template '{template_id}' was not found")))?
         .into_record()
+}
+
+/// Resolves a `template_id` as either a library template or a built-in, and says which.
+///
+/// A UUID can only mean the library; anything else can only mean a built-in.
+/// Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
+///
+/// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
+/// Shared by both adapters, because the same id resolved differently by REST and MCP would leave one of them holding a schema that silently forgot where it came from.
+pub async fn resolve_template_definition(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    template_id: &str,
+) -> Result<(MetaSchemaDefinition, Option<Uuid>), YorishiroError> {
+    match Uuid::parse_str(template_id) {
+        Ok(id) => {
+            let template = get_template(pool, tenant_id, id).await?;
+            Ok((template.definition, Some(template.id)))
+        }
+        Err(_) => Ok((crate::templates::get_template(template_id)?, None)),
+    }
 }
 
 /// Creates a template owned by `tenant_id`.

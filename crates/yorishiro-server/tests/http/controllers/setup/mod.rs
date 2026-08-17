@@ -147,6 +147,55 @@ async fn setup_creates_tenant_workspace_and_owner(pool: PgPool) {
     assert_eq!(role, Some(MembershipRole::Owner));
 }
 
+/// The wizard writes five rows, and a failure at any one of them must leave none.
+/// Half a setup is unrecoverable: a committed tenant makes the 409 above refuse every later
+/// attempt, so the deployment would be stuck with no owner and no way to create one.
+///
+/// A user already holding the email fails `create_user` on its unique constraint, and that is the
+/// third write, so the tenant and workspace are in the transaction by the time it fails.
+#[sqlx::test(migrations = "../../migrations")]
+#[allow(clippy::await_holding_lock)]
+async fn setup_leaves_nothing_behind_when_a_later_step_fails(pool: PgPool) {
+    let _guard = ENV_LOCK.lock().unwrap();
+    set_max_tenants(Some("1"));
+
+    tenancy::create_user(
+        &mut pool.acquire().await.unwrap(),
+        "taken@example.com",
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let app = app(pool.clone());
+    let response = request(
+        &app,
+        "POST",
+        "/setup",
+        Some(serde_json::json!({
+            "email": "taken@example.com",
+            "password": "hunter2-hunter2",
+        })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    let tenants = tenancy::list_tenants(&pool).await.unwrap();
+    assert!(
+        tenants.is_empty(),
+        "a failed setup committed a tenant: {tenants:?}"
+    );
+
+    // The wizard is still open, rather than blocked by its own leftovers.
+    let status_response = request(&app, "GET", "/setup/status", None).await;
+    let status_body = axum::body::to_bytes(status_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let status_json: serde_json::Value = serde_json::from_slice(&status_body).unwrap();
+    assert_eq!(status_json["setup_required"], true);
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 #[allow(clippy::await_holding_lock)]
 async fn setup_rejects_once_a_tenant_already_exists(pool: PgPool) {

@@ -46,6 +46,12 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
+        // Charged before embedding, same as the REST adapter: the budget bounds embedding work, and this tool does exactly as much of it as `GET /api/search`.
+        mcp_try!(
+            self.state
+                .charge_search_tokens(ctx.workspace_id, &args.query_text)
+        );
+
         // Embedding generation happens before acquiring a DB connection, for the same reason as the REST adapter: don't hold a pool connection while waiting on the LocalOnnx provider's serialized inference.
         let vector = mcp_try!(
             search::embed_query(self.state.embedding_provider.as_ref(), &args.query_text).await
