@@ -35,7 +35,11 @@ regex = "1"
 # `form` is for ee/'s OAuth token exchange, which posts application/x-www-form-urlencoded.
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "form", "rustls"] }
 rmcp = { version = "3.0.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
-rust-embed = "8"
+# `debug-embed`: without it, rust-embed reads assets from the absolute path they were built
+# at, so a debug binary run anywhere else serves nothing. That is every containerised debug
+# run, `test/` included, where the SPA and the Swagger UI both 404 while the same binary
+# answers on the host. Release builds always embed, so this only ever affected development.
+rust-embed = { version = "8", features = ["debug-embed"] }
 schemars = { version = "1", features = ["uuid1"] }
 sea-query = { version = "0.32", features = ["with-uuid", "with-chrono", "with-json", "postgres-vector", "postgres-array"] }
 sea-query-binder = { version = "0.7", features = ["sqlx-postgres", "with-uuid", "with-chrono", "with-json", "postgres-vector", "postgres-array"] }
@@ -62,5 +66,5 @@ uuid = { version = "1", features = ["serde"] }
 ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-swagger-ui = { version = "9", features = ["axum", "debug-embed"] }
 wiremock = "0.6.5"
