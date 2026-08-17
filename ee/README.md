@@ -51,7 +51,9 @@ The seams `ee/` composes against are `build_app`, `apply_observability_layers`, 
 
 There is one binary, `yorishiro-server`, and it contains both halves. The paid features are gated at runtime by a licence key in `YORISHIRO_LICENSE_KEY`, not at compile time.
 
-Without a key the server starts normally and the paid surfaces answer `404`. A key that is present but invalid or expired is the same as no key, logged at `warn` rather than refusing to boot: a paid-feature misconfiguration should not take the free half down with it.
+Without a key the server starts normally and the paid surfaces answer `404`.
+A key that does not verify is the same as no key, logged at `warn` rather than refusing to boot: a paid-feature misconfiguration should not take the free half down with it.
+An expired key verifies, so it is accepted at startup and logged at `info` with its expiry; `is_active` compares against the current time on every check, which is why a long-running process stops serving paid features the moment the key lapses.
 
 `yorishiro-ce-server` is the other binary, BUSL-1.1 only, with no trace of this directory in it. A release gate greps the artifact to prove that, and asserts the same markers **are** present in the paid binary, or the check would pass by matching nothing.
 

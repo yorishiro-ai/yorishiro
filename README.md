@@ -37,7 +37,8 @@ flowchart TD
     Core --> DB
 ```
 
-The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: the same routes, without `ee/` in front of them.
+The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: the same API routes, without `ee/` in front of them.
+It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
   - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
@@ -52,7 +53,8 @@ The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: t
   - On each request, the workspace (and its owning tenant) are resolved from the API key.
   - Data can only be reached through a connection that has set the `app.current_tenant`/`app.current_workspace` session variables.
   - The application runs as a dedicated role (`yorishiro_app`, without `BYPASSRLS`).
-    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all: only the admin CLI, running as the migration role, can manage them.
+    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all.
+    They are managed over the migration-role pool instead: the admin CLI, and the signup and setup endpoints, which run before any tenant or workspace context exists for RLS to scope by.
 
   One process holds two pools against the same database, and which one a request uses decides what it can reach:
 
@@ -157,7 +159,8 @@ Which one you run decides what is on disk, not what you configure.
 | Web UI | Served from the binary | None: `/` answers `404` |
 | Licence | [BUSL-1.1](LICENSE) plus [`ee/LICENSE`](ee/LICENSE) for `ee/` | [BUSL-1.1](LICENSE) |
 
-The default artifact is `yorishiro-server`, and without a licence key it behaves exactly like the community edition.
+The default artifact is `yorishiro-server`, and without a licence key its paid API surfaces answer `404`.
+It is still not the same as the community binary: `ee/` is on disk, and the Web UI is served either way, since the SPA is not licence-gated.
 `yorishiro-ce-server` exists for a deployment that cannot have proprietary code on disk at all: a distribution policy, a redistribution requirement, an audit that reads the package rather than the configuration.
 
 The paid half documents itself in [`ee/README.md`](ee/README.md) ([日本語](ee/docs/ja/README.md)).

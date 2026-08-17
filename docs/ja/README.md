@@ -38,7 +38,8 @@ flowchart TD
 ```
 
 コミュニティ版バイナリ(`yorishiro-ce-server`)は内側のサブグラフ単体である。
-同じルートを、`ee/`を前段に置かずに提供する。
+同じAPIルートを、`ee/`を前段に置かずに提供する。
+SPAは`ee/`にあるため、Web UIは提供しない。
 
 - cargo workspace
   - `yorishiro-core`(ドメインロジック)と`yorishiro-server`(HTTPサーバ・アダプタ層)で構成されます。
@@ -50,7 +51,10 @@ flowchart TD
 - RLSによる分離
   - 全テーブルにPostgreSQLのRow Level Securityを適用します。
   - リクエストごとにAPIキーからワークスペース(とその所属テナント)を解決し、セッション変数`app.current_tenant`/`app.current_workspace`を設定したコネクションでのみデータへ到達できます。
-  - アプリは専用ロール(`yorishiro_app`、`BYPASSRLS`なし)で動作し、制御プレーンのテーブル(`identity.tenants`/`identity.users`/`identity.tenant_memberships`)にはこのロールから一切アクセスできません(マイグレーションロールで動く管理CLIのみが操作可能です)。
+  - アプリは専用ロール(`yorishiro_app`、`BYPASSRLS`なし)で動作し、制御プレーンのテーブル(`identity.tenants`/`identity.users`/`identity.tenant_memberships`)にはこのロールから一切アクセスできません。
+    これらはマイグレーションロールのプール経由で操作します。
+    管理CLIに加え、サインアップとセットアップのエンドポイントも同じ経路です。
+    RLSがスコープするためのテナント/ワークスペースが、まだ存在しない段階で動くためです。
 
   1つのプロセスが同じデータベースへ2つのプールを持ち、どちらを通るかで到達できる範囲が決まります。
 
@@ -157,7 +161,9 @@ $ make init
 | Web UI | バイナリから配信 | 無し。`/`は`404` |
 | ライセンス | [BUSL-1.1](../../LICENSE)、`ee/`は[`ee/LICENSE`](../../ee/LICENSE) | [BUSL-1.1](../../LICENSE) |
 
-既定の成果物は`yorishiro-server`で、ライセンスキーが無ければコミュニティ版とまったく同じように振る舞います。
+既定の成果物は`yorishiro-server`で、ライセンスキーが無ければ有償のAPIサーフェスが`404`を返します。
+ただしコミュニティ版と同一ではありません。
+`ee/`はディスク上にあり、SPAはライセンスで塞がないためWeb UIはどちらでも提供されます。
 `yorishiro-ce-server`は、プロプライエタリなコードをディスクに置けない配備のためにあります。
 配布方針、再配布の要件、設定ではなくパッケージを読む監査といった事情です。
 
