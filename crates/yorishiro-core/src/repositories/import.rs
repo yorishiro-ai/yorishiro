@@ -12,27 +12,17 @@ use crate::repositories::schemas;
 pub use crate::models::export::ExportRecord;
 pub use crate::models::import::*;
 
-/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the
-/// same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 ///
-/// The whole read runs inside a single transaction, so it is all-or-nothing: the first
-/// malformed line or repository-level failure (e.g. an entity referencing an unknown
-/// schema, a relation referencing an unknown entity) rolls back everything imported so far
-/// and returns `Err` describing the problem. On success, `ImportResult.errors` is always
-/// empty.
+/// The whole read runs inside a single transaction, so it is all-or-nothing: the first malformed line or repository-level failure (e.g. an entity referencing an unknown schema, a relation referencing an unknown entity) rolls back everything imported so far and returns `Err` describing the problem.
+/// On success, `ImportResult.errors` is always empty.
 ///
-/// Schemas and entities are re-inserted with freshly generated IDs (`create_schema`/
-/// `entities::create` always mint a new one; entities are also re-validated against the
-/// *current* active schema rather than trusting the exported `schema_version`), so:
+/// Schemas and entities are re-inserted with freshly generated IDs (`create_schema`/`entities::create` always mint a new one; entities are also re-validated against the *current* active schema rather than trusting the exported `schema_version`), so:
 ///
-/// - an entity line resolves its schema by *name*, preferring a schema line this same
-///   import already processed over the (tenant-local, so likely meaningless here)
-///   exported `schema_id`;
-/// - a relation line's `source_id`/`target_id` are remapped through the entity lines this
-///   same import already processed.
+/// - an entity line resolves its schema by *name*, preferring a schema line this same import already processed over the (tenant-local, so likely meaningless here) exported `schema_id`;
+/// - a relation line's `source_id`/`target_id` are remapped through the entity lines this same import already processed.
 ///
-/// Because of this, a schema/entity line must appear before anything that references it:
-/// exactly the order `export::export_all` produces (schemas, then entities, then relations).
+/// Because of this, a schema/entity line must appear before anything that references it: exactly the order `export::export_all` produces (schemas, then entities, then relations).
 pub async fn import_jsonl(
     conn: &mut PgConnection,
     tenant_id: Uuid,

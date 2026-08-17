@@ -38,24 +38,18 @@ pub struct LocalOnnxConfig {
     pub query_instruction: Option<String>,
 }
 
-/// Provider that generates embeddings using a local ONNX model (BERT-family
-/// encoder). Has no runtime dependency on external services, making it
-/// suitable for closed/offline environments.
+/// Provider that generates embeddings using a local ONNX model (BERT-family encoder).
+/// Has no runtime dependency on external services, making it suitable for closed/offline environments.
 ///
-/// Note: because of the `ort` crate's default `download-binaries` feature,
-/// **building** this crate downloads the onnxruntime binary from cdn.pyke.io.
-/// If even the build environment must be closed off, point `ORT_LIB_LOCATION`
-/// at a pre-provisioned onnxruntime instead (see README).
+/// Note: because of the `ort` crate's default `download-binaries` feature, **building** this crate downloads the onnxruntime binary from cdn.pyke.io.
+/// If even the build environment must be closed off, point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime instead (see README).
 ///
 /// Model requirements:
-/// - Inputs: `input_ids` and `attention_mask` (both int64). `token_type_ids`
-///   is only passed if the model declares it.
-/// - Output: the first output must be a `[batch, seq, hidden]` last_hidden_state,
-///   the shape produced by sentence-transformers ONNX exports.
+/// - Inputs: `input_ids` and `attention_mask` (both int64).
+///   `token_type_ids` is only passed if the model declares it.
+/// - Output: the first output must be a `[batch, seq, hidden]` last_hidden_state, the shape produced by sentence-transformers ONNX exports.
 ///
-/// Token embeddings are aggregated into a sentence vector via mean pooling
-/// weighted by the attention mask, then L2-normalized for stable cosine-distance
-/// search.
+/// Token embeddings are aggregated into a sentence vector via mean pooling weighted by the attention mask, then L2-normalized for stable cosine-distance search.
 pub struct LocalOnnxProvider {
     // `Session::run` requires `&mut self`, hence the Mutex for serialization.
     // Inference itself already uses intra-op parallelism across CPU cores, so serializing inference within the process costs little throughput.
@@ -263,8 +257,7 @@ pub enum Pooling {
 
 impl Pooling {
     /// Parses the `YORISHIRO_ONNX_POOLING` value.
-    /// Unknown values are rejected rather than defaulted:
-    /// silently falling back to `Mean` is exactly the quiet degradation this type exists to prevent.
+    /// Unknown values are rejected rather than defaulted: silently falling back to `Mean` is exactly the quiet degradation this type exists to prevent.
     pub fn parse(value: &str) -> Result<Self, YorishiroError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "mean" => Ok(Self::Mean),

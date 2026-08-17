@@ -47,18 +47,14 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
     }
 }
 
-/// Generates an embedding vector from an entity's `x-embed` fields and updates
-/// the `entities.embedding` column. Returns `Ok(())` without doing anything if
-/// the schema has no `x-embed` fields or none have values (embedding is an
-/// auxiliary feature and must never block persisting the entity itself).
+/// Generates an embedding vector from an entity's `x-embed` fields and updates the `entities.embedding` column.
+/// Returns `Ok(())` without doing anything if the schema has no `x-embed` fields or none have values (embedding is an auxiliary feature and must never block persisting the entity itself).
 ///
 /// Notes for callers:
 /// - Call this after both `entities::create` and `entities::update`; either
 ///   path changes `data` and requires regenerating the embedding.
 /// - Do not call this within the same transaction as `entities::create`/`update`.
-///   It performs an embedding API call over HTTP (up to 30s), and holding a DB
-///   connection and row locks for that long risks connection pool exhaustion
-///   and lock contention.
+///   It performs an embedding API call over HTTP (up to 30s), and holding a DB connection and row locks for that long risks connection pool exhaustion and lock contention.
 pub async fn sync_embedding(
     conn: &mut PgConnection,
     workspace_id: Uuid,

@@ -84,9 +84,7 @@ struct AuthRateLimitConfig {
 ///
 /// # Safety
 ///
-/// Must only be called from a synchronous prologue in `main`, before the tokio runtime (or any
-/// other thread) starts and before anything else reads or writes the environment: `set_var`
-/// is unsound under concurrent env access, which this ordering rules out.
+/// Must only be called from a synchronous prologue in `main`, before the tokio runtime (or any other thread) starts and before anything else reads or writes the environment: `set_var` is unsound under concurrent env access, which this ordering rules out.
 unsafe fn apply_if_unset(key: &str, value: Option<String>) {
     if let Some(value) = value
         && std::env::var_os(key).is_none()
@@ -103,8 +101,7 @@ pub const PACKAGED_CONFIG_PATH: &str = "/etc/yorishiro/config.yml";
 /// `YORISHIRO_CONFIG_PATH` wins outright when it is set: an operator naming a file means that file, and silently reading a different one would be worse than reading none.
 ///
 /// Unset, the working directory comes first, so a source checkout keeps using its own `config.yml`.
-/// `/etc/yorishiro/config.yml` is the fallback, and it exists for the admin CLI:
-/// the unit exports the variable, but a shell has no such environment, so without this fallback `yorishiro-server admin create-tenant` on a packaged host would look in whatever directory the operator happens to be in and report the database as unconfigured, even while the service beside it runs normally against that exact file.
+/// `/etc/yorishiro/config.yml` is the fallback, and it exists for the admin CLI: the unit exports the variable, but a shell has no such environment, so without this fallback `yorishiro-server admin create-tenant` on a packaged host would look in whatever directory the operator happens to be in and report the database as unconfigured, even while the service beside it runs normally against that exact file.
 ///
 /// `explicit` is an `OsString` rather than a `String` because `std::env::var` reports a non-UTF-8 value as `NotUnicode`, and `.ok()` would flatten that into "unset".
 /// A path this process cannot render as UTF-8 is still a path the operator named, and treating it as unset would fall back to a different file: the one case this function exists to rule out.
@@ -126,16 +123,14 @@ pub(crate) fn config_path_from(
     exists(&packaged).then_some(packaged)
 }
 
-/// Loads `config.yml` and materializes its settings into the process environment. A missing file
-/// is not an error: it means every setting stays exactly as the environment already has it,
-/// which is the same as if this function were never called.
+/// Loads `config.yml` and materializes its settings into the process environment.
+/// A missing file is not an error: it means every setting stays exactly as the environment already has it, which is the same as if this function were never called.
 ///
 /// See [`config_path_from`] for which file is read.
 ///
 /// # Safety
 ///
-/// See `apply_if_unset`: must be called from `main`'s synchronous prologue, before the tokio
-/// runtime starts.
+/// See `apply_if_unset`: must be called from `main`'s synchronous prologue, before the tokio runtime starts.
 pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
     let explicit = std::env::var_os("YORISHIRO_CONFIG_PATH");
     let Some(path) = config_path_from(explicit, |p| p.exists()) else {

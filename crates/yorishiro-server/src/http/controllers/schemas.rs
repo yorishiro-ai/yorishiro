@@ -83,14 +83,12 @@ pub async fn get_schema_by_id(
 
 /// Either an inline schema definition, or a reference to a template.
 ///
-/// `template_id` accepts both kinds of template, because a caller holding an id should not have
-/// to know which kind it is:
+/// `template_id` accepts both kinds of template, because a caller holding an id should not have to know which kind it is:
 ///   * a built-in id (`"task-management"`, see `GET /api/templates`), served from the binary
 ///   * a UUID from the tenant's template library (`GET /api/template-library`), which is where
 ///     a template copied from another tenant lands
 ///
-/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working
-/// unchanged.
+/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum CreateSchemaRequest {

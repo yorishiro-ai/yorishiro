@@ -15,14 +15,10 @@ fn escape_pointer_segment(segment: &str) -> String {
 
 /// Validates the metaschema definition itself:
 /// - entity_types / relation_types must have minimal internal consistency
-/// - relation_types' source/target must reference keys existing in this
-///   definition's entity_types
-/// - array-type fields only allow items.type == "string" or "object" (with
-///   properties for the latter)
-/// - object-type fields require non-empty properties, nested up to
-///   MAX_OBJECT_DEPTH levels
-/// - format is only valid for string fields; minimum/maximum are only valid
-///   for number/integer fields and require minimum <= maximum
+/// - relation_types' source/target must reference keys existing in this definition's entity_types
+/// - array-type fields only allow items.type == "string" or "object" (with properties for the latter)
+/// - object-type fields require non-empty properties, nested up to MAX_OBJECT_DEPTH levels
+/// - format is only valid for string fields; minimum/maximum are only valid for number/integer fields and require minimum <= maximum
 pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroError> {
     let mut details = Vec::new();
 

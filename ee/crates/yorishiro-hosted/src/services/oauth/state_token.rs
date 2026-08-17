@@ -65,15 +65,12 @@ pub fn issue(signing_key: &[u8]) -> IssuedState {
     }
 }
 
-/// Verifies a `state` value's signature and freshness, returning the PKCE verifier and expected
-/// CSRF hash it carries. Rejects anything that doesn't parse, doesn't verify, or has aged past
-/// [`STATE_TTL_SECS`]: each is indistinguishable from the others to the caller (all map to the
-/// same `YorishiroError::Unauthenticated`), so a forged/expired/malformed `state` can't be
-/// distinguished by an attacker probing the endpoint.
+/// Verifies a `state` value's signature and freshness, returning the PKCE verifier and expected CSRF hash it carries.
+/// Rejects anything that doesn't parse, doesn't verify, or has aged past [`STATE_TTL_SECS`]: each is indistinguishable from the others to the caller (all map to the same `YorishiroError::Unauthenticated`), so a forged/expired/malformed `state` can't be distinguished by an attacker probing the endpoint.
 ///
 /// This alone does **not** prove the presenting browser is the one the flow was started for.
-/// See the module docs. Callers must separately check the returned `csrf_hash` against the
-/// SHA-256 hash of the browser's CSRF cookie.
+/// See the module docs.
+/// Callers must separately check the returned `csrf_hash` against the SHA-256 hash of the browser's CSRF cookie.
 pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     let mut parts = state.splitn(4, '.');
     let issued_at_str = parts.next()?;

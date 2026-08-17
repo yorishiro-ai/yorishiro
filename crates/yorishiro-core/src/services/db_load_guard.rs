@@ -1,20 +1,16 @@
 //! Automatic read-only under database load (FR-9, layer 4).
 //!
-//! When the database stays busy past a threshold, the deployment drops to read-only rather than
-//! waiting to become unresponsive: reads keep working, and writes get a `423` with a
-//! `Retry-After` instead of a timeout. It goes back on its own once the load subsides.
+//! When the database stays busy past a threshold, the deployment drops to read-only rather than waiting to become unresponsive: reads keep working, and writes get a `423` with a `Retry-After` instead of a timeout.
+//! It goes back on its own once the load subsides.
 //!
 //! # The signal
 //!
-//! **CPU is not available from SQL.** `pg_stat_database` carries cumulative I/O time and
-//! transaction counts, not an instantaneous load: measured, not assumed. The two candidates
-//! were connection count and a webhook from external monitoring; this takes the first.
+//! **CPU is not available from SQL.** `pg_stat_database` carries cumulative I/O time and transaction counts, not an instantaneous load: measured, not assumed.
+//! The two candidates were connection count and a webhook from external monitoring; this takes the first.
 //!
-//! It is an approximation and worth naming as one: the pool has a ceiling, so real saturation
-//! shows up as queueing *behind* the pool rather than as more active connections. What this
-//! catches is the shape that precedes it. A deployment that wants the true figure has monitoring
-//! already and can drive `admin maintenance` from it; this exists so that a deployment with
-//! nothing else keeps serving reads instead of falling over.
+//! It is an approximation and worth naming as one: the pool has a ceiling, so real saturation shows up as queueing *behind* the pool rather than as more active connections.
+//! What this catches is the shape that precedes it.
+//! A deployment that wants the true figure has monitoring already and can drive `admin maintenance` from it; this exists so that a deployment with nothing else keeps serving reads instead of falling over.
 
 use std::time::Duration;
 

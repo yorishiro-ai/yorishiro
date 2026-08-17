@@ -1,18 +1,14 @@
 //! Splitting long work into acknowledgeable pieces (FR-10, §7.5).
 //!
 //! A worker that processes a whole job and then acknowledges loses everything if it dies at 99%.
-//! Splitting the job first bounds that loss to one chunk, and lets whatever runs the chunks be
-//! stateless: a node leaving is not a failed job, it is a handful of chunks nobody
-//! acknowledged.
+//! Splitting the job first bounds that loss to one chunk, and lets whatever runs the chunks be stateless: a node leaving is not a failed job, it is a handful of chunks nobody acknowledged.
 //!
 //! # What is here, and what is not
 //!
-//! The **framework** is here: splitting, and the record of which chunks were acknowledged. The
-//! **reassignment** is not, and cannot be: returning an unacknowledged chunk to the pool is a
-//! visibility timeout, which is a property of a queue that ships work between processes.
-//! `LocalQueue` runs tasks on this runtime, where a lost chunk and a lost process are the same
-//! event. A distributed driver brings its own timeout and reuses everything here:
-//! [`ChunkProgress::outstanding`] is exactly the list it hands back.
+//! The **framework** is here: splitting, and the record of which chunks were acknowledged.
+//! The **reassignment** is not, and cannot be: returning an unacknowledged chunk to the pool is a visibility timeout, which is a property of a queue that ships work between processes.
+//! `LocalQueue` runs tasks on this runtime, where a lost chunk and a lost process are the same event.
+//! A distributed driver brings its own timeout and reuses everything here: [`ChunkProgress::outstanding`] is exactly the list it hands back.
 
 use crate::error::YorishiroError;
 

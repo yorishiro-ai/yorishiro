@@ -1,17 +1,13 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
 //!
-//! Creating a schema from a template is base's responsibility, untouched by this crate; flowing
-//! a template's later edits into the copies is this edition's.
+//! Creating a schema from a template is base's responsibility, untouched by this crate; flowing a template's later edits into the copies is this edition's.
 //!
 //! Two things differ from the community version, both forced rather than chosen:
 //!
-//! * Authentication goes through [`authz::authenticate_workspace`] rather than an `Authorized`
-//!   extractor, since this crate's lib may not depend on `yorishiro-server`. That helper resolves
-//!   through `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a
-//!   tenant-scoped one names it with `X-Workspace-Id`. Both work here, where the community
-//!   version only ever saw the first kind.
-//! * The scope check is explicit: the handler checks the scope itself, because there is no
-//!   extractor here to carry it.
+//! * Authentication goes through [`authz::authenticate_workspace`] rather than an `Authorized` extractor, since this crate's lib may not depend on `yorishiro-server`.
+//!   That helper resolves through `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a tenant-scoped one names it with `X-Workspace-Id`.
+//!   Both work here, where the community version only ever saw the first kind.
+//! * The scope check is explicit: the handler checks the scope itself, because there is no extractor here to carry it.
 
 use axum::Json;
 use axum::extract::{Path, State};

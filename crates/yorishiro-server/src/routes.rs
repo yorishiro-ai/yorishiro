@@ -12,20 +12,14 @@ use crate::http::controllers::{health, whoami};
 use crate::http::{controllers, mcp};
 use crate::state::AppState;
 
-/// The routing configuration itself needs to be identical between `main` and the
-/// integration tests, so it's factored into a function that builds the app from just an
-/// `AppState`. `static_fallback` is mounted for any path no API route matches, which is what
-/// serves the SPA and lets it own client-side routing.
+/// The routing configuration itself needs to be identical between `main` and the integration tests, so it's factored into a function that builds the app from just an `AppState`.
+/// `static_fallback` is mounted for any path no API route matches, which is what serves the SPA and lets it own client-side routing.
 ///
-/// The caller supplies that fallback rather than this crate reaching for one: the SPA is part of
-/// the paid edition under `ee/`, and a crate here must not depend on that direction. A caller
-/// with no UI to serve can pass any `MethodRouter`: the tests pass one that always 404s.
+/// The caller supplies that fallback rather than this crate reaching for one: the SPA is part of the paid edition under `ee/`, and a crate here must not depend on that direction.
+/// A caller with no UI to serve can pass any `MethodRouter`: the tests pass one that always 404s.
 ///
-/// **Merging your own routes in.** `axum::Router::merge` does not propagate a `.layer()` from
-/// either side to the other, so routes added via `some_router.merge(build_app(state,
-/// static_fallback))` get none of this router's `DefaultBodyLimit`/rate-limit/CORS/trace-id layers
-/// unless applied to `some_router` directly, *before* merging. This crate factors those layers
-/// out for exactly that reason:
+/// **Merging your own routes in.** `axum::Router::merge` does not propagate a `.layer()` from either side to the other, so routes added via `some_router.merge(build_app(state, static_fallback))` get none of this router's `DefaultBodyLimit`/rate-limit/CORS/trace-id layers unless applied to `some_router` directly, *before* merging.
+/// This crate factors those layers out for exactly that reason:
 ///
 /// ```ignore
 /// // `my_unauthenticated_routes` must already be `Router<()>` (call `.with_state(...)` on it
@@ -39,11 +33,8 @@ use crate::state::AppState;
 /// let app = my_routes.merge(build_app_with_rate_limiter(state, static_fallback, rate_limiter));
 /// ```
 ///
-/// (`RateLimiter`/`apply_rate_limit_layer` are in
-/// `crate::http::middleware::rate_limit`; `apply_body_limit_layer`/`apply_observability_layers`
-/// are in this module.) Pass the same `Arc<RateLimiter>` to both sides to share one quota
-/// across this crate's `/auth/*`/`/setup*` routes and your own unauthenticated routes (e.g. an
-/// OAuth login/callback pair): see `build_app_with_rate_limiter`.
+/// (`RateLimiter`/`apply_rate_limit_layer` are in `crate::http::middleware::rate_limit`; `apply_body_limit_layer`/`apply_observability_layers` are in this module.)
+/// Pass the same `Arc<RateLimiter>` to both sides to share one quota across this crate's `/auth/*`/`/setup*` routes and your own unauthenticated routes (e.g. an OAuth login/callback pair): see `build_app_with_rate_limiter`.
 pub fn build_app(state: AppState, static_fallback: axum::routing::MethodRouter) -> Router {
     build_app_with_rate_limiter(
         state,

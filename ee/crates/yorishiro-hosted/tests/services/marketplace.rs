@@ -334,24 +334,19 @@ async fn only_the_owner_can_change_visibility(pool: PgPool) {
     assert_eq!(row.0, "community");
 }
 
-/// The version number is read by `max(version) + 1` inside the statement that inserts it, and at
-/// READ COMMITTED Postgres locks no range for rows that do not exist yet. Without the advisory
-/// lock in `publish_version`, two concurrent publishes of one template both read the same
-/// maximum, both write the same number, and `UNIQUE (template_id, version)` fails one of them:
-/// an opaque 500 for a caller that did nothing wrong.
+/// The version number is read by `max(version) + 1` inside the statement that inserts it, and at READ COMMITTED Postgres locks no range for rows that do not exist yet.
+/// Without the advisory lock in `publish_version`, two concurrent publishes of one template both read the same maximum, both write the same number, and `UNIQUE (template_id, version)` fails one of them: an opaque 500 for a caller that did nothing wrong.
 ///
 /// All of them must succeed, taking consecutive numbers.
 ///
 /// Two details make this an actual check rather than a passing assertion:
 ///
-/// * The publishes are **spawned**, not `tokio::join!`ed. `join!` drives every future from one
-///   task, so they interleave only at await points and each read lands after the previous
-///   insert, the race never occurs and the test proves nothing. Separate tasks released by a
-///   barrier put them inside the read window together.
-/// * There are **eight**, not two. With two, removing the advisory lock failed this only about
-///   one run in three: the window is narrow, and a test that catches a bug a third of the time
-///   is a flaky test rather than a gate. Eight widens it enough that the unguarded version
-///   fails every time, measured before this was relied on.
+/// * The publishes are **spawned**, not `tokio::join!`ed.
+///   `join!` drives every future from one task, so they interleave only at await points and each read lands after the previous insert, the race never occurs and the test proves nothing.
+///   Separate tasks released by a barrier put them inside the read window together.
+/// * There are **eight**, not two.
+///   With two, removing the advisory lock failed this only about one run in three: the window is narrow, and a test that catches a bug a third of the time is a flaky test rather than a gate.
+///   Eight widens it enough that the unguarded version fails every time, measured before this was relied on.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn concurrent_publishes_get_consecutive_versions(pool: PgPool) {
     const PUBLISHERS: usize = 8;
