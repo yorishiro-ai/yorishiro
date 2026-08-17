@@ -350,6 +350,11 @@ function entityPreview(entity: Entity | undefined): Array<[string, string]> {
     .map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : String(v)]);
 }
 
+/// How many entities the picker offers.
+/// A graph is read one entity at a time, so this bounds the dropdown rather than the view: a
+/// workspace with more of them is normal, and the search page is how you reach the rest.
+const ENTITY_PICKER_LIMIT = 100;
+
 function EntityTab({ isDark }: { isDark: boolean }) {
   const navigate = useNavigate();
   const { wsId } = useParams<{ wsId: string }>();
@@ -371,7 +376,7 @@ function EntityTab({ isDark }: { isDark: boolean }) {
 
   useEffect(() => {
     let cancelled = false;
-    listEntities({ limit: 100 })
+    listEntities({ limit: ENTITY_PICKER_LIMIT })
       .then(async (data) => {
         if (cancelled) return;
         setEntities(data);
@@ -522,6 +527,15 @@ function EntityTab({ isDark }: { isDark: boolean }) {
               ))
             )}
           </select>
+          {/* The picker holds the first ENTITY_PICKER_LIMIT entities and nothing says so, which
+              reads as "this entity does not exist" rather than "this list is cut off". A full
+              count is not fetched to say it: hitting the limit is the same evidence, and the
+              search page is where finding one by name belongs. */}
+          {entities.length >= ENTITY_PICKER_LIMIT && (
+            <span className="text-xs text-muted-foreground">
+              first {ENTITY_PICKER_LIMIT}; search for others
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Depth:</span>
