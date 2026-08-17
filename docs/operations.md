@@ -7,7 +7,7 @@ Yorishiro itself does not automate the concerns below; operators need to set the
 ## Backup and restore
 
 Data lives entirely in PostgreSQL (in the development environment, the named volume `pgdata` in `docker-compose.yml`).
-Docker Compose has no explicit project name set in this repo, so it prefixes the volume with the checkout directory's basename by default (e.g. `<dir>_pgdata`) -- run `docker compose config` to confirm the resolved name for your checkout.
+Docker Compose has no explicit project name set in this repo, so it prefixes the volume with the checkout directory's basename by default (e.g. `<dir>_pgdata`): run `docker compose config` to confirm the resolved name for your checkout.
 Yorishiro has no built-in backup automation.
 
 Set up scheduled backups with standard `pg_dump`/`pg_restore`, or a WAL-archiving + PITR (Point-in-Time Recovery) setup, on the operator side.
@@ -38,18 +38,18 @@ If you need continuous monitoring, set up alerting on your log aggregation platf
 ## Access logging
 
 Every request produces one JSON log line (method, path, status, latency) alongside the rest of the application's `tracing` output.
-`YORISHIRO_LOG_TARGET` controls where all of it goes -- see [configuration.md](configuration.md#logging).
+`YORISHIRO_LOG_TARGET` controls where all of it goes: see [configuration.md](configuration.md#logging).
 
 - `stdout` is the right choice for a container runtime that collects logs from the process's standard streams.
 - `single`/`daily` suit running the binary directly on a host without a surrounding log collector.
-- `syslog` hands lines off to whatever the host's syslog daemon is already configured to do with them (forward, rotate, aggregate) -- Unix only; rejected at startup on other platforms.
+- `syslog` hands lines off to whatever the host's syslog daemon is already configured to do with them (forward, rotate, aggregate): Unix only; rejected at startup on other platforms.
 
 None of these targets rotate or prune on their own beyond what `daily`'s day-boundary split does.
 Pair `single`/`daily` with `logrotate` or an equivalent if disk usage needs to be bounded.
 
 ## Changing the embedding model
 
-Vectors from two different models cannot share an HNSW index, and the server refuses to start when `YORISHIRO_EMBEDDING_DIMENSIONS` disagrees with the model it loaded — a mismatch stops the process rather than quietly returning bad search results.
+Vectors from two different models cannot share an HNSW index, and the server refuses to start when `YORISHIRO_EMBEDDING_DIMENSIONS` disagrees with the model it loaded: a mismatch stops the process rather than quietly returning bad search results.
 
 An existing deployment is unaffected by a change of default: the dimension is read from the environment, so one already running 768 keeps its model and its vectors.
 To move to a different model, re-embed:
@@ -69,7 +69,7 @@ Re-embedding is the whole corpus through the model, so time it against a batch w
 
 ## Maintenance mode
 
-Two modes, both shared by every node in the deployment (the state is a row in the database, not a flag in the process — a flag would put one replica in maintenance while its siblings kept serving):
+Two modes, both shared by every node in the deployment (the state is a row in the database, not a flag in the process: a flag would put one replica in maintenance while its siblings kept serving):
 
 | Mode | Reads | Writes | Status |
 |---|---|---|---|
@@ -108,7 +108,7 @@ It errs toward refusing a read rather than admitting a write.
 
 ### Driving it from a monitor
 
-The mode is a row, so anything holding the migration role's credentials can set it — the CLI is one caller, not the only one.
+The mode is a row, so anything holding the migration role's credentials can set it: the CLI is one caller, not the only one.
 A monitor watching database load can shed writes on its own:
 
 ```sql
@@ -122,36 +122,36 @@ UPDATE identity.maintenance
    SET mode = 'off', reason = NULL, updated_at = now();
 ```
 
-Every request already reads this row, so the change takes effect on the next request across every node — no restart, no deploy.
+Every request already reads this row, so the change takes effect on the next request across every node: no restart, no deploy.
 
 **Pair the entry with an exit.**
 A monitor that switches to `read_only` and never switches back leaves the deployment refusing writes until somebody notices: an overnight spike becomes an outage that lasts until morning.
 Whatever rule turns it on is the rule that has to turn it off.
 
 The server does not watch load itself.
-A database's CPU usage is not available over SQL, so anything the process could measure on its own — its own connection pool, `pg_stat_database` — measures demand rather than the load the threshold is about.
+A database's CPU usage is not available over SQL, so anything the process could measure on its own (its own connection pool, `pg_stat_database`) measures demand rather than the load the threshold is about.
 
 ### Filling defaults
 
 `POST /api/schemas/active/{name}/fill-defaults` (schema scope) writes the active version's `default` values into entities written before those fields existed, and returns a `job_id`.
 
 Entities keep their own schema version.
-Filling a value is not a migration between definitions — it adds data the entity was always allowed to hold, validated against the version it already claims.
+Filling a value is not a migration between definitions: it adds data the entity was always allowed to hold, validated against the version it already claims.
 What version an entity belongs to is a separate question.
 
 A required field with **no** default is left alone and reported in `still_missing`.
 A value nobody chose is indistinguishable from one somebody did, once written.
 
 `POST /api/migration-jobs/{job_id}/undo` puts the whole run back.
-The snapshots are consumed by the undo, so a job can only be undone once — a second undo would lay stale data over whatever came after the first.
+The snapshots are consumed by the undo, so a job can only be undone once: a second undo would lay stale data over whatever came after the first.
 
 ### Inferring values
 
-Inferring a missing value from a language model is not provided.
 `fill-defaults` writes values the schema itself states; a required field with no default is reported in `still_missing` and left alone.
+Inferring a value the schema does not state is a paid feature, `POST /api/schemas/active/{name}/infer-fill`, and the `yorishiro-ce` package does not carry it.
 
-Yorishiro makes no outbound chat-completion calls, whoever would pay for them.
-The embedding providers are not an exception to that — an embeddings endpoint is not a chat completion, and the local ONNX provider makes no network call at all.
+What decides that is the server making an outbound chat completion at all, not who pays for the call: a bring-your-own-key design moves the cost without changing the property.
+The embedding providers are not an exception: an embeddings endpoint is not a chat completion, and the local ONNX provider makes no network call at all.
 
 ## Switching queue infrastructure
 
@@ -159,13 +159,14 @@ The embedding providers are not an exception to that — an embeddings endpoint 
 New work goes to the new queue from the moment it is installed; the old one keeps running what it had already accepted.
 
 1. Construct `DrainingQueue::new(new, old)` and serve from it.
-   Nothing upstream needs to know — it is a `Queue` like any other.
+   Nothing upstream needs to know: it is a `Queue` like any other.
 2. `drain_old(timeout)` waits for the old queue's outstanding work and **returns whether it finished**.
-   `DrainOutcome::TimedOut` means something is still running — do not proceed.
+   `DrainOutcome::TimedOut` means something is still running.
+   Do not proceed.
    This is deliberately not `drain()`: that one waits for *everything*, including work that has only just arrived on the new queue, which is not the question a switchover is asking.
 3. Drop it and serve from the new queue directly.
 
-Nothing sent through the switchover reaches the old queue — otherwise step 2 would be chasing a target that keeps moving.
+Nothing sent through the switchover reaches the old queue: otherwise step 2 would be chasing a target that keeps moving.
 
 ## Chunked work
 
@@ -175,4 +176,4 @@ Long work is split into pieces that are acknowledged one at a time (`yorishiro_c
 **Reassignment is not here.**
 Returning an unacknowledged chunk to the pool is a visibility timeout, a property of a queue that ships work between processes.
 `LocalQueue` runs tasks on this runtime, where a lost chunk and a lost process are the same event.
-A distributed driver brings its own timeout and reuses everything above — `outstanding()` is exactly the list it hands back.
+A distributed driver brings its own timeout and reuses everything above: `outstanding()` is exactly the list it hands back.

@@ -41,7 +41,8 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 
 ファイルが存在しない場合や、ファイル内に該当キーがない場合はエラーにならず、通常のデフォルト値にフォールバックします。
 **環境変数が設定されている場合は、対応する`config.yml`のキーより常に優先されます。**
-未知のキー(タイポなど)が含まれている場合は拒否されます — サーバーはそのキーを無視するのではなく、起動に失敗します。
+未知のキー(タイポなど)が含まれている場合は拒否されます。
+サーバーはそのキーを無視するのではなく、起動に失敗します。
 
 これにより、`config.yml`をデプロイの基本設定として使い、環境変数は一時的な上書き用途(1回限りのDocker `-e`オプションなど)に限定する使い方ができます。
 
@@ -56,8 +57,8 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 | `YORISHIRO_MAX_TENANTS` | `admin create-tenant`が作成できるテナント数の上限。未設定時は既定で`1`(シングルテナント)。無制限にするには`0`を、複数許可するにはその上限数を設定する。`POST /auth/signup`はテナントを作成しない(既存テナントへ招待を引き換えるだけ)ため影響を受けない。初回セットアップウィザード([setup.md](setup.md#初回セットアップ)参照)もこの変数で有効/無効が決まり、上限が`0`でない場合のみ有効化される |
 | `YORISHIRO_WEB_DIR` | Web UIは`ee/web/dist`からバイナリに組み込まれ、既定で`/`から配信される。実ディレクトリから配信させたい場合に設定する。リクエストごとに読み直すため、バイナリを再ビルドせずUIを編集・反映できる |
 | `YORISHIRO_AUTH_RATE_LIMIT_MAX` / `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` | `/auth/signup`・`/auth/login`・`/setup`(bearerトークン不要なエンドポイントであり、未認証の呼び出し元が総当たりできる唯一の経路)に対する、呼び出し元IPごとのレート制限。既定値: 60秒あたり10リクエスト |
-| `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | 1ワークスペースが1分間に検索へ使えるトークン数(既定: `100000`)。**検索だけをトークンで計量する**——それが埋め込みモデルへの実コストであり、書き込みは本文が大きく計量自体が書き込みより高くつくためリクエスト数のままとする。予算を超える単発クエリも1回は通り、その後ウィンドウを使い切った状態になる |
-| `YORISHIRO_SNAPSHOT_RETENTION_DAYS` | 一括移行を取り消せる日数(既定: `30`。`0`以下で無期限保持)。移行は触れたエンティティ1件につき変更前イメージを1行書き、取り消し以外では消えない——無制限にすると、移行を繰り返すワークスペースでイメージが実データを上回る。掃除はタイマーではなく、そのワークスペースで次に移行が走った時点で行う。期限を過ぎたジョブの取り消しは`404`——一度も実行されなかったジョブと同じ答えになる。32bit整数にならない値は丸めず既定値に戻す——600万年の保持は打ち間違いであり、最も近い有効値を採ればそれを隠してしまう |
+| `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | 1ワークスペースが1分間に検索へ使えるトークン数(既定: `100000`)。**検索だけをトークンで計量する**のは、それが埋め込みモデルへの実コストであるためであり、書き込みは本文が大きく計量自体が書き込みより高くつくためリクエスト数のままとする。予算を超える単発クエリも1回は通り、その後ウィンドウを使い切った状態になる |
+| `YORISHIRO_SNAPSHOT_RETENTION_DAYS` | 一括移行を取り消せる日数(既定: `30`。`0`以下で無期限保持)。移行は触れたエンティティ1件につき変更前イメージを1行書き、取り消し以外では消えない。無制限にすると、移行を繰り返すワークスペースでイメージが実データを上回る。掃除はタイマーではなく、そのワークスペースで次に移行が走った時点で行う。期限を過ぎたジョブの取り消しは`404`となり、一度も実行されなかったジョブと同じ答えになる。32bit整数にならない値は丸めず既定値に戻す。600万年の保持は打ち間違いであり、最も近い有効値を採ればそれを隠してしまうためである |
 | `RUST_LOG` | ログレベル(例: `info`) |
 
 ## DBロードガード
@@ -70,7 +71,7 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 |---|---|
 | `YORISHIRO_DB_LOAD_THRESHOLD` | この接続数を超えると読み取り専用になる。未設定または`0`でガード自体が無効 |
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | 閾値超過が何秒続いたら切り替えるか(既定: `30`)。瞬間的なスパイクで切り替わらないようにする |
-| `YORISHIRO_DB_LOAD_POLL_SECS` | 接続数を確認する間隔(既定: `5`)。`0`は無効化ではなく既定値に戻る——ガードの無効化は`YORISHIRO_DB_LOAD_THRESHOLD=0`を使う |
+| `YORISHIRO_DB_LOAD_POLL_SECS` | 接続数を確認する間隔(既定: `5`)。`0`は無効化ではなく既定値に戻る。ガードの無効化は`YORISHIRO_DB_LOAD_THRESHOLD=0`を使う |
 
 ## リクエスト相関
 
@@ -144,6 +145,6 @@ $ yorishiro-server admin resync-embeddings --workspace <id>
 | `YORISHIRO_EMBEDDING_BASE_URL` | `/v1/embeddings`互換エンドポイントのベースURL(必須) |
 | `YORISHIRO_EMBEDDING_MODEL` | モデル名(必須) |
 | `YORISHIRO_EMBEDDING_API_KEY` | エンドポイントが要求する場合のAPIキー |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストボディに`dimensions`パラメータを含めるか。未設定時は既定で`true`。一度設定すると、小文字の文字列`true`と完全一致する場合のみ有効のまま — `false`・`False`・`FALSE`・`0`等それ以外の値はすべて無効(`false`)として扱われる |
+| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストボディに`dimensions`パラメータを含めるか。未設定時は既定で`true`。一度設定すると、小文字の文字列`true`と完全一致する場合のみ有効のままとなり、`false`・`False`・`FALSE`・`0`等それ以外の値はすべて無効(`false`)として扱われる |
 
 具体的な取得例(`https://huggingface.co/Xenova/multilingual-e5-large`の`onnx/model_quantized.onnx`と`tokenizer.json`)は[docs/ja/embedding-providers.md](embedding-providers.md)を参照してください。

@@ -6,9 +6,9 @@ Embedding generation for `x-embed` fields is switched with `YORISHIRO_EMBEDDING_
 The dimension count is configurable via `YORISHIRO_EMBEDDING_DIMENSIONS` (default 1024) and must match the model's output.
 Embeddings are generated asynchronously in the background after an entity is written, so write API latency is unaffected.
 
-## `local` — Local ONNX model (default)
+## `local`: Local ONNX model (default)
 
-Requires no external service or API key — just the model files below — so it's the default and what a self-hosted deployment normally wants.
+Requires no external service or API key (just the model files below), so it's the default and what a self-hosted deployment normally wants.
 Requires a BERT-family ONNX export at `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH`, which already default to `models/model.onnx`/`models/tokenizer.json`.
 The default model (multilingual-e5-large) outputs 1024-dimensional vectors and covers 100+ languages, so Japanese and English text describing the same thing land near each other:
 
@@ -20,13 +20,13 @@ $ curl -L -o models/tokenizer.json \
     https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
 ```
 
-Placing the two files at those default paths is enough -- no environment variables are required at all.
+Placing the two files at those default paths is enough: no environment variables are required at all.
 Note: "requires no external service" applies at runtime only.
 
 **At build time**, the `ort` crate downloads a prebuilt onnxruntime binary (from cdn.pyke.io).
 If your build environment is also air-gapped, provide a pre-placed onnxruntime and point the build at it with the `ORT_LIB_LOCATION` environment variable.
 
-## `openai` — OpenAI-compatible API
+## `openai`: OpenAI-compatible API
 
 Uses an `/v1/embeddings`-compatible endpoint such as Ollama, LM Studio, or OpenAI.
 Set `YORISHIRO_EMBEDDING_PROVIDER=openai` explicitly to opt into this instead of the local ONNX default:

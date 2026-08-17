@@ -31,7 +31,7 @@ flowchart TD
 
 - cargo workspace
   - `yorishiro-core`(ドメインロジック)と`yorishiro-server`(HTTPサーバ・アダプタ層)で構成されます。
-  - DBへ直接アクセスするのは`yorishiro-server`プロセスのみです。
+  - リポジトリ層を持ちクエリを発行するのは`yorishiro-core`であり、`yorishiro-server`はそれをHTTPとMCPへ橋渡しします。
 - 2階層のテナント構造
   - **テナント**(組織/アカウント)は複数の人間の**ユーザー**をowner/admin/member/viewerのロールで紐付けられ、複数の**ワークスペース**を持ちます。
   - 全てのコンテンツ(スキーマ/エンティティ/リレーション)とAPIキーはちょうど1つのワークスペースに属します。

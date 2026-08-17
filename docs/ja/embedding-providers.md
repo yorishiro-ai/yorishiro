@@ -6,7 +6,7 @@
 次元数は`YORISHIRO_EMBEDDING_DIMENSIONS`(既定1024)で設定し、使用するモデルの出力次元と一致させる必要があります。
 埋め込みはエンティティ書き込み後にバックグラウンドで非同期生成されるため、書き込みAPIのレイテンシには影響しません。
 
-## `local` — ローカルONNXモデル(デフォルト)
+## `local`: ローカルONNXモデル(デフォルト)
 
 外部サービスもAPIキーも不要で、必要なのは下記のモデルファイルだけです。
 これがデフォルトになっており、セルフホスト環境では通常そのままで構いません。
@@ -26,7 +26,7 @@ $ curl -L -o models/tokenizer.json \
 注意: 「外部サービス不要」は実行時の話で、**ビルド時**にはortクレートがonnxruntimeのプリビルドバイナリをダウンロードします(cdn.pyke.io)。
 ビルド環境まで閉域の場合は、事前に配置したonnxruntimeを`ORT_LIB_LOCATION`環境変数で指定してビルドしてください。
 
-## `openai` — OpenAI互換API
+## `openai`: OpenAI互換API
 
 Ollama / LM Studio / OpenAIなどの`/v1/embeddings`互換エンドポイントを使います。
 ローカルONNXのデフォルトから切り替えるには`YORISHIRO_EMBEDDING_PROVIDER=openai`を明示的に設定します。

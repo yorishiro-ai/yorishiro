@@ -10,7 +10,7 @@ A missing file is not an error, and neither is a missing key.
 An unrecognised key is: the server refuses to start rather than run with a setting you believe is in effect.
 
 Every setting also has an environment variable, named in `config.example.yml` beside it, and an environment variable takes precedence over the file.
-That is what makes container deployments and one-off overrides work without editing anything — set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or the shell.
+That is what makes container deployments and one-off overrides work without editing anything: set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or the shell.
 Nothing requires them.
 
 ## The `YSR_` prefix is deprecated
@@ -30,7 +30,7 @@ By default the server looks for `config.yml` in its working directory, then fall
 The fallback is what makes `yorishiro-server admin ...` work from a shell on a packaged host: the unit exports the path, a shell does not, and without it the CLI reports the database as unconfigured while the service beside it runs normally.
 An explicit `YORISHIRO_CONFIG_PATH` never falls back: a named file that is absent means nothing is read, rather than a different deployment's settings being picked up silently.
 
-A missing file, or a missing key within it, is not an error -- that setting just falls back to its usual default.
+A missing file, or a missing key within it, is not an error: that setting just falls back to its usual default.
 **A set environment variable always wins over the equivalent `config.yml` key.**
 An *unknown* key (e.g. a typo) is rejected: the server fails to start rather than silently ignoring it.
 
@@ -43,12 +43,12 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 | `DATABASE_URL` | PostgreSQL connection string (required) |
 | `YORISHIRO_CONFIG_PATH` | Path to the `config.yml` file described below. Unset, the working directory's `config.yml` is tried first and `/etc/yorishiro/config.yml` second |
 | `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8080`) |
-| `YORISHIRO_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector) -- release builds never do this |
+| `YORISHIRO_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector): release builds never do this |
 | `YORISHIRO_MAX_TENANTS` | Deployment-wide cap on tenants `admin create-tenant` may create. Defaults to `1` (single-tenant). Set `0` for unlimited, or a higher number for that many. `POST /auth/signup` never creates a tenant (it just redeems an invite), so it's unaffected. Also gates the first-run setup wizard (see [setup.md](setup.md#first-run-setup)), enabled only when the cap isn't `0` |
 | `YORISHIRO_WEB_DIR` | The web UI is compiled into the binary from `ee/web/dist` and served at `/` by default. Set this to serve it from a real directory on disk instead, read fresh on every request, to iterate on the UI without rebuilding |
-| `YORISHIRO_AUTH_RATE_LIMIT_MAX` / `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` | Per-client-IP rate limit on `/auth/signup`, `/auth/login`, and `/setup` — the endpoints reachable without a bearer token, and therefore the only ones an unauthenticated caller can brute-force. Defaults: 10 requests per 60 seconds |
+| `YORISHIRO_AUTH_RATE_LIMIT_MAX` / `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` | Per-client-IP rate limit on `/auth/signup`, `/auth/login`, and `/setup`: the endpoints reachable without a bearer token, and therefore the only ones an unauthenticated caller can brute-force. Defaults: 10 requests per 60 seconds |
 | `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | Tokens a workspace may spend on search per minute (default: `100000`). Search is metered in tokens rather than requests because that is what it costs the embedding model; writes stay on request counts, since counting a large body costs more than the write. A query over budget still runs once and leaves the window spent, rather than being permanently impossible |
-| `YORISHIRO_SNAPSHOT_RETENTION_DAYS` | How many days a batch migration stays undoable (default: `30`; `0` or less keeps every before-image forever). A migration writes one image per entity it touches, and only an undo takes them away, so an unbounded workspace that migrates repeatedly ends up holding more images than entities. The sweep runs at the start of the next migration in that workspace rather than on a timer. Undoing a job past the window answers `404`, the same as a job that never ran. A value that is not a 32-bit integer falls back to the default rather than being clamped — six million years of retention is a typo, and honouring the nearest legal value would hide it |
+| `YORISHIRO_SNAPSHOT_RETENTION_DAYS` | How many days a batch migration stays undoable (default: `30`; `0` or less keeps every before-image forever). A migration writes one image per entity it touches, and only an undo takes them away, so an unbounded workspace that migrates repeatedly ends up holding more images than entities. The sweep runs at the start of the next migration in that workspace rather than on a timer. Undoing a job past the window answers `404`, the same as a job that never ran. A value that is not a 32-bit integer falls back to the default rather than being clamped: six million years of retention is a typo, and honouring the nearest legal value would hide it |
 | `RUST_LOG` | Log level (e.g. `info`) |
 
 ## Database load guard
@@ -60,11 +60,11 @@ Off unless a threshold is set: dropping a deployment to read-only uninvited is a
 |---|---|
 | `YORISHIRO_DB_LOAD_THRESHOLD` | Active connections above which the deployment goes read-only. Unset or `0` disables the guard entirely |
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | How long the threshold must be exceeded before switching (default: `30`). Stops a momentary spike from tripping it |
-| `YORISHIRO_DB_LOAD_POLL_SECS` | How often the connection count is sampled (default: `5`). `0` is not an off switch and falls back to the default -- disabling the guard is `YORISHIRO_DB_LOAD_THRESHOLD=0` |
+| `YORISHIRO_DB_LOAD_POLL_SECS` | How often the connection count is sampled (default: `5`). `0` is not an off switch and falls back to the default: disabling the guard is `YORISHIRO_DB_LOAD_THRESHOLD=0` |
 
 ## Request correlation
 
-Every response carries an `x-request-id` header -- a UUID the server generates if the request didn't already have one, otherwise the caller's own value is echoed back unchanged.
+Every response carries an `x-request-id` header: a UUID the server generates if the request didn't already have one, otherwise the caller's own value is echoed back unchanged.
 The same value tags the tracing span for that request, so any `warn`/`error` line logged while handling it (an authentication rejection, a rate-limit hit, an internal error) carries the same `request_id` field as the access log line for that request.
 Useful for tying a specific failed request to its server-side log lines when following up on an incident report.
 
@@ -77,7 +77,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_LOG_TARGET` | `stdout` (default, for a container runtime's log driver), `single` (one file, never rotated), `daily` (one file per day), or `syslog` (Unix only -- rejected at startup on other platforms) |
+| `YORISHIRO_LOG_TARGET` | `stdout` (default, for a container runtime's log driver), `single` (one file, never rotated), `daily` (one file per day), or `syslog` (Unix only: rejected at startup on other platforms) |
 
 ### When `YORISHIRO_LOG_TARGET=single` or `daily`
 
@@ -96,7 +96,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | Variable | Description |
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` (default) or `openai` |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `1024`, the width of the default model). Must match the model's output dimension. A workspace is stamped with this value when it is created, and a later write produced by a different model is refused — see below |
+| `YORISHIRO_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `1024`, the width of the default model). Must match the model's output dimension. A workspace is stamped with this value when it is created, and a later write produced by a different model is refused: see below |
 
 ### When `YORISHIRO_EMBEDDING_PROVIDER=local` (ONNX export, the default)
 
@@ -105,7 +105,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 | `YORISHIRO_ONNX_MODEL_PATH` | Path to the ONNX model (default: `models/model.onnx`) |
 | `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer (default: `models/tokenizer.json`) |
 | `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | Maximum sequence length (default: `512`) |
-| `YORISHIRO_ONNX_POOLING` | How token embeddings are reduced to one vector: `mean` (default) or `last_token`. This is a property of the model, not a preference — sentence-transformers exports (bge-small, multilingual-e5, all-mpnet) want `mean`, the Qwen3-Embedding family wants `last_token`. Reading a model with the wrong one raises no error; the search results just get worse, so an unrecognized value fails startup rather than falling back |
+| `YORISHIRO_ONNX_POOLING` | How token embeddings are reduced to one vector: `mean` (default) or `last_token`. This is a property of the model, not a preference: sentence-transformers exports (bge-small, multilingual-e5, all-mpnet) want `mean`, the Qwen3-Embedding family wants `last_token`. Reading a model with the wrong one raises no error; the search results just get worse, so an unrecognized value fails startup rather than falling back |
 | `YORISHIRO_ONNX_QUERY_INSTRUCTION` | Instruction prefixed to search queries only. Qwen3-Embedding expects `Instruct: {task}\nQuery:{text}`; stored documents never get it. Unset or empty disables it (the default). Leave unset for symmetric models |
 
 ### Changing the embedding model
@@ -113,7 +113,7 @@ Every log line, including the HTTP access log (method, path, status, latency), i
 A workspace records the model and dimension count it was created under.
 A write whose vector is a different width is refused with `422`, naming both numbers.
 
-Without that check the write would succeed — the column is dimensionless — and the workspace's next search would fail with `different vector dimensions 384 and 1024`, naming neither the entity nor the write that caused it.
+Without that check the write would succeed (the column is dimensionless), and the workspace's next search would fail with `different vector dimensions 384 and 1024`, naming neither the entity nor the write that caused it.
 
 To move a workspace to another model, point the deployment at it and re-embed:
 
@@ -130,6 +130,6 @@ A workspace with no stamp accepts whatever the deployment produces.
 | `YORISHIRO_EMBEDDING_BASE_URL` | Base URL of the `/v1/embeddings`-compatible endpoint (required) |
 | `YORISHIRO_EMBEDDING_MODEL` | Model name (required) |
 | `YORISHIRO_EMBEDDING_API_KEY` | API key, if required by the endpoint |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | Whether to include a `dimensions` parameter in the request body. Defaults to `true` when unset. Once set, only the exact lowercase string `true` keeps it enabled -- every other value, including `false`, `False`, `FALSE`, and `0`, disables it |
+| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | Whether to include a `dimensions` parameter in the request body. Defaults to `true` when unset. Once set, only the exact lowercase string `true` keeps it enabled: every other value, including `false`, `False`, `FALSE`, and `0`, disables it |
 
 See [docs/embedding-providers.md](embedding-providers.md) for a worked example, e.g. `https://huggingface.co/Xenova/multilingual-e5-large` (`onnx/model_quantized.onnx` and `tokenizer.json`).
