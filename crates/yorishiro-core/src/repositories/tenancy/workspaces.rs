@@ -272,9 +272,32 @@ pub async fn resolve_tenant_id(
 /// A tenant's last workspace is refused: with none left, the tenant has no way to issue itself an
 /// API key through the REST API at all (login and workspace creation both need one), so this would
 /// be a self-lockout rather than a reversible mistake.
-/// The count and the delete are one statement, so two concurrent deletes cannot each see two
-/// workspaces remaining and both proceed.
+///
+/// The count and the delete are serialized against other deletes for the same tenant with an
+/// advisory lock, the same TOCTOU guard `create_entity` uses for its quota.
+/// Writing it as one `DELETE ... WHERE EXISTS` is not enough: each transaction's `EXISTS` cannot
+/// see the others' uncommitted deletes, so eight concurrent requests each saw a spare workspace
+/// and emptied the tenant between them.
 pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), YorishiroError> {
+    let mut tx = pool.begin().await.internal()?;
+
+    let row: Option<(Uuid,)> =
+        sqlx::query_as("SELECT tenant_id FROM identity.workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .internal()?;
+
+    let Some((tenant_id,)) = row else {
+        return Err(YorishiroError::not_found(format!(
+            "workspace '{workspace_id}' was not found"
+        )));
+    };
+
+    crate::db::lock_for_update(&mut tx, &format!("workspace-delete:{tenant_id}"))
+        .await
+        .internal()?;
+
     let result = sqlx::query(
         "DELETE FROM identity.workspaces w
           WHERE w.id = $1
@@ -284,20 +307,21 @@ pub async fn delete_workspace(pool: &PgPool, workspace_id: Uuid) -> Result<(), Y
                 )",
     )
     .bind(workspace_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .internal()?;
 
     if result.rows_affected() > 0 {
+        tx.commit().await.internal()?;
         return Ok(());
     }
 
-    // Nothing was deleted, which is either "no such workspace" or "it was the last one".
-    let mut conn = pool.acquire().await.internal()?;
+    // Nothing was deleted, which is either "no such workspace" (another request won the race and
+    // removed it) or "it was the last one".
     let exists: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM identity.workspaces WHERE id = $1")
             .bind(workspace_id)
-            .fetch_optional(&mut *conn)
+            .fetch_optional(&mut *tx)
             .await
             .internal()?;
 

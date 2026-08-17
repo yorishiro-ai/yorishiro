@@ -152,7 +152,7 @@ async fn setup_creates_tenant_workspace_and_owner(pool: PgPool) {
 /// attempt, so the deployment would be stuck with no owner and no way to create one.
 ///
 /// A user already holding the email fails `create_user` on its unique constraint, and that is the
-/// fourth write, so the tenant and workspace are in the transaction by the time it fails.
+/// third write, so the tenant and workspace are in the transaction by the time it fails.
 #[sqlx::test(migrations = "../../migrations")]
 #[allow(clippy::await_holding_lock)]
 async fn setup_leaves_nothing_behind_when_a_later_step_fails(pool: PgPool) {
