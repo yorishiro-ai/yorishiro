@@ -49,15 +49,12 @@ fn no_web_ui() -> axum::routing::MethodRouter {
 }
 
 fn main() -> Result<()> {
-    // Synchronous prologue: both calls below use `std::env::set_var`, which is unsound under
+    // Synchronous prologue: the calls below use `std::env::set_var`, which is unsound under
     // concurrent env access. Doing them here, before the tokio runtime starts, is what makes
     // them sound.
     //
     // SAFETY: no other thread exists at this point in `main`.
     unsafe {
-        // Before the config file: `load_and_apply_env_overrides` only sets a variable that is
-        // unset, so running the aliases second would let a file value beat an exported old name.
-        yorishiro_server::config::aliases::apply();
         yorishiro_server::config::load_and_apply_env_overrides()?;
         // A self-hosted deployment is single-tenant unless it says otherwise, which is also what
         // enables the first-run setup wizard's REST endpoints.

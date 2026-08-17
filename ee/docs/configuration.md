@@ -7,12 +7,7 @@ Everything the rest of the product reads is in [the main configuration reference
 
 `config.yml` and `YORISHIRO_CONFIG_PATH` apply here as well, since there is one binary and it loads the file itself.
 
-## The `YSR_` prefix is deprecated
-
 Every variable is named `YORISHIRO_*`.
-The old `YSR_*` names, and the `YORISHIRO_HOSTED_*` names that distinguished a binary with no counterpart, are still accepted: the server copies each onto its replacement at startup and prints a warning naming both.
-`YSR_WEB_DIR` and `YORISHIRO_HOSTED_WEB_DIR` both become `YORISHIRO_WEB_DIR`, which is the one setting they always were.
-Setting the new name alongside an old one uses the new value.
 
 | Variable | Description |
 |---|---|

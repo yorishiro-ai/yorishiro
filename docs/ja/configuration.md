@@ -16,16 +16,7 @@
 docker composeの`environment:`や`docker compose exec -e`、systemdの`Environment=`、シェルなどで設定してください。
 必須ではありません。
 
-## `YSR_`接頭辞は非推奨
-
-変数はすべて`YORISHIRO_*`に統一しています。
-旧`YSR_*`名も引き続き受け付けます。
-起動時に新しい名前へ写し替え、両方の名前を挙げた警告を出します。
-対になるバイナリが無くなった`YORISHIRO_HOSTED_*`名も同様で、`YSR_WEB_DIR`と`YORISHIRO_HOSTED_WEB_DIR`はどちらも`YORISHIRO_WEB_DIR`になります。
-新旧の名前を両方設定した場合は新しい方の値を使います。
-
-写し替えは`config.yml`の読み込みより前に行います。
-このため、環境変数に設定した旧名は、新しい名前と同じくファイルの値より優先されます。
+変数はすべて`YORISHIRO_*`です。
 
 ## config.yml
 

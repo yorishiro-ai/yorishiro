@@ -1,18 +1,12 @@
-//! Optional `config.yml` support. This binary has always been configured entirely through
-//! environment variables (see `.env.example`); this module lets an operator put the same
-//! settings in a YAML file instead, without changing how any of them are actually consumed.
+//! Optional `config.yml` support: an operator may put settings in a YAML file instead of the
+//! environment.
 //!
-//! It does this by reading the file (if present) and, for each setting it sets, writing the
-//! corresponding environment variable -- but only if that variable isn't already set. Every
-//! existing `std::env::var("YORISHIRO_...")` call site elsewhere in this crate and in
-//! `yorishiro-core` is untouched: environment variables still win when both are set, and a
-//! deployment with no `config.yml` behaves exactly as before.
+//! The file is read if present, and each setting it names is written to the corresponding
+//! environment variable, but only where that variable is unset. Every `std::env::var` call site
+//! reads the environment as usual, so an environment variable wins over the file.
 //!
-//! Invoked from the binary's synchronous prologue, before the tokio runtime starts -- see
-//! `load_and_apply_env_overrides`'s safety contract. [`aliases::apply`] runs immediately before
-//! it, so an exported old-prefix name still beats a value in the file.
-
-pub mod aliases;
+//! Invoked from the binary's synchronous prologue, before the tokio runtime starts: see
+//! `load_and_apply_env_overrides`'s safety contract.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

@@ -68,24 +68,18 @@ async fn run_migrations(pool: &sqlx::PgPool) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    // Synchronous prologue: both calls below use `std::env::set_var`, which is unsound under
+    // Synchronous prologue: the calls below use `std::env::set_var`, which is unsound under
     // concurrent env access. Doing them here, before the tokio runtime starts, is what makes
     // them sound.
     //
     // SAFETY: no other thread exists at this point in `main`.
     unsafe {
-        // Before the config file, not after. `load_and_apply_env_overrides` only sets a variable
-        // that is unset, so running the aliases second would let a config-file value beat an
-        // explicitly exported old name -- silently inverting the precedence a deployment already
-        // depends on.
-        yorishiro_server::config::aliases::apply();
         yorishiro_server::config::load_and_apply_env_overrides()?;
         // Default to a single-tenant deployment, which is what a self-hoster gets and what
         // enables the first-run setup wizard. A hosted deployment sets this to `0` (unlimited)
-        // in its own environment, which disables the wizard -- it onboards through checkout or
+        // in its own environment, which disables the wizard: it onboards through checkout or
         // an invite instead. This binary serves both, so the default belongs here rather than
-        // being hardcoded: it was `0` unconditionally while a separate community binary carried
-        // the self-hosted path.
+        // being hardcoded.
         if std::env::var_os("YORISHIRO_MAX_TENANTS").is_none() {
             std::env::set_var("YORISHIRO_MAX_TENANTS", "1");
         }
