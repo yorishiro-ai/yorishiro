@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::tower::StreamableHttpService;
 use yorishiro_core::db::TenantDb;
 use yorishiro_hosted::http::controllers::stripe::StripeConfig;
 use yorishiro_hosted::services::oauth::OAuthConfig;
@@ -229,8 +231,28 @@ async fn run(cli: Cli) -> Result<()> {
     // particular must keep the body limit (an unbounded webhook body is its own DoS vector) but
     // must never be rate-limited: dropping a legitimate Stripe billing event on a `429` is worse
     // than not rate-limiting a signature-verified webhook Stripe itself, not an attacker, calls.
+    // `/mcp` is served here rather than being left to `build_app`, so this edition's own tools
+    // reach the same door the base edition's do. The wrapper delegates to the base server, so
+    // overriding the path serves both sets rather than replacing one with the other. It must
+    // define every method `build_app`'s own `/mcp` does, since overriding a path overrides
+    // every method on it -- `nest_service` matches whatever the inner service accepts, as the
+    // base router's does.
+    let hosted_mcp = StreamableHttpService::new(
+        {
+            let state = app_state.clone();
+            move || {
+                Ok(yorishiro_hosted::http::mcp::HostedMcpServer::new(
+                    state.clone(),
+                ))
+            }
+        },
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
     let hosted_router = apply_body_limit_layer(apply_observability_layers(
-        yorishiro_hosted::router().with_state(hosted_state),
+        yorishiro_hosted::router()
+            .with_state(hosted_state)
+            .nest_service("/mcp", hosted_mcp),
     ));
     // The maintenance guard is applied inside `build_app`, and `merge`/`fallback_service`
     // propagate a layer no more than `.layer()` does -- so without this, pausing the

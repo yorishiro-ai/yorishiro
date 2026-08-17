@@ -4,7 +4,10 @@
 //! and `mcp::YorishiroMcpServer` onto one `axum::Router`.
 
 pub(crate) mod controllers;
-pub(crate) mod mcp;
+/// Public so a crate composing this one can wrap [`mcp::YorishiroMcpServer`] and serve its own
+/// tools alongside these. `ToolRouter<Self>` ties a tool to the struct declaring it, so an
+/// outside crate cannot add to that router; it delegates to this server instead.
+pub mod mcp;
 pub mod middleware;
 
 #[cfg(test)]
