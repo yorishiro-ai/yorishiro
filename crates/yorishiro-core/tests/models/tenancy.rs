@@ -48,3 +48,28 @@ fn the_json_representation_is_lowercase_and_matches_the_database_form() {
         assert_eq!(parsed, role);
     }
 }
+
+/// Who administers the tenant, spelled out per role rather than as "the ones matching a pattern".
+///
+/// This is an authorization rule, so it is asserted here rather than inferred from a handler
+/// returning 403: `require_tenant_admin` is the only caller, and every members/workspaces/
+/// template-library write goes through it.
+#[test]
+fn owner_and_admin_administer_the_tenant_and_the_others_do_not() {
+    assert!(MembershipRole::Owner.administers_tenant());
+    assert!(MembershipRole::Admin.administers_tenant());
+    assert!(!MembershipRole::Member.administers_tenant());
+    assert!(!MembershipRole::Viewer.administers_tenant());
+}
+
+/// The ceiling a role's API key can be issued at, which is a different axis from
+/// `administers_tenant`: a Member holds `write` for content while administering nothing.
+#[test]
+fn each_role_has_its_own_key_ceiling() {
+    use crate::services::auth::ApiKeyScope;
+
+    assert_eq!(MembershipRole::Owner.max_scope(), ApiKeyScope::Migration);
+    assert_eq!(MembershipRole::Admin.max_scope(), ApiKeyScope::Migration);
+    assert_eq!(MembershipRole::Member.max_scope(), ApiKeyScope::Write);
+    assert_eq!(MembershipRole::Viewer.max_scope(), ApiKeyScope::Read);
+}
