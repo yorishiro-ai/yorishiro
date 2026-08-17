@@ -226,12 +226,18 @@ export function useSchemaGraph(definition: SchemaDefinition | null, isDark: bool
         setLayoutResult({ nodes, edges: rawGraph.edges });
       })
       // ELK runs the layout in a worker, so a failure here rejects asynchronously and no
-      // enclosing try/catch can see it. Falling back to the unlaid-out positions draws every
-      // node at the origin, which is wrong but visible, where an unhandled rejection leaves the
-      // canvas empty with nothing in the console pointing at the layout.
+      // enclosing try/catch can see it. The nodes carry `{x: 0, y: 0}` until ELK assigns
+      // positions, so falling back to them draws the whole graph stacked on one point, which is
+      // no more readable than the empty canvas an unhandled rejection leaves. A grid puts every
+      // node somewhere distinct: the relations are lost but the entity types are all readable.
       .catch(() => {
         if (cancelled) return;
-        setLayoutResult({ nodes: rawGraph.nodes, edges: rawGraph.edges });
+        const columns = Math.ceil(Math.sqrt(rawGraph.nodes.length));
+        const nodes = rawGraph.nodes.map((n, i) => ({
+          ...n,
+          position: { x: (i % columns) * 340, y: Math.floor(i / columns) * 220 },
+        }));
+        setLayoutResult({ nodes, edges: rawGraph.edges });
       });
 
     return () => {
