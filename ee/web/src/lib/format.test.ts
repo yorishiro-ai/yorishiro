@@ -25,6 +25,15 @@ describe("dataPreview", () => {
     expect(dataPreview(long).endsWith("…")).toBe(true);
   });
 
+  it("names the fields when the blob cannot be stringified", () => {
+    // A cycle is what actually reaches the fallback. `String(data)` there would answer
+    // "[object Object]", which names nothing the reader can use.
+    const cyclic: Record<string, unknown> = { title: "Alpha", body: "hello" };
+    cyclic.self = cyclic;
+    expect(dataPreview(cyclic)).toBe("{title, body, self}");
+    expect(dataPreview(cyclic)).not.toContain("[object Object]");
+  });
+
   it("returns empty -- not the string 'undefined' -- when handed nothing", () => {
     // This is what the mis-typed SearchPage actually passed in. An empty cell is bad; a cell
     // reading "undefined" would be worse, and this pins which one happens.

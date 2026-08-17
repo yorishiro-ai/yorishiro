@@ -31,9 +31,15 @@
     // things: a `[object Object]` in EntityForm's number input, and two already-guarded
     // stringifications.
     //
-    // Every hit is `loadX()` called from a `useEffect`, which is how React does it. Each of those
-    // functions wraps its own body in try/catch, so nothing rejects unhandled; the rule sees the
-    // call site, not the handler inside. 31 hits, all this shape.
+    // 29 hits, in two shapes. 17 are a `loadX()` wrapper called from a `useEffect` or an event
+    // handler, and each of those wraps its own body in try/catch, so the rule is seeing the call
+    // site rather than the handler inside. The other 12 are `navigate()`, which react-router
+    // returns a promise from since v7; a rejected navigation is not something a page can act on.
+    //
+    // Two hits were genuinely unhandled and were fixed rather than suppressed, so do not read
+    // this as "every hit is safe by construction": `SchemaGraph.tsx` ran ELK with no rejection
+    // handler at all, and `GraphPage.tsx`'s entity picker ended in `.finally`, which passes a
+    // rejection straight through. Re-run the rule and read the new hits before widening this.
     "typescript/no-floating-promises": "off",
     // Fires on `const { subscribe, notify } = createExternalStore()`. Those are closures over a
     // local `listeners`, not class methods, and reference no `this` at all.

@@ -34,7 +34,7 @@ export function truncateId(id: string): string {
 
 /**
  * One-line JSON preview of an entity's `data` blob for a table cell, ellipsised past `maxLength`.
- * Falls back to `String(data)` if the blob can't be stringified (a cycle, a `BigInt`), since a
+ * Falls back to the field names if the blob can't be stringified (a cycle, a `BigInt`), since a
  * preview column is never worth throwing over.
  */
 export function dataPreview(data: Record<string, unknown>, maxLength = 100): string {

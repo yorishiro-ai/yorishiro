@@ -348,14 +348,10 @@ function entityPreview(entity: Entity | undefined): Array<[string, string]> {
   return (
     Object.entries(entity.data)
       .slice(0, 2)
-      // Only a primitive reaches `String()`; anything else is JSON, so a nested object renders as
-      // its shape rather than "[object Object]".
-      .map(([k, v]): [string, string] => [
-        k,
-        typeof v === "string" || typeof v === "number" || typeof v === "boolean"
-          ? String(v)
-          : JSON.stringify(v),
-      ])
+      // An object goes through JSON so it renders as its shape rather than "[object Object]".
+      // Everything else goes through `String()`, `undefined` included: `JSON.stringify(undefined)`
+      // answers `undefined` rather than a string, which this function's return type forbids.
+      .map(([k, v]) => [k, typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)])
   );
 }
 
@@ -406,6 +402,12 @@ function EntityTab({ isDark }: { isDark: boolean }) {
         if (cancelled) return;
         const connected = contexts.find((c) => c.count > 0);
         setSelectedId((prev) => prev || connected?.id || data[0].id);
+      })
+      // `.finally` passes a rejection through rather than handling it, so the picker needs its
+      // own catch. An empty list is what the page already renders before this resolves, and it
+      // reads as "no entities" rather than as a hung load.
+      .catch(() => {
+        if (!cancelled) setEntities([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

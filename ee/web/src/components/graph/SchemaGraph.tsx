@@ -224,6 +224,14 @@ export function useSchemaGraph(definition: SchemaDefinition | null, isDark: bool
           position: posMap.get(n.id) ?? n.position,
         }));
         setLayoutResult({ nodes, edges: rawGraph.edges });
+      })
+      // ELK runs the layout in a worker, so a failure here rejects asynchronously and no
+      // enclosing try/catch can see it. Falling back to the unlaid-out positions draws every
+      // node at the origin, which is wrong but visible, where an unhandled rejection leaves the
+      // canvas empty with nothing in the console pointing at the layout.
+      .catch(() => {
+        if (cancelled) return;
+        setLayoutResult({ nodes: rawGraph.nodes, edges: rawGraph.edges });
       });
 
     return () => {
