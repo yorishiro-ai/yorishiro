@@ -195,7 +195,10 @@ function FieldInput({ name, def, value, onChange }: FieldInputProps) {
         <Input
           id={id}
           type="number"
-          value={value !== undefined ? String(value) : ""}
+          // A number field can still be handed an object by a schema change or a hand-edited
+          // entity, and `String({})` renders "[object Object]" into the input. Anything that is
+          // not a number or string is treated as no value at all.
+          value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
           onChange={(e) => onChange(name, e.target.value)}
           step={def.type === "integer" ? "1" : "any"}
           required={def.required}

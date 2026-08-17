@@ -34,7 +34,7 @@ export function truncateId(id: string): string {
 
 /**
  * One-line JSON preview of an entity's `data` blob for a table cell, ellipsised past `maxLength`.
- * Falls back to `String(data)` if the blob can't be stringified (a cycle, a `BigInt`), since a
+ * Falls back to the field names if the blob can't be stringified (a cycle, a `BigInt`), since a
  * preview column is never worth throwing over.
  */
 export function dataPreview(data: Record<string, unknown>, maxLength = 100): string {
@@ -42,7 +42,9 @@ export function dataPreview(data: Record<string, unknown>, maxLength = 100): str
   try {
     text = JSON.stringify(data);
   } catch {
-    text = String(data);
+    // `JSON.stringify` throws on a cycle, and `String(data)` would answer "[object Object]",
+    // which tells the reader less than the field names do.
+    text = `{${Object.keys(data).join(", ")}}`;
   }
   if (!text) return "";
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;

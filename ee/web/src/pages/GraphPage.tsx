@@ -345,9 +345,14 @@ function radialPosition(hop: number, index: number, countAtHop: number) {
 
 function entityPreview(entity: Entity | undefined): Array<[string, string]> {
   if (!entity || !entity.data) return [];
-  return Object.entries(entity.data)
-    .slice(0, 2)
-    .map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : String(v)]);
+  return (
+    Object.entries(entity.data)
+      .slice(0, 2)
+      // An object goes through JSON so it renders as its shape rather than "[object Object]".
+      // Everything else goes through `String()`, `undefined` included: `JSON.stringify(undefined)`
+      // answers `undefined` rather than a string, which this function's return type forbids.
+      .map(([k, v]) => [k, typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)])
+  );
 }
 
 /// How many entities the picker offers.
@@ -360,6 +365,10 @@ function EntityTab({ isDark }: { isDark: boolean }) {
   const { wsId } = useParams<{ wsId: string }>();
   const [entities, setEntities] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
+  // Distinct from `entities.length === 0`: a failed load and an empty workspace both leave the
+  // list empty, and rendering "no entities yet" over a failure tells the reader to create
+  // something when the real answer is to retry.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [depth, setDepth] = useState(2);
   const [graphLoading, setGraphLoading] = useState(false);
@@ -374,37 +383,46 @@ function EntityTab({ isDark }: { isDark: boolean }) {
     [navigate, wsId],
   );
 
+  const loadEntities = useCallback(async (isCancelled: () => boolean) => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await listEntities({ limit: ENTITY_PICKER_LIMIT });
+      if (isCancelled()) return;
+      setEntities(data);
+      if (data.length === 0) return;
+
+      // Open on an entity that actually has neighbours. Picking `data[0]` blindly lands on an
+      // isolated entity whenever the newest one has no relations yet, and the page then shows
+      // a single node with nothing joining it -- indistinguishable from a broken graph.
+      // Bounded to the first handful so this stays one quick pass, not a scan of every entity.
+      const probes = data.slice(0, 8);
+      const contexts = await Promise.all(
+        probes.map((e) =>
+          getEntityContext(e.id, 1)
+            .then((ctx) => ({ id: e.id, count: ctx.relations.length }))
+            .catch(() => ({ id: e.id, count: 0 })),
+        ),
+      );
+      if (isCancelled()) return;
+      const connected = contexts.find((c) => c.count > 0);
+      setSelectedId((prev) => prev || connected?.id || data[0].id);
+    } catch (e) {
+      if (isCancelled()) return;
+      setEntities([]);
+      setLoadError(e instanceof Error ? e.message : "Failed to load entities");
+    } finally {
+      if (!isCancelled()) setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    listEntities({ limit: ENTITY_PICKER_LIMIT })
-      .then(async (data) => {
-        if (cancelled) return;
-        setEntities(data);
-        if (data.length === 0) return;
-
-        // Open on an entity that actually has neighbours. Picking `data[0]` blindly lands on an
-        // isolated entity whenever the newest one has no relations yet, and the page then shows
-        // a single node with nothing joining it -- indistinguishable from a broken graph.
-        // Bounded to the first handful so this stays one quick pass, not a scan of every entity.
-        const probes = data.slice(0, 8);
-        const contexts = await Promise.all(
-          probes.map((e) =>
-            getEntityContext(e.id, 1)
-              .then((ctx) => ({ id: e.id, count: ctx.relations.length }))
-              .catch(() => ({ id: e.id, count: 0 })),
-          ),
-        );
-        if (cancelled) return;
-        const connected = contexts.find((c) => c.count > 0);
-        setSelectedId((prev) => prev || connected?.id || data[0].id);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    loadEntities(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadEntities]);
 
   const loadGraph = useCallback(async () => {
     if (!selectedId) return;
@@ -572,6 +590,21 @@ function EntityTab({ isDark }: { isDark: boolean }) {
           {graphLoading ? (
             <div className="flex h-full items-center justify-center">
               <Skeleton className="h-40 w-60" />
+            </div>
+          ) : loadError ? (
+            // Checked before the empty case, since a failed load also leaves the list empty and
+            // "create one" would be the wrong instruction for a request that never answered.
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+              <p className="text-sm font-medium text-destructive">{loadError}</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  loadEntities(() => false);
+                }}
+              >
+                Retry
+              </Button>
             </div>
           ) : entities.length === 0 ? (
             // "Select an entity" is wrong when there is nothing to select: the workspace is

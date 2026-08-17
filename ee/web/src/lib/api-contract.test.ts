@@ -24,7 +24,9 @@ type JsonSchema = {
   $ref?: string;
 };
 
-const asSchema = (name: keyof typeof schemas): JsonSchema => schemas[name] as unknown as JsonSchema;
+// The fixture is a captured OpenAPI document, and its inferred shape already satisfies
+// `JsonSchema`, so the annotation carries the intent without an assertion to hide a mismatch.
+const asSchema = (name: keyof typeof schemas): JsonSchema => schemas[name];
 
 /** Property names the server declares for a schema, from the OpenAPI document. */
 function serverFields(name: keyof typeof schemas): string[] {

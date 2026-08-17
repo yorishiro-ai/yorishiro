@@ -10,8 +10,8 @@
     "dev": "rsbuild dev",
     "build": "rsbuild build && node -e \"require('fs').closeSync(require('fs').openSync('dist/.gitkeep','a'))\"",
     "preview": "rsbuild preview",
-    "lint": "oxlint src",
-    "lint:fix": "oxlint --fix src",
+    "lint": "oxlint --type-aware src",
+    "lint:fix": "oxlint --type-aware --fix src",
     "format": "oxfmt --write src",
     "format:check": "oxfmt --check src",
     "typecheck": "tsc --build",
@@ -37,6 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "oxfmt": "^0.63.0",
     "oxlint": "^1.78.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "tailwindcss": "^4.3.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

@@ -26,6 +26,32 @@
 
     "typescript/no-non-null-assertion": "off",
 
+    // Type-aware rules (`oxlint --type-aware`, via oxlint-tsgolint). The four below were read
+    // through before being turned off; the rest of the type-aware set is on and found three real
+    // things: a `[object Object]` in EntityForm's number input, and two already-guarded
+    // stringifications.
+    //
+    // 29 hits, in two shapes. 17 are a `loadX()` wrapper called from a `useEffect` or an event
+    // handler, and each of those wraps its own body in try/catch, so the rule is seeing the call
+    // site rather than the handler inside. The other 12 are `navigate()`, which react-router
+    // returns a promise from since v7; a rejected navigation is not something a page can act on.
+    //
+    // Two hits were genuinely unhandled and were fixed rather than suppressed, so do not read
+    // this as "every hit is safe by construction": `SchemaGraph.tsx` ran ELK with no rejection
+    // handler at all, and `GraphPage.tsx`'s entity picker ended in `.finally`, which passes a
+    // rejection straight through. Re-run the rule and read the new hits before widening this.
+    "typescript/no-floating-promises": "off",
+    // Fires on `const { subscribe, notify } = createExternalStore()`. Those are closures over a
+    // local `listeners`, not class methods, and reference no `this` at all.
+    "typescript/unbound-method": "off",
+    // The cleanup function of a `useEffect` returns nothing on one branch and a disposer on the
+    // other, which is the documented shape of a conditional cleanup.
+    "typescript/consistent-return": "off",
+    // Narrowing a parsed JSON body to its declared type. `lib/api-contract.test.ts` is what
+    // actually guards that boundary, by diffing the hand-written types against an OpenAPI
+    // snapshot; a lint rule cannot see whether the server agrees.
+    "typescript/no-unsafe-type-assertion": "off",
+
     "react/button-has-type": "warn",
     "react/react-in-jsx-scope": "off",
 
