@@ -4790,6 +4790,7 @@ dependencies = [
  "mime_guess",
  "rand 0.10.2",
  "reqwest",
+ "rmcp",
  "rust-embed",
  "sea-query",
  "sea-query-binder",

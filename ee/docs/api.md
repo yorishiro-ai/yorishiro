@@ -171,8 +171,8 @@ A schema that follows no template, or one copied before merge bases were recorde
 These endpoints accept **both key kinds**: a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
 The versions that predate the move only ever saw the first.
 
-**No MCP tools.** `list_upstream_changes`, `merge_preview` and `merge_apply` existed as MCP tools before the chain moved here; `/mcp` is mounted by `build_app` from a crate-private tool router, so `ee/` cannot add to it.
-The three are REST-only here.
+**No MCP tools.** `list_upstream_changes`, `merge_preview` and `merge_apply` existed as MCP tools before the chain moved here, and the three are REST-only now.
+This edition serves `/mcp` through its own wrapper around the base server, so what is absent is the three definitions rather than a way to reach the surface.
 
 ## Inferring missing values
 
@@ -213,7 +213,7 @@ A job can be confirmed once: the proposals are deleted on apply, so confirming a
 Encryption at rest is the volume's or the managed database's concern: a key stored beside the data it protects, on a host the operator controls, leaks with the dump either way.
 
 **No MCP tools.**
-`/mcp` is mounted by `build_app` from a crate-private tool router that `ee/` cannot reach, so these six are REST-only.
+These six are REST-only: this edition's `/mcp` wrapper can carry tools of its own, and none of the six is defined as one.
 
 ## Tenant-scoped API keys
 
