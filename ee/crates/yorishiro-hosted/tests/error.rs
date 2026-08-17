@@ -3,9 +3,8 @@ use yorishiro_core::YorishiroError;
 
 use super::*;
 
-/// `HostedApiError` exists only to bridge `YorishiroError` into axum, and the rule is that the
-/// status/body mapping stays in core's `into_http_parts()`. Asserting against core's own answer
-/// rather than literals means reintroducing a local `match` here fails the test.
+/// `HostedApiError` exists only to bridge `YorishiroError` into axum, and the rule is that the status/body mapping stays in core's `into_http_parts()`.
+/// Asserting against core's own answer rather than literals means reintroducing a local `match` here fails the test.
 #[tokio::test]
 async fn the_status_always_matches_what_core_maps_the_error_to() {
     let cases = [
@@ -49,13 +48,11 @@ async fn internal_errors_do_not_leak_their_cause() {
     assert!(rendered.contains("internal server error"));
 }
 
-/// `HostedApiErrorBody` is an OpenAPI-only type: nothing constructs it, and its doc comment
-/// says it is kept in sync with core's `into_http_parts` by hand. That is exactly the kind of
-/// claim that rots silently, so the documented optional fields are checked against real bodies.
+/// `HostedApiErrorBody` is an OpenAPI-only type: nothing constructs it, and its doc comment says it is kept in sync with core's `into_http_parts` by hand.
+/// That is exactly the kind of claim that rots silently, so the documented optional fields are checked against real bodies.
 ///
-/// `details` and `hint` are `Option` in the documented type precisely because they are
-/// status-dependent: core emits `hint` on 403 and 422, and `details` on 422 only. A client
-/// generated from this schema must treat both as absent-able.
+/// `details` and `hint` are `Option` in the documented type precisely because they are status-dependent: core emits `hint` on 403 and 422, and `details` on 422 only.
+/// A client generated from this schema must treat both as absent-able.
 #[tokio::test]
 async fn the_documented_optional_fields_are_the_ones_core_actually_omits() {
     async fn body_of(error: YorishiroError) -> serde_json::Value {
@@ -93,9 +90,8 @@ async fn the_documented_optional_fields_are_the_ones_core_actually_omits() {
     assert!(missing["error"]["message"].is_string());
     assert!(missing["error"].get("hint").is_none());
 
-    // The documented type must serialise the same way: an absent field is omitted, not rendered
-    // as an explicit null. Without `skip_serializing_if` the generated schema would advertise
-    // `"details": null` on every error, which no real body contains.
+    // The documented type must serialise the same way: an absent field is omitted, not rendered as an explicit null.
+    // Without `skip_serializing_if` the generated schema would advertise `"details": null` on every error, which no real body contains.
     let documented = serde_json::to_value(HostedApiErrorBody {
         error: HostedApiErrorDetail {
             message: "m".into(),

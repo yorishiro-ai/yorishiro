@@ -20,8 +20,8 @@ fn a_summary_omits_the_definition_body() {
     assert_eq!(json["status"], "active");
 }
 
-/// A schema record travels through a JSONL export and back, carrying its parsed definition. The
-/// round trip is what `repositories::import` relies on.
+/// A schema record travels through a JSONL export and back, carrying its parsed definition.
+/// The round trip is what `repositories::import` relies on.
 #[test]
 fn a_schema_record_round_trips_with_its_parsed_definition() {
     let definition: crate::metaschema::MetaSchemaDefinition =

@@ -8,9 +8,8 @@ use crate::repositories::schemas;
 
 pub use crate::models::export::*;
 
-/// Fetches every schema (all versions, including archived), entity, and relation for the
-/// workspace, for a full-workspace data export. Schemas come first so a reader can resolve the
-/// entity_types/relation_types that the entities and relations after them reference.
+/// Fetches every schema (all versions, including archived), entity, and relation for the workspace, for a full-workspace data export.
+/// Schemas come first so a reader can resolve the entity_types/relation_types that the entities and relations after them reference.
 pub async fn export_all(
     conn: &mut PgConnection,
     workspace_id: Uuid,

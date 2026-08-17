@@ -16,8 +16,8 @@ pub struct MarketplaceListing {
     pub description: Option<String>,
     pub tags: Vec<String>,
     pub author: Option<String>,
-    /// The tenant that publishes it. Present so a browser can tell two same-named templates
-    /// apart, not for display of anything tenant-private.
+    /// The tenant that publishes it.
+    /// Present so a browser can tell two same-named templates apart, not for display of anything tenant-private.
     pub tenant_id: Uuid,
     /// Highest `stable` version, or `null` when only pre-releases have been published.
     pub latest_stable_version: Option<i32>,
@@ -67,8 +67,7 @@ pub struct SubmitReviewRequest {
     pub comment: Option<String>,
 }
 
-/// The template columns a fork copies across, minus the definition (which comes from the chosen
-/// version rather than the template row).
+/// The template columns a fork copies across, minus the definition (which comes from the chosen version rather than the template row).
 #[derive(sqlx::FromRow)]
 struct ForkSource {
     name: String,
@@ -91,9 +90,7 @@ fn validate_status(status: &str) -> Result<(), YorishiroError> {
 
 /// Lists community-visible templates across every tenant.
 ///
-/// A template appears only once it has a non-draft version: `visibility = 'community'` says its
-/// owner is willing to share it, but with nothing published there is nothing to install, and a
-/// listing whose every entry 404s on install is worse than a shorter one.
+/// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
 pub async fn list_marketplace(pool: &PgPool) -> Result<Vec<MarketplaceListing>, YorishiroError> {
     let rows = sqlx::query(
         r#"
@@ -141,9 +138,7 @@ pub async fn list_marketplace(pool: &PgPool) -> Result<Vec<MarketplaceListing>, 
 
 /// Versions of a template that `tenant_id` is allowed to see.
 ///
-/// **Drafts are the caller's own only.** The database does not enforce this: `template_versions`
-/// carries no RLS, matching `identity.templates`, so this WHERE clause is the enforcement, and
-/// dropping it publishes every tenant's unfinished work.
+/// **Drafts are the caller's own only.** The database does not enforce this: `template_versions` carries no RLS, matching `identity.templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
 pub async fn list_versions(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -183,9 +178,7 @@ pub async fn list_versions(
 
 /// Publishes the next version of a template.
 ///
-/// Only the owning tenant may publish, and the version number is assigned here rather than taken
-/// from the caller: letting a client choose it invites gaps and collisions in a sequence other
-/// tenants read as history.
+/// Only the owning tenant may publish, and the version number is assigned here rather than taken from the caller: letting a client choose it invites gaps and collisions in a sequence other tenants read as history.
 pub async fn publish_version(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -196,15 +189,11 @@ pub async fn publish_version(
     validate_status(&request.status)?;
     require_ownership(pool, tenant_id, template_id).await?;
 
-    // The number comes from `max(version) + 1` read in the same statement that inserts, and at
-    // READ COMMITTED Postgres locks no range for the rows that do not exist yet, so two
-    // concurrent publishes of one template both read the same maximum and both try to write the
-    // same next version. `UNIQUE (template_id, version)` catches it, which is why this was never
-    // corruption, but the loser got an opaque 500 for doing nothing wrong.
+    // The number comes from `max(version) + 1` read in the same statement that inserts, and at READ COMMITTED Postgres locks no range for the rows that do not exist yet, so two concurrent publishes of one template both read the same maximum and both try to write the same next version.
+    // `UNIQUE (template_id, version)` catches it, which is why this was never corruption, but the loser got an opaque 500 for doing nothing wrong.
     //
-    // Serializing on the template turns that into what the caller expects: both succeed, with
-    // consecutive numbers. The lock is transaction-scoped, so it releases on commit or rollback
-    // with no unlock to forget.
+    // Serializing on the template turns that into what the caller expects: both succeed, with consecutive numbers.
+    // The lock is transaction-scoped, so it releases on commit or rollback with no unlock to forget.
     let mut tx = pool.begin().await.internal()?;
     db::lock_for_update(&mut tx, &format!("template-version:{template_id}"))
         .await
@@ -283,8 +272,7 @@ pub async fn list_reviews(
 
 /// Records this tenant's review, replacing its previous one if it had left one.
 ///
-/// `tenant_id` comes from the authenticated context, never from the request body: taking it from
-/// input would let any caller review as any tenant, which is the whole value of a rating.
+/// `tenant_id` comes from the authenticated context, never from the request body: taking it from input would let any caller review as any tenant, which is the whole value of a rating.
 pub async fn submit_review(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -350,9 +338,7 @@ pub async fn submit_review(
 
 /// Copies a published version of someone else's template into the caller's own library.
 ///
-/// The copy records `fork_of`, and takes the definition from the *version* rather than the
-/// template row: the template keeps moving as its owner edits it, so forking "the template"
-/// would install whatever it happened to be at that instant rather than the version chosen.
+/// The copy records `fork_of`, and takes the definition from the *version* rather than the template row: the template keeps moving as its owner edits it, so forking "the template" would install whatever it happened to be at that instant rather than the version chosen.
 pub async fn fork_template(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -410,8 +396,7 @@ pub async fn fork_template(
         ));
     };
 
-    // The forked copy is the caller's own template, so it starts private: publishing someone
-    // else's work into the marketplace under your name is a decision, not a default.
+    // The forked copy is the caller's own template, so it starts private: publishing someone else's work into the marketplace under your name is a decision, not a default.
     let inserted = sqlx::query(
         r#"
         INSERT INTO identity.templates
@@ -431,8 +416,7 @@ pub async fn fork_template(
     .fetch_one(pool)
     .await;
 
-    // Only the unique violation is translated by hand; everything else goes through `.internal()`
-    // rather than a hand-built `YorishiroError::Internal(err.into())`, which CLAUDE.md forbids.
+    // Only the unique violation is translated by hand; everything else goes through `.internal()` rather than a hand-built `YorishiroError::Internal(err.into())`, which CLAUDE.md forbids.
     let row = match inserted {
         Err(err)
             if err
@@ -449,7 +433,8 @@ pub async fn fork_template(
     row.try_get("id").internal()
 }
 
-/// Sets a template's marketplace visibility. Only its owning tenant may.
+/// Sets a template's marketplace visibility.
+/// Only its owning tenant may.
 pub async fn set_visibility(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -476,8 +461,7 @@ pub async fn set_visibility(
 
 /// Rejects any operation on a template the caller's tenant does not own.
 ///
-/// Reported as NotFound rather than Forbidden: a caller that cannot act on a template should not
-/// learn it exists from the difference between the two.
+/// Reported as NotFound rather than Forbidden: a caller that cannot act on a template should not learn it exists from the difference between the two.
 async fn require_ownership(
     pool: &PgPool,
     tenant_id: Uuid,

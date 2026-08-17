@@ -224,9 +224,7 @@ async fn forks_template_within_the_same_tenant(pool: PgPool) {
     assert_eq!(templates.len(), 2);
 }
 
-/// A template with the default `visibility = 'tenant'` is invisible to other tenants, so
-/// `fork_template` (which resolves its source through `get_template`) rejects forking
-/// another tenant's private template.
+/// A template with the default `visibility = 'tenant'` is invisible to other tenants, so `fork_template` (which resolves its source through `get_template`) rejects forking another tenant's private template.
 #[sqlx::test(migrations = "../../migrations")]
 async fn fork_template_rejects_other_tenants_private_template(pool: PgPool) {
     let tenant_a = create_tenant(&pool, "a", None).await.unwrap();

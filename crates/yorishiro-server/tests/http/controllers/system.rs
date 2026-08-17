@@ -109,9 +109,9 @@ async fn maintenance_is_readable_and_settable_over_rest(pool: PgPool) {
     assert_eq!(body["mode"], "read_only", "the write is what the read sees");
 }
 
-/// The point of the endpoint. Behind the maintenance guard, a full lock entered over REST could
-/// only be left over the CLI, which makes the switch a one-way door for anyone without shell
-/// access. This test fails if the route ever moves behind the guard.
+/// The point of the endpoint.
+/// Behind the maintenance guard, a full lock entered over REST could only be left over the CLI, which makes the switch a one-way door for anyone without shell access.
+/// This test fails if the route ever moves behind the guard.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_full_lock_entered_over_rest_can_be_left_over_rest(pool: PgPool) {
     let key = owner_key(&pool).await;
@@ -149,8 +149,8 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest(pool: PgPool) {
     assert_eq!(served, StatusCode::OK, "and the deployment is back");
 }
 
-/// `migration` is the scope that guards batch migration and the maintenance switch alike. A
-/// `write`-scoped key stopping every caller would be an escalation.
+/// `migration` is the scope that guards batch migration and the maintenance switch alike.
+/// A `write`-scoped key stopping every caller would be an escalation.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_member_key_cannot_touch_maintenance(pool: PgPool) {
     let key = member_key(&pool).await;
@@ -171,8 +171,8 @@ async fn a_member_key_cannot_touch_maintenance(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// A typo must not read as a mode. Silently ignoring it would leave an operator believing the
-/// deployment is locked when it is serving.
+/// A typo must not read as a mode.
+/// Silently ignoring it would leave an operator believing the deployment is locked when it is serving.
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unknown_mode_is_refused(pool: PgPool) {
     let key = owner_key(&pool).await;
@@ -196,9 +196,8 @@ async fn an_unknown_mode_is_refused(pool: PgPool) {
     );
 }
 
-/// The endpoint has to appear in the published document, or a client generating from it will not
-/// know the switch exists. `utoipa` only includes what `paths(...)` names, and forgetting that
-/// registration produces a working endpoint nobody can discover.
+/// The endpoint has to appear in the published document, or a client generating from it will not know the switch exists.
+/// `utoipa` only includes what `paths(...)` names, and forgetting that registration produces a working endpoint nobody can discover.
 #[test]
 fn maintenance_is_in_the_openapi_document() {
     use utoipa::OpenApi;

@@ -1,15 +1,10 @@
-//! The template marketplace: templates shared between tenants, their published versions, and
-//! what other tenants thought of them.
+//! The template marketplace: templates shared between tenants, their published versions, and what other tenants thought of them.
 //!
-//! Distribution between tenants is an enterprise capability, so these routes live here rather
-//! than in the community edition.
+//! Distribution between tenants is an enterprise capability, so these routes live here rather than in the community edition.
 //!
 //! Authentication differs from the community edition's version by necessity, not by design.
-//! There, handlers took `Authorized<ReadScope>` from `yorishiro-server`'s middleware; this
-//! crate's lib may not depend on that crate, so they resolve the key through
-//! [`authz::authenticate_tenant`] instead. The rule is the same one every route in this
-//! process follows: any valid key for the tenant, with ownership enforced by the service
-//! rather than by the role.
+//! There, handlers took `Authorized<ReadScope>` from `yorishiro-server`'s middleware; this crate's lib may not depend on that crate, so they resolve the key through [`authz::authenticate_tenant`] instead.
+//! The rule is the same one every route in this process follows: any valid key for the tenant, with ownership enforced by the service rather than by the role.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -26,17 +21,11 @@ use crate::services::marketplace::{
 };
 use crate::state::HostedState;
 
-/// The licence gate for every route in this module, paired with authentication so the two cannot
-/// drift apart: a handler added here reaches for this rather than `authz::authenticate_tenant`
-/// directly, and is gated by construction.
+/// The licence gate for every route in this module, paired with authentication so the two cannot drift apart: a handler added here reaches for this rather than `authz::authenticate_tenant` directly, and is gated by construction.
 ///
-/// The gate is not on `authenticate_tenant` itself: the tenant dashboard authenticates through
-/// the same function and is part of the free floor (requirements FR-5-3), so gating there would
-/// close a page that must stay open.
+/// The gate is not on `authenticate_tenant` itself: the tenant dashboard authenticates through the same function and is part of the free floor (requirements FR-5-3), so gating there would close a page that must stay open.
 ///
-/// It is checked *before* authentication, so an unlicensed deployment answers the same `404`
-/// whether or not the caller holds a valid key: a marketplace that 401s tells an anonymous
-/// prober that it exists here and is merely locked.
+/// It is checked *before* authentication, so an unlicensed deployment answers the same `404` whether or not the caller holds a valid key: a marketplace that 401s tells an anonymous prober that it exists here and is merely locked.
 async fn licensed_tenant(
     state: &HostedState,
     headers: &HeaderMap,
@@ -60,15 +49,13 @@ pub async fn list_marketplace(
     State(state): State<HostedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<MarketplaceListing>>, HostedApiError> {
-    // The listing spans every tenant, so the identity is not read, but a valid key is still
-    // required, which is what authenticating here enforces.
+    // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
     let _ = licensed_tenant(&state, &headers).await?;
     let listings = marketplace::list_marketplace(&state.identity_pool).await?;
     Ok(Json(listings))
 }
 
-/// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts
-/// when it owns the template.
+/// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
 #[utoipa::path(
     get,
     path = "/api/marketplace/{id}/versions",
@@ -170,7 +157,8 @@ pub async fn submit_review(
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ForkParams {
-    /// Which published version to copy. Omitted takes the latest `stable` one.
+    /// Which published version to copy.
+    /// Omitted takes the latest `stable` one.
     pub version: Option<i32>,
 }
 

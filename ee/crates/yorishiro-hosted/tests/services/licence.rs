@@ -1,9 +1,8 @@
 use super::{LicenceClaims, LicenceState, verify};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
-/// A test-only keypair, committed under `tests/fixtures/`. Deliberately not the key the binary
-/// embeds: signing with this one and verifying against the real public key must fail, which is
-/// what `a_key_signed_by_another_issuer_is_refused` asserts.
+/// A test-only keypair, committed under `tests/fixtures/`.
+/// Deliberately not the key the binary embeds: signing with this one and verifying against the real public key must fail, which is what `a_key_signed_by_another_issuer_is_refused` asserts.
 const TEST_PRIVATE_KEY: &[u8] = include_bytes!("../fixtures/test-licence-key.pem");
 const TEST_PUBLIC_KEY: &[u8] = include_bytes!("../fixtures/test-licence-public.pem");
 const REAL_PUBLIC_KEY: &[u8] = include_bytes!("../../keys/licence-public.pem");
@@ -43,10 +42,8 @@ fn a_key_signed_by_another_issuer_is_refused() {
     assert!(verify(&token, REAL_PUBLIC_KEY).is_err());
 }
 
-/// Well past `Validation`'s default 60s leeway, which exists for clock skew and would otherwise
-/// accept a key that expired seconds ago. The leeway is left at its default: a minute either way
-/// does not matter for a licence measured in months, and `is_active_at` is the gate that decides
-/// during a run anyway.
+/// Well past `Validation`'s default 60s leeway, which exists for clock skew and would otherwise accept a key that expired seconds ago.
+/// The leeway is left at its default: a minute either way does not matter for a licence measured in months, and `is_active_at` is the gate that decides during a run anyway.
 #[test]
 fn an_expired_key_does_not_verify() {
     let an_hour_ago = chrono::Utc::now().timestamp() - 60 * 60;
@@ -55,8 +52,7 @@ fn an_expired_key_does_not_verify() {
     assert!(verify(&token, TEST_PUBLIC_KEY).is_err());
 }
 
-/// The leeway is real, and stating it here keeps the previous test honest about *why* it uses an
-/// hour rather than a second.
+/// The leeway is real, and stating it here keeps the previous test honest about *why* it uses an hour rather than a second.
 #[test]
 fn a_key_expiring_within_the_clock_skew_leeway_still_verifies() {
     let just_expired = chrono::Utc::now().timestamp() - 5;
@@ -100,8 +96,7 @@ fn no_licence_means_paid_features_are_off() {
 fn a_licence_is_active_until_its_expiry_and_not_after() {
     let state = LicenceState::licensed(claims(1_000));
 
-    // Expiry is compared at the moment of the check, not frozen when the process started, so a
-    // key that lapses mid-run stops working without a restart.
+    // Expiry is compared at the moment of the check, not frozen when the process started, so a key that lapses mid-run stops working without a restart.
     assert!(state.is_active_at(999));
     assert!(!state.is_active_at(1_000), "expiry itself is not active");
     assert!(!state.is_active_at(1_001));
@@ -115,10 +110,8 @@ fn an_active_licence_permits_a_gated_feature() {
     assert!(state.require_active().is_ok());
 }
 
-/// The licence may be configured in `config.yml` rather than the environment, and this is the
-/// half that reads it. `deny_unknown_fields` is deliberately absent: the file it parses is the
-/// server's whole configuration, so every key that belongs to another struct has to pass
-/// through rather than fail the parse.
+/// The licence may be configured in `config.yml` rather than the environment, and this is the half that reads it.
+/// `deny_unknown_fields` is deliberately absent: the file it parses is the server's whole configuration, so every key that belongs to another struct has to pass through rather than fail the parse.
 #[test]
 fn the_licence_key_is_read_from_a_config_file() {
     use crate::services::licence::licence_key_in;
@@ -145,12 +138,10 @@ fn the_licence_key_is_read_from_a_config_file() {
     );
 }
 
-/// The environment wins over the config file, and **set-but-empty is the environment winning**,
-/// not an absence that lets the file through.
+/// The environment wins over the config file, and **set-but-empty is the environment winning**, not an absence that lets the file through.
 ///
-/// Without that, `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file,
-/// which is the opposite of what "the environment takes precedence" means. Every other setting
-/// behaves this way: the shared loader skips the file whenever the variable exists at all.
+/// Without that, `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file, which is the opposite of what "the environment takes precedence" means.
+/// Every other setting behaves this way: the shared loader skips the file whenever the variable exists at all.
 #[test]
 fn an_empty_environment_key_does_not_fall_through_to_the_file() {
     use crate::services::licence::resolve_licence_key;

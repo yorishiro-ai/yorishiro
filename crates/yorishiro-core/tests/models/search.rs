@@ -1,7 +1,6 @@
 use super::*;
 
-/// An unparameterised search must stay bounded: the default limit is what stops a query from
-/// returning the whole workspace.
+/// An unparameterised search must stay bounded: the default limit is what stops a query from returning the whole workspace.
 #[test]
 fn the_default_search_query_is_bounded_and_unfiltered() {
     let query = SearchQuery::default();
@@ -11,9 +10,8 @@ fn the_default_search_query_is_bounded_and_unfiltered() {
     assert!(query.limit > 0);
 }
 
-/// `distance` is `None` for a hit that came from the pg_trgm fallback rather than from a vector
-/// comparison. That distinction is meaningful to a caller ranking results, so it must serialise
-/// as an explicit null rather than being omitted.
+/// `distance` is `None` for a hit that came from the pg_trgm fallback rather than from a vector comparison.
+/// That distinction is meaningful to a caller ranking results, so it must serialise as an explicit null rather than being omitted.
 #[test]
 fn a_hit_without_an_embedding_reports_a_null_distance() {
     let hit = SearchHit {

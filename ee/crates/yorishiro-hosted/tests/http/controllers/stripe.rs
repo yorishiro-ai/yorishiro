@@ -184,8 +184,8 @@ async fn post_webhook(app: &Router, body: Vec<u8>) -> StatusCode {
     response.status()
 }
 
-/// Reads the tenant's plan. It lives in this repo's `billing` table, not on `identity.tenants`,
-/// so the assertions below go through `billing` rather than through a tenant record.
+/// Reads the tenant's plan.
+/// It lives in this repo's `billing` table, not on `identity.tenants`, so the assertions below go through `billing` rather than through a tenant record.
 async fn tenant_plan(pool: &PgPool, tenant_id: uuid::Uuid) -> Option<String> {
     billing::get_billing(pool, tenant_id)
         .await
@@ -212,8 +212,7 @@ async fn a_duplicate_event_id_is_not_reapplied(pool: PgPool) {
     let after_first = tenant_plan(&pool, tenant.id).await;
     assert_eq!(after_first.as_deref(), Some("pro"));
 
-    // Downgrade the tenant to `free` directly, bypassing the webhook, so a re-application of the
-    // duplicate delivery below would be observable as a plan flip back to `pro`.
+    // Downgrade the tenant to `free` directly, bypassing the webhook, so a re-application of the duplicate delivery below would be observable as a plan flip back to `pro`.
     billing::set_plan(&pool, tenant.id, "free").await.unwrap();
 
     assert_eq!(
@@ -242,8 +241,7 @@ async fn an_out_of_order_delivery_does_not_undo_a_newer_event(pool: PgPool) {
         .unwrap()
         .timestamp();
 
-    // The newer event (created later) arrives first: plausible under Stripe's own
-    // no-ordering-guarantee, or simply because the older one was delayed/retried.
+    // The newer event (created later) arrives first: plausible under Stripe's own no-ordering-guarantee, or simply because the older one was delayed/retried.
     let newer_body = subscription_updated_body("evt_newer", base + 100, "cus_2");
     assert_eq!(post_webhook(&app, newer_body).await, StatusCode::OK);
     let after_newer = tenant_plan(&pool, tenant.id).await;
@@ -251,8 +249,7 @@ async fn an_out_of_order_delivery_does_not_undo_a_newer_event(pool: PgPool) {
 
     billing::set_plan(&pool, tenant.id, "free").await.unwrap();
 
-    // The older, stale event now arrives (a different event id, so it isn't caught by the
-    // duplicate-event-id guard alone): it must not be allowed to move the plan again.
+    // The older, stale event now arrives (a different event id, so it isn't caught by the duplicate-event-id guard alone): it must not be allowed to move the plan again.
     let older_body = subscription_updated_body("evt_older", base, "cus_2");
     assert_eq!(post_webhook(&app, older_body).await, StatusCode::OK);
     let after_stale = tenant_plan(&pool, tenant.id).await;
@@ -281,8 +278,7 @@ async fn events_for_different_customers_do_not_interfere(pool: PgPool) {
         post_webhook(&app, subscription_updated_body("evt_a", base, "cus_a")).await,
         StatusCode::OK
     );
-    // An older `created` for a *different* customer must apply normally: staleness is scoped
-    // per customer, not global.
+    // An older `created` for a *different* customer must apply normally: staleness is scoped per customer, not global.
     assert_eq!(
         post_webhook(
             &app,
@@ -298,19 +294,15 @@ async fn events_for_different_customers_do_not_interfere(pool: PgPool) {
     assert_eq!(tenant_b.as_deref(), Some("pro"));
 }
 
-/// A `checkout.session.completed` event must not set a per-customer staleness floor: Stripe does
-/// not guarantee delivery order between it and the `customer.subscription.created` event for the
-/// same purchase, and the subscription event can carry an earlier `created` timestamp. If the
-/// checkout event's `customer_id` were recorded for ordering, that earlier subscription event
-/// would be wrongly rejected as stale and the tenant would never receive its purchased plan.
+/// A `checkout.session.completed` event must not set a per-customer staleness floor: Stripe does not guarantee delivery order between it and the `customer.subscription.created` event for the same purchase, and the subscription event can carry an earlier `created` timestamp.
+/// If the checkout event's `customer_id` were recorded for ordering, that earlier subscription event would be wrongly rejected as stale and the tenant would never receive its purchased plan.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_checkout_completion_does_not_block_an_earlier_created_subscription_event(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     let app = router(pool.clone());
     let base = Utc::now().timestamp();
 
-    // The subscription event's own `created` predates the checkout event's, as can genuinely
-    // happen, and the checkout event is delivered first.
+    // The subscription event's own `created` predates the checkout event's, as can genuinely happen, and the checkout event is delivered first.
     let checkout_body =
         checkout_session_completed_body("evt_checkout", base, tenant.id, "cus_checkout");
     assert_eq!(post_webhook(&app, checkout_body).await, StatusCode::OK);
@@ -328,9 +320,8 @@ async fn a_checkout_completion_does_not_block_an_earlier_created_subscription_ev
     );
 }
 
-/// Cancelling a subscription has to put the tenant back on Free: both the plan and the
-/// workspace cap that comes with it. Missing the cap would leave a cancelled tenant with a paid
-/// tier's limits, which is the expensive direction to get wrong.
+/// Cancelling a subscription has to put the tenant back on Free: both the plan and the workspace cap that comes with it.
+/// Missing the cap would leave a cancelled tenant with a paid tier's limits, which is the expensive direction to get wrong.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_cancellation_returns_the_tenant_to_free(pool: PgPool) {
     let tenant = yorishiro_core::repositories::tenancy::create_tenant(&pool, "acme", None)
@@ -372,8 +363,7 @@ async fn a_cancellation_returns_the_tenant_to_free(pool: PgPool) {
 }
 
 /// A cancellation for a customer nobody is linked to must be accepted and ignored, not error.
-/// Stripe retries anything it does not get a 2xx for, so returning an error here would have it
-/// redeliver the same event indefinitely.
+/// Stripe retries anything it does not get a 2xx for, so returning an error here would have it redeliver the same event indefinitely.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_cancellation_for_an_unknown_customer_is_accepted_and_ignored(pool: PgPool) {
     let app = router(pool.clone());
@@ -388,10 +378,8 @@ async fn a_cancellation_for_an_unknown_customer_is_accepted_and_ignored(pool: Pg
     );
 }
 
-/// Billing is opt-in. With no webhook secret configured there is no way to tell a genuine Stripe
-/// delivery from anything else, so the endpoint refuses rather than accepting unverifiable
-/// requests: if this ever started returning 200, a forged body would be applied to real
-/// tenants.
+/// Billing is opt-in.
+/// With no webhook secret configured there is no way to tell a genuine Stripe delivery from anything else, so the endpoint refuses rather than accepting unverifiable requests: if this ever started returning 200, a forged body would be applied to real tenants.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting(pool: PgPool) {
     let state = HostedState {

@@ -15,8 +15,7 @@ fn syslog_writer_sends_one_datagram_per_dropped_writer_with_the_right_pri() {
 
     {
         let mut writer = make_writer.writer_for_severity(6);
-        // Two separate `write` calls (as tracing-subscriber issues for a formatted line
-        // plus its trailing newline) must still coalesce into a single datagram.
+        // Two separate `write` calls (as tracing-subscriber issues for a formatted line plus its trailing newline) must still coalesce into a single datagram.
         io::Write::write_all(&mut writer, b"{\"message\":\"hello\"}").unwrap();
         io::Write::write_all(&mut writer, b"\n").unwrap();
     } // dropped here, which flushes

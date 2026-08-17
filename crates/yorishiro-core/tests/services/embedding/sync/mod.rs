@@ -423,9 +423,9 @@ async fn stamp_dimensions(pool: &PgPool, workspace_id: Uuid, dimensions: i32) {
 
 /// A vector of the wrong width must be refused at the write.
 ///
-/// The column is dimensionless, so the write itself would succeed. The workspace's next
-/// search would then fail with `different vector dimensions`, naming neither the entity nor the
-/// write that caused it. One refused write is the better failure.
+/// The column is dimensionless, so the write itself would succeed.
+/// The workspace's next search would then fail with `different vector dimensions`, naming neither the entity nor the write that caused it.
+/// One refused write is the better failure.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_vector_of_the_wrong_dimension_is_refused(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -516,9 +516,8 @@ async fn a_vector_of_the_stamped_dimension_is_written(pool: PgPool) {
     assert_eq!(stored.unwrap().as_slice().len(), 768);
 }
 
-/// A workspace created before the stamp existed has none, and takes whatever the deployment
-/// produces, which is what it has always done. Refusing those writes would break every
-/// existing deployment on upgrade.
+/// A workspace created before the stamp existed has none, and takes whatever the deployment produces, which is what it has always done.
+/// Refusing those writes would break every existing deployment on upgrade.
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unstamped_workspace_accepts_any_dimension(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;

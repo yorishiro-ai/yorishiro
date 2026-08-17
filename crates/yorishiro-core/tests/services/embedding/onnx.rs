@@ -11,7 +11,8 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 
 #[test]
 fn mean_pooling_ignores_masked_tokens_and_normalizes() {
-    // seq=3, hidden=2. The 3rd token has mask=0, so it's excluded from the average.
+    // seq=3, hidden=2.
+    // The 3rd token has mask=0, so it's excluded from the average.
     let embeddings = [1.0, 0.0, 3.0, 4.0, 100.0, 100.0];
     let mask = [1_i64, 1, 0];
     let pooled = mean_pool_normalized(&embeddings, &mask, 3, 2);
@@ -23,8 +24,7 @@ fn mean_pooling_ignores_masked_tokens_and_normalizes() {
 
 #[test]
 fn load_rejects_too_small_max_sequence_length() {
-    // tokenizers subtracts the special-token count from max_length during
-    // truncation, so an extremely small value underflows; confirm load() rejects it.
+    // tokenizers subtracts the special-token count from max_length during truncation, so an extremely small value underflows; confirm load() rejects it.
     let result = LocalOnnxProvider::load(LocalOnnxConfig {
         model_path: "/nonexistent/model.onnx".into(),
         tokenizer_path: "/nonexistent/tokenizer.json".into(),
@@ -55,10 +55,9 @@ fn load_reports_missing_files_clearly() {
     assert!(err.to_string().contains("tokenizer"));
 }
 
-/// End-to-end verification against a real model. Model files aren't
-/// checked into the repo (models/ is gitignored), so the test skips if
-/// they're absent. Follow the README to place models/model.onnx and
-/// models/tokenizer.json to enable it.
+/// End-to-end verification against a real model.
+/// Model files aren't checked into the repo (models/ is gitignored), so the test skips if they're absent.
+/// Follow the README to place models/model.onnx and models/tokenizer.json to enable it.
 #[tokio::test]
 async fn embeds_texts_with_a_real_model() {
     let model_path = std::env::var("YORISHIRO_TEST_ONNX_MODEL")
@@ -108,8 +107,8 @@ async fn embeds_texts_with_a_real_model() {
 
 #[test]
 fn last_token_pooling_takes_the_final_unmasked_position() {
-    // Three positions, two dimensions. The third is padding, so the second is the last real
-    // token and the one whose embedding should come back.
+    // Three positions, two dimensions.
+    // The third is padding, so the second is the last real token and the one whose embedding should come back.
     let embeddings = vec![
         1.0, 0.0, // t0
         0.0, 2.0, // t1  <- last unmasked
@@ -119,7 +118,8 @@ fn last_token_pooling_takes_the_final_unmasked_position() {
 
     let pooled = last_token_pool_normalized(&embeddings, &mask, 3, 2);
 
-    // t1 normalized: (0, 2) -> (0, 1). The padding row must not contribute.
+    // t1 normalized: (0, 2) -> (0, 1).
+    // The padding row must not contribute.
     assert!((pooled[0] - 0.0).abs() < 1e-6, "got {pooled:?}");
     assert!((pooled[1] - 1.0).abs() < 1e-6, "got {pooled:?}");
 }
@@ -157,9 +157,7 @@ fn pooling_parses_its_accepted_spellings() {
     assert_eq!(Pooling::default(), Pooling::Mean);
 }
 
-/// An unknown value must fail rather than fall back to the default: silently pooling a
-/// last-token model with the mean is the failure this setting exists to prevent, and it
-/// produces no error of its own.
+/// An unknown value must fail rather than fall back to the default: silently pooling a last-token model with the mean is the failure this setting exists to prevent, and it produces no error of its own.
 #[test]
 fn pooling_rejects_an_unknown_value() {
     let err = Pooling::parse("cls").unwrap_err();
@@ -169,8 +167,7 @@ fn pooling_rejects_an_unknown_value() {
     );
 }
 
-/// With no instruction configured, a query and a document embed identically: this is the
-/// path every symmetric model takes, including the current default.
+/// With no instruction configured, a query and a document embed identically: this is the path every symmetric model takes, including the current default.
 #[tokio::test]
 async fn without_an_instruction_queries_and_documents_agree() {
     let Some(provider) = real_model_provider(None) else {
@@ -189,9 +186,8 @@ async fn without_an_instruction_queries_and_documents_agree() {
     assert_eq!(as_query, as_document);
 }
 
-/// With one configured, the query diverges and the document does not. Asserting the document
-/// is untouched is the half that matters: prefixing stored text too would reintroduce the
-/// symmetry this exists to break.
+/// With one configured, the query diverges and the document does not.
+/// Asserting the document is untouched is the half that matters: prefixing stored text too would reintroduce the symmetry this exists to break.
 #[tokio::test]
 async fn an_instruction_changes_queries_only() {
     let Some(provider) = real_model_provider(Some("Retrieve relevant documents")) else {

@@ -29,15 +29,13 @@ pub struct GetSchemaByIdArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateSchemaArgs {
-    /// JSON object conforming to `MetaSchemaDefinition`
-    /// (name/description/entity_types/relation_types). If a schema with the same
-    /// name already exists, whether the change is breaking or non-breaking is
-    /// detected automatically and it is registered as a new version. Mutually
-    /// exclusive with `template_id`; exactly one of the two must be set.
+    /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
+    /// If a schema with the same name already exists, whether the change is breaking or non-breaking is detected automatically and it is registered as a new version.
+    /// Mutually exclusive with `template_id`; exactly one of the two must be set.
     pub definition: Option<Value>,
-    /// ID of a built-in template to use as the definition instead of supplying one
-    /// inline. See `list_templates` for the available IDs. Mutually exclusive with
-    /// `definition`; exactly one of the two must be set.
+    /// ID of a built-in template to use as the definition instead of supplying one inline.
+    /// See `list_templates` for the available IDs.
+    /// Mutually exclusive with `definition`; exactly one of the two must be set.
     pub template_id: Option<String>,
 }
 

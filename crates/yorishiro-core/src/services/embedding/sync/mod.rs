@@ -11,8 +11,7 @@ use crate::models::entities::EntityRecord;
 use crate::repositories::schemas;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
-/// `pub` (rather than private) only so the crate-root integration test in `tests/` can build
-/// its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can build its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 #[derive(Iden)]
 pub enum Entities {
@@ -23,14 +22,11 @@ pub enum Entities {
     Embedding,
 }
 
-/// Concatenates the values of `x-embed` fields as `"field: value"` to build the
-/// text to embed. Field names are kept because bare values would lose semantic
-/// context that helps the embedding model, compared to concatenating raw
-/// values alone. Returns `None` when there are no such fields or all are
-/// absent, so callers can skip the embedding API call entirely.
+/// Concatenates the values of `x-embed` fields as `"field: value"` to build the text to embed.
+/// Field names are kept because bare values would lose semantic context that helps the embedding model, compared to concatenating raw values alone.
+/// Returns `None` when there are no such fields or all are absent, so callers can skip the embedding API call entirely.
 ///
-/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
-/// it directly; `#[doc(hidden)]` keeps it out of the public API docs.
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call it directly; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> Option<String> {
     let parts: Vec<String> = entity_type_def
@@ -80,13 +76,10 @@ pub async fn sync_embedding(
 
     // Refuse a vector that would not sit alongside what the workspace already holds.
     //
-    // The column is dimensionless, so a mismatched write succeeds and the damage surfaces
-    // somewhere else entirely: the next search over that workspace fails with
-    // `different vector dimensions 384 and 1024`, naming neither the entity nor the write that
-    // caused it. Checking here turns a broken workspace into one refused write.
+    // The column is dimensionless, so a mismatched write succeeds and the damage surfaces somewhere else entirely: the next search over that workspace fails with `different vector dimensions 384 and 1024`, naming neither the entity nor the write that caused it.
+    // Checking here turns a broken workspace into one refused write.
     //
-    // A workspace with no stamp (created before this existed) takes whatever the deployment
-    // produces, which is what it has always done.
+    // A workspace with no stamp (created before this existed) takes whatever the deployment produces, which is what it has always done.
     if let Some(expected) = workspace_embedding_dimensions(&mut *conn, workspace_id).await?
         && vector.len() != expected as usize
     {
@@ -103,11 +96,7 @@ pub async fn sync_embedding(
         });
     }
 
-    // Including the `updated_at` match as a write condition prevents a vector
-    // computed from stale data from overwriting a newer one when consecutive
-    // updates to the same entity complete out of order due to differing
-    // embedding API latencies (writing the embedding itself doesn't change
-    // `updated_at`, so this condition never blocks a subsequent legitimate sync).
+    // Including the `updated_at` match as a write condition prevents a vector computed from stale data from overwriting a newer one when consecutive updates to the same entity complete out of order due to differing embedding API latencies (writing the embedding itself doesn't change `updated_at`, so this condition never blocks a subsequent legitimate sync).
     let (sql, values) = Query::update()
         .table((Alias::new("content"), Entities::Table))
         .values([(Entities::Embedding, pgvector::Vector::from(vector).into())])
@@ -131,15 +120,10 @@ pub async fn sync_embedding(
     Ok(())
 }
 
-/// Resolves the schema definition needed for embedding sync on its own,
-/// relying only on the return value of `entities::create`/`update`
-/// (`EntityRecord`), then calls `sync_embedding`. The record's data belongs to
-/// the schema version it was validated against (`record.schema_id`), so
-/// fetching by ID rather than the active version is correct.
+/// Resolves the schema definition needed for embedding sync on its own, relying only on the return value of `entities::create`/`update` (`EntityRecord`), then calls `sync_embedding`.
+/// The record's data belongs to the schema version it was validated against (`record.schema_id`), so fetching by ID rather than the active version is correct.
 ///
-/// This is the intended entry point for adapter layers to call from a
-/// background task after returning a response; like `sync_embedding`, call it
-/// from a separate connection/transaction than create/update.
+/// This is the intended entry point for adapter layers to call from a background task after returning a response; like `sync_embedding`, call it from a separate connection/transaction than create/update.
 pub async fn sync_embedding_for_record(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -170,11 +154,9 @@ pub async fn sync_embedding_for_record(
     .await
 }
 
-/// The dimension count a workspace's vectors are expected to have, or `None` when it was created
-/// before the stamp existed and therefore takes the deployment's.
+/// The dimension count a workspace's vectors are expected to have, or `None` when it was created before the stamp existed and therefore takes the deployment's.
 ///
-/// Read on the request connection: `identity.workspaces` is readable by `yorishiro_app`
-/// (entity creation already reads `max_entities` from it), so this needs no second pool.
+/// Read on the request connection: `identity.workspaces` is readable by `yorishiro_app` (entity creation already reads `max_entities` from it), so this needs no second pool.
 async fn workspace_embedding_dimensions(
     conn: &mut PgConnection,
     workspace_id: Uuid,

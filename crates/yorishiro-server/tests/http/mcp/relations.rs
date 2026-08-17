@@ -1,7 +1,6 @@
 use super::*;
 
-/// A relation needs both endpoints and a type; properties are optional because most relations
-/// carry none.
+/// A relation needs both endpoints and a type; properties are optional because most relations carry none.
 #[test]
 fn creating_a_relation_requires_both_endpoints_and_a_type() {
     assert!(

@@ -1,12 +1,9 @@
-//! Optional `config.yml` support: an operator may put settings in a YAML file instead of the
-//! environment.
+//! Optional `config.yml` support: an operator may put settings in a YAML file instead of the environment.
 //!
-//! The file is read if present, and each setting it names is written to the corresponding
-//! environment variable, but only where that variable is unset. Every `std::env::var` call site
-//! reads the environment as usual, so an environment variable wins over the file.
+//! The file is read if present, and each setting it names is written to the corresponding environment variable, but only where that variable is unset.
+//! Every `std::env::var` call site reads the environment as usual, so an environment variable wins over the file.
 //!
-//! Invoked from the binary's synchronous prologue, before the tokio runtime starts: see
-//! `load_and_apply_env_overrides`'s safety contract.
+//! Invoked from the binary's synchronous prologue, before the tokio runtime starts: see `load_and_apply_env_overrides`'s safety contract.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -33,21 +30,17 @@ struct FileConfig {
     db_load_guard: DbLoadGuardConfig,
     search_tokens_per_minute: Option<u32>,
     snapshot_retention_days: Option<i32>,
-    /// Accepted and ignored here; `ee/` reads it. The key has to exist in this struct because
-    /// it is `deny_unknown_fields` and both editions parse the same file: without it, a
-    /// config carrying `license_key:` would refuse to start on the community build.
+    /// Accepted and ignored here; `ee/` reads it.
+    /// The key has to exist in this struct because it is `deny_unknown_fields` and both editions parse the same file: without it, a config carrying `license_key:` would refuse to start on the community build.
     ///
-    /// Deliberately not applied to the environment from here. Doing that would put the string
-    /// `YORISHIRO_LICENSE_KEY` in the community binary, which the release gate scans for and
-    /// would reject: correctly, since that binary is meant to carry no trace of the paid
-    /// edition.
+    /// Deliberately not applied to the environment from here.
+    /// Doing that would put the string `YORISHIRO_LICENSE_KEY` in the community binary, which the release gate scans for and would reject: correctly, since that binary is meant to carry no trace of the paid edition.
     #[allow(dead_code)]
     license_key: Option<String>,
 }
 
-/// The load shedder's settings. Present here because they are documented, and this struct is
-/// `deny_unknown_fields`: a documented key that has no field makes a copied example config
-/// refuse to start.
+/// The load shedder's settings.
+/// Present here because they are documented, and this struct is `deny_unknown_fields`: a documented key that has no field makes a copied example config refuse to start.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct DbLoadGuardConfig {
@@ -102,29 +95,21 @@ unsafe fn apply_if_unset(key: &str, value: Option<String>) {
     }
 }
 
-/// Where a package install puts the configuration, and where the unit points
-/// `YORISHIRO_CONFIG_PATH` at.
+/// Where a package install puts the configuration, and where the unit points `YORISHIRO_CONFIG_PATH` at.
 pub const PACKAGED_CONFIG_PATH: &str = "/etc/yorishiro/config.yml";
 
 /// Which file to read, or `None` when there is nothing to read.
 ///
-/// `YORISHIRO_CONFIG_PATH` wins outright when it is set: an operator naming a file means that
-/// file, and silently reading a different one would be worse than reading none.
+/// `YORISHIRO_CONFIG_PATH` wins outright when it is set: an operator naming a file means that file, and silently reading a different one would be worse than reading none.
 ///
-/// Unset, the working directory comes first, so a source checkout keeps using its own
-/// `config.yml`. `/etc/yorishiro/config.yml` is the fallback, and it exists for the admin CLI:
-/// the unit exports the variable, but a shell has no such environment, so without this fallback
-/// `yorishiro-server admin create-tenant` on a packaged host would look in whatever directory
-/// the operator happens to be in and report the database as unconfigured, even while the
-/// service beside it runs normally against that exact file.
+/// Unset, the working directory comes first, so a source checkout keeps using its own `config.yml`.
+/// `/etc/yorishiro/config.yml` is the fallback, and it exists for the admin CLI:
+/// the unit exports the variable, but a shell has no such environment, so without this fallback `yorishiro-server admin create-tenant` on a packaged host would look in whatever directory the operator happens to be in and report the database as unconfigured, even while the service beside it runs normally against that exact file.
 ///
-/// `explicit` is an `OsString` rather than a `String` because `std::env::var` reports a
-/// non-UTF-8 value as `NotUnicode`, and `.ok()` would flatten that into "unset". A path this
-/// process cannot render as UTF-8 is still a path the operator named, and treating it as unset
-/// would fall back to a different file: the one case this function exists to rule out.
+/// `explicit` is an `OsString` rather than a `String` because `std::env::var` reports a non-UTF-8 value as `NotUnicode`, and `.ok()` would flatten that into "unset".
+/// A path this process cannot render as UTF-8 is still a path the operator named, and treating it as unset would fall back to a different file: the one case this function exists to rule out.
 ///
-/// Split out as a pure function so the precedence is testable without touching the process
-/// environment or the filesystem root.
+/// Split out as a pure function so the precedence is testable without touching the process environment or the filesystem root.
 pub(crate) fn config_path_from(
     explicit: Option<OsString>,
     exists: impl Fn(&Path) -> bool,

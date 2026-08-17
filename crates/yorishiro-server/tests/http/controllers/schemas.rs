@@ -101,8 +101,7 @@ async fn rest_schema_endpoints_round_trip(pool: PgPool) {
             .contains(&serde_json::json!("title"))
     );
 
-    // v2, which adds a required field, is reported in the diff as a breaking change,
-    // and active switches to it.
+    // v2, which adds a required field, is reported in the diff as a breaking change, and active switches to it.
     let response = rest_request(
         &app,
         "POST",
@@ -199,8 +198,7 @@ async fn rest_creates_a_schema_from_a_built_in_template(pool: PgPool) {
 
 /// A template from the tenant's library becomes a schema by its UUID.
 ///
-/// This is what makes the library worth having: a template copied into it from anywhere else
-/// is otherwise a row nothing can act on.
+/// This is what makes the library worth having: a template copied into it from anywhere else is otherwise a row nothing can act on.
 #[sqlx::test(migrations = "../../migrations")]
 async fn rest_creates_a_schema_from_a_library_template(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
@@ -247,8 +245,7 @@ async fn rest_creates_a_schema_from_a_library_template(pool: PgPool) {
     .await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let created = rest_json_body(response).await;
-    // Named after the definition, not the library row: the schema is the definition's, and the
-    // library name is just what this tenant filed it under.
+    // Named after the definition, not the library row: the schema is the definition's, and the library name is just what this tenant filed it under.
     assert_eq!(created["schema"]["version"], 1);
     assert!(created["schema"]["definition"]["entity_types"]["character"].is_object());
 }

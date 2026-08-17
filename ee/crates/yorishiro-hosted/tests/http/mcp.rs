@@ -1,6 +1,5 @@
-//! The wrapper's one job is to serve this edition's tools *in addition to* the base edition's,
-//! never instead of them. Overriding `/mcp` is what makes losing the base set possible, so that
-//! is what these check.
+//! The wrapper's one job is to serve this edition's tools *in addition to* the base edition's, never instead of them.
+//! Overriding `/mcp` is what makes losing the base set possible, so that is what these check.
 
 use async_trait::async_trait;
 use axum::Router;
@@ -33,8 +32,7 @@ impl EmbeddingProvider for UnusedEmbeddingProvider {
 }
 
 /// The tool names each server exposes, read through `get_tool` rather than over the transport.
-/// The two transport tests below cover `tools/list` and `tools/call`; this pair isolates the
-/// name lookup, so a failure says which of the three delegations broke.
+/// The two transport tests below cover `tools/list` and `tools/call`; this pair isolates the name lookup, so a failure says which of the three delegations broke.
 fn tool_names(pool: PgPool) -> (Vec<String>, Vec<String>) {
     let state = AppState::new(
         yorishiro_core::db::TenantDb::new(pool.clone()),
@@ -46,8 +44,7 @@ fn tool_names(pool: PgPool) -> (Vec<String>, Vec<String>) {
     (base_names(&base), hosted_names(&hosted))
 }
 
-/// `get_tool` is the one name-addressed accessor both servers implement, so asking it for every
-/// base tool name is how the wrapper's routing gets checked without a live session.
+/// `get_tool` is the one name-addressed accessor both servers implement, so asking it for every base tool name is how the wrapper's routing gets checked without a live session.
 fn base_names(server: &YorishiroMcpServer) -> Vec<String> {
     KNOWN_BASE_TOOLS
         .iter()
@@ -125,10 +122,9 @@ async fn an_unknown_tool_is_unknown_to_both(pool: PgPool) {
     );
 }
 
-/// Mounts the wrapper exactly as `main` does, so `list_tools` and `call_tool` are reached
-/// through the transport rather than called directly. `RequestContext` needs a `Peer`, whose
-/// constructor is `pub(crate)` in rmcp, so the HTTP door is the only way in from here. It is
-/// also the one that ships.
+/// Mounts the wrapper exactly as `main` does, so `list_tools` and `call_tool` are reached through the transport rather than called directly.
+/// `RequestContext` needs a `Peer`, whose constructor is `pub(crate)` in rmcp, so the HTTP door is the only way in from here.
+/// It is also the one that ships.
 fn hosted_mcp_router(pool: PgPool) -> Router {
     let state = AppState::new(
         yorishiro_core::db::TenantDb::new(pool.clone()),
@@ -258,8 +254,8 @@ async fn tools_call_falls_through_to_the_base_server(pool: PgPool) {
     let app = hosted_mcp_router(pool);
     let session = handshake(&app).await;
 
-    // No Authorization header, so the base tool refuses. That refusal is the point: reaching it
-    // at all proves `call_tool` delegated, since this crate's router has no `list_schemas`.
+    // No Authorization header, so the base tool refuses.
+    // That refusal is the point: reaching it at all proves `call_tool` delegated, since this crate's router has no `list_schemas`.
     let (status, body) = mcp_post(
         &app,
         Some(&session),

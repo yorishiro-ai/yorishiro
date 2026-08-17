@@ -31,8 +31,7 @@ fn project_task_schema() -> MetaSchemaDefinition {
     .unwrap()
 }
 
-/// A three-type chain (task -> project -> team) so multi-hop traversal has somewhere to go
-/// beyond a single hop.
+/// A three-type chain (task -> project -> team) so multi-hop traversal has somewhere to go beyond a single hop.
 fn task_project_team_schema() -> MetaSchemaDefinition {
     serde_json::from_value(json!({
         "name": "task-project-team",
@@ -306,9 +305,8 @@ async fn reports_not_found_for_a_missing_entity(pool: PgPool) {
     assert!(matches!(err, YorishiroError::NotFound { .. }));
 }
 
-/// A -> B -> C chain (task -> project -> team). Recalling from A (the task) with depth=1 should
-/// only see B (the project); with depth=2 it should also reach C (the team) at hop_distance 2,
-/// without re-listing B.
+/// A -> B -> C chain (task -> project -> team).
+/// Recalling from A (the task) with depth=1 should only see B (the project); with depth=2 it should also reach C (the team) at hop_distance 2, without re-listing B.
 #[sqlx::test(migrations = "../../migrations")]
 async fn depth_two_reaches_the_second_hop_neighbor(pool: PgPool) {
     let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
@@ -436,8 +434,7 @@ async fn depth_two_reaches_the_second_hop_neighbor(pool: PgPool) {
     assert_eq!(team_relation.neighbor.data["name"], "platform");
 }
 
-/// depth is clamped to MAX_RECALL_DEPTH (3), so an out-of-range request doesn't error but also
-/// doesn't traverse further than the cap.
+/// depth is clamped to MAX_RECALL_DEPTH (3), so an out-of-range request doesn't error but also doesn't traverse further than the cap.
 #[sqlx::test(migrations = "../../migrations")]
 async fn depth_beyond_the_maximum_is_clamped_not_rejected(pool: PgPool) {
     let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;
@@ -505,15 +502,13 @@ async fn depth_beyond_the_maximum_is_clamped_not_rejected(pool: PgPool) {
     .await
     .unwrap();
 
-    // Only one real hop exists in this graph, so the clamp doesn't change the result here, but
-    // the call must succeed (not error) with an out-of-range depth.
+    // Only one real hop exists in this graph, so the clamp doesn't change the result here, but the call must succeed (not error) with an out-of-range depth.
     assert_eq!(context.relations.len(), 1);
     assert_eq!(context.relations[0].hop_distance, 1);
 }
 
-/// A single task belonging to two projects, each owned by its own team, so hop 1's frontier
-/// has two nodes at once. Exercises the batched neighbor lookup (`relations::neighbors_batch`)
-/// across a multi-node frontier, not just the single-node chain the other depth tests use.
+/// A single task belonging to two projects, each owned by its own team, so hop 1's frontier has two nodes at once.
+/// Exercises the batched neighbor lookup (`relations::neighbors_batch`) across a multi-node frontier, not just the single-node chain the other depth tests use.
 #[sqlx::test(migrations = "../../migrations")]
 async fn depth_two_expands_every_node_in_a_multi_node_frontier(pool: PgPool) {
     let (workspace_id_tenant, workspace_id) = seed_workspace(&pool).await;

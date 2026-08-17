@@ -6,9 +6,8 @@ use utoipa::ToSchema;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::error::ValidationDetail;
 
-/// A thin wrapper that converts `YorishiroError` into an HTTP response. The core split is
-/// between client-caused errors (4xx, safe to return details for) and internal errors
-/// (5xx, whose details go only to logs and never to the client).
+/// A thin wrapper that converts `YorishiroError` into an HTTP response.
+/// The core split is between client-caused errors (4xx, safe to return details for) and internal errors (5xx, whose details go only to logs and never to the client).
 pub struct ApiError(pub YorishiroError);
 
 impl From<YorishiroError> for ApiError {
@@ -26,8 +25,7 @@ impl IntoResponse for ApiError {
 }
 
 /// A DTO that exists only to describe the error response shape in the OpenAPI document.
-/// Actual response bodies are built individually by `ApiError::into_response`, so this
-/// type's values are never used: it exists purely for schema generation.
+/// Actual response bodies are built individually by `ApiError::into_response`, so this type's values are never used: it exists purely for schema generation.
 #[derive(Serialize, ToSchema)]
 pub struct ApiErrorBody {
     pub error: ApiErrorDetail,

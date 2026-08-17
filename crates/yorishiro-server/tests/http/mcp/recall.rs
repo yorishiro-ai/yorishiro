@@ -14,8 +14,7 @@ fn only_the_entity_is_required() {
     assert!(args.depth.is_none());
 }
 
-/// `depth` drives graph traversal; it arrives as a number and must not be silently accepted as a
-/// string, which would fail later in the query layer with a much worse message.
+/// `depth` drives graph traversal; it arrives as a number and must not be silently accepted as a string, which would fail later in the query layer with a much worse message.
 #[test]
 fn depth_must_be_a_number() {
     assert!(

@@ -119,19 +119,17 @@ pub async fn create_schema(
 ) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
     let tenant_id = authorized.ctx.tenant_id;
 
-    // Carried alongside the definition so the schema can record which library template it
-    // came from. A built-in has no row to point at, so it stays None.
+    // Carried alongside the definition so the schema can record which library template it came from.
+    // A built-in has no row to point at, so it stays None.
     let mut origin_template_id = None;
-    // What the template said, kept as the merge base. Only a template body has one: a
-    // definition posted inline is not a copy of anything, even when a template of the same
-    // name exists.
+    // What the template said, kept as the merge base.
+    // Only a template body has one: a definition posted inline is not a copy of anything, even when a template of the same name exists.
     let mut origin_snapshot = None;
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => {
-            // A UUID can only mean the library; anything else can only mean a built-in. Parsing
-            // decides which, so neither lookup runs against an id that could not name it, and a
-            // library miss reports the library's own not-found rather than the built-in one.
+            // A UUID can only mean the library; anything else can only mean a built-in.
+            // Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
             match Uuid::parse_str(&template_id) {
                 Ok(id) => {
                     let template =

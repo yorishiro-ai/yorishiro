@@ -19,13 +19,8 @@ pub use routes::{
 };
 pub use state::AppState;
 
-/// `YORISHIRO_MAX_TENANTS` is process-wide state read by both `http::controllers::setup` and login's
-/// workspace auto-resolution, so every test across the crate that sets it (rather than just
-/// asserting the default) must serialize through this one shared lock: a per-module lock
-/// only prevents that module's own tests from racing each other, not tests in a different
-/// module running concurrently in the same `cargo test` process. `#[cfg(test)]`-gated and
-/// `pub(crate)`: `tests/` reaches it as `crate::max_tenants_env_lock`, since every test file
-/// compiles as its own module's `mod tests` rather than as an external integration test.
+/// `YORISHIRO_MAX_TENANTS` is process-wide state read by both `http::controllers::setup` and login's workspace auto-resolution, so every test across the crate that sets it (rather than just asserting the default) must serialize through this one shared lock: a per-module lock only prevents that module's own tests from racing each other, not tests in a different module running concurrently in the same `cargo test` process.
+/// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::max_tenants_env_lock`, since every test file compiles as its own module's `mod tests` rather than as an external integration test.
 #[cfg(test)]
 pub(crate) mod max_tenants_env_lock {
     pub static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -40,10 +35,8 @@ pub(crate) mod max_tenants_env_lock {
 
 /// Shared test-only fixtures used by the crate-root integration tests in `tests/`.
 ///
-/// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::test_support`, since
-/// every test file compiles as its own module's `mod tests` rather than as an external
-/// integration test. It is therefore never part of a release build or of this crate's public
-/// API.
+/// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::test_support`, since every test file compiles as its own module's `mod tests` rather than as an external integration test.
+/// It is therefore never part of a release build or of this crate's public API.
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::sync::Arc;
@@ -80,8 +73,7 @@ pub(crate) mod test_support {
         Name,
     }
 
-    /// Tests shouldn't call out to a remote embeddings service, so this dummy provider only
-    /// satisfies the dimension count (and errors immediately if actually invoked).
+    /// Tests shouldn't call out to a remote embeddings service, so this dummy provider only satisfies the dimension count (and errors immediately if actually invoked).
     pub struct UnreachableEmbeddingProvider;
 
     #[async_trait]
@@ -105,16 +97,14 @@ pub(crate) mod test_support {
         )
     }
 
-    /// The `static_fallback` argument for tests in this crate, which assert about API routes and
-    /// never about the SPA. It 404s, matching what this crate serves on its own: the UI lives in
-    /// `ee/` and a crate here cannot reach it.
+    /// The `static_fallback` argument for tests in this crate, which assert about API routes and never about the SPA.
+    /// It 404s, matching what this crate serves on its own: the UI lives in `ee/` and a crate here cannot reach it.
     pub fn no_static_fallback() -> axum::routing::MethodRouter {
         axum::routing::any(|| async { StatusCode::NOT_FOUND })
     }
 
-    /// A provider that returns a deterministic vector, for end-to-end tests of the embedding
-    /// wiring. Every text maps to the same vector, so the distance between query and entity
-    /// is always 0: guaranteeing a hit.
+    /// A provider that returns a deterministic vector, for end-to-end tests of the embedding wiring.
+    /// Every text maps to the same vector, so the distance between query and entity is always 0: guaranteeing a hit.
     pub struct FixedEmbeddingProvider;
 
     #[async_trait]
@@ -154,8 +144,7 @@ pub(crate) mod test_support {
     }
 
     /// Extracts the `data: {...}` line from a `text/event-stream` body and parses it as JSON.
-    /// streamable-http returns multiple events separated by `\n\n`, but the response to a
-    /// single request is carried in the last one, so that's the one targeted.
+    /// streamable-http returns multiple events separated by `\n\n`, but the response to a single request is carried in the last one, so that's the one targeted.
     pub fn parse_sse_json(body: &str) -> serde_json::Value {
         body.split("\n\n")
             .filter_map(|event| event.lines().find_map(|line| line.strip_prefix("data: ")))
@@ -190,8 +179,7 @@ pub(crate) mod test_support {
             .unwrap()
     }
 
-    /// Performs the initialize + notifications/initialized handshake and returns the
-    /// session ID to use for subsequent tools/call requests.
+    /// Performs the initialize + notifications/initialized handshake and returns the session ID to use for subsequent tools/call requests.
     pub async fn mcp_handshake(app: &Router) -> String {
         let response = mcp_post(
             app,
@@ -243,9 +231,7 @@ pub(crate) mod test_support {
     }
 
     /// Fills each tool's required arguments with dummy values that only satisfy their types.
-    /// The authorization check runs after argument deserialization, so for this test's goal
-    /// (catching missing authorization checks) to hold, the arguments themselves must
-    /// already be well-formed.
+    /// The authorization check runs after argument deserialization, so for this test's goal (catching missing authorization checks) to hold, the arguments themselves must already be well-formed.
     pub fn dummy_arguments_for_tool(name: &str) -> serde_json::Value {
         const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
         match name {
@@ -377,8 +363,7 @@ pub(crate) mod test_support {
         (task_id, project_id)
     }
 
-    /// Issues an API key attributed to `user_id`, scoped to `role`'s max scope: exactly what
-    /// `/auth/login` would hand out for that role.
+    /// Issues an API key attributed to `user_id`, scoped to `role`'s max scope: exactly what `/auth/login` would hand out for that role.
     pub async fn issue_key_for(
         pool: &PgPool,
         tenant_id: Uuid,
@@ -398,8 +383,7 @@ pub(crate) mod test_support {
     }
 }
 
-/// Starts a graceful shutdown on Ctrl-C (all platforms) or SIGTERM (Unix only,
-/// the standard stop signal from container orchestrators).
+/// Starts a graceful shutdown on Ctrl-C (all platforms) or SIGTERM (Unix only, the standard stop signal from container orchestrators).
 pub async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
@@ -425,28 +409,21 @@ pub async fn shutdown_signal() {
     tracing::info!("shutdown signal received, draining connections");
 }
 
-/// The exit code a binary uses when it stops because its configuration is absent or unusable,
-/// rather than because something it depends on is not ready yet.
+/// The exit code a binary uses when it stops because its configuration is absent or unusable, rather than because something it depends on is not ready yet.
 ///
-/// `EX_CONFIG` from `sysexits.h`. The units set `RestartPreventExitStatus=78`, which is the
-/// whole point of having a distinct code: an unconfigured start is not a fault that waiting
-/// fixes, so systemd must stop rather than retry every five seconds forever. Anything else
-/// still exits 1 and keeps its retry: a database that has not finished starting is exactly
-/// the case `Restart=on-failure` exists for.
+/// `EX_CONFIG` from `sysexits.h`.
+/// The units set `RestartPreventExitStatus=78`, which is the whole point of having a distinct code: an unconfigured start is not a fault that waiting fixes, so systemd must stop rather than retry every five seconds forever.
+/// Anything else still exits 1 and keeps its retry: a database that has not finished starting is exactly the case `Restart=on-failure` exists for.
 ///
-/// Measured before this existed: an unconfigured `enable --now` restarted 15 times in 45
-/// seconds, and `systemctl is-failed` answered `activating` throughout, so nothing watching
-/// unit state could ever see it.
+/// Measured before this existed: an unconfigured `enable --now` restarted 15 times in 45 seconds, and `systemctl is-failed` answered `activating` throughout, so nothing watching unit state could ever see it.
 pub const EXIT_CONFIG: i32 = 78;
 
 /// `DATABASE_URL`, or an error an operator can act on.
 ///
-/// The obvious `.expect("DATABASE_URL must be set")` prints a Rust panic naming a source file,
-/// which is the wrong audience: most people meet this message after installing a package, having
-/// never seen the source. This names the file the package actually puts the setting in.
+/// The obvious `.expect("DATABASE_URL must be set")` prints a Rust panic naming a source file, which is the wrong audience: most people meet this message after installing a package, having never seen the source.
+/// This names the file the package actually puts the setting in.
 ///
-/// Callers that are a `main` should report this through [`exit_with_config_code`] so the
-/// process carries [`EXIT_CONFIG`] rather than a bare 1.
+/// Callers that are a `main` should report this through [`exit_with_config_code`] so the process carries [`EXIT_CONFIG`] rather than a bare 1.
 pub fn database_url_from_env() -> Result<String> {
     non_empty_env("DATABASE_URL").ok_or_else(|| {
         anyhow::anyhow!(
@@ -463,20 +440,17 @@ pub fn database_url_from_env() -> Result<String> {
 
 /// Prints `error` the way `fn main() -> Result<()>` would and exits with [`EXIT_CONFIG`].
 ///
-/// Returning the `Err` from `main` prints the same text but always exits 1, which is
-/// indistinguishable from a database that is not up yet. The two want opposite handling
-/// from systemd, and this keeps the message identical and changes only the code.
+/// Returning the `Err` from `main` prints the same text but always exits 1, which is indistinguishable from a database that is not up yet.
+/// The two want opposite handling from systemd, and this keeps the message identical and changes only the code.
 ///
-/// Returns `T` rather than `!` only so it can be passed straight to `unwrap_or_else`, which
-/// needs the closure's return type to match the `Ok` type; it never actually returns.
+/// Returns `T` rather than `!` only so it can be passed straight to `unwrap_or_else`, which needs the closure's return type to match the `Ok` type; it never actually returns.
 pub fn exit_with_config_code<T>(error: anyhow::Error) -> T {
     eprintln!("Error: {error:?}");
     std::process::exit(EXIT_CONFIG)
 }
 
 /// Reads an environment variable, treating both "unset" and "set to an empty string" as absent.
-/// `env::var(...).ok()` alone would treat `FOO=` (set but empty) as present, which for a bind
-/// address means handing `TcpListener::bind` an empty string and aborting startup.
+/// `env::var(...).ok()` alone would treat `FOO=` (set but empty) as present, which for a bind address means handing `TcpListener::bind` an empty string and aborting startup.
 pub fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|s| !s.is_empty())
 }
@@ -486,14 +460,13 @@ pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
 
 /// `YORISHIRO_BIND`, defaulting to [`DEFAULT_BIND_ADDR`].
 ///
-/// Here rather than in `ee/` because both binaries need it and neither edition owns the idea of
-/// a listen address. `ee/` re-exports it.
+/// Here rather than in `ee/` because both binaries need it and neither edition owns the idea of a listen address.
+/// `ee/` re-exports it.
 pub fn bind_addr_from_env() -> String {
     bind_addr_or_default(non_empty_env("YORISHIRO_BIND").as_deref())
 }
 
-/// The pure fold [`bind_addr_from_env`] wraps, split out so it is testable without touching the
-/// process environment: `None` and `Some("")` both fall back to [`DEFAULT_BIND_ADDR`].
+/// The pure fold [`bind_addr_from_env`] wraps, split out so it is testable without touching the process environment: `None` and `Some("")` both fall back to [`DEFAULT_BIND_ADDR`].
 pub fn bind_addr_or_default(raw: Option<&str>) -> String {
     raw.filter(|s| !s.is_empty())
         .unwrap_or(DEFAULT_BIND_ADDR)
@@ -502,10 +475,7 @@ pub fn bind_addr_or_default(raw: Option<&str>) -> String {
 
 /// The model name this deployment is configured for, for stamping onto new workspaces.
 ///
-/// Read from the environment rather than the provider: `EmbeddingProvider` exposes
-/// `dimensions()` because callers need it, and adding a `model()` for one caller would put a
-/// naming question ("what does a local ONNX file call itself?") into a trait every downstream
-/// implementation would have to answer.
+/// Read from the environment rather than the provider: `EmbeddingProvider` exposes `dimensions()` because callers need it, and adding a `model()` for one caller would put a naming question ("what does a local ONNX file call itself?") into a trait every downstream implementation would have to answer.
 pub fn embedding_model_name() -> String {
     match std::env::var("YORISHIRO_EMBEDDING_PROVIDER")
         .unwrap_or_else(|_| "local".into())
@@ -517,13 +487,9 @@ pub fn embedding_model_name() -> String {
     }
 }
 
-/// Builds the embeddings provider from environment variables. `YORISHIRO_EMBEDDING_PROVIDER`
-/// switches between `local` (a local ONNX model, the default: needs no external service or
-/// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
-/// operators already running something like Ollama/LM Studio). The `entities.embedding`
-/// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
-/// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024: the
-/// width of the default model, multilingual-e5-large).
+/// Builds the embeddings provider from environment variables.
+/// `YORISHIRO_EMBEDDING_PROVIDER` switches between `local` (a local ONNX model, the default: needs no external service or API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for operators already running something like Ollama/LM Studio).
+/// The `entities.embedding` column is `vector` (dimensionless), so any model works; all vectors in a deployment must share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024: the width of the default model, multilingual-e5-large).
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "1024".into())
@@ -562,14 +528,12 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
                 .unwrap_or_else(|_| "models/model.onnx".into());
             let tokenizer_path = std::env::var("YORISHIRO_ONNX_TOKENIZER_PATH")
                 .unwrap_or_else(|_| "models/tokenizer.json".into());
-            // Rejected rather than defaulted on an unknown value: reading a model with the
-            // wrong pooling does not fail, it just returns worse vectors.
+            // Rejected rather than defaulted on an unknown value: reading a model with the wrong pooling does not fail, it just returns worse vectors.
             let pooling = match std::env::var("YORISHIRO_ONNX_POOLING") {
                 Ok(value) => Pooling::parse(&value)?,
                 Err(_) => Pooling::default(),
             };
-            // Empty is treated as unset: an operator clearing the variable means "no prefix",
-            // not "prefix with nothing".
+            // Empty is treated as unset: an operator clearing the variable means "no prefix", not "prefix with nothing".
             let query_instruction = std::env::var("YORISHIRO_ONNX_QUERY_INSTRUCTION")
                 .ok()
                 .filter(|value| !value.trim().is_empty());

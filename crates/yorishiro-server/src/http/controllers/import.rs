@@ -5,13 +5,10 @@ use yorishiro_core::repositories::import::{self, ImportResult};
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, SchemaScope};
 
-/// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one
-/// `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line. Requires
-/// `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is
-/// itself a schema-scope-only operation elsewhere in the API.
+/// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
 ///
-/// Runs as a single transaction: either every record in the body is applied, or (on the
-/// first error) none of it is and the request fails with that error.
+/// Runs as a single transaction: either every record in the body is applied, or (on the first error) none of it is and the request fails with that error.
 #[utoipa::path(
     post,
     path = "/api/import.jsonl",

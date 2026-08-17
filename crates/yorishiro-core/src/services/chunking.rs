@@ -16,28 +16,26 @@
 
 use crate::error::YorishiroError;
 
-/// The window §7.5 asks for. Small enough that losing one is cheap, large enough that the
-/// per-chunk overhead is not the cost.
+/// The window §7.5 asks for.
+/// Small enough that losing one is cheap, large enough that the per-chunk overhead is not the cost.
 pub const MIN_CHUNK_TOKENS: usize = 1_000;
 pub const MAX_CHUNK_TOKENS: usize = 2_000;
 
 /// One piece of a job, identified so an acknowledgement can name it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chunk {
-    /// Position in the original sequence. What an acknowledgement refers to, and what tells a
-    /// reader which piece is missing.
+    /// Position in the original sequence.
+    /// What an acknowledgement refers to, and what tells a reader which piece is missing.
     pub index: usize,
     pub text: String,
 }
 
 /// Splits text into chunks of roughly `target` tokens, breaking at whitespace.
 ///
-/// Token counts are approximated by whitespace-separated words. The exact figure belongs to the
-/// tokenizer of whichever model will embed this, which this module does not know, and the
-/// window is a range precisely because it does not have to be exact.
+/// Token counts are approximated by whitespace-separated words.
+/// The exact figure belongs to the tokenizer of whichever model will embed this, which this module does not know, and the window is a range precisely because it does not have to be exact.
 ///
-/// Never splits mid-word: a chunk ending halfway through one would embed a fragment that means
-/// something else, and the boundary is arbitrary anyway.
+/// Never splits mid-word: a chunk ending halfway through one would embed a fragment that means something else, and the boundary is arbitrary anyway.
 pub fn split(text: &str, target: usize) -> Result<Vec<Chunk>, YorishiroError> {
     if target == 0 {
         return Err(YorishiroError::ValidationFailed {
@@ -64,9 +62,7 @@ pub fn split(text: &str, target: usize) -> Result<Vec<Chunk>, YorishiroError> {
 
 /// Which chunks of a job have been acknowledged.
 ///
-/// Deliberately not a count: a worker that acknowledges the same chunk twice must not make the
-/// job look finished, and a reader asking "what is missing" wants the indices, not the
-/// arithmetic.
+/// Deliberately not a count: a worker that acknowledges the same chunk twice must not make the job look finished, and a reader asking "what is missing" wants the indices, not the arithmetic.
 #[derive(Debug)]
 pub struct ChunkProgress {
     total: usize,
@@ -81,16 +77,16 @@ impl ChunkProgress {
         }
     }
 
-    /// Records that a chunk completed. Idempotent: a redelivered chunk acknowledged twice is
-    /// the normal case for an at-least-once queue, not an error.
+    /// Records that a chunk completed.
+    /// Idempotent: a redelivered chunk acknowledged twice is the normal case for an at-least-once queue, not an error.
     pub fn acknowledge(&mut self, index: usize) {
         if index < self.total {
             self.acknowledged.insert(index);
         }
     }
 
-    /// The chunks nobody has acknowledged. What a distributed driver returns to the pool once
-    /// its visibility timeout expires.
+    /// The chunks nobody has acknowledged.
+    /// What a distributed driver returns to the pool once its visibility timeout expires.
     pub fn outstanding(&self) -> Vec<usize> {
         (0..self.total)
             .filter(|i| !self.acknowledged.contains(i))

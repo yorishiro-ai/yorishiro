@@ -1,7 +1,7 @@
 use super::*;
 
-/// The library tool fetches one saved template by id. A malformed id must fail here rather than
-/// reaching the repository layer.
+/// The library tool fetches one saved template by id.
+/// A malformed id must fail here rather than reaching the repository layer.
 #[test]
 fn fetching_an_item_requires_a_valid_uuid() {
     assert!(serde_json::from_value::<GetTemplateLibraryItemArgs>(serde_json::json!({})).is_err());

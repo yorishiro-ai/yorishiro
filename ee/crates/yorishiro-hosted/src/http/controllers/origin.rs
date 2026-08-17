@@ -30,8 +30,8 @@ use crate::services::merge::MergePlan;
 use crate::services::{authz, origin};
 use crate::state::HostedState;
 
-/// The community edition's extractors enforce a minimum scope by type. Without them, the check
-/// is written out: the ordering on `ApiKeyScope` is the same one they use.
+/// The community edition's extractors enforce a minimum scope by type.
+/// Without them, the check is written out: the ordering on `ApiKeyScope` is the same one they use.
 fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope < needed {
         return Err(YorishiroError::ScopeInsufficient {
@@ -42,8 +42,7 @@ fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), Yorishiro
     Ok(())
 }
 
-/// The response of a merge, matching the community edition's `CreateSchemaResponse` shape so a
-/// client written against that response shape needs no change.
+/// The response of a merge, matching the community edition's `CreateSchemaResponse` shape so a client written against that response shape needs no change.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MergeResponse {
     pub schema: SchemaRecord,
@@ -98,8 +97,7 @@ pub async fn merge_preview(
     let ctx = authz::authenticate_workspace(&state, &headers).await?;
     require_scope(&ctx, ApiKeyScope::Read)?;
 
-    // The schema is workspace content and comes off the RLS-scoped connection; the template is
-    // control-plane data the request role holds no grant on, hence both.
+    // The schema is workspace content and comes off the RLS-scoped connection; the template is control-plane data the request role holds no grant on, hence both.
     let mut conn = state
         .tenant_db
         .acquire_for_workspace(ctx.tenant_id, ctx.workspace_id)

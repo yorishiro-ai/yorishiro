@@ -40,9 +40,8 @@ async fn seed_entity(pool: &PgPool) -> (Uuid, Uuid) {
     (workspace_id, record.id)
 }
 
-/// A proposal is not a write. Recording one must leave the entity exactly as it was: the
-/// whole reason mode B holds its output here is that a guess written straight into an entity
-/// becomes indistinguishable from a value someone entered.
+/// A proposal is not a write.
+/// Recording one must leave the entity exactly as it was: the whole reason mode B holds its output here is that a guess written straight into an entity becomes indistinguishable from a value someone entered.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn recording_a_proposal_does_not_touch_the_entity(pool: PgPool) {
     let (workspace_id, entity_id) = seed_entity(&pool).await;
@@ -73,8 +72,7 @@ async fn recording_a_proposal_does_not_touch_the_entity(pool: PgPool) {
     assert_eq!(proposals[0].proposed, serde_json::json!("fiction"));
 }
 
-/// Confirming writes the reviewed values, and `undo_job` reverses the whole thing: the point
-/// of reusing the snapshot machinery rather than adding a second rollback path.
+/// Confirming writes the reviewed values, and `undo_job` reverses the whole thing: the point of reusing the snapshot machinery rather than adding a second rollback path.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn confirming_applies_the_proposals_and_undo_reverses_them(pool: PgPool) {
     let (workspace_id, entity_id) = seed_entity(&pool).await;
@@ -114,8 +112,8 @@ async fn confirming_applies_the_proposals_and_undo_reverses_them(pool: PgPool) {
     );
 }
 
-/// Confirming clears the job. Leaving the proposals would let the same job be confirmed again
-/// after an undo, writing the same guesses back over what the undo restored.
+/// Confirming clears the job.
+/// Leaving the proposals would let the same job be confirmed again after an undo, writing the same guesses back over what the undo restored.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_job_cannot_be_confirmed_twice(pool: PgPool) {
     let (workspace_id, entity_id) = seed_entity(&pool).await;
@@ -140,9 +138,8 @@ async fn a_job_cannot_be_confirmed_twice(pool: PgPool) {
     );
 }
 
-/// A guess the schema rejects is skipped, not fatal. The rest of a batch someone reviewed
-/// should still land: discarding all of it because one field read badly would push a reviewer
-/// toward accepting everything.
+/// A guess the schema rejects is skipped, not fatal.
+/// The rest of a batch someone reviewed should still land: discarding all of it because one field read badly would push a reviewer toward accepting everything.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_proposal_the_schema_rejects_is_skipped(pool: PgPool) {
     let (workspace_id, entity_id) = seed_entity(&pool).await;
@@ -171,8 +168,7 @@ async fn a_proposal_the_schema_rejects_is_skipped(pool: PgPool) {
     assert_eq!(after.data["title"], serde_json::json!("a note"));
 }
 
-/// Re-running inference for a job replaces the earlier answer rather than adding a second one,
-/// which would leave the choice between them to row order.
+/// Re-running inference for a job replaces the earlier answer rather than adding a second one, which would leave the choice between them to row order.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn recording_the_same_field_twice_replaces_the_proposal(pool: PgPool) {
     let (workspace_id, entity_id) = seed_entity(&pool).await;

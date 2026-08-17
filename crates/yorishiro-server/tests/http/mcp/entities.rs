@@ -1,8 +1,6 @@
 use super::*;
 
-/// MCP tool arguments are deserialized straight from what an LLM client sends, so the optional
-/// fields have to actually be optional: a client omitting `filter`/`limit`/`offset` is the
-/// common case, and a required-by-accident field would fail every such call.
+/// MCP tool arguments are deserialized straight from what an LLM client sends, so the optional fields have to actually be optional: a client omitting `filter`/`limit`/`offset` is the common case, and a required-by-accident field would fail every such call.
 #[test]
 fn listing_arguments_accept_an_empty_object() {
     let args: ListEntitiesArgs = serde_json::from_value(serde_json::json!({})).unwrap();
@@ -13,8 +11,7 @@ fn listing_arguments_accept_an_empty_object() {
     assert!(args.offset.is_none());
 }
 
-/// Conversely the create arguments are all required: an entity with no schema or type cannot be
-/// placed, so a client omitting them must get a deserialization error rather than a default.
+/// Conversely the create arguments are all required: an entity with no schema or type cannot be placed, so a client omitting them must get a deserialization error rather than a default.
 #[test]
 fn create_arguments_require_schema_type_and_body() {
     assert!(serde_json::from_value::<CreateEntityArgs>(serde_json::json!({})).is_err());
@@ -35,8 +32,7 @@ fn create_arguments_require_schema_type_and_body() {
     assert_eq!(args.data["title"], "write tests");
 }
 
-/// Ids arrive as strings over JSON and must parse as UUIDs: a malformed id is a client error,
-/// not something to pass through to the query layer.
+/// Ids arrive as strings over JSON and must parse as UUIDs: a malformed id is a client error, not something to pass through to the query layer.
 #[test]
 fn id_arguments_reject_a_malformed_uuid() {
     assert!(

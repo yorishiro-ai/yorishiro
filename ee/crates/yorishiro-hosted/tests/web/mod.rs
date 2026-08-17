@@ -12,10 +12,9 @@ async fn get(router: Router, uri: &str) -> Response {
         .unwrap()
 }
 
-/// The build gate. `ee/web/dist` is produced by `pnpm run build` and is not committed, so a
-/// checkout that skipped that step embeds only `.gitkeep`, and every other test here still
-/// passes, because an empty embed serves 404s that look like ordinary misses. This is the one
-/// that fails, rather than shipping a binary whose UI is a blank 404.
+/// The build gate.
+/// `ee/web/dist` is produced by `pnpm run build` and is not committed, so a checkout that skipped that step embeds only `.gitkeep`, and every other test here still passes, because an empty embed serves 404s that look like ordinary misses.
+/// This is the one that fails, rather than shipping a binary whose UI is a blank 404.
 #[test]
 fn embeds_a_built_spa() {
     assert!(
@@ -39,9 +38,8 @@ async fn serves_index_html_at_root_from_embedded_assets() {
     assert!(String::from_utf8(body.to_vec()).unwrap().contains("<html"));
 }
 
-/// rsbuild hashes its output filenames, so no asset can be named literally. The name is taken
-/// from the embed itself; what is asserted is that a real asset is served with the content type
-/// its extension implies, not that a particular file exists.
+/// rsbuild hashes its output filenames, so no asset can be named literally.
+/// The name is taken from the embed itself; what is asserted is that a real asset is served with the content type its extension implies, not that a particular file exists.
 #[tokio::test]
 async fn serves_a_named_asset_with_the_right_content_type() {
     let js = Assets::iter()

@@ -47,8 +47,7 @@ pub trait Authenticator: Send + Sync {
     ) -> Result<AuthContext, YorishiroError>;
 }
 
-/// This crate's own rule: a key is bound to exactly one workspace, recorded on the key itself,
-/// and the request's headers do not affect which one it resolves to.
+/// This crate's own rule: a key is bound to exactly one workspace, recorded on the key itself, and the request's headers do not affect which one it resolves to.
 pub struct DefaultAuthenticator;
 
 #[async_trait]

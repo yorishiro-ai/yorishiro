@@ -26,9 +26,8 @@ use crate::repositories::maintenance::{self, MaintenanceMode};
 
 /// Written as the reason when this guard trips, and matched when deciding whether to lift.
 ///
-/// The distinction matters: an operator who typed `admin maintenance read-only` before a restore
-/// must not have it undone because the database happened to look quiet. Only a state this guard
-/// wrote is one it may clear.
+/// The distinction matters: an operator who typed `admin maintenance read-only` before a restore must not have it undone because the database happened to look quiet.
+/// Only a state this guard wrote is one it may clear.
 pub const AUTO_REASON: &str = "database load (automatic)";
 
 pub struct LoadGuardConfig {
@@ -41,12 +40,10 @@ pub struct LoadGuardConfig {
 }
 
 impl LoadGuardConfig {
-    /// `YORISHIRO_DB_LOAD_THRESHOLD` (default 0 = disabled), `YORISHIRO_DB_LOAD_SUSTAIN_SECS` (default 30),
-    /// `YORISHIRO_DB_LOAD_POLL_SECS` (default 5).
+    /// `YORISHIRO_DB_LOAD_THRESHOLD` (default 0 = disabled), `YORISHIRO_DB_LOAD_SUSTAIN_SECS` (default 30), `YORISHIRO_DB_LOAD_POLL_SECS` (default 5).
     ///
-    /// Off by default. Switching a deployment to read-only without being asked is a large thing
-    /// to do on a default, and the right threshold depends on `max_connections`, which this
-    /// crate does not choose.
+    /// Off by default.
+    /// Switching a deployment to read-only without being asked is a large thing to do on a default, and the right threshold depends on `max_connections`, which this crate does not choose.
     pub fn from_env() -> Option<Self> {
         let threshold: i64 = std::env::var("YORISHIRO_DB_LOAD_THRESHOLD")
             .ok()
@@ -63,10 +60,8 @@ impl LoadGuardConfig {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(30),
             ),
-            // `.filter(|v| *v > 0)` rather than `unwrap_or` alone: `tokio::time::interval`
-            // panics on a zero period, and `0` is what an operator writes when they mean "off".
-            // Falling back to the default keeps the guard running at 5s instead of taking the
-            // process down: turning it off is what `YORISHIRO_DB_LOAD_THRESHOLD=0` is for.
+            // `.filter(|v| *v > 0)` rather than `unwrap_or` alone: `tokio::time::interval` panics on a zero period, and `0` is what an operator writes when they mean "off".
+            // Falling back to the default keeps the guard running at 5s instead of taking the process down: turning it off is what `YORISHIRO_DB_LOAD_THRESHOLD=0` is for.
             poll: Duration::from_secs(
                 std::env::var("YORISHIRO_DB_LOAD_POLL_SECS")
                     .ok()
@@ -91,7 +86,8 @@ pub async fn active_connections(pool: &PgPool) -> Result<i64, YorishiroError> {
     .internal()
 }
 
-/// One decision. Separated from the loop so the rule is testable without waiting on a clock.
+/// One decision.
+/// Separated from the loop so the rule is testable without waiting on a clock.
 ///
 /// Returns the mode to switch to, or `None` to leave things alone.
 pub fn decide(
@@ -110,12 +106,14 @@ pub fn decide(
         {
             Some(MaintenanceMode::Off)
         }
-        // A full lock, or a read-only somebody else asked for. Not ours to touch.
+        // A full lock, or a read-only somebody else asked for.
+        // Not ours to touch.
         _ => None,
     }
 }
 
-/// Polls until the process ends. Spawned at startup when `LoadGuardConfig::from_env` yields one.
+/// Polls until the process ends.
+/// Spawned at startup when `LoadGuardConfig::from_env` yields one.
 pub async fn run(pool: PgPool, config: LoadGuardConfig) {
     let mut ticker = interval(config.poll);
     let mut busy_for = Duration::ZERO;
@@ -126,8 +124,7 @@ pub async fn run(pool: PgPool, config: LoadGuardConfig) {
 
         let active = match active_connections(&pool).await {
             Ok(n) => n,
-            // A failure to measure is not a reason to change anything: the database being
-            // unreachable is exactly when flipping modes would help least.
+            // A failure to measure is not a reason to change anything: the database being unreachable is exactly when flipping modes would help least.
             Err(err) => {
                 tracing::warn!(error = %err, "db load guard could not read pg_stat_activity");
                 continue;
@@ -169,8 +166,7 @@ pub async fn run(pool: PgPool, config: LoadGuardConfig) {
         };
 
         let reason = (next == MaintenanceMode::ReadOnly).then(|| AUTO_REASON.to_string());
-        // Keeps whatever Retry-After the deployment already advertises: this guard decides
-        // *when* to refuse, not how long to tell a caller to wait.
+        // Keeps whatever Retry-After the deployment already advertises: this guard decides *when* to refuse, not how long to tell a caller to wait.
         match maintenance::set(&pool, next, state.retry_after, reason).await {
             Ok(_) => {
                 tracing::warn!(

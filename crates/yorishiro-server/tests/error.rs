@@ -3,10 +3,8 @@ use yorishiro_core::YorishiroError;
 
 use super::*;
 
-/// `ApiError` exists only to bridge `YorishiroError` into axum, and the rule is that it
-/// delegates to `into_http_parts()` rather than carrying a second `match`. If someone
-/// reintroduces a local mapping, these statuses drift from core's, so they are pinned against
-/// core's own answer rather than against literals.
+/// `ApiError` exists only to bridge `YorishiroError` into axum, and the rule is that it delegates to `into_http_parts()` rather than carrying a second `match`.
+/// If someone reintroduces a local mapping, these statuses drift from core's, so they are pinned against core's own answer rather than against literals.
 #[tokio::test]
 async fn the_status_always_matches_what_core_maps_the_error_to() {
     let cases = [
@@ -28,8 +26,7 @@ async fn the_status_always_matches_what_core_maps_the_error_to() {
     }
 }
 
-/// The wrapper must not change the body either: a consumer parsing `error.message` sees
-/// whatever core produced.
+/// The wrapper must not change the body either: a consumer parsing `error.message` sees whatever core produced.
 #[tokio::test]
 async fn the_body_is_core_s_body_verbatim() {
     let response = ApiError(YorishiroError::not_found("schema 'x' was not found")).into_response();
@@ -42,8 +39,7 @@ async fn the_body_is_core_s_body_verbatim() {
     assert_eq!(body["error"]["message"], "schema 'x' was not found");
 }
 
-/// `From<YorishiroError>` is what makes `?` work in every handler; without it each call site
-/// would need an explicit map_err.
+/// `From<YorishiroError>` is what makes `?` work in every handler; without it each call site would need an explicit map_err.
 #[test]
 fn a_core_error_converts_with_the_question_mark_operator() {
     fn handler() -> Result<(), ApiError> {
@@ -54,8 +50,7 @@ fn a_core_error_converts_with_the_question_mark_operator() {
     assert!(handler().is_err());
 }
 
-/// Helper: ask core directly what status an error maps to, so the assertions above compare the
-/// wrapper against the single source of truth instead of a copied number.
+/// Helper: ask core directly what status an error maps to, so the assertions above compare the wrapper against the single source of truth instead of a copied number.
 trait StatusProbe {
     fn clone_status(&self) -> u16;
 }

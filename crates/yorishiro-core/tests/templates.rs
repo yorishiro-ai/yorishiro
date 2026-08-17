@@ -23,9 +23,7 @@ fn reports_not_found_for_an_unknown_template_id() {
 }
 
 /// Every built-in template must pass the same validator a user-submitted schema goes through.
-/// `templates.rs` itself only parses the embedded JSON, so without this a template that parses
-/// but violates a metaschema rule (a relation pointing at an undeclared entity type, a `format`
-/// on a non-string field) would ship and only fail when someone tried to register it.
+/// `templates.rs` itself only parses the embedded JSON, so without this a template that parses but violates a metaschema rule (a relation pointing at an undeclared entity type, a `format` on a non-string field) would ship and only fail when someone tried to register it.
 #[test]
 fn every_built_in_template_passes_metaschema_validation() {
     let templates = list_templates();

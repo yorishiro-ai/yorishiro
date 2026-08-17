@@ -15,14 +15,9 @@ enum Tenants {
     CreatedAt,
 }
 
-/// Creates a tenant, enforcing the system-wide tenant cap from `YORISHIRO_MAX_TENANTS` (`0` or
-/// unset means unlimited). This is a deployment-wide limit rather than a per-tenant column, since
-/// it bounds a deployment to a single tenant without needing a settings table: `yorishiro-server`
-/// defaults this to `1` (single-tenant) and deployments that want multiple tenants set it to `0`
-/// or a higher count. It is enforced only in application code (there is no anti-tampering against
-/// an operator who edits the source or the env var directly), like the rest of this module's
-/// caps, it exists for product consistency, not as a security boundary against whoever controls
-/// the deployment.
+/// Creates a tenant, enforcing the system-wide tenant cap from `YORISHIRO_MAX_TENANTS` (`0` or unset means unlimited).
+/// This is a deployment-wide limit rather than a per-tenant column, since it bounds a deployment to a single tenant without needing a settings table: `yorishiro-server` defaults this to `1` (single-tenant) and deployments that want multiple tenants set it to `0` or a higher count.
+/// It is enforced only in application code (there is no anti-tampering against an operator who edits the source or the env var directly), like the rest of this module's caps, it exists for product consistency, not as a security boundary against whoever controls the deployment.
 pub async fn create_tenant(
     pool: &PgPool,
     name: &str,
@@ -31,9 +26,8 @@ pub async fn create_tenant(
     create_tenant_with_cap(pool, name, max_workspaces, max_tenants_from_env()?).await
 }
 
-/// Reads and parses `YORISHIRO_MAX_TENANTS`. Unset or `0` means unlimited; a negative or
-/// non-integer value is a misconfiguration and fails loudly rather than silently falling back to
-/// unlimited.
+/// Reads and parses `YORISHIRO_MAX_TENANTS`.
+/// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and fails loudly rather than silently falling back to unlimited.
 pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
     match std::env::var("YORISHIRO_MAX_TENANTS") {
         Ok(raw) => {
@@ -54,12 +48,9 @@ pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
     }
 }
 
-/// Cap-checking logic factored out of `create_tenant` so tests can exercise it without mutating
-/// the process-wide `YORISHIRO_MAX_TENANTS` env var (which would race against other tests running
-/// concurrently in the same test binary).
+/// Cap-checking logic factored out of `create_tenant` so tests can exercise it without mutating the process-wide `YORISHIRO_MAX_TENANTS` env var (which would race against other tests running concurrently in the same test binary).
 ///
-/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
-/// it directly; `#[doc(hidden)]` keeps it out of the public API docs.
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call it directly; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 pub async fn create_tenant_with_cap(
     pool: &PgPool,
@@ -108,10 +99,8 @@ fn tenant_columns() -> [Tenants; 4] {
     ]
 }
 
-/// Takes `&mut PgConnection` (rather than `&PgPool`, like most of this module) so a caller can
-/// compose it into a larger transaction: e.g. `add_member` calls this as part of its own
-/// atomic user-creation-plus-membership flow. Pass `&mut pool.acquire().await?` for a
-/// standalone call.
+/// Takes `&mut PgConnection` (rather than `&PgPool`, like most of this module) so a caller can compose it into a larger transaction: e.g. `add_member` calls this as part of its own atomic user-creation-plus-membership flow.
+/// Pass `&mut pool.acquire().await?` for a standalone call.
 pub async fn get_tenant(
     conn: &mut PgConnection,
     tenant_id: Uuid,
@@ -142,10 +131,9 @@ pub async fn list_tenants(pool: &PgPool) -> Result<Vec<TenantRecord>, YorishiroE
         .internal()
 }
 
-/// Updates a tenant's workspace cap. `None` means unlimited. Existing workspaces keep whatever
-/// `max_entities` they were created with: only newly created workspaces are affected by a
-/// change here, since retroactively shrinking a cap could put an existing workspace over its own
-/// limit.
+/// Updates a tenant's workspace cap.
+/// `None` means unlimited.
+/// Existing workspaces keep whatever `max_entities` they were created with: only newly created workspaces are affected by a change here, since retroactively shrinking a cap could put an existing workspace over its own limit.
 pub async fn set_tenant_max_workspaces(
     pool: &PgPool,
     tenant_id: Uuid,

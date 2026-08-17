@@ -33,8 +33,7 @@ pub struct TenantUsage {
 }
 
 /// Builds and runs a `SELECT COUNT(*) ...` statement, returning the single count it yields.
-/// Shared by every counter `compute_tenant_usage` needs: each caller only differs in the
-/// `FROM`/`JOIN`/`WHERE` clauses of `query`, and `COUNT(*)` always yields exactly one row.
+/// Shared by every counter `compute_tenant_usage` needs: each caller only differs in the `FROM`/`JOIN`/`WHERE` clauses of `query`, and `COUNT(*)` always yields exactly one row.
 async fn fetch_count(pool: &PgPool, query: SelectStatement) -> Result<i64, YorishiroError> {
     let (sql, values) = query.build_sqlx(PostgresQueryBuilder);
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
@@ -44,9 +43,8 @@ async fn fetch_count(pool: &PgPool, query: SelectStatement) -> Result<i64, Yoris
     Ok(count)
 }
 
-/// Computes usage counters for invoicing/dashboard display. Runs over the admin/migration-role
-/// pool (the same one `identity_pool` uses), since it aggregates across every workspace in a
-/// tenant and `content.entities` only has a workspace-level RLS policy, not a tenant-wide one.
+/// Computes usage counters for invoicing/dashboard display.
+/// Runs over the admin/migration-role pool (the same one `identity_pool` uses), since it aggregates across every workspace in a tenant and `content.entities` only has a workspace-level RLS policy, not a tenant-wide one.
 pub async fn compute_tenant_usage(
     pool: &PgPool,
     tenant_id: Uuid,

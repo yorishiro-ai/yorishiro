@@ -1,13 +1,10 @@
 //! Calling an LLM to propose values for fields an entity is missing.
 //!
-//! The one place this crate makes an outbound LLM call. Everything else that reaches a model
-//! goes through [`crate::services::embedding`], which produces vectors rather than text.
+//! The one place this crate makes an outbound LLM call.
+//! Everything else that reaches a model goes through [`crate::services::embedding`], which produces vectors rather than text.
 //!
-//! The credentials belong to a workspace, not to the deployment: this product does not pay for
-//! inference (requirements §1.3), so a workspace that wants inferred values brings its own key.
-//! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back
-//! to `default` values: a caller who asked for inference and received defaults would have no
-//! way to tell that nothing was inferred.
+//! The credentials belong to a workspace, not to the deployment: this product does not pay for inference (requirements §1.3), so a workspace that wants inferred values brings its own key.
+//! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back to `default` values: a caller who asked for inference and received defaults would have no way to tell that nothing was inferred.
 
 use std::time::Duration;
 
@@ -16,15 +13,12 @@ use serde_json::Value;
 
 use yorishiro_core::{ResultExt, YorishiroError};
 
-/// Longer than the embedding provider's 30s: a chat completion over several fields is a slower
-/// call than embedding one string, and the work is already asynchronous behind a job id, so a
-/// caller is not sitting on this.
+/// Longer than the embedding provider's 30s: a chat completion over several fields is a slower call than embedding one string, and the work is already asynchronous behind a job id, so a caller is not sitting on this.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// An OpenAI-compatible chat-completions endpoint, configured per workspace.
 ///
-/// The same shape [`crate::services::embedding::OpenAiCompatibleConfig`] takes, so a
-/// deployment pointing at Ollama or LM Studio configures both the same way.
+/// The same shape [`crate::services::embedding::OpenAiCompatibleConfig`] takes, so a deployment pointing at Ollama or LM Studio configures both the same way.
 #[derive(Clone)]
 pub struct InferenceConfig {
     /// Example: `https://api.openai.com/v1` (a trailing `/` is optional).
@@ -33,10 +27,8 @@ pub struct InferenceConfig {
     pub api_key: String,
 }
 
-/// Written out rather than derived, because a derived `Debug` prints `api_key` in clear text and
-/// anything that formats this (a tracing field, an error context, one `dbg!` left behind)
-/// would put a workspace's credential into a log. The endpoint and model still show, since those
-/// are what a reader is usually trying to identify.
+/// Written out rather than derived, because a derived `Debug` prints `api_key` in clear text and anything that formats this (a tracing field, an error context, one `dbg!` left behind) would put a workspace's credential into a log.
+/// The endpoint and model still show, since those are what a reader is usually trying to identify.
 impl std::fmt::Debug for InferenceConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InferenceConfig")
@@ -58,15 +50,13 @@ impl InferenceClient {
     pub fn new(config: InferenceConfig) -> Self {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
-            // No redirects. A workspace sets `base_url` freely, and this request carries both
-            // the entity's data and that workspace's bearer key. Following a 307 would re-send
-            // the body, headers included, to a host nobody configured. A chat-completions
-            // endpoint has no reason to redirect across hosts, so refusing costs nothing real
-            // and the error names the endpoint rather than hanging.
+            // No redirects.
+            // A workspace sets `base_url` freely, and this request carries both the entity's data and that workspace's bearer key.
+            // Following a 307 would re-send the body, headers included, to a host nobody configured.
+            // A chat-completions endpoint has no reason to redirect across hosts, so refusing costs nothing real and the error names the endpoint rather than hanging.
             //
-            // This does not make the destination safe: `base_url` itself is still unrestricted,
-            // which is a policy question about what a tenant may point the server at. See
-            // docs/api.md.
+            // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
+            // See docs/api.md.
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("reqwest client configuration is static and always valid");
@@ -83,8 +73,7 @@ impl InferenceClient {
     ///
     /// Returns only the fields the model answered with, and only those that were asked for:
     /// a model that invents a key would otherwise write a field the schema does not define.
-    /// A field the model declines to guess is absent from the result rather than null, so the
-    /// caller can tell "no proposal" from "proposed nothing".
+    /// A field the model declines to guess is absent from the result rather than null, so the caller can tell "no proposal" from "proposed nothing".
     pub async fn propose_fields(
         &self,
         entity_data: &Value,
@@ -110,9 +99,7 @@ impl InferenceClient {
                 role: "user",
                 content: &prompt,
             }],
-            // Deterministic: the same record should not produce a different proposal each run,
-            // or a caller comparing two runs cannot tell a model's uncertainty from a change in
-            // the data.
+            // Deterministic: the same record should not produce a different proposal each run, or a caller comparing two runs cannot tell a model's uncertainty from a change in the data.
             temperature: 0.0,
             response_format: ResponseFormat {
                 kind: "json_object",
@@ -130,9 +117,8 @@ impl InferenceClient {
 
         let status = response.status();
         if !status.is_success() {
-            // The body may quote the key back or carry provider-side detail; neither belongs in
-            // an error a tenant reads. The status is what tells an operator whether to fix the
-            // key (401), the model name (404), or wait (429).
+            // The body may quote the key back or carry provider-side detail; neither belongs in an error a tenant reads.
+            // The status is what tells an operator whether to fix the key (401), the model name (404), or wait (429).
             return Err(YorishiroError::ValidationFailed {
                 message: format!("the configured inference provider returned {status}"),
                 details: vec![],

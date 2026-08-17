@@ -6,8 +6,7 @@ use yorishiro_core::repositories::export;
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, ReadScope};
 
-/// Line-delimited JSON export of every schema, entity, and relation belonging to the
-/// tenant, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Line-delimited JSON export of every schema, entity, and relation belonging to the tenant, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 #[utoipa::path(
     get,
     path = "/api/export.jsonl",

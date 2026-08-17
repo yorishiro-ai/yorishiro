@@ -14,8 +14,7 @@ pub struct VersioningDiff {
 }
 
 /// Non-breaking: adding an optional field, description changes, adding enum values.
-/// Breaking: removing/renaming a field, changing its type, making it required,
-/// removing an entity_type, changing a relation_type.
+/// Breaking: removing/renaming a field, changing its type, making it required, removing an entity_type, changing a relation_type.
 pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> VersioningDiff {
     let mut reasons = Vec::new();
 
@@ -56,10 +55,9 @@ pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> Versionin
 
 /// Whether an upper bound got stricter: a lower ceiling, or a ceiling where there was none.
 ///
-/// Comparing the two `Option`s directly does not express this. `Option`'s ordering places `None`
-/// below every `Some`, so `Some(10) < None` is false, and adding a ceiling where there was none
-/// read as compatible; `None < Some(10)` is true, so *removing* one read as breaking. Both
-/// backwards.
+/// Comparing the two `Option`s directly does not express this.
+/// `Option`'s ordering places `None` below every `Some`, so `Some(10) < None` is false, and adding a ceiling where there was none read as compatible; `None < Some(10)` is true, so *removing* one read as breaking.
+/// Both backwards.
 fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
         // A ceiling where there was none: anything above it was valid a moment ago.
@@ -71,9 +69,8 @@ fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     }
 }
 
-/// The floor-side mirror of [`lowered_ceiling`]. A bare `new > old` happens to give these two
-/// cases the right answer, but only by luck of which way `None` sorts: spelling it out keeps
-/// the two sides symmetric and stops the next reader from having to recall that ordering.
+/// The floor-side mirror of [`lowered_ceiling`].
+/// A bare `new > old` happens to give these two cases the right answer, but only by luck of which way `None` sorts: spelling it out keeps the two sides symmetric and stops the next reader from having to recall that ordering.
 fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
         (None, Some(_)) => true,
@@ -83,9 +80,7 @@ fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     }
 }
 
-/// Compares two field maps under a common `path` prefix (e.g. `"task"` at the
-/// top level, `"task.address"` when recursing into a nested object), pushing
-/// human-readable breaking-change reasons into `reasons`.
+/// Compares two field maps under a common `path` prefix (e.g. `"task"` at the top level, `"task.address"` when recursing into a nested object), pushing human-readable breaking-change reasons into `reasons`.
 fn diff_fields(
     path: &str,
     old_fields: &BTreeMap<String, FieldDef>,
@@ -138,9 +133,8 @@ fn diff_fields(
             );
         }
 
-        // Removing the enum constraint entirely (Some -> None) is treated
-        // as a non-breaking widening. Only the case where the constraint
-        // remains but an existing value is no longer allowed is breaking.
+        // Removing the enum constraint entirely (Some -> None) is treated as a non-breaking widening.
+        // Only the case where the constraint remains but an existing value is no longer allowed is breaking.
         if let Some(old_enum) = &old_field.enum_values
             && let Some(new_enum) = &new_field.enum_values
         {
@@ -153,9 +147,7 @@ fn diff_fields(
             }
         }
 
-        // Narrowing a constraint (adding a new one, or making an existing
-        // one stricter) can invalidate data that was valid under the old
-        // schema → breaking.
+        // Narrowing a constraint (adding a new one, or making an existing one stricter) can invalidate data that was valid under the old schema → breaking.
         let fp = |attr: &str| format!("field '{path}.{field_name}' {attr}");
 
         if old_field.format.is_none() && new_field.format.is_some() {

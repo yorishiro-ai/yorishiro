@@ -1,7 +1,6 @@
 use super::*;
 
-/// An import that touched nothing must report zeros and no errors rather than, say, a default
-/// that looks like a partial success.
+/// An import that touched nothing must report zeros and no errors rather than, say, a default that looks like a partial success.
 #[test]
 fn a_default_result_reports_nothing_imported_and_no_errors() {
     let result = ImportResult::default();
@@ -12,8 +11,7 @@ fn a_default_result_reports_nothing_imported_and_no_errors() {
     assert!(result.errors.is_empty());
 }
 
-/// The counts are what a caller reports back to a user, so the serialised field names are part of
-/// the API and pinned here.
+/// The counts are what a caller reports back to a user, so the serialised field names are part of the API and pinned here.
 #[test]
 fn the_serialised_shape_names_each_counted_kind() {
     let result = ImportResult {

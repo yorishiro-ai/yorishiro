@@ -22,8 +22,7 @@ fn drops_to_read_only_only_after_the_load_is_sustained() {
     );
 }
 
-/// The distinction the whole design turns on: an operator who asked for read-only before a
-/// restore must not have it lifted because the database went quiet.
+/// The distinction the whole design turns on: an operator who asked for read-only before a restore must not have it lifted because the database went quiet.
 #[test]
 fn lifts_only_what_it_set_itself() {
     assert_eq!(
@@ -61,7 +60,8 @@ fn lifts_only_what_it_set_itself() {
     );
 }
 
-/// A full lock is a deliberate act: a restore, a migration. Load has nothing to say about it.
+/// A full lock is a deliberate act: a restore, a migration.
+/// Load has nothing to say about it.
 #[test]
 fn never_touches_a_full_lock() {
     assert_eq!(
@@ -83,23 +83,19 @@ async fn counts_the_connections_it_claims_to(pool: PgPool) {
     assert!(n >= 1, "at least this query is active, got {n}");
 }
 
-/// Serializes the tests below, which set process-wide environment variables. Same shape and
-/// same reasoning as `MaxTenantsGuard` in `tests/repositories/tenancy/tenants.rs`, including
-/// taking the lock with `unwrap_or_else(|e| e.into_inner())` so one panicking test does not
-/// cascade into unrelated failures.
+/// Serializes the tests below, which set process-wide environment variables.
+/// Same shape and same reasoning as `MaxTenantsGuard` in `tests/repositories/tenancy/tenants.rs`, including taking the lock with `unwrap_or_else(|e| e.into_inner())` so one panicking test does not cascade into unrelated failures.
 static LOAD_GUARD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct LoadGuardEnv {
     _lock: std::sync::MutexGuard<'static, ()>,
-    /// What each variable held before this guard ran, so `Drop` puts it back. Removing them
-    /// unconditionally would delete a value the test process was started with, and the next
-    /// test to read either one would see a different deployment than the one it was run under.
+    /// What each variable held before this guard ran, so `Drop` puts it back.
+    /// Removing them unconditionally would delete a value the test process was started with, and the next test to read either one would see a different deployment than the one it was run under.
     previous: [(&'static str, Option<std::ffi::OsString>); 2],
 }
 
 impl LoadGuardEnv {
-    /// The threshold is always set, since `from_env` returns `None` without it and there would
-    /// be no config to inspect.
+    /// The threshold is always set, since `from_env` returns `None` without it and there would be no config to inspect.
     fn set(poll: Option<&str>) -> Self {
         let lock = LOAD_GUARD_ENV_LOCK
             .lock()
@@ -143,10 +139,8 @@ impl Drop for LoadGuardEnv {
     }
 }
 
-/// `tokio::time::interval` panics on a zero period, and `0` is what an operator writes when they
-/// mean "off": so the value that reaches it must never be zero, whatever the variable says.
-/// Turning the guard off is `YORISHIRO_DB_LOAD_THRESHOLD=0`, which `from_env` already honours by
-/// returning `None`.
+/// `tokio::time::interval` panics on a zero period, and `0` is what an operator writes when they mean "off": so the value that reaches it must never be zero, whatever the variable says.
+/// Turning the guard off is `YORISHIRO_DB_LOAD_THRESHOLD=0`, which `from_env` already honours by returning `None`.
 #[test]
 fn a_zero_poll_interval_does_not_reach_the_ticker() {
     let _guard = LoadGuardEnv::set(Some("0"));

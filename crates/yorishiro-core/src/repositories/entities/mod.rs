@@ -53,9 +53,8 @@ fn escape_pointer_segment(segment: &str) -> String {
     segment.replace('~', "~0").replace('/', "~1")
 }
 
-/// Represents where a validation error occurred as a JSON Pointer. For `required`
-/// violations, `instance_path()` alone only points at the containing object and doesn't
-/// say which property is missing, so the missing property name is appended.
+/// Represents where a validation error occurred as a JSON Pointer.
+/// For `required` violations, `instance_path()` alone only points at the containing object and doesn't say which property is missing, so the missing property name is appended.
 fn error_field_pointer(err: &jsonschema::ValidationError<'_>) -> String {
     let base = err.instance_path().to_string();
     if let jsonschema::error::ValidationErrorKind::Required { property } = err.kind()
@@ -68,12 +67,9 @@ fn error_field_pointer(err: &jsonschema::ValidationError<'_>) -> String {
 }
 
 /// Validates `data` against the JSON Schema generated from the entity_type definition.
-/// Reuses `entity_type_to_json_schema`'s schema as-is so validation logic isn't duplicated
-/// between entities and the MCP inputSchema.
+/// Reuses `entity_type_to_json_schema`'s schema as-is so validation logic isn't duplicated between entities and the MCP inputSchema.
 ///
-/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call
-/// it directly; `#[doc(hidden)]` keeps it out of the public API docs since it isn't meant for
-/// external callers.
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can call it directly; `#[doc(hidden)]` keeps it out of the public API docs since it isn't meant for external callers.
 #[doc(hidden)]
 pub fn validate_data(
     entity_type_def: &metaschema::EntityTypeDef,
@@ -115,10 +111,8 @@ fn resolve_entity_type<'a>(
 }
 
 /// Checks the workspace's `max_entities` cap (billing/quota enforcement) before an insert.
-/// `NULL` means unlimited, which is the default so self-hosted deployments are never capped
-/// unless an operator explicitly sets a limit. The app role only has SELECT on
-/// `identity.workspaces`, which is enough to read this column without needing write access to
-/// the control-plane schema.
+/// `NULL` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
+/// The app role only has SELECT on `identity.workspaces`, which is enough to read this column without needing write access to the control-plane schema.
 async fn check_entity_quota(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -152,8 +146,7 @@ async fn check_entity_quota(
     }
 }
 
-/// Counts how many entities a workspace holds, for both quota enforcement (`create`, above)
-/// and workspace-detail summaries.
+/// Counts how many entities a workspace holds, for both quota enforcement (`create`, above) and workspace-detail summaries.
 pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, YorishiroError> {
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
@@ -167,14 +160,10 @@ pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, Y
     Ok(count)
 }
 
-/// Creates a new entity: resolves the schema name to its currently active schema, checks
-/// that the entity_type exists in that version, validates `data`, and persists the result.
-/// `created_by` is the acting user's ID (from `AuthContext::user_id`), or `None` for an
-/// unattributed service/automation API key.
+/// Creates a new entity: resolves the schema name to its currently active schema, checks that the entity_type exists in that version, validates `data`, and persists the result.
+/// `created_by` is the acting user's ID (from `AuthContext::user_id`), or `None` for an unattributed service/automation API key.
 ///
-/// The quota check and insert are serialized with a workspace-scoped advisory lock: without
-/// it, concurrent creates could each read a count under `max_entities` and both insert,
-/// overshooting the cap (the same TOCTOU that `create_schema` guards against for schemas).
+/// The quota check and insert are serialized with a workspace-scoped advisory lock: without it, concurrent creates could each read a count under `max_entities` and both insert, overshooting the cap (the same TOCTOU that `create_schema` guards against for schemas).
 pub async fn create(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -189,9 +178,8 @@ pub async fn create(
 
     check_entity_quota(&mut tx, workspace_id).await?;
 
-    // Before resolving the schema, so an empty workspace is told it is empty. Resolving first
-    // would report the schema name as not found, which reads as a typo rather than as "nothing
-    // has been defined here yet".
+    // Before resolving the schema, so an empty workspace is told it is empty.
+    // Resolving first would report the schema name as not found, which reads as a typo rather than as "nothing has been defined here yet".
     if crate::repositories::tenancy::is_schema_pending(&mut tx, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
@@ -259,12 +247,9 @@ pub async fn get(
         .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }
 
-/// Fully replaces an existing entity's `data`. Validation is done against the schema
-/// version the entity was actually created with (i.e. the row `entities.schema_id` points
-/// to), so existing entities don't silently break compatibility even if the active version
-/// has since moved on.
-/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation
-/// API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
+/// Fully replaces an existing entity's `data`.
+/// Validation is done against the schema version the entity was actually created with (i.e. the row `entities.schema_id` points to), so existing entities don't silently break compatibility even if the active version has since moved on.
+/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
 pub async fn update(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -377,13 +362,10 @@ mod tests;
 
 /// Reports how `entity_id` stands against the active version of its schema.
 ///
-/// Lazy migration means an entity keeps validating against the version it was created with, so
-/// a field added later is simply absent from it. This distinguishes that from a field its
-/// author left blank: the entity's own definition is compared against the active one, and the
-/// fields only the active one defines are returned.
+/// Lazy migration means an entity keeps validating against the version it was created with, so a field added later is simply absent from it.
+/// This distinguishes that from a field its author left blank: the entity's own definition is compared against the active one, and the fields only the active one defines are returned.
 ///
-/// An entity already on the active version reports no missing fields, and neither does one
-/// whose newer version only altered fields it already carries.
+/// An entity already on the active version reports no missing fields, and neither does one whose newer version only altered fields it already carries.
 pub async fn drift(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -393,9 +375,8 @@ pub async fn drift(
     let own = schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
     let active = schemas::get_active_schema(conn, workspace_id, &own.definition.name).await?;
 
-    // The entity's own type definition may be absent from the active version: the type was
-    // dropped. Nothing is "missing" in that case; the whole type is, which the version numbers
-    // already say.
+    // The entity's own type definition may be absent from the active version: the type was dropped.
+    // Nothing is "missing" in that case; the whole type is, which the version numbers already say.
     let own_fields = own
         .definition
         .entity_types
@@ -431,7 +412,8 @@ pub async fn drift(
 
 /// Counts what a batch migration to `schema_name`'s active version would face.
 ///
-/// Reads only. The counting is done in one query per entity type rather than one per entity:
+/// Reads only.
+/// The counting is done in one query per entity type rather than one per entity:
 /// a workspace can hold far more entities than it holds versions, and the answer is the same.
 pub async fn migration_dry_run(
     conn: &mut PgConnection,
@@ -441,8 +423,7 @@ pub async fn migration_dry_run(
     let active = schemas::get_active_schema(conn, workspace_id, schema_name).await?;
 
     // (entity_type, schema_id, count) for everything under this schema name, whatever version.
-    // Grouping by schema_id is what keeps this proportional to the number of versions in use
-    // rather than to the number of entities.
+    // Grouping by schema_id is what keeps this proportional to the number of versions in use rather than to the number of entities.
     let rows: Vec<(String, Uuid, i64)> = sqlx::query_as(
         "SELECT e.entity_type, e.schema_id, count(*) \
          FROM content.entities e \
@@ -485,8 +466,7 @@ pub async fn migration_dry_run(
         };
 
         // Required in the active version, absent from the version these were written with.
-        // Optional additions are not counted: those entities are valid as they stand, and
-        // reporting them as work to do would inflate the number an operator acts on.
+        // Optional additions are not counted: those entities are valid as they stand, and reporting them as work to do would inflate the number an operator acts on.
         let missing: Vec<String> = match (
             active.definition.entity_types.get(&entity_type),
             old.entity_types.get(&entity_type),
@@ -497,8 +477,8 @@ pub async fn migration_dry_run(
                 .filter(|(name, def)| def.required && !old_type.fields.contains_key(*name))
                 .map(|(name, _)| name.clone())
                 .collect(),
-            // The type is gone from the active version, or was never in the old one. Neither
-            // is a field to fill in.
+            // The type is gone from the active version, or was never in the old one.
+            // Neither is a field to fill in.
             _ => Vec::new(),
         };
 
@@ -538,17 +518,15 @@ pub async fn migration_dry_run(
 
 /// Records what `entity_id` holds now, tagged with `job_id`.
 ///
-/// Called before an overwrite. Taking the image from the row rather than from the caller means
-/// it is what the database actually holds, not what the caller believed it held.
+/// Called before an overwrite.
+/// Taking the image from the row rather than from the caller means it is what the database actually holds, not what the caller believed it held.
 pub async fn snapshot(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     entity_id: Uuid,
     job_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    // One statement: reading then writing would leave a window in which a concurrent update
-    // slips between, and the image would be of a state that no longer existed when it was
-    // taken.
+    // One statement: reading then writing would leave a window in which a concurrent update slips between, and the image would be of a state that no longer existed when it was taken.
     let affected = sqlx::query(
         "INSERT INTO content.entity_snapshots \
              (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
@@ -593,8 +571,8 @@ pub async fn snapshots_for_job(
 
 /// Puts every entity in `job_id` back to what it held before.
 ///
-/// All in one transaction: a half-undone batch is a state nobody asked for, and worse than
-/// either end of it. An entity deleted since the snapshot is counted rather than failed:
+/// All in one transaction: a half-undone batch is a state nobody asked for, and worse than either end of it.
+/// An entity deleted since the snapshot is counted rather than failed:
 /// refusing the whole undo because one row is gone would leave the rest wrong.
 pub async fn undo_job(
     conn: &mut PgConnection,
@@ -625,9 +603,7 @@ pub async fn undo_job(
     let mut missing = 0i64;
 
     for snapshot in &snapshots {
-        // schema_id and schema_version go back too: an undo that restored the data but left
-        // the entity claiming a newer version would leave it validating against a definition
-        // its data no longer matches.
+        // schema_id and schema_version go back too: an undo that restored the data but left the entity claiming a newer version would leave it validating against a definition its data no longer matches.
         let affected = sqlx::query(
             "UPDATE content.entities \
              SET data = $3, schema_id = $4, schema_version = $5, updated_at = now() \
@@ -650,8 +626,8 @@ pub async fn undo_job(
         }
     }
 
-    // The snapshots go with the undo. Keeping them would let the same job be undone twice,
-    // the second time restoring what the first already put back over whatever came after.
+    // The snapshots go with the undo.
+    // Keeping them would let the same job be undone twice, the second time restoring what the first already put back over whatever came after.
     sqlx::query("DELETE FROM content.entity_snapshots WHERE workspace_id = $1 AND job_id = $2")
         .bind(workspace_id)
         .bind(job_id)
@@ -668,19 +644,16 @@ pub async fn undo_job(
     })
 }
 
-/// Fills fields that the active schema version defines a `default` for, into entities written
-/// before those fields existed.
+/// Fills fields that the active schema version defines a `default` for, into entities written before those fields existed.
 ///
-/// The entity keeps its own schema version. Filling a value is not a migration to the newer
-/// definition: it adds data the entity was always allowed to hold, validated against the
-/// version the entity already claims. Moving an entity between versions is a separate question
-/// and not this one.
+/// The entity keeps its own schema version.
+/// Filling a value is not a migration to the newer definition: it adds data the entity was always allowed to hold, validated against the version the entity already claims.
+/// Moving an entity between versions is a separate question and not this one.
 ///
-/// Every entity touched is snapshotted under one `job_id` first, so the whole run can be put
-/// back with [`undo_job`].
+/// Every entity touched is snapshotted under one `job_id` first, so the whole run can be put back with [`undo_job`].
 ///
-/// Fields with no `default` are left alone and reported. Inventing a value would be worse than
-/// an absent field: once written, a value nobody chose looks exactly like one someone did.
+/// Fields with no `default` are left alone and reported.
+/// Inventing a value would be worse than an absent field: once written, a value nobody chose looks exactly like one someone did.
 pub async fn fill_defaults(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -693,13 +666,11 @@ pub async fn fill_defaults(
     let mut skipped = 0i64;
     let mut still_missing: Vec<String> = Vec::new();
 
-    // One transaction: a half-filled run leaves a workspace in a state nobody asked for, and
-    // the snapshots would describe a rollback point that was never a whole state.
+    // One transaction: a half-filled run leaves a workspace in a state nobody asked for, and the snapshots would describe a rollback point that was never a whole state.
     let mut tx = conn.begin().await.internal()?;
 
-    // Drop the images that have aged out before writing this job's. Here rather than on a timer
-    // because nothing in this crate runs on one: a sweeper would be the first thing of its
-    // kind, and a workspace that never migrates has nothing to sweep.
+    // Drop the images that have aged out before writing this job's.
+    // Here rather than on a timer because nothing in this crate runs on one: a sweeper would be the first thing of its kind, and a workspace that never migrates has nothing to sweep.
     prune_snapshots(&mut tx, workspace_id).await?;
 
     let rows: Vec<(Uuid, String, Value)> = sqlx::query_as(
@@ -717,7 +688,8 @@ pub async fn fill_defaults(
 
     for (entity_id, entity_type, data) in rows {
         let Some(type_def) = active.definition.entity_types.get(&entity_type) else {
-            // The active version dropped this type. Nothing to fill against.
+            // The active version dropped this type.
+            // Nothing to fill against.
             continue;
         };
         let Some(object) = data.as_object() else {
@@ -784,20 +756,13 @@ pub async fn fill_defaults(
 
 /// How long a batch migration stays undoable.
 ///
-/// `YORISHIRO_SNAPSHOT_RETENTION_DAYS` (default 30); `0` keeps every image forever. Left unbounded,
-/// a workspace that migrates repeatedly accumulates before-images faster than it holds
-/// entities: every run writes one row per entity it touches, and only an undo takes them
-/// away again.
+/// `YORISHIRO_SNAPSHOT_RETENTION_DAYS` (default 30); `0` keeps every image forever.
+/// Left unbounded, a workspace that migrates repeatedly accumulates before-images faster than it holds entities: every run writes one row per entity it touches, and only an undo takes them away again.
 ///
-/// The guarantee this buys is stated in days, not in rows: **a batch migration can be undone for
-/// this many days.** Past that its images are gone and `undo_job` answers `NotFound`, the same as
-/// for a job that never ran: an expired window is indistinguishable from no window, and that is
-/// what the setting means rather than a fault to guard against.
-/// Read as `i32` because that is what `make_interval(days => …)` takes. A wider parse would let
-/// a value above `i32::MAX` wrap negative, and a negative interval puts the cutoff in the
-/// *future*: the sweep would then delete the images it exists to keep. Anything unparseable,
-/// out of range included, falls back to the default rather than being clamped: a retention of
-/// six million years is a typo, and honouring the nearest legal value would hide it.
+/// The guarantee this buys is stated in days, not in rows: **a batch migration can be undone for this many days.** Past that its images are gone and `undo_job` answers `NotFound`, the same as for a job that never ran: an expired window is indistinguishable from no window, and that is what the setting means rather than a fault to guard against.
+/// Read as `i32` because that is what `make_interval(days => …)` takes.
+/// A wider parse would let a value above `i32::MAX` wrap negative, and a negative interval puts the cutoff in the *future*: the sweep would then delete the images it exists to keep.
+/// Anything unparseable, out of range included, falls back to the default rather than being clamped: a retention of six million years is a typo, and honouring the nearest legal value would hide it.
 fn snapshot_retention_days() -> i32 {
     std::env::var("YORISHIRO_SNAPSHOT_RETENTION_DAYS")
         .ok()
@@ -807,9 +772,8 @@ fn snapshot_retention_days() -> i32 {
 
 /// Deletes this workspace's before-images older than the retention window.
 ///
-/// Workspace-scoped so the delete stays inside RLS, and `yorishiro_app` already holds DELETE
-/// on the table. Runs once per job rather than once per entity: the sweep is the same work
-/// either way, and a thousand-entity migration should not pay for it a thousand times.
+/// Workspace-scoped so the delete stays inside RLS, and `yorishiro_app` already holds DELETE on the table.
+/// Runs once per job rather than once per entity: the sweep is the same work either way, and a thousand-entity migration should not pay for it a thousand times.
 async fn prune_snapshots(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     workspace_id: Uuid,
@@ -819,8 +783,7 @@ async fn prune_snapshots(
         return Ok(());
     }
 
-    // `make_interval` rather than a formatted string: the number reaches Postgres as a bound
-    // parameter, so a retention value out of the environment is never concatenated into SQL.
+    // `make_interval` rather than a formatted string: the number reaches Postgres as a bound parameter, so a retention value out of the environment is never concatenated into SQL.
     sqlx::query(
         "DELETE FROM content.entity_snapshots \
          WHERE workspace_id = $1 AND created_at < now() - make_interval(days => $2)",
@@ -834,8 +797,7 @@ async fn prune_snapshots(
     Ok(())
 }
 
-/// [`snapshot`] against an open transaction, so the image and the write it protects commit or
-/// roll back together.
+/// [`snapshot`] against an open transaction, so the image and the write it protects commit or roll back together.
 async fn snapshot_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     workspace_id: Uuid,

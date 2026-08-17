@@ -173,8 +173,7 @@ pub async fn list_entities(
 pub struct EntityContextParams {
     /// Maximum number of relations/neighbors to include per hop (defaults to 20 if omitted).
     pub limit: Option<i64>,
-    /// When true, neighbor entities include every field instead of only `x-embed` fields
-    /// (defaults to false).
+    /// When true, neighbor entities include every field instead of only `x-embed` fields (defaults to false).
     pub full: Option<bool>,
     /// How many hops to traverse outward from the entity (defaults to 1, max 3).
     pub depth: Option<i64>,
@@ -266,8 +265,7 @@ pub async fn fill_defaults(
     Path(name): Path<String>,
 ) -> Result<Json<FillDefaultsReport>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    // The job id is minted here rather than taken from the caller: it is what the undo will
-    // name, and a caller choosing it could collide with a previous run's snapshots.
+    // The job id is minted here rather than taken from the caller: it is what the undo will name, and a caller choosing it could collide with a previous run's snapshots.
     let job_id = Uuid::new_v4();
     let report = entities::fill_defaults(authorized.conn(), workspace_id, &name, job_id).await?;
     Ok(Json(report))

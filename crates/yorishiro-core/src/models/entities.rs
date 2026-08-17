@@ -4,12 +4,10 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-/// A row in the `entities` table. `embedding` is managed separately by the
-/// search/embedding pipeline, so this module's CRUD doesn't touch it. `created_by`/
-/// `updated_by` are `None` for entities touched by an unattributed (service/automation) API
-/// key, since there's no user to record. `Deserialize` is derived so this can be read back
-/// from a JSONL export (see `repositories::import`); import treats `id`, `schema_version`,
-/// `created_at`/`updated_at` as informational only (a fresh row is always inserted).
+/// A row in the `entities` table.
+/// `embedding` is managed separately by the search/embedding pipeline, so this module's CRUD doesn't touch it.
+/// `created_by`/ `updated_by` are `None` for entities touched by an unattributed (service/automation) API key, since there's no user to record.
+/// `Deserialize` is derived so this can be read back from a JSONL export (see `repositories::import`); import treats `id`, `schema_version`, `created_at`/`updated_at` as informational only (a fresh row is always inserted).
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 pub struct EntityRecord {
     pub id: Uuid,
@@ -37,9 +35,8 @@ pub struct ListEntitiesQuery {
     pub entity_type: Option<String>,
     /// JSONB containment filter (`data @> filter`), e.g. `{"status": "active"}`.
     pub filter: Option<Value>,
-    /// Restricts results to entities created against this schema version. Entities keep the
-    /// version they were written against, so this selects the entities a given version
-    /// produced rather than the ones that would validate against it today.
+    /// Restricts results to entities created against this schema version.
+    /// Entities keep the version they were written against, so this selects the entities a given version produced rather than the ones that would validate against it today.
     pub schema_version: Option<i32>,
     pub limit: i64,
     pub offset: i64,
@@ -63,11 +60,9 @@ mod tests;
 
 /// How one entity stands relative to the active version of its schema.
 ///
-/// Entities are migrated lazily: a schema gaining a version does not rewrite the rows written
-/// against earlier ones, and an update validates against the version the entity was created
-/// with. That is deliberate: it is what stops a schema change from invalidating stored data.
-/// But it leaves a reader unable to tell whether a field is absent because nobody filled it in
-/// or because it did not exist when the entity was written.
+/// Entities are migrated lazily: a schema gaining a version does not rewrite the rows written against earlier ones, and an update validates against the version the entity was created with.
+/// That is deliberate: it is what stops a schema change from invalidating stored data.
+/// But it leaves a reader unable to tell whether a field is absent because nobody filled it in or because it did not exist when the entity was written.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct EntityDrift {
     pub entity_id: Uuid,
@@ -76,9 +71,8 @@ pub struct EntityDrift {
     pub schema_version: i32,
     /// The newest active version of the same schema.
     pub active_schema_version: i32,
-    /// Fields the active version defines that this entity's version did not. Empty when the
-    /// entity is current, and empty as well when the newer version only changed fields the
-    /// entity already carries.
+    /// Fields the active version defines that this entity's version did not.
+    /// Empty when the entity is current, and empty as well when the newer version only changed fields the entity already carries.
     pub missing_fields: Vec<DriftField>,
 }
 
@@ -89,33 +83,28 @@ pub struct DriftField {
     /// The field's type in the active version, so a caller can tell what would go there.
     /// Serializes to the same spelling the schema uses.
     pub r#type: crate::metaschema::FieldTypeName,
-    /// Whether the active version marks it required. A required field an old entity lacks is
-    /// the case worth surfacing: the entity is valid under its own version and would not be
-    /// under the current one.
+    /// Whether the active version marks it required.
+    /// A required field an old entity lacks is the case worth surfacing: the entity is valid under its own version and would not be under the current one.
     pub required: bool,
 }
 
 /// What a batch migration would find, without doing it.
 ///
-/// Migration is lazy: an entity keeps validating against the version it was written with, so a
-/// workspace accumulates entities spread across versions. This counts them before anything is
-/// touched, because the useful question before a migration is how much of the corpus it would
-/// have to fill in: a number that decides whether defaults suffice or whether the work needs
-/// a person.
+/// Migration is lazy: an entity keeps validating against the version it was written with, so a workspace accumulates entities spread across versions.
+/// This counts them before anything is touched, because the useful question before a migration is how much of the corpus it would have to fill in: a number that decides whether defaults suffice or whether the work needs a person.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MigrationDryRun {
     pub schema_name: String,
     /// The version everything would be brought to.
     pub active_version: i32,
     pub total_entities: i64,
-    /// Already on the active version. Nothing to do for these.
+    /// Already on the active version.
+    /// Nothing to do for these.
     pub current: i64,
-    /// On an older version, but missing no field the active version requires: they validate
-    /// as they stand and only their version marker is behind.
+    /// On an older version, but missing no field the active version requires: they validate as they stand and only their version marker is behind.
     pub behind_but_valid: i64,
-    /// On an older version and missing at least one field the active version requires. These
-    /// are what a migration has to fill in, and what mode A's defaults or mode B's inference
-    /// would be for.
+    /// On an older version and missing at least one field the active version requires.
+    /// These are what a migration has to fill in, and what mode A's defaults or mode B's inference would be for.
     pub needs_values: i64,
     /// Per entity type, so an operator can see whether the work is spread or concentrated.
     pub by_entity_type: Vec<DryRunByType>,
@@ -126,8 +115,7 @@ pub struct DryRunByType {
     pub entity_type: String,
     pub behind: i64,
     pub needs_values: i64,
-    /// The required fields those entities lack, so the report names the work rather than only
-    /// counting it.
+    /// The required fields those entities lack, so the report names the work rather than only counting it.
     pub missing_required: Vec<String>,
 }
 
@@ -151,9 +139,8 @@ pub struct UndoReport {
     pub job_id: Uuid,
     /// Entities restored to the data they held before.
     pub restored: i64,
-    /// Snapshots whose entity no longer exists. Counted rather than treated as an error: a
-    /// batch partially undone leaves a workspace in a state nobody chose, and an entity
-    /// deleted since is not a reason to refuse the rest.
+    /// Snapshots whose entity no longer exists.
+    /// Counted rather than treated as an error: a batch partially undone leaves a workspace in a state nobody chose, and an entity deleted since is not a reason to refuse the rest.
     pub missing: i64,
 }
 
@@ -165,9 +152,8 @@ pub struct FillDefaultsReport {
     pub schema_name: String,
     /// Entities that gained at least one value.
     pub filled: i64,
-    /// Entities that needed a value the active version defines no default for. Left untouched
-    /// and counted, because inventing one would be worse than leaving the field absent: a
-    /// value nobody chose is indistinguishable from one someone did.
+    /// Entities that needed a value the active version defines no default for.
+    /// Left untouched and counted, because inventing one would be worse than leaving the field absent: a value nobody chose is indistinguishable from one someone did.
     pub skipped_no_default: i64,
     /// The fields those entities still lack.
     pub still_missing: Vec<String>,

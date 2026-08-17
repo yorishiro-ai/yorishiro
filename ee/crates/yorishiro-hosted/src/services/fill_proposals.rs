@@ -1,11 +1,9 @@
 //! Proposed values waiting to be confirmed (§FR-8-2 mode B).
 //!
-//! Mode A reads a value out of the schema; this one asks a model to guess it. A guess written
-//! straight into `content.entities` is indistinguishable afterwards from a value a person
-//! entered, so it is held here until a caller confirms the job.
+//! Mode A reads a value out of the schema; this one asks a model to guess it.
+//! A guess written straight into `content.entities` is indistinguishable afterwards from a value a person entered, so it is held here until a caller confirms the job.
 //!
-//! Confirming reuses `content.entity_snapshots`: the same `job_id` groups the before-images, so
-//! `entities::undo_job` reverses a confirmation with no machinery of its own.
+//! Confirming reuses `content.entity_snapshots`: the same `job_id` groups the before-images, so `entities::undo_job` reverses a confirmation with no machinery of its own.
 
 use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
@@ -41,16 +39,16 @@ pub struct FillProposal {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ConfirmReport {
     pub job_id: Uuid,
-    /// Entities whose data was changed. Undo takes the same `job_id`.
+    /// Entities whose data was changed.
+    /// Undo takes the same `job_id`.
     pub applied: i64,
-    /// Proposals whose entity no longer exists, or whose value the schema rejects. Skipping is
-    /// not an error: a proposal is a guess, and one guess failing validation should not stop
-    /// the rest of a reviewed batch from landing.
+    /// Proposals whose entity no longer exists, or whose value the schema rejects.
+    /// Skipping is not an error: a proposal is a guess, and one guess failing validation should not stop the rest of a reviewed batch from landing.
     pub skipped: i64,
 }
 
-/// Records what a model proposed. Replaces any earlier proposal for the same field in the same
-/// job, so re-running inference for a job does not leave two answers with no way to choose.
+/// Records what a model proposed.
+/// Replaces any earlier proposal for the same field in the same job, so re-running inference for a job does not leave two answers with no way to choose.
 pub async fn record(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -115,13 +113,11 @@ pub async fn for_job(
 
 /// Applies a job's proposals to the entities they were made for.
 ///
-/// Snapshots each entity under the same `job_id` first, so `entities::undo_job` reverses the
-/// whole confirmation. The proposals are deleted afterwards: leaving them would let the same
-/// job be confirmed twice, and the second run would write the same guesses over whatever the
-/// first run's undo had restored.
+/// Snapshots each entity under the same `job_id` first, so `entities::undo_job` reverses the whole confirmation.
+/// The proposals are deleted afterwards: leaving them would let the same job be confirmed twice, and the second run would write the same guesses over whatever the first run's undo had restored.
 ///
-/// One transaction. A half-applied confirmation would leave the workspace in a state nobody
-/// reviewed, and the snapshots would describe a rollback point that never existed.
+/// One transaction.
+/// A half-applied confirmation would leave the workspace in a state nobody reviewed, and the snapshots would describe a rollback point that never existed.
 pub async fn confirm(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -139,9 +135,8 @@ pub async fn confirm(
 
     let mut tx = conn.begin().await.internal()?;
 
-    // Grouped per entity: one entity with three proposed fields is one write and one snapshot,
-    // not three of each. Three snapshots of the same entity under one job would make undo
-    // restore an intermediate state depending on which row it read last.
+    // Grouped per entity: one entity with three proposed fields is one write and one snapshot, not three of each.
+    // Three snapshots of the same entity under one job would make undo restore an intermediate state depending on which row it read last.
     let mut by_entity: std::collections::BTreeMap<Uuid, Vec<&FillProposal>> = Default::default();
     for proposal in &proposals {
         by_entity
@@ -170,8 +165,8 @@ pub async fn confirm(
 
         match entities::update(&mut tx, workspace_id, entity_id, data, None).await {
             Ok(_) => applied += fields.len() as i64,
-            // The schema rejected a guess. The other entities in this batch were reviewed too,
-            // so one bad guess does not discard them.
+            // The schema rejected a guess.
+            // The other entities in this batch were reviewed too, so one bad guess does not discard them.
             Err(_) => skipped += fields.len() as i64,
         }
     }

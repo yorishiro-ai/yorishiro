@@ -12,11 +12,8 @@ use yorishiro_core::{ResultExt, YorishiroError};
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// These two endpoints are the only ones in the whole API reachable without a bearer token,
-/// by design, since their entire purpose is to hand one out. They read/write
-/// `identity.users`/`identity.tenant_memberships`/`identity.invites` through `state.identity_pool`
-/// (the admin/migration-role pool) rather than `state.tenant_db`, exactly like the admin CLI,
-/// since no tenant/workspace context exists yet for RLS to scope by.
+/// These two endpoints are the only ones in the whole API reachable without a bearer token, by design, since their entire purpose is to hand one out.
+/// They read/write `identity.users`/`identity.tenant_memberships`/`identity.invites` through `state.identity_pool` (the admin/migration-role pool) rather than `state.tenant_db`, exactly like the admin CLI, since no tenant/workspace context exists yet for RLS to scope by.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SignupRequest {
     /// The plaintext token from an `admin create-invite` invitation.
@@ -37,8 +34,8 @@ pub struct SignupResponse {
     pub email: String,
     pub tenant_id: Uuid,
     pub role: MembershipRole,
-    /// The workspaces the new member can now log into. The client picks one and passes its id
-    /// to `/auth/login`.
+    /// The workspaces the new member can now log into.
+    /// The client picks one and passes its id to `/auth/login`.
     pub workspaces: Vec<WorkspaceSummary>,
 }
 
@@ -67,11 +64,8 @@ pub async fn signup(
             hint: "ask a tenant admin for a fresh invite".into(),
         })?;
 
-    // create_user + add_member run in one transaction: if a request dies between the two
-    // (e.g. the connection drops), an isolated user row with no tenant membership would
-    // otherwise be unrecoverable (it can never be added to a tenant via a normal signup or
-    // `admin add-member`, both of which expect a user that doesn't already exist / already
-    // does, respectively). See `create_user`'s doc comment.
+    // create_user + add_member run in one transaction: if a request dies between the two (e.g. the connection drops), an isolated user row with no tenant membership would otherwise be unrecoverable (it can never be added to a tenant via a normal signup or `admin add-member`, both of which expect a user that doesn't already exist / already does, respectively).
+    // See `create_user`'s doc comment.
     let mut tx = state.identity_pool.begin().await.internal()?;
     let user = tenancy::create_user(
         &mut tx,
@@ -108,19 +102,16 @@ pub async fn signup(
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
-    /// Which of the account's workspaces to issue an API key for: a key is always scoped to
-    /// exactly one workspace, same as one created through `admin create-api-key`. Omit this
-    /// when the account can only ever log into one workspace (true by default, since
-    /// `YORISHIRO_MAX_TENANTS` defaults to a single tenant with one
-    /// workspace); it resolves automatically. An account with access to more than one
-    /// workspace must specify which one explicitly (422 otherwise).
+    /// Which of the account's workspaces to issue an API key for: a key is always scoped to exactly one workspace, same as one created through `admin create-api-key`.
+    /// Omit this when the account can only ever log into one workspace (true by default, since `YORISHIRO_MAX_TENANTS` defaults to a single tenant with one workspace); it resolves automatically.
+    /// An account with access to more than one workspace must specify which one explicitly (422 otherwise).
     pub workspace_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LoginResponse {
-    /// The freshly issued API key's plaintext. Shown only in this response: only its hash is
-    /// ever persisted, so it cannot be recovered afterward.
+    /// The freshly issued API key's plaintext.
+    /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
     pub api_key: String,
     pub api_key_id: Uuid,
     pub workspace_id: Uuid,
@@ -147,17 +138,14 @@ pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    // Credentials are checked before the workspace is looked up, so a request with a bad
-    // password never reveals whether `workspace_id` exists.
+    // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether `workspace_id` exists.
     let user = tenancy::verify_login(&state.identity_pool, &body.email, &body.password)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
 
     let workspace = match body.workspace_id {
         Some(workspace_id) => tenancy::get_workspace(&state.identity_pool, workspace_id).await?,
-        // A deployment has exactly one workspace by default (see
-        // YORISHIRO_MAX_TENANTS), so resolving it automatically here means the login form
-        // never needs to ask for a workspace id in the common case.
+        // A deployment has exactly one workspace by default (see YORISHIRO_MAX_TENANTS), so resolving it automatically here means the login form never needs to ask for a workspace id in the common case.
         None => {
             let mut workspaces =
                 tenancy::list_workspaces_for_user(&state.identity_pool, user.id).await?;

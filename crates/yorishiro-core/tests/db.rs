@@ -13,15 +13,9 @@ enum Workspaces {
     Name,
 }
 
-/// The pool `sqlx::test` provides is connected as the admin role (superuser) that ran
-/// the migrations, so `TenantDb::new` alone won't make RLS take effect. This test
-/// explicitly switches to `yorishiro_app` via `SET ROLE` and verifies that RLS actually
-/// blocks cross-tenant access: confirming the effect of the switch `TenantDb::connect`
-/// performs in production.
-/// `identity.tenants` itself has no grant for `yorishiro_app` (see the role-separation
-/// migration), so this exercises RLS through `identity.workspaces` instead, which the
-/// app role has a read-only grant on and which is scoped by the same
-/// `app.current_tenant` policy.
+/// The pool `sqlx::test` provides is connected as the admin role (superuser) that ran the migrations, so `TenantDb::new` alone won't make RLS take effect.
+/// This test explicitly switches to `yorishiro_app` via `SET ROLE` and verifies that RLS actually blocks cross-tenant access: confirming the effect of the switch `TenantDb::connect` performs in production.
+/// `identity.tenants` itself has no grant for `yorishiro_app` (see the role-separation migration), so this exercises RLS through `identity.workspaces` instead, which the app role has a read-only grant on and which is scoped by the same `app.current_tenant` policy.
 #[sqlx::test(migrations = "../../migrations")]
 async fn rls_blocks_cross_tenant_access_under_restricted_role(pool: PgPool) {
     let tenant_a = test_support::seed_tenant(&pool, "tenant-a").await;
@@ -30,8 +24,7 @@ async fn rls_blocks_cross_tenant_access_under_restricted_role(pool: PgPool) {
     test_support::seed_workspace(&pool, tenant_b, "workspace-b").await;
 
     let mut conn = pool.acquire().await.unwrap();
-    // Same session/connection-control statements as `TenantDb::connect`/
-    // `acquire_for_workspace` above: no query-builder form, stays raw SQL.
+    // Same session/connection-control statements as `TenantDb::connect`/ `acquire_for_workspace` above: no query-builder form, stays raw SQL.
     sqlx::query("SET ROLE yorishiro_app")
         .execute(conn.as_mut())
         .await
@@ -57,9 +50,7 @@ async fn rls_blocks_cross_tenant_access_under_restricted_role(pool: PgPool) {
 
 /// Schemas are isolated per workspace, not per tenant.
 ///
-/// Like the test above, this switches to `yorishiro_app` explicitly: the pool `sqlx::test`
-/// hands over is the migration superuser, which bypasses RLS even under FORCE, so a policy
-/// test that skips `SET ROLE` passes whatever the policy says.
+/// Like the test above, this switches to `yorishiro_app` explicitly: the pool `sqlx::test` hands over is the migration superuser, which bypasses RLS even under FORCE, so a policy test that skips `SET ROLE` passes whatever the policy says.
 #[sqlx::test(migrations = "../../migrations")]
 async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: PgPool) {
     let tenant = test_support::seed_tenant(&pool, "one-tenant").await;
@@ -105,9 +96,8 @@ async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: Pg
     assert_eq!(names, vec!["schema-a".to_string()]);
 }
 
-/// The seam is only a seam if a caller can hold it without naming the implementation. This
-/// takes `&dyn Storage`, so it compiles against the trait alone: an engine added later
-/// satisfies the same signature without touching this function.
+/// The seam is only a seam if a caller can hold it without naming the implementation.
+/// This takes `&dyn Storage`, so it compiles against the trait alone: an engine added later satisfies the same signature without touching this function.
 async fn count_through_the_seam(storage: &dyn Storage, tenant_id: Uuid, workspace_id: Uuid) -> i64 {
     let mut conn = storage
         .acquire_for_workspace(tenant_id, workspace_id)
@@ -128,9 +118,8 @@ async fn the_storage_trait_scopes_a_connection_like_the_concrete_type(pool: PgPo
     // Through the trait object, not the struct.
     let via_trait = count_through_the_seam(&db, tenant_id, workspace_id).await;
 
-    // And directly, for comparison. Both run with the same session variables set, so an
-    // implementation that forgot to scope the connection would differ here rather than
-    // silently returning another workspace's rows.
+    // And directly, for comparison.
+    // Both run with the same session variables set, so an implementation that forgot to scope the connection would differ here rather than silently returning another workspace's rows.
     let mut conn = db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
@@ -148,8 +137,7 @@ async fn the_storage_trait_exposes_the_unscoped_pool_for_the_control_plane(pool:
     let db = TenantDb::new(pool);
     let storage: &dyn Storage = &db;
 
-    // The control-plane paths need a pool that is not workspace-scoped; the trait has to keep
-    // offering one or signup and setup have nowhere to run.
+    // The control-plane paths need a pool that is not workspace-scoped; the trait has to keep offering one or signup and setup have nowhere to run.
     let (one,): (i32,) = sqlx::query_as("SELECT 1")
         .fetch_one(storage.pool())
         .await
@@ -157,8 +145,8 @@ async fn the_storage_trait_exposes_the_unscoped_pool_for_the_control_plane(pool:
     assert_eq!(one, 1);
 }
 
-/// The lock has to actually exclude, not just execute. Two transactions take the same key;
-/// the second must wait for the first to commit rather than proceeding beside it.
+/// The lock has to actually exclude, not just execute.
+/// Two transactions take the same key; the second must wait for the first to commit rather than proceeding beside it.
 #[sqlx::test(migrations = "../../migrations")]
 async fn lock_for_update_serializes_transactions_on_the_same_key(pool: PgPool) {
     use sqlx::Acquire;
@@ -170,9 +158,8 @@ async fn lock_for_update_serializes_transactions_on_the_same_key(pool: PgPool) {
         .unwrap();
 
     // A second transaction wanting the same key cannot get it while the first holds it.
-    // Bounded by a timeout so a regression fails here instead of hanging the suite. The
-    // connection is dropped with the future: a timed-out attempt is still queued for the lock
-    // server-side, and reusing it would have the next attempt wait behind its own ghost.
+    // Bounded by a timeout so a regression fails here instead of hanging the suite.
+    // The connection is dropped with the future: a timed-out attempt is still queued for the lock server-side, and reusing it would have the next attempt wait behind its own ghost.
     {
         let mut second = pool.acquire().await.unwrap();
         let blocked = tokio::time::timeout(std::time::Duration::from_millis(500), async {
@@ -189,8 +176,7 @@ async fn lock_for_update_serializes_transactions_on_the_same_key(pool: PgPool) {
         );
     }
 
-    // Releasing the first lets a fresh attempt through, which is what makes this exclusion
-    // rather than a deadlock.
+    // Releasing the first lets a fresh attempt through, which is what makes this exclusion rather than a deadlock.
     first_tx.commit().await.unwrap();
     let mut third = pool.acquire().await.unwrap();
     let proceeds = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -204,8 +190,7 @@ async fn lock_for_update_serializes_transactions_on_the_same_key(pool: PgPool) {
     assert!(proceeds.is_ok(), "the lock should release on commit");
 }
 
-/// Different keys do not block each other: otherwise the lock would serialize every
-/// workspace's writes against every other's.
+/// Different keys do not block each other: otherwise the lock would serialize every workspace's writes against every other's.
 #[sqlx::test(migrations = "../../migrations")]
 async fn lock_for_update_does_not_serialize_different_keys(pool: PgPool) {
     use sqlx::Acquire;

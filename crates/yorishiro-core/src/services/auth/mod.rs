@@ -13,8 +13,7 @@ pub use authenticator::*;
 pub use authorize::*;
 pub use keys::*;
 
-/// `pub` (rather than `pub(super)`) only so the crate-root integration test in `tests/` can
-/// build its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
+/// `pub` (rather than `pub(super)`) only so the crate-root integration test in `tests/` can build its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 #[derive(Iden)]
 pub enum ApiKeys {
@@ -31,10 +30,9 @@ pub enum ApiKeys {
 pub(super) const KEY_PREFIX_BYTES: usize = 6;
 pub(super) const KEY_SECRET_BYTES: usize = 24;
 
-/// Permission level held by an API key. Declaration order feeds the derived `Ord`, so any
-/// code relying on the `Read < Write < Schema` hierarchy (a higher scope subsumes lower ones)
-/// depends on this exact ordering. The `serde` representation matches the DB `scope` column
-/// ('read'/'write'/'schema'), so REST/MCP adapters don't need a separate mapping.
+/// Permission level held by an API key.
+/// Declaration order feeds the derived `Ord`, so any code relying on the `Read < Write < Schema` hierarchy (a higher scope subsumes lower ones) depends on this exact ordering.
+/// The `serde` representation matches the DB `scope` column ('read'/'write'/'schema'), so REST/MCP adapters don't need a separate mapping.
 #[derive(
     Debug,
     Clone,
@@ -52,20 +50,16 @@ pub enum ApiKeyScope {
     Read,
     Write,
     Schema,
-    /// Running a batch migration, and switching maintenance mode. Above `schema` because both
-    /// act on data already stored: a schema registration adds a version that nothing has been
-    /// written against yet, while a migration rewrites rows and a maintenance switch stops
-    /// every caller. `audit` is not defined here: a scope over an audit log that does not
-    /// exist yet would read as though the log did.
+    /// Running a batch migration, and switching maintenance mode.
+    /// Above `schema` because both act on data already stored: a schema registration adds a version that nothing has been written against yet, while a migration rewrites rows and a maintenance switch stops every caller.
+    /// `audit` is not defined here: a scope over an audit log that does not exist yet would read as though the log did.
     Migration,
 }
 
 impl ApiKeyScope {
     /// The `identity.api_keys.scope` value for this scope.
     ///
-    /// `pub` for the same reason as [`hash_key`]: an [`Authenticator`] implementation outside
-    /// this crate reads and writes that column itself, and cannot round-trip the value without
-    /// this pair.
+    /// `pub` for the same reason as [`hash_key`]: an [`Authenticator`] implementation outside this crate reads and writes that column itself, and cannot round-trip the value without this pair.
     pub fn as_db_str(self) -> &'static str {
         match self {
             ApiKeyScope::Read => "read",
@@ -75,8 +69,8 @@ impl ApiKeyScope {
         }
     }
 
-    /// Parses an `identity.api_keys.scope` value. `None` for anything this crate does not
-    /// define, which the caller should treat as a corrupt row rather than a missing scope.
+    /// Parses an `identity.api_keys.scope` value.
+    /// `None` for anything this crate does not define, which the caller should treat as a corrupt row rather than a missing scope.
     pub fn from_db_str(s: &str) -> Option<Self> {
         match s {
             "read" => Some(ApiKeyScope::Read),
@@ -94,19 +88,17 @@ impl ApiKeyScope {
     }
 }
 
-/// Workspace, tenant, and scope information resolved by API key authentication. Serves as
-/// the starting point for both the subsequent RLS context setup
-/// (`TenantDb::acquire_for_workspace`) and scope enforcement. An API key is always scoped to
-/// exactly one workspace; `tenant_id` (the workspace's owning tenant) is carried alongside it
-/// for tenant-level concerns such as billing checks.
+/// Workspace, tenant, and scope information resolved by API key authentication.
+/// Serves as the starting point for both the subsequent RLS context setup (`TenantDb::acquire_for_workspace`) and scope enforcement.
+/// An API key is always scoped to exactly one workspace; `tenant_id` (the workspace's owning tenant) is carried alongside it for tenant-level concerns such as billing checks.
 #[derive(Debug, Clone)]
 pub struct AuthContext {
     pub api_key_id: Uuid,
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,
     pub scope: ApiKeyScope,
-    /// The human user this key was issued for, if any. `None` for keys not attributed to a
-    /// specific person (e.g. pure service/automation keys).
+    /// The human user this key was issued for, if any.
+    /// `None` for keys not attributed to a specific person (e.g. pure service/automation keys).
     pub user_id: Option<Uuid>,
 }
 
@@ -115,21 +107,18 @@ pub struct CreatedApiKey {
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
     pub user_id: Option<Uuid>,
-    /// The raw API key string. Only its hash is stored in the DB, so this return value is
-    /// the only place it can ever be obtained. Callers must make sure to surface it to the user.
+    /// The raw API key string.
+    /// Only its hash is stored in the DB, so this return value is the only place it can ever be obtained.
+    /// Callers must make sure to surface it to the user.
     pub plaintext: String,
 }
 
-/// Extracts the API key from an `Authorization` header value, or `None` if the header is absent,
-/// is not a `Bearer` credential, or carries an empty one.
+/// Extracts the API key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
 ///
-/// Takes the header's string value rather than a `HeaderMap` so this crate needs no `http`
-/// dependency; callers do the `headers.get(AUTHORIZATION)?.to_str().ok()` themselves.
+/// Takes the header's string value rather than a `HeaderMap` so this crate needs no `http` dependency; callers do the `headers.get(AUTHORIZATION)?.to_str().ok()` themselves.
 ///
-/// Every adapter that authenticates a request routes through here. `Authorization: Bearer `
-/// with nothing after it is the same request whichever adapter receives it, so it has to get
-/// the same answer: one adapter accepting the empty string and hashing it into a lookup that
-/// can never match, while another rejects it outright, is a difference with no reason behind it.
+/// Every adapter that authenticates a request routes through here.
+/// `Authorization: Bearer ` with nothing after it is the same request whichever adapter receives it, so it has to get the same answer: one adapter accepting the empty string and hashing it into a lookup that can never match, while another rejects it outright, is a difference with no reason behind it.
 pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
     header_value
         .and_then(|value| value.strip_prefix("Bearer "))
@@ -141,8 +130,8 @@ pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Decodes a lowercase- or uppercase-hex string back into bytes. Returns `None` (rather than
-/// panicking) for an odd-length string or one containing a non-hex-digit/non-ASCII character.
+/// Decodes a lowercase- or uppercase-hex string back into bytes.
+/// Returns `None` (rather than panicking) for an odd-length string or one containing a non-hex-digit/non-ASCII character.
 pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if !s.is_ascii() || !s.len().is_multiple_of(2) {
         return None;
@@ -165,9 +154,7 @@ pub(crate) fn random_hex(byte_len: usize) -> String {
 
 /// Hashes a presented key into the form stored in `identity.api_keys.key_hash`.
 ///
-/// `pub` because an [`Authenticator`] implementation outside this crate has to look a key up the
-/// same way this crate does: without it the seam is only half a seam, since a replacement can
-/// be installed but cannot resolve the key it was handed.
+/// `pub` because an [`Authenticator`] implementation outside this crate has to look a key up the same way this crate does: without it the seam is only half a seam, since a replacement can be installed but cannot resolve the key it was handed.
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }

@@ -25,9 +25,7 @@ async fn rest_openapi_json_is_served(pool: PgPool) {
         "bearer"
     );
 
-    // Verify every $ref referenced by paths' responses/request_body actually exists
-    // under components.schemas (a regression test for utoipa's `paths(...)` listing
-    // correctly auto-collecting schemas).
+    // Verify every $ref referenced by paths' responses/request_body actually exists under components.schemas (a regression test for utoipa's `paths(...)` listing correctly auto-collecting schemas).
     let schemas = json["components"]["schemas"].as_object().unwrap();
     let json_str = json.to_string();
     let dangling: Vec<&str> = json_str
@@ -200,9 +198,8 @@ async fn rest_entity_crud_round_trip(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// Verifies the full production path over REST: entity creation, background
-/// embedding sync, then a vector search hit. The embedding sync is a fire-and-forget
-/// background task, so this polls at short intervals until the search hits.
+/// Verifies the full production path over REST: entity creation, background embedding sync, then a vector search hit.
+/// The embedding sync is a fire-and-forget background task, so this polls at short intervals until the search hits.
 #[sqlx::test(migrations = "../../migrations")]
 async fn rest_created_entity_becomes_searchable(pool: PgPool) {
     let (tenant_id_tenant, tenant_id) = seed_workspace(&pool).await;

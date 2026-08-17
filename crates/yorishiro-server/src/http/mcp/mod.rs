@@ -52,8 +52,7 @@ impl ServerHandler for YorishiroMcpServer {
     }
 }
 
-/// Auth context plus a connection with RLS already configured, held by calls
-/// that passed authentication and scope checks.
+/// Auth context plus a connection with RLS already configured, held by calls that passed authentication and scope checks.
 pub(super) struct Authorized {
     pub(super) ctx: AuthContext,
     conn: PoolConnection<sqlx::Postgres>,
@@ -66,16 +65,14 @@ impl Authorized {
 }
 
 /// `authorize` splits its outcome into two kinds rather than a single failure case:
-/// a protocol-level failure (`Err`) and a scope-insufficient business outcome
-/// (`Ok` variant). The former is a dead end an agent can't usefully retry
-/// (missing/invalid API key); the latter is information an agent can act on.
+/// a protocol-level failure (`Err`) and a scope-insufficient business outcome (`Ok` variant).
+/// The former is a dead end an agent can't usefully retry (missing/invalid API key); the latter is information an agent can act on.
 pub(super) enum AuthzOutcome {
     Authorized(Authorized),
     ScopeDenied(CallToolResult),
 }
 
-/// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the
-/// REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
+/// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
 fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
     parts
         .headers
@@ -99,12 +96,9 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     .ok_or_else(|| ErrorData::invalid_request("missing or malformed Authorization header", None))
 }
 
-/// The sole entry point for every tool handler. Because there is no other way to
-/// obtain a `&mut PgConnection`, forgetting the scope check is structurally
-/// impossible. The actual auth/authz logic is shared with the REST adapter via
-/// `yorishiro_core::services::auth::authorize`; this just routes its result into the MCP
-/// protocol's two failure shapes (`ErrorData` at the protocol level,
-/// `CallToolResult` at the tool-result level).
+/// The sole entry point for every tool handler.
+/// Because there is no other way to obtain a `&mut PgConnection`, forgetting the scope check is structurally impossible.
+/// The actual auth/authz logic is shared with the REST adapter via `yorishiro_core::services::auth::authorize`; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
 pub(super) async fn authorize(
     state: &AppState,
     parts: &Parts,
@@ -133,16 +127,15 @@ pub(super) async fn authorize(
     }
 }
 
-/// The connection-less counterpart to `authorize`'s result. Same two-way split as
-/// `AuthzOutcome`, but the success variant carries no connection.
+/// The connection-less counterpart to `authorize`'s result.
+/// Same two-way split as `AuthzOutcome`, but the success variant carries no connection.
 pub(super) enum ScopeOutcome {
     Verified(AuthContext),
     ScopeDenied(CallToolResult),
 }
 
-/// Connection-less version of `authorize`, for tools (search) that run a slow step
-/// such as embedding generation in between, so the pool connection isn't held idle
-/// during it. Acquire a connection afterward via `state.tenant_db.acquire_for_workspace`.
+/// Connection-less version of `authorize`, for tools (search) that run a slow step such as embedding generation in between, so the pool connection isn't held idle during it.
+/// Acquire a connection afterward via `state.tenant_db.acquire_for_workspace`.
 pub(super) async fn authorize_scope_only(
     state: &AppState,
     parts: &Parts,
@@ -172,8 +165,7 @@ pub(super) async fn authorize_scope_only(
 }
 
 /// Converts a business-logic error into a tool call result (`is_error: true`).
-/// `Internal` errors are logged with detail but only a generic message reaches
-/// the client, matching the REST adapter's `ApiError` policy.
+/// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(super) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let message = match err {
         YorishiroError::Internal(err) => {
@@ -209,10 +201,9 @@ pub(super) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
-/// Authenticates the caller and verifies scope, acquiring an RLS-scoped DB connection. Expands
-/// to the `Authorized` value on success; on a scope-denied outcome it early-returns the tool
-/// result. A macro rather than a function because it early-returns from the enclosing handler
-/// (which must return `Result<CallToolResult, ErrorData>`).
+/// Authenticates the caller and verifies scope, acquiring an RLS-scoped DB connection.
+/// Expands to the `Authorized` value on success; on a scope-denied outcome it early-returns the tool result.
+/// A macro rather than a function because it early-returns from the enclosing handler (which must return `Result<CallToolResult, ErrorData>`).
 macro_rules! authorized {
     ($state:expr, $parts:expr, $scope:expr) => {
         match $crate::http::mcp::authorize($state, $parts, $scope).await? {
@@ -225,9 +216,8 @@ macro_rules! authorized {
 }
 pub(crate) use authorized;
 
-/// Connection-less counterpart to `authorized!`, for handlers (search) that do slow work before
-/// touching the DB. Expands to the `AuthContext` on success, else early-returns the scope-denied
-/// result.
+/// Connection-less counterpart to `authorized!`, for handlers (search) that do slow work before touching the DB.
+/// Expands to the `AuthContext` on success, else early-returns the scope-denied result.
 macro_rules! verified {
     ($state:expr, $parts:expr, $scope:expr) => {
         match $crate::http::mcp::authorize_scope_only($state, $parts, $scope).await? {
@@ -240,11 +230,9 @@ macro_rules! verified {
 }
 pub(crate) use verified;
 
-/// Unwraps a repository/service call's `Ok` value, or early-returns the
-/// tool-level error result for its `Err` value. A macro rather than a function
-/// because it early-returns from the enclosing handler (which must return
-/// `Result<CallToolResult, ErrorData>`). Only fits call sites whose `Err` arm
-/// is exactly `Ok(err_to_tool_result(err))`.
+/// Unwraps a repository/service call's `Ok` value, or early-returns the tool-level error result for its `Err` value.
+/// A macro rather than a function because it early-returns from the enclosing handler (which must return `Result<CallToolResult, ErrorData>`).
+/// Only fits call sites whose `Err` arm is exactly `Ok(err_to_tool_result(err))`.
 macro_rules! mcp_try {
     ($expr:expr) => {
         match $expr {

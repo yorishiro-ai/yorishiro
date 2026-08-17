@@ -25,7 +25,8 @@ pub struct ListRelationsParams {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
-    /// Restricts the listing to one state. Omitted, every state is listed.
+    /// Restricts the listing to one state.
+    /// Omitted, every state is listed.
     pub status: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,

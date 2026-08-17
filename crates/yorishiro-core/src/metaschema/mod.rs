@@ -10,8 +10,7 @@ pub use types::{
 pub use validate::validate_definition;
 pub use versioning::{VersioningDiff, diff};
 
-/// Re-exported only so the crate-root integration test in `tests/` can reference it;
-/// `#[doc(hidden)]` keeps it out of the public API docs.
+/// Re-exported only so the crate-root integration test in `tests/` can reference it; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 pub use validate::MAX_OBJECT_DEPTH;
 

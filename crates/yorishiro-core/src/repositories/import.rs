@@ -43,10 +43,8 @@ pub async fn import_jsonl(
 
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
-    // Exported `schema_id`s are only meaningful in the *source* tenant they came
-    // from: `create_schema` always mints a fresh ID. So entity lines can't resolve their
-    // schema by re-querying the exported `schema_id` in the destination tenant; instead
-    // track name-by-old-id for every schema line this import itself has processed so far.
+    // Exported `schema_id`s are only meaningful in the *source* tenant they came from: `create_schema` always mints a fresh ID.
+    // So entity lines can't resolve their schema by re-querying the exported `schema_id` in the destination tenant; instead track name-by-old-id for every schema line this import itself has processed so far.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
 
     for (line_no, line) in reader.lines().enumerate() {
@@ -79,12 +77,9 @@ pub async fn import_jsonl(
             ExportRecord::Entity(entity) => {
                 let old_id = entity.id;
 
-                // `entities::create` takes a schema *name* (it always resolves against the
-                // tenant's currently active version), not a schema ID. Prefer the name
-                // of a schema line this same import just created; a `schema_id` exported
-                // from a different tenant means nothing here. Fall back to looking the
-                // ID up in the destination tenant, for the case of importing entities
-                // against a schema that already exists there (not part of this import).
+                // `entities::create` takes a schema *name* (it always resolves against the tenant's currently active version), not a schema ID.
+                // Prefer the name of a schema line this same import just created; a `schema_id` exported from a different tenant means nothing here.
+                // Fall back to looking the ID up in the destination tenant, for the case of importing entities against a schema that already exists there (not part of this import).
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {

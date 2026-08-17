@@ -2,11 +2,9 @@ use crate::error::{ValidationDetail, YorishiroError};
 
 use super::types::{FieldDef, FieldTypeName, MetaSchemaDefinition};
 
-/// Maximum nesting depth for object-type fields, to prevent unbounded
-/// recursion from malformed or adversarial schema definitions.
+/// Maximum nesting depth for object-type fields, to prevent unbounded recursion from malformed or adversarial schema definitions.
 ///
-/// `pub` (rather than private) only so the crate-root integration test in `tests/` can
-/// reference it directly; `#[doc(hidden)]` keeps it out of the public API docs.
+/// `pub` (rather than private) only so the crate-root integration test in `tests/` can reference it directly; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
 pub const MAX_OBJECT_DEPTH: usize = 5;
 

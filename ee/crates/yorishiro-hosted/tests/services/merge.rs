@@ -20,8 +20,8 @@ fn verdict_for(plan: &crate::services::merge::MergePlan, field: &str) -> Option<
         .map(|f| f.verdict)
 }
 
-/// Upstream added a field the workspace has never had. Taking it adds structure without
-/// touching anything stored.
+/// Upstream added a field the workspace has never had.
+/// Taking it adds structure without touching anything stored.
 #[test]
 fn a_field_only_upstream_added_is_taken() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -41,9 +41,8 @@ fn a_field_only_upstream_added_is_taken() {
     );
 }
 
-/// The workspace's own field. Following the template must not delete it: this is the case
-/// the two-way comparison could not express, since "absent upstream" looked the same as
-/// "removed upstream".
+/// The workspace's own field.
+/// Following the template must not delete it: this is the case the two-way comparison could not express, since "absent upstream" looked the same as "removed upstream".
 #[test]
 fn a_field_only_the_workspace_added_is_kept() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -61,7 +60,8 @@ fn a_field_only_the_workspace_added_is_kept() {
     );
 }
 
-/// Upstream changed a field nobody here touched. No local work to lose.
+/// Upstream changed a field nobody here touched.
+/// No local work to lose.
 #[test]
 fn an_upstream_change_to_an_untouched_field_is_taken() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -73,8 +73,8 @@ fn an_upstream_change_to_an_untouched_field_is_taken() {
     assert_eq!(verdict_for(&plan, "title"), Some(MergeVerdict::AutoUpdate));
 }
 
-/// Both sides changed the same field differently. Nothing here picks a side: whichever lost
-/// would leave the entities written against it failing validation.
+/// Both sides changed the same field differently.
+/// Nothing here picks a side: whichever lost would leave the entities written against it failing validation.
 #[test]
 fn a_field_both_sides_changed_is_a_conflict() {
     let base = def(json!({ "priority": { "type": "string" } }));
@@ -93,8 +93,8 @@ fn a_field_both_sides_changed_is_a_conflict() {
     );
 }
 
-/// Both added the same field the same way. That is agreement, not a conflict: reporting it
-/// would make an operator adjudicate a decision already shared.
+/// Both added the same field the same way.
+/// That is agreement, not a conflict: reporting it would make an operator adjudicate a decision already shared.
 #[test]
 fn the_same_change_on_both_sides_is_not_a_conflict() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -109,8 +109,7 @@ fn the_same_change_on_both_sides_is_not_a_conflict() {
     assert_eq!(verdict_for(&plan, "due"), None);
 }
 
-/// An entity type present only upstream is as much a difference as a field, and each of its
-/// fields is reported.
+/// An entity type present only upstream is as much a difference as a field, and each of its fields is reported.
 #[test]
 fn a_new_entity_type_upstream_is_reported_field_by_field() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -134,8 +133,8 @@ fn a_new_entity_type_upstream_is_reported_field_by_field() {
     assert_eq!(project.verdict, MergeVerdict::AutoAdd);
 }
 
-/// Fields differing only in an unknown `x-` extension still differ. FieldDef keeps those in a
-/// flattened map, so a comparison over the named fields alone would call these equal.
+/// Fields differing only in an unknown `x-` extension still differ.
+/// FieldDef keeps those in a flattened map, so a comparison over the named fields alone would call these equal.
 #[test]
 fn an_extension_attribute_is_part_of_the_comparison() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -201,8 +200,8 @@ fn applying_takes_an_upstream_change_to_an_untouched_field() {
     );
 }
 
-/// A conflicting plan is refused whole. Applying the rest would leave a definition neither
-/// side asked for, with nothing recording which fields were skipped.
+/// A conflicting plan is refused whole.
+/// Applying the rest would leave a definition neither side asked for, with nothing recording which fields were skipped.
 #[test]
 fn applying_refuses_a_plan_with_conflicts() {
     let base = def(json!({ "priority": { "type": "string" } }));
@@ -226,8 +225,7 @@ fn applying_refuses_a_plan_with_conflicts() {
     }
 }
 
-/// A whole entity type added upstream arrives, even though the workspace has no such type to
-/// merge into.
+/// A whole entity type added upstream arrives, even though the workspace has no such type to merge into.
 #[test]
 fn applying_adds_an_entity_type_the_workspace_does_not_have() {
     let base = def(json!({ "title": { "type": "string" } }));
@@ -263,9 +261,8 @@ fn applying_an_empty_plan_changes_nothing() {
     );
 }
 
-/// Only the workspace changed the field's type (base and upstream agree), so the workspace's
-/// own definition is kept rather than reported as a conflict. A conflict needs *both* sides to
-/// have moved, which `a_field_both_sides_changed_is_a_conflict` covers.
+/// Only the workspace changed the field's type (base and upstream agree), so the workspace's own definition is kept rather than reported as a conflict.
+/// A conflict needs *both* sides to have moved, which `a_field_both_sides_changed_is_a_conflict` covers.
 #[test]
 fn a_type_changed_only_locally_is_kept() {
     let upstream: MetaSchemaDefinition = serde_json::from_value(json!({

@@ -5,8 +5,8 @@ use yorishiro_core::YorishiroError;
 
 use super::*;
 
-/// Creates a template directly. The marketplace only ever reads templates it did not create, so
-/// the library's own creation path is not what these tests are about.
+/// Creates a template directly.
+/// The marketplace only ever reads templates it did not create, so the library's own creation path is not what these tests are about.
 async fn seed_template(pool: &PgPool, tenant_id: Uuid, name: &str, visibility: &str) -> Uuid {
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO identity.templates (tenant_id, name, definition, visibility) \
@@ -28,8 +28,7 @@ async fn seed_tenant(pool: &PgPool, name: &str) -> Uuid {
         .id
 }
 
-/// A template whose only versions are drafts has nothing installable, so listing it would put an
-/// entry in the marketplace that 404s the moment anyone tries to use it.
+/// A template whose only versions are drafts has nothing installable, so listing it would put an entry in the marketplace that 404s the moment anyone tries to use it.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn the_listing_skips_templates_with_nothing_published(pool: PgPool) {
     let tenant = seed_tenant(&pool, "publisher").await;
@@ -91,8 +90,8 @@ async fn the_listing_skips_private_templates(pool: PgPool) {
     assert!(list_marketplace(&pool).await.unwrap().is_empty());
 }
 
-/// **The database does not enforce this** (`template_versions` carries no RLS), so the query
-/// is the enforcement. A draft is unfinished work its owner has not chosen to show.
+/// **The database does not enforce this** (`template_versions` carries no RLS), so the query is the enforcement.
+/// A draft is unfinished work its owner has not chosen to show.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn another_tenant_cannot_see_draft_versions(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;
@@ -123,8 +122,8 @@ async fn another_tenant_cannot_see_draft_versions(pool: PgPool) {
     assert_eq!(seen_by_other[0].status, "stable");
 }
 
-/// Publishing is the owner's alone. Reported as NotFound so a caller cannot map out which
-/// template ids exist by the difference between 403 and 404.
+/// Publishing is the owner's alone.
+/// Reported as NotFound so a caller cannot map out which template ids exist by the difference between 403 and 404.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn another_tenant_cannot_publish_a_version(pool: PgPool) {
     let owner = seed_tenant(&pool, "owner").await;

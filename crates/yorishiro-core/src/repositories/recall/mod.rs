@@ -12,13 +12,10 @@ use crate::repositories::schemas::{self, SchemaRecord};
 
 pub use crate::models::recall::*;
 
-/// Reduces `entity.data` down to only the fields marked `x-embed` in its entity_type
-/// definition. Falls back to an empty body if the entity's schema version no longer defines
-/// that entity_type at all, rather than failing the whole recall for one neighbor.
+/// Reduces `entity.data` down to only the fields marked `x-embed` in its entity_type definition.
+/// Falls back to an empty body if the entity's schema version no longer defines that entity_type at all, rather than failing the whole recall for one neighbor.
 ///
-/// `schema` is the entity's own `schema_id` resolved by the caller (and cached across neighbors
-/// sharing the same schema) rather than looked up here, so a multi-neighbor recall doesn't repeat
-/// the same `schemas::get_by_id` round trip once per neighbor.
+/// `schema` is the entity's own `schema_id` resolved by the caller (and cached across neighbors sharing the same schema) rather than looked up here, so a multi-neighbor recall doesn't repeat the same `schemas::get_by_id` round trip once per neighbor.
 fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord {
     let fields = schema
         .definition
@@ -40,16 +37,13 @@ fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord
     entity
 }
 
-/// Fetches an entity's full body together with its relations and connected neighbors in one
-/// call, so a caller doesn't need `entity_get` + `list_relations` + `entity_get` per neighbor
-/// round trips. Neighbors are shallow (only `x-embed` fields) unless `query.full` is set.
+/// Fetches an entity's full body together with its relations and connected neighbors in one call, so a caller doesn't need `entity_get` + `list_relations` + `entity_get` per neighbor round trips.
+/// Neighbors are shallow (only `x-embed` fields) unless `query.full` is set.
 ///
-/// `query.depth` controls how many hops are traversed outward from `entity_id` (clamped to
-/// `[1, MAX_RECALL_DEPTH]`). At depth 1 this is exactly the original single-hop behavior: only
-/// `entity_id`'s direct neighbors are returned. At depth > 1, each subsequent hop fetches the
-/// neighbors of every entity discovered at the previous hop, expanding breadth-first. An entity
-/// reachable by more than one path is only reported once, tagged with the shortest
-/// `hop_distance` it was reached at, and never re-expanded once visited (so cycles terminate).
+/// `query.depth` controls how many hops are traversed outward from `entity_id` (clamped to `[1, MAX_RECALL_DEPTH]`).
+/// At depth 1 this is exactly the original single-hop behavior: only `entity_id`'s direct neighbors are returned.
+/// At depth > 1, each subsequent hop fetches the neighbors of every entity discovered at the previous hop, expanding breadth-first.
+/// An entity reachable by more than one path is only reported once, tagged with the shortest `hop_distance` it was reached at, and never re-expanded once visited (so cycles terminate).
 pub async fn recall_context(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -62,15 +56,11 @@ pub async fn recall_context(
 
     let entity = entities::get(conn, workspace_id, entity_id).await?;
 
-    // Resolved once and reused for every neighbor's `shallow_copy` below, instead of each
-    // neighbor re-resolving its own workspace's tenant_id (always the same value: `neighbors`
-    // never crosses a workspace boundary).
+    // Resolved once and reused for every neighbor's `shallow_copy` below, instead of each neighbor re-resolving its own workspace's tenant_id (always the same value: `neighbors` never crosses a workspace boundary).
     let mut schema_cache: HashMap<Uuid, SchemaRecord> = HashMap::new();
 
-    // BFS outward from entity_id. `visited` tracks every entity already seen (the root plus
-    // every neighbor emitted so far) so a given entity is only ever expanded/reported once, at
-    // the hop it was first reached: this both dedups diamond-shaped paths and guarantees
-    // termination in the presence of cycles.
+    // BFS outward from entity_id.
+    // `visited` tracks every entity already seen (the root plus every neighbor emitted so far) so a given entity is only ever expanded/reported once, at the hop it was first reached: this both dedups diamond-shaped paths and guarantees termination in the presence of cycles.
     let mut visited: HashSet<Uuid> = HashSet::from([entity_id]);
     let mut frontier: Vec<Uuid> = vec![entity_id];
     let mut relations_out = Vec::new();
@@ -79,10 +69,7 @@ pub async fn recall_context(
     for hop in 1..=depth {
         let mut next_frontier = Vec::new();
 
-        // One round trip for every node in the frontier instead of one `neighbors()` call per
-        // node: see `relations::neighbors_batch`'s doc comment for why this isn't a plain
-        // `source_id = ANY(...)` query (that would apply `limit` across the whole batch rather
-        // than per node).
+        // One round trip for every node in the frontier instead of one `neighbors()` call per node: see `relations::neighbors_batch`'s doc comment for why this isn't a plain `source_id = ANY(...)` query (that would apply `limit` across the whole batch rather than per node).
         let mut by_pivot =
             relations::neighbors_batch(conn, workspace_id, &frontier, limit + 1).await?;
 

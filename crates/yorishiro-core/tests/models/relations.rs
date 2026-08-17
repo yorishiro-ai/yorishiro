@@ -1,7 +1,6 @@
 use super::*;
 
-/// `ListRelationsQuery::default()` is what a caller gets when it omits every filter, so the
-/// defaults are the de-facto API contract for an unfiltered list.
+/// `ListRelationsQuery::default()` is what a caller gets when it omits every filter, so the defaults are the de-facto API contract for an unfiltered list.
 #[test]
 fn the_default_list_query_filters_nothing_and_uses_the_documented_limit() {
     let query = ListRelationsQuery::default();
@@ -13,8 +12,7 @@ fn the_default_list_query_filters_nothing_and_uses_the_documented_limit() {
     assert_eq!(query.offset, 0);
 }
 
-/// `RelationRecord` is both written to the API and read back from a JSONL export, so it has to
-/// survive a serialize/deserialize round trip unchanged, including the free-form `properties`.
+/// `RelationRecord` is both written to the API and read back from a JSONL export, so it has to survive a serialize/deserialize round trip unchanged, including the free-form `properties`.
 #[test]
 fn a_relation_record_round_trips_through_json() {
     let record = RelationRecord {

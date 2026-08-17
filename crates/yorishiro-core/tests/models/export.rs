@@ -1,8 +1,7 @@
 use super::*;
 
-/// The export format is a tagged union so a reader can tell record kinds apart without tracking
-/// line position. The tag and content keys are the on-disk format: pinned here because a
-/// rename would make every previously exported file unreadable.
+/// The export format is a tagged union so a reader can tell record kinds apart without tracking line position.
+/// The tag and content keys are the on-disk format: pinned here because a rename would make every previously exported file unreadable.
 #[test]
 fn each_kind_is_tagged_so_a_reader_can_discriminate_lines() {
     let entity = ExportRecord::Entity(crate::models::entities::EntityRecord {
@@ -24,8 +23,7 @@ fn each_kind_is_tagged_so_a_reader_can_discriminate_lines() {
     assert_eq!(json["record"]["entity_type"], "task");
 }
 
-/// Import reads back exactly what export wrote, so the round trip through the tagged form has to
-/// preserve which variant a line was.
+/// Import reads back exactly what export wrote, so the round trip through the tagged form has to preserve which variant a line was.
 #[test]
 fn a_record_round_trips_back_into_the_same_variant() {
     let relation = ExportRecord::Relation(crate::models::relations::RelationRecord {

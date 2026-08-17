@@ -1,8 +1,7 @@
 use super::*;
 
-/// The REST search endpoint deserializes its parameters from the query string. Only
-/// `query_text` is required; the rest narrow an already-valid search, so a caller sending just
-/// the text must succeed.
+/// The REST search endpoint deserializes its parameters from the query string.
+/// Only `query_text` is required; the rest narrow an already-valid search, so a caller sending just the text must succeed.
 #[test]
 fn only_the_query_text_is_required() {
     let params: SearchEntitiesParams =
@@ -13,8 +12,7 @@ fn only_the_query_text_is_required() {
     assert!(params.filter.is_none());
 }
 
-/// A search with no text is meaningless (it would embed to noise), so the parameter is
-/// required rather than defaulted to an empty string.
+/// A search with no text is meaningless (it would embed to noise), so the parameter is required rather than defaulted to an empty string.
 #[test]
 fn a_search_without_text_is_rejected() {
     assert!(
@@ -25,9 +23,7 @@ fn a_search_without_text_is_rejected() {
     );
 }
 
-/// The filter arrives as a raw string on the query string and is parsed separately by
-/// `parse_filter_param`; at this layer it stays a string so the endpoint can report a precise
-/// error for malformed JSON.
+/// The filter arrives as a raw string on the query string and is parsed separately by `parse_filter_param`; at this layer it stays a string so the endpoint can report a precise error for malformed JSON.
 #[test]
 fn the_filter_is_carried_as_a_raw_string_for_later_parsing() {
     let params: SearchEntitiesParams = serde_json::from_value(serde_json::json!({
@@ -75,10 +71,8 @@ async fn app_with_key(
     (app, created.plaintext)
 }
 
-/// Creates a schema with one embeddable field and one entity carrying `title`, then embeds it
-/// synchronously. `POST /api/entities` would embed in a background task, which this test would
-/// have to poll for; going through the same repository and service calls that task uses gets the
-/// row and its vector committed before the search runs.
+/// Creates a schema with one embeddable field and one entity carrying `title`, then embeds it synchronously.
+/// `POST /api/entities` would embed in a background task, which this test would have to poll for; going through the same repository and service calls that task uses gets the row and its vector committed before the search runs.
 async fn seed_embedded_entity(
     conn: &mut sqlx::PgConnection,
     tenant_id: Uuid,
@@ -132,8 +126,7 @@ async fn get(app: axum::Router, uri: &str, key: &str) -> axum::http::Response<Bo
 }
 
 /// Search reads entity data, so an unauthenticated caller must not reach the embedding provider:
-/// `UnreachableEmbeddingProvider` errors if it is called, which would surface as a 500 rather
-/// than the 401 this asserts.
+/// `UnreachableEmbeddingProvider` errors if it is called, which would surface as a 500 rather than the 401 this asserts.
 #[sqlx::test(migrations = "../../migrations")]
 async fn search_requires_authentication(pool: PgPool) {
     let app = build_app(test_state(pool), no_static_fallback());
@@ -151,9 +144,9 @@ async fn search_requires_authentication(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
-/// `query_text` is the one required parameter. Axum rejects the request at extraction, before the
-/// handler runs. This also pins that no embedding call is made for a request that cannot
-/// produce a meaningful search.
+/// `query_text` is the one required parameter.
+/// Axum rejects the request at extraction, before the handler runs.
+/// This also pins that no embedding call is made for a request that cannot produce a meaningful search.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_search_without_query_text_is_rejected_before_embedding(pool: PgPool) {
     let (app, key) = app_with_key(
@@ -168,8 +161,8 @@ async fn a_search_without_query_text_is_rejected_before_embedding(pool: PgPool) 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-/// A malformed `filter` has to come back as a client error naming the problem. Returning a 500
-/// would tell the caller to retry a request that can never succeed.
+/// A malformed `filter` has to come back as a client error naming the problem.
+/// Returning a 500 would tell the caller to retry a request that can never succeed.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_malformed_filter_is_a_client_error(pool: PgPool) {
     let (app, key) = app_with_key(
@@ -188,14 +181,10 @@ async fn a_malformed_filter_is_a_client_error(pool: PgPool) {
     );
 }
 
-/// Search hands the caller's `workspace_id` to `search_by_vector` separately from acquiring the
-/// connection. If it ever passed the wrong one (or none), one tenant's search would return
-/// another's entities, and `FixedEmbeddingProvider` makes every entity a distance-0 match, so
-/// nothing about the vector distance would hide the leak.
+/// Search hands the caller's `workspace_id` to `search_by_vector` separately from acquiring the connection.
+/// If it ever passed the wrong one (or none), one tenant's search would return another's entities, and `FixedEmbeddingProvider` makes every entity a distance-0 match, so nothing about the vector distance would hide the leak.
 ///
-/// The entity is written directly rather than through `POST /api/entities` because that path
-/// embeds in a background task; this test is about which workspace the *query* reads, and
-/// `tests/http/controllers/entities.rs` already covers the write-then-search round trip.
+/// The entity is written directly rather than through `POST /api/entities` because that path embeds in a background task; this test is about which workspace the *query* reads, and `tests/http/controllers/entities.rs` already covers the write-then-search round trip.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_search_never_returns_another_workspaces_entities(pool: PgPool) {
     let db = TenantDb::new(pool.clone());

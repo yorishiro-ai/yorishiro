@@ -1,11 +1,10 @@
 //! A workspace's own LLM credentials, for the one feature that infers values (§FR-8-2).
 //!
-//! Reads and writes go through the migration-role pool, not the request role: `yorishiro_app`
-//! has no GRANT on this table, so a query issued on a request connection fails at the
-//! permission check rather than relying on an RLS policy being right. See the migration.
+//! Reads and writes go through the migration-role pool, not the request role: `yorishiro_app` has no GRANT on this table, so a query issued on a request connection fails at the permission check rather than relying on an RLS policy being right.
+//! See the migration.
 //!
-//! [`get`] returns the key so the inference client can send it. Nothing else does: [`describe`]
-//! is what an endpoint calls, and it reports the endpoint and model without the secret.
+//! [`get`] returns the key so the inference client can send it.
+//! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
 
 use sea_query::{Alias, Expr, Iden, OnConflict, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
@@ -29,27 +28,24 @@ enum WorkspaceLlmKeys {
 
 /// What a workspace has configured, without the key itself.
 ///
-/// The shape an endpoint returns. `api_key` is deliberately absent rather than masked: a masked
-/// value still travels through logs and proxies, and nothing a caller does needs it back.
+/// The shape an endpoint returns.
+/// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct LlmKeyDescription {
     pub base_url: String,
     pub model: String,
-    /// Always true when present: the row cannot exist without a key. Callers use the absence
-    /// of the whole description to mean "not configured".
+    /// Always true when present: the row cannot exist without a key.
+    /// Callers use the absence of the whole description to mean "not configured".
     pub configured: bool,
 }
 
 /// Refuses anything that is not `http://` or `https://`.
 ///
-/// The value is interpolated into a request URL, so a `file://` or `gopher://` there points
-/// reqwest at something that is not an HTTP conversation at all, and a scheme-less string
-/// silently becomes a relative path. Checked here, at the point a person types it, so the
-/// refusal names the field rather than surfacing later as a failed inference run.
+/// The value is interpolated into a request URL, so a `file://` or `gopher://` there points reqwest at something that is not an HTTP conversation at all, and a scheme-less string silently becomes a relative path.
+/// Checked here, at the point a person types it, so the refusal names the field rather than surfacing later as a failed inference run.
 ///
-/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a
-/// policy question for the operator; see docs/api.md. This only rules out URLs that could never
-/// be a chat-completions endpoint.
+/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator; see docs/api.md.
+/// This only rules out URLs that could never be a chat-completions endpoint.
 pub(crate) fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
     let trimmed = base_url.trim();
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -77,10 +73,8 @@ pub async fn set(
             hint: "remove the configuration instead of storing an empty key".into(),
         });
     }
-    // Normalise once, then validate and store the same string. Checking `base_url.trim()` and
-    // storing `base_url` would let "  https://host  " pass and be persisted with its padding,
-    // which `InferenceClient` then interpolates straight into a request URL: the check and the
-    // stored value have to be the same value.
+    // Normalise once, then validate and store the same string.
+    // Checking `base_url.trim()` and storing `base_url` would let "  https://host  " pass and be persisted with its padding, which `InferenceClient` then interpolates straight into a request URL: the check and the stored value have to be the same value.
     let base_url = base_url.trim().trim_end_matches('/');
     check_scheme(base_url)?;
 
@@ -117,7 +111,8 @@ pub async fn set(
     Ok(())
 }
 
-/// Removes a workspace's credentials. Inference then refuses until one is configured again.
+/// Removes a workspace's credentials.
+/// Inference then refuses until one is configured again.
 pub async fn clear(pool: &PgPool, workspace_id: Uuid) -> Result<(), YorishiroError> {
     let (sql, values) = Query::delete()
         .from_table((Alias::new("identity"), WorkspaceLlmKeys::Table))
@@ -131,7 +126,8 @@ pub async fn clear(pool: &PgPool, workspace_id: Uuid) -> Result<(), YorishiroErr
     Ok(())
 }
 
-/// What is configured, for an endpoint to report. Never includes the key.
+/// What is configured, for an endpoint to report.
+/// Never includes the key.
 pub async fn describe(
     pool: &PgPool,
     workspace_id: Uuid,
@@ -156,9 +152,8 @@ pub async fn describe(
 
 /// The credentials themselves, for making a call.
 ///
-/// `None` means the workspace has configured none. Callers turn that into a refusal rather than
-/// a fallback: inferring nothing and filling defaults instead would look, to the caller, like
-/// inference that produced default-shaped answers.
+/// `None` means the workspace has configured none.
+/// Callers turn that into a refusal rather than a fallback: inferring nothing and filling defaults instead would look, to the caller, like inference that produced default-shaped answers.
 pub async fn get(
     pool: &PgPool,
     workspace_id: Uuid,

@@ -7,8 +7,8 @@ use super::*;
 
 use crate::tests::test_helpers;
 
-/// Issues a key directly. The community edition's `create_api_key` always records a workspace,
-/// so a tenant-scoped key (the whole point here) cannot be made through it.
+/// Issues a key directly.
+/// The community edition's `create_api_key` always records a workspace, so a tenant-scoped key (the whole point here) cannot be made through it.
 async fn issue_key(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -35,8 +35,7 @@ fn workspace_header(id: Uuid) -> Vec<(String, String)> {
     vec![(WORKSPACE_HEADER.to_string(), id.to_string())]
 }
 
-/// A tenant-scoped key carries no workspace of its own, so the one named by the header becomes
-/// the request's workspace.
+/// A tenant-scoped key carries no workspace of its own, so the one named by the header becomes the request's workspace.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_tenant_key_resolves_the_requested_workspace(pool: PgPool) {
     let (tenant_id, workspace_a) = test_helpers::seed_tenant_and_workspace(&pool).await;
@@ -53,8 +52,7 @@ async fn a_tenant_key_resolves_the_requested_workspace(pool: PgPool) {
     }
 }
 
-/// **The tenant isolation boundary for these keys.** The workspace is named per request, so
-/// without this check the header alone would carry a caller into any tenant's data.
+/// **The tenant isolation boundary for these keys.** The workspace is named per request, so without this check the header alone would carry a caller into any tenant's data.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_tenant_key_cannot_reach_another_tenants_workspace(pool: PgPool) {
     let (tenant_a, _) = test_helpers::seed_tenant_and_workspace(&pool).await;
@@ -69,8 +67,7 @@ async fn a_tenant_key_cannot_reach_another_tenants_workspace(pool: PgPool) {
     assert!(matches!(err, YorishiroError::Unauthenticated));
 }
 
-/// A tenant-scoped key has no workspace to fall back on, so omitting the header cannot silently
-/// resolve to one: it must fail rather than pick a workspace on the caller's behalf.
+/// A tenant-scoped key has no workspace to fall back on, so omitting the header cannot silently resolve to one: it must fail rather than pick a workspace on the caller's behalf.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_tenant_key_without_a_requested_workspace_is_rejected(pool: PgPool) {
     let (tenant_id, _) = test_helpers::seed_tenant_and_workspace(&pool).await;
@@ -84,8 +81,7 @@ async fn a_tenant_key_without_a_requested_workspace_is_rejected(pool: PgPool) {
     assert!(matches!(err, YorishiroError::Unauthenticated));
 }
 
-/// A workspace-scoped key still works with no header at all: the community edition's own
-/// behaviour has to survive replacing the authenticator.
+/// A workspace-scoped key still works with no header at all: the community edition's own behaviour has to survive replacing the authenticator.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_workspace_key_still_authenticates_without_a_header(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
@@ -116,8 +112,7 @@ async fn a_workspace_key_naming_another_workspace_is_rejected(pool: PgPool) {
     assert!(matches!(err, YorishiroError::ValidationFailed { .. }));
 }
 
-/// An unparseable header is an error rather than an omission: treating it as "not sent" would
-/// send a request meant for one workspace to whichever one the key happens to carry.
+/// An unparseable header is an error rather than an omission: treating it as "not sent" would send a request meant for one workspace to whichever one the key happens to carry.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_malformed_header_is_rejected(pool: PgPool) {
     let (tenant_id, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;

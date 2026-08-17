@@ -1,14 +1,9 @@
-//! Core domain logic for Yorishiro: the metaschema, repositories, and services that both the
-//! HTTP/MCP server in this workspace and downstream crates outside it are built on.
+//! Core domain logic for Yorishiro: the metaschema, repositories, and services that both the HTTP/MCP server in this workspace and downstream crates outside it are built on.
 //!
-//! **This crate's `pub` API has consumers that aren't in this repository.** A `pub` item with no
-//! caller in this workspace is therefore not evidence that it's dead: searching this repo can
-//! only prove that *this repo* doesn't use it. Before removing or narrowing the visibility of
-//! anything `pub`, check the downstream consumers too; a dead-code sweep that skips that step
-//! has already come close to deleting a security-relevant function here.
+//! **This crate's `pub` API has consumers that aren't in this repository.** A `pub` item with no caller in this workspace is therefore not evidence that it's dead: searching this repo can only prove that *this repo* doesn't use it.
+//! Before removing or narrowing the visibility of anything `pub`, check the downstream consumers too; a dead-code sweep that skips that step has already come close to deleting a security-relevant function here.
 //!
-//! Items genuinely internal to this crate should be `pub(crate)` (or `pub(super)`) so this
-//! distinction stays visible in the code rather than depending on someone remembering it.
+//! Items genuinely internal to this crate should be `pub(crate)` (or `pub(super)`) so this distinction stays visible in the code rather than depending on someone remembering it.
 
 pub mod db;
 pub mod error;
@@ -20,16 +15,11 @@ pub mod templates;
 
 pub use error::{ResultExt, YorishiroError};
 
-/// Shared test-only fixtures. `tenancy::create_tenant`/`create_workspace` themselves depend on
-/// `PgPool` and enforce caps unrelated to what most other modules' tests need, so this crosses
-/// that dependency out entirely: a minimal, direct sea-query insert against
-/// `identity.tenants`/`identity.workspaces`, safe for any test module to call without pulling
-/// in tenancy's cap-checking logic.
+/// Shared test-only fixtures.
+/// `tenancy::create_tenant`/`create_workspace` themselves depend on `PgPool` and enforce caps unrelated to what most other modules' tests need, so this crosses that dependency out entirely: a minimal, direct sea-query insert against `identity.tenants`/`identity.workspaces`, safe for any test module to call without pulling in tenancy's cap-checking logic.
 ///
-/// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::test_support`, since
-/// every test file compiles as its own module's `mod tests` rather than as an external
-/// integration test. It is therefore never part of a release build or of this crate's public
-/// API.
+/// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::test_support`, since every test file compiles as its own module's `mod tests` rather than as an external integration test.
+/// It is therefore never part of a release build or of this crate's public API.
 #[cfg(test)]
 pub(crate) mod test_support {
     use sea_query::{Alias, Iden, PostgresQueryBuilder, Query};

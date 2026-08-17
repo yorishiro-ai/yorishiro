@@ -14,10 +14,8 @@ fn sample_definition(name: &str) -> serde_json::Value {
     })
 }
 
-/// Creates a tenant with one workspace and one member holding `role`, and returns
-/// `(tenant_id, api_key)` for that member. The four write endpoints below gate on the caller's
-/// *membership role* (`require_tenant_admin`), not on the API key's scope, so every caller here
-/// gets `role.max_scope()` and the role is what varies between tests.
+/// Creates a tenant with one workspace and one member holding `role`, and returns `(tenant_id, api_key)` for that member.
+/// The four write endpoints below gate on the caller's *membership role* (`require_tenant_admin`), not on the API key's scope, so every caller here gets `role.max_scope()` and the role is what varies between tests.
 async fn seed_member(pool: &PgPool, email: &str, role: tenancy::MembershipRole) -> (Uuid, String) {
     let tenant = tenancy::create_tenant(pool, "acme", None).await.unwrap();
     let workspace = tenancy::create_workspace(pool, tenant.id, "main", None, None, None)
@@ -36,8 +34,8 @@ async fn seed_member(pool: &PgPool, email: &str, role: tenancy::MembershipRole) 
     (tenant.id, key)
 }
 
-/// The happy path for all four admin-gated endpoints. Without this, an implementation that
-/// returned 403 unconditionally would still satisfy every rejection test below.
+/// The happy path for all four admin-gated endpoints.
+/// Without this, an implementation that returned 403 unconditionally would still satisfy every rejection test below.
 #[sqlx::test(migrations = "../../migrations")]
 async fn owner_can_create_update_fork_and_delete_a_template(pool: PgPool) {
     let (_tenant_id, owner_key) =
