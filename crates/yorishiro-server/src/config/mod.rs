@@ -113,10 +113,10 @@ pub const PACKAGED_CONFIG_PATH: &str = "/etc/yorishiro/config.yml";
 ///
 /// Unset, the working directory comes first, so a source checkout keeps using its own
 /// `config.yml`. `/etc/yorishiro/config.yml` is the fallback, and it exists for the admin CLI:
-/// the unit exports the variable, but a shell has no such environment, so
-/// `yorishiro-server admin create-tenant` on a packaged host used to look in whatever directory
-/// the operator happened to be in and report the database as unconfigured while the service
-/// beside it ran normally against that exact file.
+/// the unit exports the variable, but a shell has no such environment, so without this fallback
+/// `yorishiro-server admin create-tenant` on a packaged host would look in whatever directory
+/// the operator happens to be in and report the database as unconfigured, even while the
+/// service beside it runs normally against that exact file.
 ///
 /// `explicit` is an `OsString` rather than a `String` because `std::env::var` reports a
 /// non-UTF-8 value as `NotUnicode`, and `.ok()` would flatten that into "unset". A path this

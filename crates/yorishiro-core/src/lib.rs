@@ -24,8 +24,7 @@ pub use error::{ResultExt, YorishiroError};
 /// `PgPool` and enforce caps unrelated to what most other modules' tests need, so this crosses
 /// that dependency out entirely: a minimal, direct sea-query insert against
 /// `identity.tenants`/`identity.workspaces`, safe for any test module to call without pulling
-/// in tenancy's cap-checking logic. Consolidates what used to be a near-identical raw-SQL
-/// helper copy-pasted across a dozen test modules.
+/// in tenancy's cap-checking logic.
 ///
 /// `#[cfg(test)]`-gated and `pub(crate)`: `tests/` reaches it as `crate::test_support`, since
 /// every test file compiles as its own module's `mod tests` rather than as an external

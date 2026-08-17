@@ -298,9 +298,10 @@ fn hex_decode_accepts_uppercase() {
 
 /// Every adapter that authenticates a request routes its `Authorization` header through this,
 /// so the shapes it accepts and rejects are the shapes the whole server accepts and rejects.
-/// The empty-credential case is why this is shared at all: `Authorization: Bearer ` used to be
-/// rejected by one caller and accepted -- then hashed into a lookup that could never match --
-/// by the REST and MCP paths, which is the disagreement a shared helper exists to prevent.
+/// The empty-credential case is why this is shared at all: `Authorization: Bearer ` with nothing
+/// after it must be rejected the same way by every caller, since hashing the empty string into
+/// a lookup can never match and a caller that instead accepted it would disagree silently with
+/// every other path.
 #[test]
 fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
     assert_eq!(

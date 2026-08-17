@@ -58,8 +58,7 @@ fn a_too_deep_definition_reports_the_offending_field() {
 
 /// This module re-exports the metaschema surface under one path, and `validate_definition` is
 /// what every write path runs before touching the database. Exercising it here also pins that
-/// the re-export still resolves -- if one were dropped, this file stops compiling, which is the
-/// same signal the old type-only assertions gave, but as a side effect of a real test.
+/// the re-export still resolves: dropping it stops this file compiling.
 #[test]
 fn a_definition_with_no_entity_types_is_rejected() {
     let error = validate_definition(&parse(serde_json::json!({

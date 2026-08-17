@@ -45,9 +45,8 @@ pub struct ListRelationsQuery {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
-    /// Restricts the listing to one state. `None` lists every state, so a caller that has not
-    /// heard of `status` still sees deprecated and archived relations rather than silently
-    /// losing rows it used to get.
+    /// Restricts the listing to one state. `None` lists every state, so a caller that does not
+    /// pass `status` sees deprecated and archived relations along with every other state.
     pub status: Option<String>,
     pub limit: i64,
     pub offset: i64,

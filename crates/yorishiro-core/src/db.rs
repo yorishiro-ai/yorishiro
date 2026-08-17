@@ -124,12 +124,11 @@ impl TenantDb {
 
         // Under `cargo test` only, and only because `sqlx::test` hands out a pool that connects
         // as the owner. Production pools take the role from `connect`'s `after_connect`; tests
-        // build theirs with `TenantDb::new`, so without this every test ran with privileges no
-        // request ever has, and a missing GRANT was invisible to all of them. That is how
-        // `create_schema` shipped answering 500 on every path with the suite green (#129).
+        // build theirs with `TenantDb::new`, so without this a test runs with privileges no
+        // request ever has, and a missing GRANT is invisible to it.
         //
-        // Redundant in production rather than wrong there -- `SET ROLE` to the role already
-        // held is a no-op -- but it costs a round trip, so it stays behind `cfg(test)`.
+        // Redundant in production rather than wrong there, since `SET ROLE` to the role already
+        // held is a no-op, but it costs a round trip, so it stays behind `cfg(test)`.
         #[cfg(test)]
         sqlx::query("SET ROLE yorishiro_app")
             .execute(conn.as_mut())

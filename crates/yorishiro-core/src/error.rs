@@ -48,9 +48,10 @@ pub enum YorishiroError {
     /// three an operator can fix, and only if the response says so.
     ///
     /// A provider that answers `429` becomes `ProviderBusy` and reports the wait. A provider
-    /// that is not there at all used to fall through to `Internal`, so the case with an actual
-    /// remedy reported worse than the case without one: the log held
-    /// `error sending request for url ...` while the caller got `internal server error`.
+    /// that cannot be reached at all maps here rather than to `Internal`, so the case with an
+    /// actual remedy is distinguishable from the case without one: folding it into `Internal`
+    /// would leave the log holding `error sending request for url ...` while the caller sees
+    /// only `internal server error`.
     ///
     /// `url` is the configured base URL, not the caller's input, so naming it discloses nothing
     /// the deployment's own operator did not set.

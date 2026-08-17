@@ -66,8 +66,7 @@ async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: Pg
     let workspace_a = test_support::seed_workspace(&pool, tenant, "workspace-a").await;
     let workspace_b = test_support::seed_workspace(&pool, tenant, "workspace-b").await;
 
-    // Two schemas under the SAME tenant, one per workspace. Under the old tenant-scoped
-    // policy both would be visible to either workspace.
+    // Two schemas under the SAME tenant, one per workspace.
     for (workspace, name) in [(workspace_a, "schema-a"), (workspace_b, "schema-b")] {
         sqlx::query(
             "INSERT INTO content.schemas (tenant_id, workspace_id, name, definition) \
