@@ -237,7 +237,7 @@ export function EntitiesPage() {
                     <TableRow
                       key={entity.id}
                       className="cursor-pointer"
-                      onClick={() => navigate(`${entity.id}`)}
+                      onClick={() => navigate(entity.id)}
                     >
                       {/* The name, with the id beneath it. Ids are time-ordered, so a column
                           of id prefixes reads as the same value repeated on every row. */}

@@ -42,7 +42,9 @@ export function dataPreview(data: Record<string, unknown>, maxLength = 100): str
   try {
     text = JSON.stringify(data);
   } catch {
-    text = String(data);
+    // `JSON.stringify` throws on a cycle, and `String(data)` would answer "[object Object]",
+    // which tells the reader less than the field names do.
+    text = `{${Object.keys(data).join(", ")}}`;
   }
   if (!text) return "";
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;

@@ -149,7 +149,7 @@ export function useSchemaGraph(definition: SchemaDefinition | null, isDark: bool
       const fields = Object.entries(def.fields ?? {}).map(([fname, fdef]) => ({
         name: fname,
         type: fdef.type,
-        required: Boolean(fdef.required),
+        required: fdef.required,
         embed: Boolean(fdef["x-embed"]),
       }));
       return {

@@ -90,8 +90,9 @@ export function WsSchemaPage() {
         return;
       }
 
+      const found = match;
       const sameName = allSchemas
-        .filter((s) => s.name === match!.name)
+        .filter((s) => s.name === found.name)
         .toSorted((a, b) => b.version - a.version);
       setVersions(sameName);
 

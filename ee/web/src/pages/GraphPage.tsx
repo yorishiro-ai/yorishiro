@@ -345,9 +345,18 @@ function radialPosition(hop: number, index: number, countAtHop: number) {
 
 function entityPreview(entity: Entity | undefined): Array<[string, string]> {
   if (!entity || !entity.data) return [];
-  return Object.entries(entity.data)
-    .slice(0, 2)
-    .map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : String(v)]);
+  return (
+    Object.entries(entity.data)
+      .slice(0, 2)
+      // Only a primitive reaches `String()`; anything else is JSON, so a nested object renders as
+      // its shape rather than "[object Object]".
+      .map(([k, v]): [string, string] => [
+        k,
+        typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+          ? String(v)
+          : JSON.stringify(v),
+      ])
+  );
 }
 
 /// How many entities the picker offers.
