@@ -140,7 +140,7 @@ pub async fn confirm(
     let mut tx = conn.begin().await.internal()?;
 
     // Grouped per entity: one entity with three proposed fields is one write and one snapshot,
-    // not three of each -- three snapshots of the same entity under one job would make undo
+    // not three of each. Three snapshots of the same entity under one job would make undo
     // restore an intermediate state depending on which row it read last.
     let mut by_entity: std::collections::BTreeMap<Uuid, Vec<&FillProposal>> = Default::default();
     for proposal in &proposals {

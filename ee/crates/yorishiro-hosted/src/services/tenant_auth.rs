@@ -15,7 +15,7 @@ pub const WORKSPACE_HEADER: &str = "x-workspace-id";
 /// [`WORKSPACE_HEADER`].
 ///
 /// Installed with `AppState::with_authenticator`, so it is honoured on every authenticated path
-/// -- REST and MCP alike -- rather than only where a handler remembered to look.
+/// (REST and MCP alike) rather than only where a handler remembered to look.
 pub struct TenantScopedAuthenticator;
 
 /// The outcome of reading the workspace header.
@@ -68,7 +68,7 @@ impl Authenticator for TenantScopedAuthenticator {
 
         // The two-argument overload this repo's migration adds. `p_requested_workspace` is only
         // consulted for a key with no workspace of its own, and resolves only when the named
-        // workspace belongs to that key's tenant -- the tenant isolation boundary for these keys.
+        // workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
         let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
             "SELECT id, workspace_id, tenant_id, scope, user_id \
              FROM identity.authenticate_api_key($1, $2)",
@@ -84,7 +84,7 @@ impl Authenticator for TenantScopedAuthenticator {
 
         // A workspace-scoped key ignores the header, so a client that sends one naming a
         // different workspace is asking for something it will not get. Rejecting says so;
-        // proceeding would act on the key's own workspace instead -- a write landing where the
+        // proceeding would act on the key's own workspace instead: a write landing where the
         // client never named, answered with a 2xx.
         if let Some(requested) = requested
             && requested != workspace_id
@@ -114,7 +114,7 @@ impl Authenticator for TenantScopedAuthenticator {
     }
 }
 
-/// A freshly issued tenant-scoped key. The plaintext exists only here -- only its hash is stored.
+/// A freshly issued tenant-scoped key. The plaintext exists only here: only its hash is stored.
 pub struct CreatedTenantApiKey {
     pub id: Uuid,
     pub plaintext: String,
@@ -123,7 +123,7 @@ pub struct CreatedTenantApiKey {
 /// Issues a tenant-scoped key.
 ///
 /// The community edition's `create_api_key` always records a workspace, so a key with none
-/// cannot be made through it -- this writes the row directly. The role cap is the same one that
+/// cannot be made through it: this writes the row directly. The role cap is the same one that
 /// command applies: a key attributed to a user may not exceed what that user's tenant role
 /// permits, since the key can act as them.
 pub async fn create_tenant_api_key(

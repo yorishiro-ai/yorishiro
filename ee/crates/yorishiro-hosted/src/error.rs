@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use yorishiro_core::YorishiroError;
 
-/// The JSON envelope every failing route in this crate returns, for OpenAPI only -- nothing
+/// The JSON envelope every failing route in this crate returns, for OpenAPI only: nothing
 /// constructs it. The response body is built by `YorishiroError::into_http_parts()` as an
 /// untyped `serde_json::Value`, so there is no existing Rust type describing its shape, and
 /// `yorishiro-server`'s equivalent (`ApiErrorBody`) lives behind a `pub(crate)` module this
@@ -18,7 +18,7 @@ pub struct HostedApiErrorBody {
 pub struct HostedApiErrorDetail {
     pub message: String,
     /// Present on validation failures (`422`) only. Omitted rather than serialised as `null`
-    /// when absent, matching what `into_http_parts` actually emits -- a `403` body carries
+    /// when absent, matching what `into_http_parts` actually emits: a `403` body carries
     /// `message` and `hint` and no `details` key at all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,

@@ -1,6 +1,6 @@
 use super::*;
 
-/// The default list query must not filter anything out -- a caller that supplies no parameters
+/// The default list query must not filter anything out: a caller that supplies no parameters
 /// expects the whole workspace, one page at a time.
 #[test]
 fn the_default_list_query_filters_nothing_and_uses_the_documented_limit() {

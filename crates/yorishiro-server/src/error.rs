@@ -27,7 +27,7 @@ impl IntoResponse for ApiError {
 
 /// A DTO that exists only to describe the error response shape in the OpenAPI document.
 /// Actual response bodies are built individually by `ApiError::into_response`, so this
-/// type's values are never used — it exists purely for schema generation.
+/// type's values are never used: it exists purely for schema generation.
 #[derive(Serialize, ToSchema)]
 pub struct ApiErrorBody {
     pub error: ApiErrorDetail,

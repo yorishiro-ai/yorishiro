@@ -23,7 +23,7 @@ pub use yorishiro_server::{
 
 /// `YORISHIRO_WEB_DIR`, the directory `yorishiro-server` serves its admin
 /// dashboard SPA from. `None` (unset, or set to an empty string via [`non_empty_env`]) makes the
-/// caller fall back to the community edition's own embedded assets -- see
+/// caller fall back to the community edition's own embedded assets, see
 /// `yorishiro_server::build_app`.
 pub fn web_dir_from_env() -> Option<String> {
     web_dir_or_none(non_empty_env("YORISHIRO_WEB_DIR").as_deref())

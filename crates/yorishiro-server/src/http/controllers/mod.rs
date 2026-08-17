@@ -39,7 +39,7 @@ pub(crate) fn parse_filter_param(
 }
 
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and
-/// stricter than) the presented API key's own scope -- a Member-role key can carry `write`
+/// stricter than) the presented API key's own scope: a Member-role key can carry `write`
 /// scope for content operations while still having no business adding members or managing
 /// workspaces.
 pub(crate) async fn require_tenant_admin(
@@ -187,11 +187,11 @@ pub struct ApiDoc;
 /// that `main.rs` can merge in the MCP routes and SwaggerUi before calling
 /// `with_state` at the end.
 ///
-/// `rate_limiter` protects `/auth/signup`, `/auth/login`, `/setup`, and `/setup/status` --
+/// `rate_limiter` protects `/auth/signup`, `/auth/login`, `/setup`, and `/setup/status`:
 /// this crate's own bearer-token-free endpoints, and therefore the ones an unauthenticated
 /// caller can brute-force (invite tokens, passwords). A downstream crate that adds its own
 /// unauthenticated routes (e.g. an OAuth login/callback pair) should rate-limit those too,
-/// via `crate::http::middleware::rate_limit::apply_rate_limit_layer` -- pass this same `Arc`
+/// via `crate::http::middleware::rate_limit::apply_rate_limit_layer`: pass this same `Arc`
 /// to share one quota with these routes, or a fresh one for an independent quota. See
 /// `crate::build_app`'s doc comment for the full downstream-integration example.
 pub fn router(

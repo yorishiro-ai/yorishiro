@@ -22,7 +22,7 @@ enum Tenants {
 /// Whether the first-run setup wizard is enabled at all. Gated on `YORISHIRO_MAX_TENANTS`
 /// resolving to an actual cap (the default is `1`; setting it to `0` means unlimited) rather
 /// than a separate flag, so the wizard can never be enabled on a deployment that lacks the
-/// tenant cap that makes it safe -- without that cap, anyone could hit `POST /setup` between a
+/// tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a
 /// deploy and its first real tenant and claim ownership of the whole deployment.
 fn wizard_enabled() -> bool {
     matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
@@ -42,7 +42,7 @@ async fn tenant_count(pool: &sqlx::PgPool) -> Result<i64, YorishiroError> {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SetupStatusResponse {
-    /// True when the wizard is enabled and no tenant exists yet -- the client should show the
+    /// True when the wizard is enabled and no tenant exists yet: the client should show the
     /// setup form instead of the login form.
     pub setup_required: bool,
 }
@@ -62,7 +62,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatusRes
 }
 
 /// Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the
-/// deployment's first tenant/workspace from scratch -- there is no one to invite from yet. Only
+/// deployment's first tenant/workspace from scratch: there is no one to invite from yet. Only
 /// email/password are asked for (see `web/`'s setup screen); the tenant and workspace get fixed
 /// default names, matching a self-hosted deployment's "one operator, one tenant" reality.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -78,7 +78,7 @@ pub struct SetupResponse {
     pub email: String,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
-    /// A freshly issued API key, scoped to the new owner account -- shown only here, same as
+    /// A freshly issued API key, scoped to the new owner account: shown only here, same as
     /// `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
     pub api_key: String,
 }

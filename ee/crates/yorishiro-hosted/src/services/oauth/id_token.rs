@@ -21,7 +21,7 @@ pub struct IdTokenClaims {
 /// Verifies an ID token's signature against the provider's JWKS and validates its standard
 /// claims (`iss` must equal `issuer_url`, `aud` must contain `client_id`, `exp` must be in the
 /// future). Returns `YorishiroError::Unauthenticated` for every failure mode (bad signature,
-/// wrong issuer/audience, expired, unknown `kid`, unsupported `alg`) -- a caller has no
+/// wrong issuer/audience, expired, unknown `kid`, unsupported `alg`): a caller has no
 /// actionable way to distinguish them, and doing so would only help an attacker fingerprint
 /// which check failed.
 pub fn verify(

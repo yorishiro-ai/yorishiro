@@ -496,7 +496,7 @@ async fn neighbors_batch_omits_pivots_with_no_relations(pool: PgPool) {
     assert!(batch.is_empty());
 }
 
-/// A duplicate id in `pivot_ids` must contribute its neighbors only once -- `unnest` would
+/// A duplicate id in `pivot_ids` must contribute its neighbors only once: `unnest` would
 /// otherwise drive the lateral subquery twice for that id and double its entry in the result.
 #[sqlx::test(migrations = "../../migrations")]
 async fn neighbors_batch_dedups_a_repeated_pivot_id(pool: PgPool) {
@@ -639,7 +639,7 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
     .await
     .unwrap();
 
-    // Created in order alpha, beta, gamma -- relation_created_at is monotonically increasing,
+    // Created in order alpha, beta, gamma: relation_created_at is monotonically increasing,
     // so the most-recent-first order is exactly the reverse of creation order.
     let mut project_ids = Vec::new();
     for name in ["alpha", "beta", "gamma"] {
@@ -671,8 +671,8 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
     }
 
     // limit=2 against 3 relations: truncation must drop the oldest (alpha), keeping gamma then
-    // beta -- the same outcome a single `neighbors(&mut conn, workspace_id, task.id, 2)` call
-    // would produce.
+    // beta. That is the same outcome a single `neighbors(&mut conn, workspace_id, task.id, 2)`
+    // call would produce.
     let batch = neighbors_batch(&mut conn, workspace_id, &[task.id], 2)
         .await
         .unwrap();
@@ -753,7 +753,7 @@ async fn traversal_skips_non_active_relations(pool: PgPool) {
         .unwrap();
     assert!(out.is_empty(), "deprecated relation is not traversed");
 
-    // Inbound, from the target -- the 'in' branch of the union is a separate WHERE clause and
+    // Inbound, from the target: the 'in' branch of the union is a separate WHERE clause and
     // would keep returning the relation if only the 'out' branch had been filtered.
     let inbound = neighbors(&mut conn, workspace_id, project.id, DEFAULT_NEIGHBORS_LIMIT)
         .await

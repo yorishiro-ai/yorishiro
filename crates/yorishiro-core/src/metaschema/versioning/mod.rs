@@ -54,7 +54,7 @@ pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> Versionin
     }
 }
 
-/// Whether an upper bound got stricter -- a lower ceiling, or a ceiling where there was none.
+/// Whether an upper bound got stricter: a lower ceiling, or a ceiling where there was none.
 ///
 /// Comparing the two `Option`s directly does not express this. `Option`'s ordering places `None`
 /// below every `Some`, so `Some(10) < None` is false, and adding a ceiling where there was none
@@ -72,7 +72,7 @@ fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
 }
 
 /// The floor-side mirror of [`lowered_ceiling`]. A bare `new > old` happens to give these two
-/// cases the right answer, but only by luck of which way `None` sorts -- spelling it out keeps
+/// cases the right answer, but only by luck of which way `None` sorts: spelling it out keeps
 /// the two sides symmetric and stops the next reader from having to recall that ordering.
 fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {

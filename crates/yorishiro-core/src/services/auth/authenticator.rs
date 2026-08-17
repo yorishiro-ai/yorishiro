@@ -13,8 +13,8 @@ use super::{AuthContext, authenticate};
 ///
 /// Authentication is the one decision every `/api/*` route and every MCP tool passes through,
 /// and it is reached from five separate entry points inside this workspace. A deployment that
-/// needs a different rule — a key that names its workspace per request, a key issued by an
-/// external identity system, a key carrying a claim this crate has never heard of — cannot get
+/// needs a different rule (a key that names its workspace per request, a key issued by an
+/// external identity system, a key carrying a claim this crate has never heard of) cannot get
 /// there by adding routes, because the decision happens *inside* the handlers those routes
 /// already own.
 ///
@@ -35,7 +35,7 @@ use super::{AuthContext, authenticate};
 ///   headers verbatim, minus nothing.
 ///
 /// `headers` is a slice of `(name, value)` pairs rather than an `http::HeaderMap` so this crate
-/// keeps no HTTP dependency — the same reason [`super::bearer_credential`] takes a `&str`.
+/// keeps no HTTP dependency: the same reason [`super::bearer_credential`] takes a `&str`.
 /// Names are lowercase, as HTTP/2 requires and `http` normalizes them.
 #[async_trait]
 pub trait Authenticator: Send + Sync {

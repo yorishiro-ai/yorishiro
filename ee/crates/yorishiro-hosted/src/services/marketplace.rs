@@ -141,8 +141,8 @@ pub async fn list_marketplace(pool: &PgPool) -> Result<Vec<MarketplaceListing>, 
 
 /// Versions of a template that `tenant_id` is allowed to see.
 ///
-/// **Drafts are the caller's own only.** The database does not enforce this -- `template_versions`
-/// carries no RLS, matching `identity.templates` -- so this WHERE clause is the enforcement, and
+/// **Drafts are the caller's own only.** The database does not enforce this: `template_versions`
+/// carries no RLS, matching `identity.templates`, so this WHERE clause is the enforcement, and
 /// dropping it publishes every tenant's unfinished work.
 pub async fn list_versions(
     pool: &PgPool,
@@ -184,7 +184,7 @@ pub async fn list_versions(
 /// Publishes the next version of a template.
 ///
 /// Only the owning tenant may publish, and the version number is assigned here rather than taken
-/// from the caller -- letting a client choose it invites gaps and collisions in a sequence other
+/// from the caller: letting a client choose it invites gaps and collisions in a sequence other
 /// tenants read as history.
 pub async fn publish_version(
     pool: &PgPool,
@@ -197,7 +197,7 @@ pub async fn publish_version(
     require_ownership(pool, tenant_id, template_id).await?;
 
     // The number comes from `max(version) + 1` read in the same statement that inserts, and at
-    // READ COMMITTED Postgres locks no range for the rows that do not exist yet -- so two
+    // READ COMMITTED Postgres locks no range for the rows that do not exist yet, so two
     // concurrent publishes of one template both read the same maximum and both try to write the
     // same next version. `UNIQUE (template_id, version)` catches it, which is why this was never
     // corruption, but the loser got an opaque 500 for doing nothing wrong.

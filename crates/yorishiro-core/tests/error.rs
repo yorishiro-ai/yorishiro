@@ -89,7 +89,7 @@ fn a_busy_provider_and_an_unreachable_one_differ() {
     assert_ne!(busy, unreachable);
 }
 
-/// An internal error must never leak its cause to the client -- the detail goes to the log, and
+/// An internal error must never leak its cause to the client: the detail goes to the log, and
 /// the body carries a fixed generic message.
 #[test]
 fn internal_errors_do_not_leak_their_cause() {
@@ -133,7 +133,7 @@ fn validation_failures_carry_details_and_hint() {
     assert_eq!(body["error"]["hint"], "check the schema");
 }
 
-/// `ResultExt::internal()` exists so call sites never hand-write the `map_err` -- it must map an
+/// `ResultExt::internal()` exists so call sites never hand-write the `map_err`: it must map an
 /// arbitrary error into `Internal` rather than into any other variant.
 #[test]
 fn result_ext_maps_arbitrary_errors_to_internal() {

@@ -153,7 +153,7 @@ async fn a_yanked_schema_stops_being_reported(pool: PgPool) {
 }
 
 /// The merge base. A copy keeps the definition it was made from, and that snapshot does not
-/// move when the template does — otherwise there would be nothing to compare the upstream
+/// move when the template does, otherwise there would be nothing to compare the upstream
 /// edit against.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_hand_written_schema_has_no_merge_base(pool: PgPool) {
@@ -358,7 +358,7 @@ async fn merge_apply_takes_upstream_and_keeps_local(pool: PgPool) {
 }
 
 /// The property the whole three-way apparatus rests on. After a merge the base must be what
-/// upstream said, not what the merge produced -- otherwise the *next* merge reads this
+/// upstream said, not what the merge produced, otherwise the *next* merge reads this
 /// workspace's own fields as upstream's, sees them "unchanged here", and follows a later
 /// upstream removal by deleting them.
 #[sqlx::test(migrations = "../../../migrations")]
@@ -371,7 +371,7 @@ async fn merge_apply_advances_the_base_to_upstream(pool: PgPool) {
         .await
         .unwrap();
 
-    // The copy already carries a field of its own, so it must say what the template said --
+    // The copy already carries a field of its own, so it must say what the template said,
     // otherwise the base would claim `assignee` came from upstream.
     create_schema_with_base(
         &mut conn,
@@ -480,7 +480,7 @@ async fn merge_apply_refuses_a_conflict(pool: PgPool) {
     assert_eq!(still.id, active.id);
 }
 
-/// `get_by_id` returns any version, archived included -- that is how a caller reads an old
+/// `get_by_id` returns any version, archived included: that is how a caller reads an old
 /// definition. Merging into one is different: the merge installs its result as the new active
 /// version, so an archived id would resurrect an abandoned lineage over the one entities are
 /// actually written against. Both preview and apply refuse, since they share `merge_sides`.

@@ -42,7 +42,7 @@ async fn health_response(pool: PgPool) -> axum::response::Response {
 }
 
 /// `/up` must stay healthy even when the database is unreachable, since it's a pure
-/// liveness probe — that's the property distinguishing it from `/health`.
+/// liveness probe: that's the property distinguishing it from `/health`.
 #[sqlx::test(migrations = "../../migrations")]
 async fn up_returns_ok_even_when_db_is_unreachable(pool: PgPool) {
     pool.close().await;

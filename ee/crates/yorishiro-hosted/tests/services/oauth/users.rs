@@ -27,7 +27,7 @@ fn a_unique_violation_is_distinguishable_from_other_failures() {
 /// The doc comment on `UniqueViolation` reasons that only the email constraint can fire, because
 /// an advisory lock rules out a concurrent insert of the same identity. That reasoning is what
 /// makes the variant safe to report as an email collision, so the variant carries no constraint
-/// name to disambiguate -- pinned here so a future change that needs one is a deliberate choice.
+/// name to disambiguate: pinned here so a future change that needs one is a deliberate choice.
 #[test]
 fn the_unique_violation_variant_carries_no_payload() {
     let error = CreateOauthUserError::UniqueViolation;

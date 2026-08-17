@@ -69,7 +69,7 @@ pub async fn recall_context(
 
     // BFS outward from entity_id. `visited` tracks every entity already seen (the root plus
     // every neighbor emitted so far) so a given entity is only ever expanded/reported once, at
-    // the hop it was first reached -- this both dedups diamond-shaped paths and guarantees
+    // the hop it was first reached: this both dedups diamond-shaped paths and guarantees
     // termination in the presence of cycles.
     let mut visited: HashSet<Uuid> = HashSet::from([entity_id]);
     let mut frontier: Vec<Uuid> = vec![entity_id];
@@ -80,7 +80,7 @@ pub async fn recall_context(
         let mut next_frontier = Vec::new();
 
         // One round trip for every node in the frontier instead of one `neighbors()` call per
-        // node -- see `relations::neighbors_batch`'s doc comment for why this isn't a plain
+        // node: see `relations::neighbors_batch`'s doc comment for why this isn't a plain
         // `source_id = ANY(...)` query (that would apply `limit` across the whole batch rather
         // than per node).
         let mut by_pivot =

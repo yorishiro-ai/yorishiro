@@ -1,7 +1,7 @@
 //! Where deferred work runs.
 //!
-//! Some work must not hold up a response — generating an embedding takes hundreds of
-//! milliseconds and the write is already durable without it — so it is handed off. This is the
+//! Some work must not hold up a response (generating an embedding takes hundreds of
+//! milliseconds and the write is already durable without it), so it is handed off. This is the
 //! seam between deciding to defer something and deciding where it runs.
 //!
 //! In one process that is a task on the runtime, bounded by a semaphore and awaited at
@@ -21,23 +21,23 @@ use tokio_util::task::TaskTracker;
 /// A boxed future rather than a serialisable payload: a payload is what a distributed queue
 /// requires, and demanding one here would impose that cost on the in-process case that does
 /// not need it. A driver that ships work between machines will need the caller to describe the
-/// task differently, and that is the right time to change this — not before there is one.
+/// task differently, and that is the right time to change this, not before there is one.
 pub type Task = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 /// Runs deferred work.
 pub trait Queue: Send + Sync {
-    /// Accepts a task. Returns as soon as the task is accepted, not when it completes — the
+    /// Accepts a task. Returns as soon as the task is accepted, not when it completes: the
     /// caller is a request handler that has already answered.
     fn enqueue(&self, task: Task);
 
     /// Waits for accepted work to finish, up to `timeout`.
     ///
     /// Called during shutdown. Dropping an accepted task would leave an entity written but
-    /// never embedded — invisible to search until someone runs a resync, with nothing to say
+    /// never embedded: invisible to search until someone runs a resync, with nothing to say
     /// it happened.
     ///
     /// Returns whether it finished. `()` would leave a caller unable to tell an empty queue from
-    /// an expired timeout -- and a switchover removing the old queue needs exactly that
+    /// an expired timeout. A switchover removing the old queue needs exactly that
     /// distinction, because work still outstanding is work that goes away with it.
     fn drain(
         &self,
@@ -114,7 +114,7 @@ pub enum DrainOutcome {
 /// Two queues during an infrastructure switchover (FR-7-3).
 ///
 /// New work goes to the new queue from the moment this is installed; the old one keeps running
-/// what it already accepted until it is empty. That is the whole of the switchover — the three
+/// what it already accepted until it is empty. That is the whole of the switchover: the three
 /// stages the spec describes (start sending to the new one, drain the old, remove it) are
 /// respectively constructing this, calling [`DrainingQueue::drain_old`], and dropping it.
 ///
@@ -123,7 +123,7 @@ pub enum DrainOutcome {
 /// the point of the exercise is to reach zero.
 ///
 /// **The two queues are any two `Queue`s.** The spec framed this as needing a second *driver*,
-/// but the seam does not care what is behind it — swapping a `LocalQueue` for another
+/// but the seam does not care what is behind it: swapping a `LocalQueue` for another
 /// `LocalQueue` exercises the same paths, which is what the tests do.
 pub struct DrainingQueue {
     new: Arc<dyn Queue>,
@@ -143,7 +143,7 @@ impl DrainingQueue {
     /// for work that has only just arrived on the new queue, which is not what it is asking.
     ///
     /// **Returns whether it actually finished.** Stage 3 removes the old queue, which must not
-    /// happen while work is still outstanding — so the answer has to reach the caller rather
+    /// happen while work is still outstanding, so the answer has to reach the caller rather
     /// than being swallowed the way an unreported timeout would be.
     pub async fn drain_old(&self, timeout: std::time::Duration) -> DrainOutcome {
         self.old.drain(timeout).await

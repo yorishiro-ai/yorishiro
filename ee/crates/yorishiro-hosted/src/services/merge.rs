@@ -4,8 +4,8 @@
 //! taken. Deciding what to do about that needs three definitions, not two: the template as it
 //! stood when copied (base), the template now (upstream), and the workspace's own (local).
 //!
-//! With only two, an upstream addition and a local one look identical — both are "present
-//! there, absent here" — and following the template would silently delete the workspace's own
+//! With only two, an upstream addition and a local one look identical (both are "present
+//! there, absent here"), and following the template would silently delete the workspace's own
 //! fields. The base is what tells them apart.
 //!
 //! This module classifies. It does not apply anything: a conflict is a question for a person,
@@ -30,7 +30,7 @@ pub enum MergeVerdict {
     /// Upstream changed it and the workspace did not. Taking the change loses no local work,
     /// since there is none to lose.
     AutoUpdate,
-    /// The workspace's own, unknown upstream. Kept — following a template must not delete what
+    /// The workspace's own, unknown upstream. Kept: following a template must not delete what
     /// the workspace added on top of it.
     KeepLocal,
     /// Both sides changed it, differently. Nothing here decides which is right; a person does.
@@ -73,7 +73,7 @@ impl MergePlan {
 /// Compares three definitions field by field.
 ///
 /// `base` is the template as copied, `upstream` the template now, `local` the workspace's own.
-/// Fields identical in all three are omitted — a plan lists what to decide, not what exists.
+/// Fields identical in all three are omitted: a plan lists what to decide, not what exists.
 pub fn three_way(
     base: &MetaSchemaDefinition,
     upstream: &MetaSchemaDefinition,
@@ -168,7 +168,7 @@ fn classify(
             }
         }
         (true, true) => {
-            // Both moved. Identical moves are not a conflict -- two people adding the same
+            // Both moved. Identical moves are not a conflict: two people adding the same
             // field with the same type have agreed, not disagreed.
             if same(upstream, local) {
                 None
@@ -188,14 +188,14 @@ fn same(a: Option<&FieldDef>, b: Option<&FieldDef>) -> bool {
         (Some(a), Some(b)) => match (serde_json::to_value(a), serde_json::to_value(b)) {
             (Ok(a), Ok(b)) => a == b,
             // Not `.ok() == .ok()`, which maps two *failures* to `None == None` and calls them
-            // equal -- and "equal" here means the field never enters the plan, so a genuine
+            // equal, and "equal" here means the field never enters the plan, so a genuine
             // upstream change would be neither reported nor applied.
             //
             // No input reaches this arm today: every `FieldDef` member serialises, and even a
             // non-finite `minimum`/`maximum` yields `Ok(Null)` from `serde_json` rather than an
             // error (measured, not assumed). It is written this way because an error is evidence
             // of nothing, and a silently dropped field is the worst possible way to find that
-            // out later. Deliberately untested -- there is no way to construct the input.
+            // out later. Deliberately untested: there is no way to construct the input.
             _ => false,
         },
         _ => false,
@@ -226,8 +226,8 @@ fn type_name(field: &FieldDef) -> String {
 /// Produces the definition a plan describes: upstream's version of everything it changed
 /// alone, the workspace's version of everything it changed alone.
 ///
-/// Refuses a plan with conflicts. There is no answer to apply for those — that is what a
-/// conflict means — and applying the rest would leave a definition that is neither what the
+/// Refuses a plan with conflicts. There is no answer to apply for those (that is what a
+/// conflict means), and applying the rest would leave a definition that is neither what the
 /// merge produced nor what was there before, with no record of which fields were skipped.
 ///
 /// The result is a definition, not a stored schema. Whether writing it mints a new version is
@@ -274,7 +274,7 @@ pub fn apply_plan(
 
                 match upstream_field {
                     Some(def) => {
-                        // The entity type may not exist locally yet -- an upstream addition of
+                        // The entity type may not exist locally yet: an upstream addition of
                         // a whole type arrives field by field.
                         merged
                             .entity_types

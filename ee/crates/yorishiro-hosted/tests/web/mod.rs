@@ -13,7 +13,7 @@ async fn get(router: Router, uri: &str) -> Response {
 }
 
 /// The build gate. `ee/web/dist` is produced by `pnpm run build` and is not committed, so a
-/// checkout that skipped that step embeds only `.gitkeep` -- and every other test here still
+/// checkout that skipped that step embeds only `.gitkeep`, and every other test here still
 /// passes, because an empty embed serves 404s that look like ordinary misses. This is the one
 /// that fails, rather than shipping a binary whose UI is a blank 404.
 #[test]

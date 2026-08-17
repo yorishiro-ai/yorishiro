@@ -6,7 +6,7 @@ fn round_trips_a_freshly_issued_state() {
     let issued = issue(key);
     let verified = verify(key, &issued.state).expect("valid state should verify");
     // The recovered verifier must hash to the challenge that was sent to the provider at
-    // authorize time -- that's the actual PKCE property this round trip needs to preserve.
+    // authorize time: that's the actual PKCE property this round trip needs to preserve.
     let recomputed_challenge =
         URL_SAFE_NO_PAD.encode(Sha256::digest(verified.pkce_verifier.as_bytes()));
     assert_eq!(recomputed_challenge, issued.pkce_challenge);
@@ -49,7 +49,7 @@ fn csrf_hash_does_not_match_a_different_cookie_value() {
 }
 
 /// Signs a `state` payload as [`issue`] would, but with a caller-chosen issue time. The signature
-/// is genuine, so anything rejected here is rejected on age alone -- not because the HMAC failed.
+/// is genuine, so anything rejected here is rejected on age alone, not because the HMAC failed.
 fn state_issued_at(key: &[u8], issued_at: i64) -> String {
     let payload = format!("{issued_at}.{}.{}", "a".repeat(64), "verifier");
     let signature = crate::services::hmac_sign::sign(key, payload.as_bytes());

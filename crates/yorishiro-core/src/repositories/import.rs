@@ -31,7 +31,7 @@ pub use crate::models::import::*;
 /// - a relation line's `source_id`/`target_id` are remapped through the entity lines this
 ///   same import already processed.
 ///
-/// Because of this, a schema/entity line must appear before anything that references it --
+/// Because of this, a schema/entity line must appear before anything that references it:
 /// exactly the order `export::export_all` produces (schemas, then entities, then relations).
 pub async fn import_jsonl(
     conn: &mut PgConnection,
@@ -44,7 +44,7 @@ pub async fn import_jsonl(
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
     // Exported `schema_id`s are only meaningful in the *source* tenant they came
-    // from -- `create_schema` always mints a fresh ID. So entity lines can't resolve their
+    // from: `create_schema` always mints a fresh ID. So entity lines can't resolve their
     // schema by re-querying the exported `schema_id` in the destination tenant; instead
     // track name-by-old-id for every schema line this import itself has processed so far.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();

@@ -21,7 +21,7 @@ pub use state::AppState;
 
 /// `YORISHIRO_MAX_TENANTS` is process-wide state read by both `http::controllers::setup` and login's
 /// workspace auto-resolution, so every test across the crate that sets it (rather than just
-/// asserting the default) must serialize through this one shared lock -- a per-module lock
+/// asserting the default) must serialize through this one shared lock: a per-module lock
 /// only prevents that module's own tests from racing each other, not tests in a different
 /// module running concurrently in the same `cargo test` process. `#[cfg(test)]`-gated and
 /// `pub(crate)`: `tests/` reaches it as `crate::max_tenants_env_lock`, since every test file
@@ -114,7 +114,7 @@ pub(crate) mod test_support {
 
     /// A provider that returns a deterministic vector, for end-to-end tests of the embedding
     /// wiring. Every text maps to the same vector, so the distance between query and entity
-    /// is always 0 — guaranteeing a hit.
+    /// is always 0: guaranteeing a hit.
     pub struct FixedEmbeddingProvider;
 
     #[async_trait]
@@ -377,7 +377,7 @@ pub(crate) mod test_support {
         (task_id, project_id)
     }
 
-    /// Issues an API key attributed to `user_id`, scoped to `role`'s max scope -- exactly what
+    /// Issues an API key attributed to `user_id`, scoped to `role`'s max scope: exactly what
     /// `/auth/login` would hand out for that role.
     pub async fn issue_key_for(
         pool: &PgPool,
@@ -431,7 +431,7 @@ pub async fn shutdown_signal() {
 /// `EX_CONFIG` from `sysexits.h`. The units set `RestartPreventExitStatus=78`, which is the
 /// whole point of having a distinct code: an unconfigured start is not a fault that waiting
 /// fixes, so systemd must stop rather than retry every five seconds forever. Anything else
-/// still exits 1 and keeps its retry -- a database that has not finished starting is exactly
+/// still exits 1 and keeps its retry: a database that has not finished starting is exactly
 /// the case `Restart=on-failure` exists for.
 ///
 /// Measured before this existed: an unconfigured `enable --now` restarted 15 times in 45
@@ -464,8 +464,8 @@ pub fn database_url_from_env() -> Result<String> {
 /// Prints `error` the way `fn main() -> Result<()>` would and exits with [`EXIT_CONFIG`].
 ///
 /// Returning the `Err` from `main` prints the same text but always exits 1, which is
-/// indistinguishable from a database that is not up yet -- and the two want opposite handling
-/// from systemd. This keeps the message identical and changes only the code.
+/// indistinguishable from a database that is not up yet. The two want opposite handling
+/// from systemd, and this keeps the message identical and changes only the code.
 ///
 /// Returns `T` rather than `!` only so it can be passed straight to `unwrap_or_else`, which
 /// needs the closure's return type to match the `Ok` type; it never actually returns.
@@ -518,11 +518,11 @@ pub fn embedding_model_name() -> String {
 }
 
 /// Builds the embeddings provider from environment variables. `YORISHIRO_EMBEDDING_PROVIDER`
-/// switches between `local` (a local ONNX model, the default -- needs no external service or
+/// switches between `local` (a local ONNX model, the default: needs no external service or
 /// API key, just the model files under `models/`) and `openai` (an OpenAI-compatible API, for
 /// operators already running something like Ollama/LM Studio). The `entities.embedding`
 /// column is `vector` (dimensionless), so any model works; all vectors in a deployment must
-/// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024 — the
+/// share the same dimension count (set via `YORISHIRO_EMBEDDING_DIMENSIONS`, default 1024: the
 /// width of the default model, multilingual-e5-large).
 pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
@@ -584,7 +584,7 @@ pub fn build_embedding_provider() -> Result<Arc<dyn EmbeddingProvider>> {
             .map_err(|err| {
                 anyhow::anyhow!(
                     "{err}\n\nThe local ONNX embedding provider (the default; see \
-                     YORISHIRO_EMBEDDING_PROVIDER) needs '{model_path}' and '{tokenizer_path}' -- \
+                     YORISHIRO_EMBEDDING_PROVIDER) needs '{model_path}' and '{tokenizer_path}': \
                      these are not bundled in the repository or the Docker image, and must be \
                      fetched separately. See docs/setup.md#prerequisites for the download \
                      commands, or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an OpenAI-compatible \

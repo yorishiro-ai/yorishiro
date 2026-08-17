@@ -65,8 +65,8 @@ mod tests;
 ///
 /// Entities are migrated lazily: a schema gaining a version does not rewrite the rows written
 /// against earlier ones, and an update validates against the version the entity was created
-/// with. That is deliberate — it is what stops a schema change from invalidating stored data —
-/// but it leaves a reader unable to tell whether a field is absent because nobody filled it in
+/// with. That is deliberate: it is what stops a schema change from invalidating stored data.
+/// But it leaves a reader unable to tell whether a field is absent because nobody filled it in
 /// or because it did not exist when the entity was written.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct EntityDrift {
@@ -100,7 +100,7 @@ pub struct DriftField {
 /// Migration is lazy: an entity keeps validating against the version it was written with, so a
 /// workspace accumulates entities spread across versions. This counts them before anything is
 /// touched, because the useful question before a migration is how much of the corpus it would
-/// have to fill in — a number that decides whether defaults suffice or whether the work needs
+/// have to fill in: a number that decides whether defaults suffice or whether the work needs
 /// a person.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MigrationDryRun {
@@ -110,7 +110,7 @@ pub struct MigrationDryRun {
     pub total_entities: i64,
     /// Already on the active version. Nothing to do for these.
     pub current: i64,
-    /// On an older version, but missing no field the active version requires — they validate
+    /// On an older version, but missing no field the active version requires: they validate
     /// as they stand and only their version marker is behind.
     pub behind_but_valid: i64,
     /// On an older version and missing at least one field the active version requires. These
@@ -166,7 +166,7 @@ pub struct FillDefaultsReport {
     /// Entities that gained at least one value.
     pub filled: i64,
     /// Entities that needed a value the active version defines no default for. Left untouched
-    /// and counted, because inventing one would be worse than leaving the field absent — a
+    /// and counted, because inventing one would be worse than leaving the field absent: a
     /// value nobody chose is indistinguishable from one someone did.
     pub skipped_no_default: i64,
     /// The fields those entities still lack.

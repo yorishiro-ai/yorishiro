@@ -8,7 +8,7 @@ use super::*;
 use crate::tests::test_helpers;
 
 /// Issues a key directly. The community edition's `create_api_key` always records a workspace,
-/// so a tenant-scoped key -- the whole point here -- cannot be made through it.
+/// so a tenant-scoped key (the whole point here) cannot be made through it.
 async fn issue_key(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -70,7 +70,7 @@ async fn a_tenant_key_cannot_reach_another_tenants_workspace(pool: PgPool) {
 }
 
 /// A tenant-scoped key has no workspace to fall back on, so omitting the header cannot silently
-/// resolve to one -- it must fail rather than pick a workspace on the caller's behalf.
+/// resolve to one: it must fail rather than pick a workspace on the caller's behalf.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_tenant_key_without_a_requested_workspace_is_rejected(pool: PgPool) {
     let (tenant_id, _) = test_helpers::seed_tenant_and_workspace(&pool).await;
@@ -84,7 +84,7 @@ async fn a_tenant_key_without_a_requested_workspace_is_rejected(pool: PgPool) {
     assert!(matches!(err, YorishiroError::Unauthenticated));
 }
 
-/// A workspace-scoped key still works with no header at all -- the community edition's own
+/// A workspace-scoped key still works with no header at all: the community edition's own
 /// behaviour has to survive replacing the authenticator.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_workspace_key_still_authenticates_without_a_header(pool: PgPool) {
@@ -116,7 +116,7 @@ async fn a_workspace_key_naming_another_workspace_is_rejected(pool: PgPool) {
     assert!(matches!(err, YorishiroError::ValidationFailed { .. }));
 }
 
-/// An unparseable header is an error rather than an omission -- treating it as "not sent" would
+/// An unparseable header is an error rather than an omission: treating it as "not sent" would
 /// send a request meant for one workspace to whichever one the key happens to carry.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_malformed_header_is_rejected(pool: PgPool) {

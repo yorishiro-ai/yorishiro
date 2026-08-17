@@ -13,7 +13,7 @@ fn only_the_query_text_is_required() {
     assert!(params.filter.is_none());
 }
 
-/// A search with no text is meaningless -- it would embed to noise -- so the parameter is
+/// A search with no text is meaningless (it would embed to noise), so the parameter is
 /// required rather than defaulted to an empty string.
 #[test]
 fn a_search_without_text_is_rejected() {
@@ -131,8 +131,8 @@ async fn get(app: axum::Router, uri: &str, key: &str) -> axum::http::Response<Bo
     .unwrap()
 }
 
-/// Search reads entity data, so an unauthenticated caller must not reach the embedding provider
-/// -- `UnreachableEmbeddingProvider` errors if it is called, which would surface as a 500 rather
+/// Search reads entity data, so an unauthenticated caller must not reach the embedding provider:
+/// `UnreachableEmbeddingProvider` errors if it is called, which would surface as a 500 rather
 /// than the 401 this asserts.
 #[sqlx::test(migrations = "../../migrations")]
 async fn search_requires_authentication(pool: PgPool) {
@@ -152,7 +152,7 @@ async fn search_requires_authentication(pool: PgPool) {
 }
 
 /// `query_text` is the one required parameter. Axum rejects the request at extraction, before the
-/// handler runs -- so this also pins that no embedding call is made for a request that cannot
+/// handler runs. This also pins that no embedding call is made for a request that cannot
 /// produce a meaningful search.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_search_without_query_text_is_rejected_before_embedding(pool: PgPool) {
@@ -189,7 +189,7 @@ async fn a_malformed_filter_is_a_client_error(pool: PgPool) {
 }
 
 /// Search hands the caller's `workspace_id` to `search_by_vector` separately from acquiring the
-/// connection. If it ever passed the wrong one -- or none -- one tenant's search would return
+/// connection. If it ever passed the wrong one (or none), one tenant's search would return
 /// another's entities, and `FixedEmbeddingProvider` makes every entity a distance-0 match, so
 /// nothing about the vector distance would hide the leak.
 ///

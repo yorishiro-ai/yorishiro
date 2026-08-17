@@ -3,7 +3,7 @@ use crate::tests::test_helpers::{seed_tenant, seed_workspace};
 use sqlx::PgPool;
 
 /// A workspace with nothing configured must read as absent, not as an error and not as an empty
-/// configuration -- the caller turns absence into a refusal, and an empty `base_url` would
+/// configuration: the caller turns absence into a refusal, and an empty `base_url` would
 /// instead produce a request to nowhere.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn an_unconfigured_workspace_has_no_credentials(pool: PgPool) {
@@ -132,7 +132,7 @@ fn check_scheme_accepts_http_and_https_only() {
 
 /// `check_scheme` alone did not catch this: it trims before looking, so it accepts padding that
 /// `set` was then storing verbatim. The stored value is interpolated into a request URL, so what
-/// matters is what lands in the row -- which only a `set`-level test can see.
+/// matters is what lands in the row, which only a `set`-level test can see.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn set_stores_the_normalised_base_url(pool: PgPool) {
     let (_tenant_id, workspace_id) =

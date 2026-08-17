@@ -6,7 +6,7 @@ use crate::models::relations::DEFAULT_NEIGHBORS_LIMIT;
 
 pub const DEFAULT_RECALL_LIMIT: i64 = DEFAULT_NEIGHBORS_LIMIT;
 
-/// Default number of hops `recall_context` traverses when `depth` is omitted — matches the
+/// Default number of hops `recall_context` traverses when `depth` is omitted: matches the
 /// original single-hop behavior so existing callers are unaffected.
 pub const DEFAULT_RECALL_DEPTH: i64 = 1;
 

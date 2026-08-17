@@ -1,6 +1,6 @@
 use super::*;
 
-/// `SchemaSummary` is the listing shape MCP clients read first, so it must stay lightweight --
+/// `SchemaSummary` is the listing shape MCP clients read first, so it must stay lightweight:
 /// specifically it must not carry the `definition` body, which is the whole reason it exists.
 #[test]
 fn a_summary_omits_the_definition_body() {

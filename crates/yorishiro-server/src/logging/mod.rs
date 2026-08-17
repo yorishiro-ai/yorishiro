@@ -5,7 +5,7 @@
 //! - `single`: JSON lines appended to one file that's never rotated.
 //! - `daily`: JSON lines appended to a file that rotates at midnight UTC.
 //! - `syslog`: forwarded to the local syslog daemon over `/dev/log`, RFC 3164-framed (see the
-//!   `syslog` submodule for the datagram framing). Unix-only -- `/dev/log` is a Unix domain
+//!   `syslog` submodule for the datagram framing). Unix-only: `/dev/log` is a Unix domain
 //!   socket, so this target is rejected at startup on other platforms.
 //!
 //! `single`/`daily` write under `YORISHIRO_LOG_DIR` (default `.`) as `yorishiro.log`. `syslog`
@@ -19,7 +19,7 @@ use tracing_subscriber::EnvFilter;
 
 /// Owns whatever background resource the chosen log target needs to keep running (a
 /// non-blocking writer thread, for the file targets). Dropping it would stop that thread, so
-/// the caller must hold it for the process's entire lifetime — binding it to `main`'s last
+/// the caller must hold it for the process's entire lifetime: binding it to `main`'s last
 /// local variable is enough.
 pub enum LogGuard {
     None,

@@ -264,7 +264,7 @@ pub async fn get(
 /// to), so existing entities don't silently break compatibility even if the active version
 /// has since moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation
-/// API key -- this overwrites whatever `updated_by` the previous update (if any) left behind.
+/// API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
 pub async fn update(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -393,7 +393,7 @@ pub async fn drift(
     let own = schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
     let active = schemas::get_active_schema(conn, workspace_id, &own.definition.name).await?;
 
-    // The entity's own type definition may be absent from the active version -- the type was
+    // The entity's own type definition may be absent from the active version: the type was
     // dropped. Nothing is "missing" in that case; the whole type is, which the version numbers
     // already say.
     let own_fields = own
@@ -594,7 +594,7 @@ pub async fn snapshots_for_job(
 /// Puts every entity in `job_id` back to what it held before.
 ///
 /// All in one transaction: a half-undone batch is a state nobody asked for, and worse than
-/// either end of it. An entity deleted since the snapshot is counted rather than failed —
+/// either end of it. An entity deleted since the snapshot is counted rather than failed:
 /// refusing the whole undo because one row is gone would leave the rest wrong.
 pub async fn undo_job(
     conn: &mut PgConnection,
@@ -672,7 +672,7 @@ pub async fn undo_job(
 /// before those fields existed.
 ///
 /// The entity keeps its own schema version. Filling a value is not a migration to the newer
-/// definition — it adds data the entity was always allowed to hold, validated against the
+/// definition: it adds data the entity was always allowed to hold, validated against the
 /// version the entity already claims. Moving an entity between versions is a separate question
 /// and not this one.
 ///
@@ -698,7 +698,7 @@ pub async fn fill_defaults(
     let mut tx = conn.begin().await.internal()?;
 
     // Drop the images that have aged out before writing this job's. Here rather than on a timer
-    // because nothing in this crate runs on one -- a sweeper would be the first thing of its
+    // because nothing in this crate runs on one: a sweeper would be the first thing of its
     // kind, and a workspace that never migrates has nothing to sweep.
     prune_snapshots(&mut tx, workspace_id).await?;
 
@@ -786,16 +786,16 @@ pub async fn fill_defaults(
 ///
 /// `YORISHIRO_SNAPSHOT_RETENTION_DAYS` (default 30); `0` keeps every image forever. Left unbounded,
 /// a workspace that migrates repeatedly accumulates before-images faster than it holds
-/// entities -- every run writes one row per entity it touches, and only an undo takes them
+/// entities: every run writes one row per entity it touches, and only an undo takes them
 /// away again.
 ///
 /// The guarantee this buys is stated in days, not in rows: **a batch migration can be undone for
 /// this many days.** Past that its images are gone and `undo_job` answers `NotFound`, the same as
-/// for a job that never ran — an expired window is indistinguishable from no window, and that is
+/// for a job that never ran: an expired window is indistinguishable from no window, and that is
 /// what the setting means rather than a fault to guard against.
 /// Read as `i32` because that is what `make_interval(days => …)` takes. A wider parse would let
 /// a value above `i32::MAX` wrap negative, and a negative interval puts the cutoff in the
-/// *future* — the sweep would then delete the images it exists to keep. Anything unparseable,
+/// *future*: the sweep would then delete the images it exists to keep. Anything unparseable,
 /// out of range included, falls back to the default rather than being clamped: a retention of
 /// six million years is a typo, and honouring the nearest legal value would hide it.
 fn snapshot_retention_days() -> i32 {

@@ -1,6 +1,6 @@
 # yorishiro-core
 
-Domain logic for [Yorishiro](https://github.com/yotsunagi/yorishiro) — an MCP-native, multi-tenant knowledge store with user-defined schemas.
+Domain logic for [Yorishiro](https://github.com/yotsunagi/yorishiro), an MCP-native, multi-tenant knowledge store with user-defined schemas.
 
 This crate contains the core domain layer: metaschema validation/versioning/projection, entity/relation/schema repositories (sea-query + sqlx), authentication/authorization, embedding providers (local ONNX / OpenAI-compatible), and vector search. It is consumed by `yorishiro-server` (the HTTP layer) and `ee/crates/yorishiro-hosted` (the paid features and the binary), and is not meant to be used standalone.
 

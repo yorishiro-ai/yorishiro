@@ -36,8 +36,9 @@ enum Command {
     /// Issue a tenant-scoped API key: one key that can act on any workspace in the tenant,
     /// naming the workspace per request with the `X-Workspace-Id` header.
     ///
-    /// Separate from `admin create-api-key`, which always binds a key to one workspace. Prefer that one when a client only ever works in a
-    /// single workspace -- a key bound to one workspace reaches less if it leaks.
+    /// Separate from `admin create-api-key`, which always binds a key to one workspace. Prefer
+    /// that one when a client only ever works in a single workspace: a key bound to one
+    /// workspace reaches less if it leaks.
     CreateTenantApiKey {
         tenant_id: uuid::Uuid,
         /// `read`, `write`, or `schema`.
@@ -60,7 +61,7 @@ enum Command {
 /// `set_ignore_missing(true)` is deliberately absent. It existed because two directories shared
 /// one `_sqlx_migrations` table and each pass saw the other's versions as missing; with one set
 /// there is nothing legitimate for it to ignore, and keeping it would silence a genuinely absent
-/// migration -- including the fresh-database boundary this version declares, which is supposed
+/// migration, including the fresh-database boundary this version declares, which is supposed
 /// to refuse loudly.
 async fn run_migrations(pool: &sqlx::PgPool) -> Result<()> {
     sqlx::migrate!("../../../migrations").run(pool).await?;
@@ -96,7 +97,7 @@ fn main() -> Result<()> {
 async fn run(cli: Cli) -> Result<()> {
     // Not `?`: an absent DATABASE_URL exits 78 so the unit's `RestartPreventExitStatus=78` stops
     // rather than retrying every five seconds forever. Everything below keeps exiting 1, which
-    // is what `Restart=on-failure` is for -- a database still starting is worth waiting for, and
+    // is what `Restart=on-failure` is for: a database still starting is worth waiting for, and
     // missing configuration is not.
     let database_url =
         database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
@@ -120,7 +121,7 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await?;
             println!(
-                "tenant-scoped api key created (the plaintext key is shown ONLY once — store it now)"
+                "tenant-scoped api key created (the plaintext key is shown ONLY once, store it now)"
             );
             println!("  key:          {}", created.plaintext);
             println!("  key id:       {}", created.id);
@@ -156,7 +157,7 @@ async fn run(cli: Cli) -> Result<()> {
     let tenant_db = TenantDb::connect(&database_url, 20).await?;
     let embedding_provider = build_embedding_provider()?;
     // Installing this here is what makes tenant-scoped keys work at all: every authenticated
-    // path in the process -- REST extractors and MCP handlers alike -- resolves through the one
+    // path in the process (REST extractors and MCP handlers alike) resolves through the one
     // authenticator the state carries, so a key is read the same way whichever door it arrives
     // at. Leaving it at the default would silently accept only workspace-scoped keys.
     let app_state = AppState::new(tenant_db.clone(), identity_pool.clone(), embedding_provider)
@@ -172,7 +173,7 @@ async fn run(cli: Cli) -> Result<()> {
     let licence = yorishiro_hosted::services::licence::LicenceState::from_env();
 
     // Stripe and OAuth are gated by simply not configuring them without a licence, which reuses
-    // the `None`/unconfigured paths both already have -- their routes answer 404 exactly as they
+    // the `None`/unconfigured paths both already have: their routes answer 404 exactly as they
     // do on a deployment that never set the variables. Unlike the marketplace and infer-fill
     // gates, this is decided once at startup: both read process-wide configuration at boot
     // anyway, so a key expiring mid-run leaves them configured until the next restart. The two
@@ -207,7 +208,7 @@ async fn run(cli: Cli) -> Result<()> {
         yorishiro_hosted::web::fallback_service(yorishiro_hosted::services::web_dir_from_env());
 
     // Shared with `build_app_with_rate_limiter` below so `/auth/oauth/authorize|callback` draw
-    // from the same quota as this crate's own `/auth/login`/`/auth/signup`/`/setup*` -- an
+    // from the same quota as this crate's own `/auth/login`/`/auth/signup`/`/setup*`: an
     // attacker who exhausts one doesn't get a fresh bucket by switching to the other. See
     // `yorishiro_hosted::router`'s doc comment for why the OAuth login pair is a separate
     // sub-router from the rest of `yorishiro-hosted`'s routes.
@@ -218,9 +219,9 @@ async fn run(cli: Cli) -> Result<()> {
             rate_limiter.clone(),
         )));
     // `/hosted/tenant/overview` (bearer-token-authenticated) and `/auth/oauth/status` (unlimited
-    // by design -- the Web UI's login page polls it on every load) don't need the rate limiter,
+    // by design, the Web UI's login page polls it on every load) don't need the rate limiter,
     // but every route in this process still needs the body-size cap and observability stack
-    // `build_app`'s own routes get -- `axum::Router::merge` doesn't propagate a `.layer()` from
+    // `build_app`'s own routes get: `axum::Router::merge` doesn't propagate a `.layer()` from
     // either side, so each sub-router carries its own copy. `/hosted/stripe/webhook` in
     // particular must keep the body limit (an unbounded webhook body is its own DoS vector) but
     // must never be rate-limited: dropping a legitimate Stripe billing event on a `429` is worse
@@ -249,7 +250,7 @@ async fn run(cli: Cli) -> Result<()> {
             .nest_service("/mcp", hosted_mcp),
     ));
     // The maintenance guard is applied inside `build_app`, and `merge`/`fallback_service`
-    // propagate a layer no more than `.layer()` does -- so without this, pausing the
+    // propagate a layer no more than `.layer()` does, so without this, pausing the
     // deployment would refuse `/api/*` while this crate's own routes kept writing. Applied
     // here rather than to the merged router so it sits inside the observability stack, as it
     // does in the community edition. `/up` and `/health` opt out inside the guard itself.
@@ -263,8 +264,8 @@ async fn run(cli: Cli) -> Result<()> {
     ));
     // This crate's routes are matched *first*, with the community edition behind them as the
     // fallback, rather than merged alongside. `Router::merge` panics on a duplicate path, so a
-    // merged layout can only ever add paths the community edition does not already serve --
-    // this one can also replace them, which is what lets a hosted-only behaviour take over an
+    // merged layout can only ever add paths the community edition does not already serve.
+    // This one can also replace them, which is what lets a hosted-only behaviour take over an
     // endpoint the community edition defines.
     //
     // The community edition's own router still ends in its static-asset fallback, so an
@@ -280,7 +281,7 @@ async fn run(cli: Cli) -> Result<()> {
         .merge(oauth_login_router)
         .fallback_service(base_app);
 
-    // Load shedding is started by the binary, not by `build_app` -- it is a spawned task, not a
+    // Load shedding is started by the binary, not by `build_app`: it is a spawned task, not a
     // router layer, so embedding the community router does not bring it along. Both editions
     // point at one database, so a guard only the community binary ran would watch a pool this
     // process is the one loading. Same env vars and same default (off unless

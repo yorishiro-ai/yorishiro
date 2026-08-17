@@ -242,7 +242,7 @@ async fn an_out_of_order_delivery_does_not_undo_a_newer_event(pool: PgPool) {
         .unwrap()
         .timestamp();
 
-    // The newer event (created later) arrives first -- plausible under Stripe's own
+    // The newer event (created later) arrives first: plausible under Stripe's own
     // no-ordering-guarantee, or simply because the older one was delayed/retried.
     let newer_body = subscription_updated_body("evt_newer", base + 100, "cus_2");
     assert_eq!(post_webhook(&app, newer_body).await, StatusCode::OK);
@@ -252,7 +252,7 @@ async fn an_out_of_order_delivery_does_not_undo_a_newer_event(pool: PgPool) {
     billing::set_plan(&pool, tenant.id, "free").await.unwrap();
 
     // The older, stale event now arrives (a different event id, so it isn't caught by the
-    // duplicate-event-id guard alone) -- it must not be allowed to move the plan again.
+    // duplicate-event-id guard alone): it must not be allowed to move the plan again.
     let older_body = subscription_updated_body("evt_older", base, "cus_2");
     assert_eq!(post_webhook(&app, older_body).await, StatusCode::OK);
     let after_stale = tenant_plan(&pool, tenant.id).await;
@@ -281,7 +281,7 @@ async fn events_for_different_customers_do_not_interfere(pool: PgPool) {
         post_webhook(&app, subscription_updated_body("evt_a", base, "cus_a")).await,
         StatusCode::OK
     );
-    // An older `created` for a *different* customer must apply normally -- staleness is scoped
+    // An older `created` for a *different* customer must apply normally: staleness is scoped
     // per customer, not global.
     assert_eq!(
         post_webhook(
@@ -328,7 +328,7 @@ async fn a_checkout_completion_does_not_block_an_earlier_created_subscription_ev
     );
 }
 
-/// Cancelling a subscription has to put the tenant back on Free -- both the plan and the
+/// Cancelling a subscription has to put the tenant back on Free: both the plan and the
 /// workspace cap that comes with it. Missing the cap would leave a cancelled tenant with a paid
 /// tier's limits, which is the expensive direction to get wrong.
 #[sqlx::test(migrations = "../../../migrations")]
@@ -390,7 +390,7 @@ async fn a_cancellation_for_an_unknown_customer_is_accepted_and_ignored(pool: Pg
 
 /// Billing is opt-in. With no webhook secret configured there is no way to tell a genuine Stripe
 /// delivery from anything else, so the endpoint refuses rather than accepting unverifiable
-/// requests -- if this ever started returning 200, a forged body would be applied to real
+/// requests: if this ever started returning 200, a forged body would be applied to real
 /// tenants.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting(pool: PgPool) {

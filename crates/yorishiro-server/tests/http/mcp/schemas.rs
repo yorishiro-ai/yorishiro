@@ -1,7 +1,7 @@
 use super::*;
 
 /// `definition` and `template_id` are mutually exclusive and both optional at the type level,
-/// so deserialization accepts either -- the exclusivity is enforced by the handler, and this
+/// so deserialization accepts either. The exclusivity is enforced by the handler, and this
 /// pins that the shape itself permits both spellings a client might send.
 #[test]
 fn a_schema_can_be_created_from_either_a_definition_or_a_template() {

@@ -13,8 +13,8 @@ async fn a_tenant_with_no_billing_row_reads_back_as_unbilled(pool: PgPool) {
     assert!(get_billing(&pool, tenant.id).await.unwrap().is_none());
 }
 
-/// Checkout can complete for a tenant that already has a row -- a resubscribe after cancellation
-/// -- so linking must upsert rather than fail on the primary key.
+/// Checkout can complete for a tenant that already has a row (a resubscribe after cancellation),
+/// so linking must upsert rather than fail on the primary key.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn linking_a_customer_twice_updates_rather_than_failing(pool: PgPool) {
     let tenant = yorishiro_core::repositories::tenancy::create_tenant(&pool, "acme", None)
@@ -68,7 +68,7 @@ async fn linking_a_customer_preserves_an_already_set_plan(pool: PgPool) {
 }
 
 /// Subscription webhooks carry only the Stripe customer id, so resolving a tenant from it is the
-/// inbound path -- and an unknown customer must be `None`, not a wrong tenant.
+/// inbound path, and an unknown customer must be `None`, not a wrong tenant.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_customer_resolves_to_its_own_tenant_and_only_its_own(pool: PgPool) {
     let a = yorishiro_core::repositories::tenancy::create_tenant(&pool, "a", None)

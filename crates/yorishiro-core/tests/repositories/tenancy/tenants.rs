@@ -31,8 +31,8 @@ static MAX_TENANTS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Sets the variable for one test and removes it on drop, including when the test panics.
 ///
-/// The previous version cleared it by hand after each assertion. That happened to be safe --
-/// every test read its result into a local before asserting -- but it was one reordered line
+/// The previous version cleared it by hand after each assertion. That happened to be safe
+/// (every test read its result into a local before asserting), but it was one reordered line
 /// away from leaking a value into whichever test ran next. `Drop` makes the cleanup a property
 /// of the guard rather than of each test body's shape, matching `yorishiro-server`'s
 /// `tests/config/mod.rs`.
@@ -74,7 +74,7 @@ fn max_tenants_from_env_unset_is_unlimited() {
     assert_eq!(max_tenants_from_env().unwrap(), None);
 }
 
-/// Zero means "no cap", not "no tenant may be created" -- an operator writing `0` to turn the
+/// Zero means "no cap", not "no tenant may be created": an operator writing `0` to turn the
 /// limit off must not lock themselves out of creating any tenant at all.
 #[test]
 fn max_tenants_from_env_zero_is_unlimited() {

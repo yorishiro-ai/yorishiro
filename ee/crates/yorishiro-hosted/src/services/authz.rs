@@ -10,7 +10,7 @@ use crate::state::HostedState;
 /// The prefix-stripping and the empty-credential check both live in
 /// [`auth::bearer_credential`], so this path and the ones upstream cannot disagree about what
 /// `Authorization: Bearer ` means. This function stays because the upstream one returns an
-/// `Option` -- the mapping to `Unauthenticated` is this crate's business, not core's.
+/// `Option`: the mapping to `Unauthenticated` is this crate's business, not core's.
 fn bearer_token(headers: &HeaderMap) -> Result<&str, YorishiroError> {
     auth::bearer_credential(headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()))
         .ok_or(YorishiroError::Unauthenticated)
@@ -53,7 +53,7 @@ pub(crate) async fn authenticate_workspace(
 /// per-tenant acts that any valid key for that tenant may perform. Requiring Owner/Admin here
 /// would silently narrow the feature rather than relocate it.
 ///
-/// Ownership is still enforced downstream — the service scopes every write by this
+/// Ownership is still enforced downstream: the service scopes every write by this
 /// `tenant_id`, and acting on another tenant's template answers `404` rather than `403`.
 ///
 /// Returns the attributed `user_id` alongside it, which is `None` for a service-only key.

@@ -8,7 +8,7 @@
 //! * Authentication goes through [`authz::authenticate_workspace`] rather than an `Authorized`
 //!   extractor, since this crate's lib may not depend on `yorishiro-server`. That helper resolves
 //!   through `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a
-//!   tenant-scoped one names it with `X-Workspace-Id` -- both work here, where the community
+//!   tenant-scoped one names it with `X-Workspace-Id`. Both work here, where the community
 //!   version only ever saw the first kind.
 //! * The scope check is explicit: the handler checks the scope itself, because there is no
 //!   extractor here to carry it.
@@ -31,7 +31,7 @@ use crate::services::{authz, origin};
 use crate::state::HostedState;
 
 /// The community edition's extractors enforce a minimum scope by type. Without them, the check
-/// is written out -- the ordering on `ApiKeyScope` is the same one they use.
+/// is written out: the ordering on `ApiKeyScope` is the same one they use.
 fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope < needed {
         return Err(YorishiroError::ScopeInsufficient {
@@ -50,7 +50,7 @@ pub struct MergeResponse {
     pub diff: VersioningDiff,
 }
 
-/// `GET /api/schemas/upstream-changes` -- schemas whose origin template has moved on.
+/// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
 #[utoipa::path(
     get,
     path = "/api/schemas/upstream-changes",
@@ -75,7 +75,7 @@ pub async fn list_upstream_changes(
     Ok(Json(changes))
 }
 
-/// `GET /api/schemas/{schema_id}/merge-preview` -- what following the template would do.
+/// `GET /api/schemas/{schema_id}/merge-preview`: what following the template would do.
 #[utoipa::path(
     get,
     path = "/api/schemas/{schema_id}/merge-preview",
@@ -116,7 +116,7 @@ pub async fn merge_preview(
     Ok(Json(plan))
 }
 
-/// `POST /api/schemas/{schema_id}/merge` -- write the merged definition as the next version.
+/// `POST /api/schemas/{schema_id}/merge`: write the merged definition as the next version.
 #[utoipa::path(
     post,
     path = "/api/schemas/{schema_id}/merge",

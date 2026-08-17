@@ -467,7 +467,7 @@ async fn list_filters_by_schema_version(pool: PgPool) {
 }
 
 /// A workspace with no schema refuses entity writes, and says that is why. Before the status
-/// column this failed too, but as a 404 on the schema name -- which reads as a typo.
+/// column this failed too, but as a 404 on the schema name: which reads as a typo.
 #[sqlx::test(migrations = "../../migrations")]
 async fn refuses_entity_creation_while_the_workspace_has_no_schema(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -544,7 +544,7 @@ async fn creating_the_first_schema_activates_the_workspace(pool: PgPool) {
     .unwrap();
 }
 
-/// A second schema version must not flip the workspace back or otherwise disturb it -- the
+/// A second schema version must not flip the workspace back or otherwise disturb it: the
 /// activation runs on every create_schema call, so it has to be idempotent.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_further_schema_version_leaves_the_workspace_active(pool: PgPool) {
@@ -733,7 +733,7 @@ async fn drift_marks_an_optional_addition_as_not_required(pool: PgPool) {
 }
 
 /// The number an operator acts on: entities lacking a field the active version requires.
-/// Entities merely behind, but still valid, are counted separately — conflating them would
+/// Entities merely behind, but still valid, are counted separately: conflating them would
 /// inflate the work a migration appears to need.
 #[sqlx::test(migrations = "../../migrations")]
 async fn dry_run_separates_entities_that_need_values_from_ones_merely_behind(pool: PgPool) {
@@ -1260,7 +1260,7 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
             .unwrap();
     assert_eq!(remaining, 0, "the sweep took the aged-out image");
 
-    // An expired window answers the same way a job that never existed does -- which is what
+    // An expired window answers the same way a job that never existed does: which is what
     // "undoable for N days" means once the days are up.
     let err = entities::undo_job(&mut conn, workspace_id, old_job)
         .await
@@ -1272,7 +1272,7 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
 }
 
 /// A retention value that does not fit `make_interval(days => …)` must not reach it. Parsed as
-/// `i64` and cast, `2147483648` wraps negative — `now() - a negative interval` puts the cutoff in
+/// `i64` and cast, `2147483648` wraps negative: `now() - a negative interval` puts the cutoff in
 /// the *future*, and the sweep would delete the images it exists to preserve.
 #[test]
 fn an_out_of_range_retention_falls_back_to_the_default() {
@@ -1290,7 +1290,7 @@ fn an_out_of_range_retention_falls_back_to_the_default() {
         );
     }
 
-    // A negative value does parse. It is not clamped or rejected -- `prune_snapshots` treats
+    // A negative value does parse. It is not clamped or rejected: `prune_snapshots` treats
     // anything `<= 0` as "keep everything", so it lands with `0` rather than reaching
     // `make_interval` and moving the cutoff into the future.
     // SAFETY: as above.

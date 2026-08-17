@@ -133,7 +133,7 @@ fn unknown_key_is_a_hard_error() {
     assert!(err.to_string().contains("failed to parse config file"));
 }
 
-/// `config.example.yml` offers both of these, and `FileConfig` is `deny_unknown_fields` — so a
+/// `config.example.yml` offers both of these, and `FileConfig` is `deny_unknown_fields`: so a
 /// key documented there but missing from the struct does not silently do nothing, it refuses to
 /// start. Covering them here keeps the example file and the loader from drifting apart.
 #[test]
@@ -206,7 +206,7 @@ fn the_example_config_parses_with_every_key_enabled() {
 
 /// `license_key` belongs to the paid edition, and both editions parse this struct, which is
 /// `deny_unknown_fields`. So the field has to exist here or a config carrying the key refuses
-/// to start on the community build -- an operator switching editions would meet that.
+/// to start on the community build: an operator switching editions would meet that.
 ///
 /// The field is otherwise unused, which makes it exactly the kind of thing a later cleanup
 /// removes. This is the contract that says it cannot be.
@@ -227,7 +227,7 @@ fn a_licence_key_in_the_config_is_accepted() {
 /// And it must not reach the environment from here.
 ///
 /// This loader is compiled into the community binary. Applying the key would put the string
-/// `YORISHIRO_LICENSE_KEY` into that artifact, which the release gate scans for and rejects --
+/// `YORISHIRO_LICENSE_KEY` into that artifact, which the release gate scans for and rejects:
 /// the build is meant to carry no trace of the paid edition. `ee/` reads the file itself.
 #[test]
 fn a_licence_key_in_the_config_is_not_applied_to_the_environment() {
@@ -282,7 +282,7 @@ fn no_config_anywhere_reads_nothing() {
 
 /// A path that is not valid UTF-8 is still a path the operator named. `std::env::var` reports it
 /// as `NotUnicode`, and flattening that to "unset" with `.ok()` would fall back to
-/// `/etc/yorishiro/config.yml` -- reading a different deployment's settings than the one asked
+/// `/etc/yorishiro/config.yml`: reading a different deployment's settings than the one asked
 /// for, which is the single outcome the explicit-path rule exists to prevent.
 ///
 /// Unix-only: `OsStringExt::from_vec` takes arbitrary bytes, which is what makes the case

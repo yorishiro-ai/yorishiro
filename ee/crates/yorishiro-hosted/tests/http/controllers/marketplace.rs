@@ -1,5 +1,5 @@
-//! The licence gate on the marketplace routes. The marketplace's own behaviour -- publishing,
-//! forking, reviews, visibility -- is covered at the service level in `tests/services/marketplace.rs`;
+//! The licence gate on the marketplace routes. The marketplace's own behaviour (publishing,
+//! forking, reviews, visibility) is covered at the service level in `tests/services/marketplace.rs`;
 //! what is asserted here is only that the gate opens and closes, which needs the HTTP layer.
 
 use crate::http::controllers::marketplace::list_marketplace;
@@ -96,7 +96,7 @@ async fn a_licence_does_not_replace_authentication(pool: PgPool) {
 }
 
 /// A key that lapsed while the process was running closes the gate on the next request, without
-/// a restart -- the state holds claims, not a boolean captured at boot.
+/// a restart: the state holds claims, not a boolean captured at boot.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_licence_that_expired_mid_run_closes_the_gate(pool: PgPool) {
     use crate::services::licence::{LicenceClaims, LicenceState};

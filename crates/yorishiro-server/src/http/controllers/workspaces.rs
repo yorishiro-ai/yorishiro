@@ -16,7 +16,7 @@ use crate::http::middleware::auth::AuthContext;
 use crate::state::AppState;
 
 /// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or
-/// act on another tenant's workspace by guessing its id -- `identity.workspaces` has no RLS of
+/// act on another tenant's workspace by guessing its id: `identity.workspaces` has no RLS of
 /// its own (it's read through the admin `identity_pool`), so this check is the only thing
 /// enforcing that boundary for these handlers.
 async fn get_workspace_in_tenant(
@@ -104,7 +104,7 @@ pub struct WorkspaceDetail {
     pub created_at: DateTime<Utc>,
     pub entity_count: i64,
     pub relation_count: i64,
-    /// Currently *active* schemas only (one per distinct schema name) -- not a raw row count,
+    /// Currently *active* schemas only (one per distinct schema name): not a raw row count,
     /// which would also include archived versions.
     pub schema_count: i64,
 }

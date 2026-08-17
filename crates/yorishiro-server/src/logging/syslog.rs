@@ -36,8 +36,8 @@ impl<'a> MakeWriter<'a> for SyslogMakeWriter {
 
 /// Maps a tracing level to its RFC 5424 severity number.
 ///
-/// `pub` (rather than private) solely so the crate-root `tests/` integration tests -- which
-/// only see this crate's public API -- can exercise this mapping directly.
+/// `pub` (rather than private) solely so the crate-root `tests/` integration tests (which
+/// only see this crate's public API) can exercise this mapping directly.
 pub fn severity_for_level(level: tracing::Level) -> u8 {
     match level {
         tracing::Level::ERROR => 3,

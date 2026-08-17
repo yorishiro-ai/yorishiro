@@ -33,7 +33,7 @@ pub struct TenantUsage {
 }
 
 /// Builds and runs a `SELECT COUNT(*) ...` statement, returning the single count it yields.
-/// Shared by every counter `compute_tenant_usage` needs -- each caller only differs in the
+/// Shared by every counter `compute_tenant_usage` needs: each caller only differs in the
 /// `FROM`/`JOIN`/`WHERE` clauses of `query`, and `COUNT(*)` always yields exactly one row.
 async fn fetch_count(pool: &PgPool, query: SelectStatement) -> Result<i64, YorishiroError> {
     let (sql, values) = query.build_sqlx(PostgresQueryBuilder);

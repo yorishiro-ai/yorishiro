@@ -49,7 +49,7 @@ async fn internal_errors_do_not_leak_their_cause() {
     assert!(rendered.contains("internal server error"));
 }
 
-/// `HostedApiErrorBody` is an OpenAPI-only type -- nothing constructs it, and its doc comment
+/// `HostedApiErrorBody` is an OpenAPI-only type: nothing constructs it, and its doc comment
 /// says it is kept in sync with core's `into_http_parts` by hand. That is exactly the kind of
 /// claim that rots silently, so the documented optional fields are checked against real bodies.
 ///

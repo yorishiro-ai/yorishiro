@@ -55,7 +55,7 @@ pub enum ApiKeyScope {
     /// Running a batch migration, and switching maintenance mode. Above `schema` because both
     /// act on data already stored: a schema registration adds a version that nothing has been
     /// written against yet, while a migration rewrites rows and a maintenance switch stops
-    /// every caller. `audit` is not defined here -- a scope over an audit log that does not
+    /// every caller. `audit` is not defined here: a scope over an audit log that does not
     /// exist yet would read as though the log did.
     Migration,
 }
@@ -128,7 +128,7 @@ pub struct CreatedApiKey {
 ///
 /// Every adapter that authenticates a request routes through here. `Authorization: Bearer `
 /// with nothing after it is the same request whichever adapter receives it, so it has to get
-/// the same answer -- one adapter accepting the empty string and hashing it into a lookup that
+/// the same answer: one adapter accepting the empty string and hashing it into a lookup that
 /// can never match, while another rejects it outright, is a difference with no reason behind it.
 pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
     header_value
@@ -166,7 +166,7 @@ pub(crate) fn random_hex(byte_len: usize) -> String {
 /// Hashes a presented key into the form stored in `identity.api_keys.key_hash`.
 ///
 /// `pub` because an [`Authenticator`] implementation outside this crate has to look a key up the
-/// same way this crate does -- without it the seam is only half a seam, since a replacement can
+/// same way this crate does: without it the seam is only half a seam, since a replacement can
 /// be installed but cannot resolve the key it was handed.
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()

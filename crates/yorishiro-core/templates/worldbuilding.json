@@ -53,7 +53,7 @@
       }
     },
     "location": {
-      "description": "A place in the world — city, dungeon, landmark, etc.",
+      "description": "A place in the world: city, dungeon, landmark, etc.",
       "fields": {
         "name": {
           "type": "string",
@@ -98,7 +98,7 @@
       }
     },
     "item": {
-      "description": "A notable object — weapon, artifact, document, etc.",
+      "description": "A notable object: weapon, artifact, document, etc.",
       "fields": {
         "name": {
           "type": "string",

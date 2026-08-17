@@ -5,7 +5,7 @@ use crate::services::auth::{ApiKeyScope, create_api_key};
 use crate::test_support;
 
 /// A key that was never issued must be rejected as unauthenticated rather than, say, panicking
-/// on a malformed shape -- unauthenticated input is the normal case on a public endpoint.
+/// on a malformed shape: unauthenticated input is the normal case on a public endpoint.
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unknown_key_is_rejected(pool: PgPool) {
     let error = authenticate(&pool, "ysr_deadbeef_notarealkey")
@@ -47,7 +47,7 @@ async fn a_freshly_issued_key_resolves_its_workspace_and_scope(pool: PgPool) {
 }
 
 /// Only the hash is stored, so a key that differs from the issued one by a single character must
-/// not authenticate -- this is what makes the stored hash worth anything.
+/// not authenticate: this is what makes the stored hash worth anything.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_tampered_secret_does_not_authenticate(pool: PgPool) {
     let (_, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;

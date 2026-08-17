@@ -85,7 +85,7 @@ pub async fn sync_embedding(
     // `different vector dimensions 384 and 1024`, naming neither the entity nor the write that
     // caused it. Checking here turns a broken workspace into one refused write.
     //
-    // A workspace with no stamp -- created before this existed -- takes whatever the deployment
+    // A workspace with no stamp (created before this existed) takes whatever the deployment
     // produces, which is what it has always done.
     if let Some(expected) = workspace_embedding_dimensions(&mut *conn, workspace_id).await?
         && vector.len() != expected as usize

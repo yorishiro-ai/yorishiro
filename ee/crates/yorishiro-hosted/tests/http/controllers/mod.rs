@@ -24,7 +24,7 @@ fn every_route_this_crate_serves_appears_in_its_openapi_document() {
     }
 }
 
-/// The spec is served to clients as JSON, so it has to serialise -- a schema referencing a type
+/// The spec is served to clients as JSON, so it has to serialise: a schema referencing a type
 /// that no longer derives `ToSchema` fails here rather than at request time.
 #[test]
 fn the_document_serialises() {

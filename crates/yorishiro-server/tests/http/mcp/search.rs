@@ -1,6 +1,6 @@
 use super::*;
 
-/// Search is driven by the query text, which is the only required argument -- everything else
+/// Search is driven by the query text, which is the only required argument. Everything else
 /// narrows an already-valid search.
 #[test]
 fn the_query_text_is_required_and_the_rest_is_optional() {

@@ -6,7 +6,7 @@
 //! The credentials belong to a workspace, not to the deployment: this product does not pay for
 //! inference (requirements §1.3), so a workspace that wants inferred values brings its own key.
 //! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back
-//! to `default` values -- a caller who asked for inference and received defaults would have no
+//! to `default` values: a caller who asked for inference and received defaults would have no
 //! way to tell that nothing was inferred.
 
 use std::time::Duration;
@@ -34,7 +34,7 @@ pub struct InferenceConfig {
 }
 
 /// Written out rather than derived, because a derived `Debug` prints `api_key` in clear text and
-/// anything that formats this -- a tracing field, an error context, one `dbg!` left behind --
+/// anything that formats this (a tracing field, an error context, one `dbg!` left behind)
 /// would put a workspace's credential into a log. The endpoint and model still show, since those
 /// are what a reader is usually trying to identify.
 impl std::fmt::Debug for InferenceConfig {
@@ -59,7 +59,7 @@ impl InferenceClient {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             // No redirects. A workspace sets `base_url` freely, and this request carries both
-            // the entity's data and that workspace's bearer key -- following a 307 would re-send
+            // the entity's data and that workspace's bearer key. Following a 307 would re-send
             // the body, headers included, to a host nobody configured. A chat-completions
             // endpoint has no reason to redirect across hosts, so refusing costs nothing real
             // and the error names the endpoint rather than hanging.
@@ -81,7 +81,7 @@ impl InferenceClient {
 
     /// Asks the model for values for `missing_fields`, given what the entity already holds.
     ///
-    /// Returns only the fields the model answered with, and only those that were asked for --
+    /// Returns only the fields the model answered with, and only those that were asked for:
     /// a model that invents a key would otherwise write a field the schema does not define.
     /// A field the model declines to guess is absent from the result rather than null, so the
     /// caller can tell "no proposal" from "proposed nothing".
@@ -97,7 +97,7 @@ impl InferenceClient {
         let prompt = format!(
             "Given this record, propose values for the listed missing fields.\n\
              Answer with a JSON object containing only those field names. Omit any field you \
-             cannot infer from the record -- do not guess blindly, and do not invent field \
+             cannot infer from the record: do not guess blindly, and do not invent field \
              names that are not listed.\n\n\
              Record:\n{}\n\nMissing fields: {}",
             serde_json::to_string_pretty(entity_data).unwrap_or_else(|_| "{}".into()),

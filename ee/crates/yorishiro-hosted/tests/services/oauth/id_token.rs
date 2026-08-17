@@ -1,7 +1,7 @@
 use super::*;
 
 /// The claims come from an identity provider and drive user provisioning, so the shape is a
-/// trust boundary. `sub` is the only field that must be present -- it is the stable identity.
+/// trust boundary. `sub` is the only field that must be present: it is the stable identity.
 #[test]
 fn only_the_subject_is_required() {
     let claims: IdTokenClaims =

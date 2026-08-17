@@ -24,7 +24,7 @@ pub struct WorkspaceRecord {
     /// Entity writes are refused while pending.
     pub status: String,
     /// The embedding model this workspace's vectors were produced by, and their dimension
-    /// count. `None` on both means the deployment default -- what every workspace created
+    /// count. `None` on both means the deployment default: what every workspace created
     /// before the stamp existed means, and what a deployment that has never changed models
     /// keeps meaning.
     ///
@@ -81,7 +81,7 @@ impl MembershipRole {
     }
 
     /// The highest API key scope a member with this role may be issued. Enforced at key
-    /// issuance time (see `admin create-api-key --user`), not re-checked afterward -- this
+    /// issuance time (see `admin create-api-key --user`), not re-checked afterward: this
     /// mirrors how a key's scope is otherwise fixed for its lifetime until revoked.
     pub fn max_scope(self) -> ApiKeyScope {
         match self {
@@ -133,7 +133,7 @@ pub struct TemplateRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Input for creating a new template. `visibility` is not settable here -- every template
+/// Input for creating a new template. `visibility` is not settable here: every template
 /// starts as tenant-private (`visibility = 'tenant'`); community publishing is a future,
 /// separate operation once that workflow is designed (see the migration's comment).
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]

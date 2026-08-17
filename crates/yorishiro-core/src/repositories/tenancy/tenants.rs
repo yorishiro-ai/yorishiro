@@ -20,7 +20,7 @@ enum Tenants {
 /// it bounds a deployment to a single tenant without needing a settings table: `yorishiro-server`
 /// defaults this to `1` (single-tenant) and deployments that want multiple tenants set it to `0`
 /// or a higher count. It is enforced only in application code (there is no anti-tampering against
-/// an operator who edits the source or the env var directly) — like the rest of this module's
+/// an operator who edits the source or the env var directly), like the rest of this module's
 /// caps, it exists for product consistency, not as a security boundary against whoever controls
 /// the deployment.
 pub async fn create_tenant(
@@ -109,7 +109,7 @@ fn tenant_columns() -> [Tenants; 4] {
 }
 
 /// Takes `&mut PgConnection` (rather than `&PgPool`, like most of this module) so a caller can
-/// compose it into a larger transaction -- e.g. `add_member` calls this as part of its own
+/// compose it into a larger transaction: e.g. `add_member` calls this as part of its own
 /// atomic user-creation-plus-membership flow. Pass `&mut pool.acquire().await?` for a
 /// standalone call.
 pub async fn get_tenant(
@@ -143,7 +143,7 @@ pub async fn list_tenants(pool: &PgPool) -> Result<Vec<TenantRecord>, YorishiroE
 }
 
 /// Updates a tenant's workspace cap. `None` means unlimited. Existing workspaces keep whatever
-/// `max_entities` they were created with -- only newly created workspaces are affected by a
+/// `max_entities` they were created with: only newly created workspaces are affected by a
 /// change here, since retroactively shrinking a cap could put an existing workspace over its own
 /// limit.
 pub async fn set_tenant_max_workspaces(

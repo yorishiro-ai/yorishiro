@@ -2,7 +2,7 @@ use super::*;
 
 /// The model is asked for specific fields, and only those may come back. A model that answers
 /// with a key nobody asked for would otherwise have that key written into an entity, where the
-/// schema does not define it -- validation would reject the write, but only after the proposal
+/// schema does not define it: validation would reject the write, but only after the proposal
 /// had been stored and shown to someone as though it were usable.
 #[test]
 fn a_proposal_keeps_only_the_fields_that_were_asked_for() {
@@ -46,7 +46,7 @@ async fn no_missing_fields_makes_no_request() {
     assert!(proposals.is_empty());
 }
 
-/// A provider that refuses gets reported as a caller-fixable error, not an internal one -- the
+/// A provider that refuses gets reported as a caller-fixable error, not an internal one: the
 /// key, the model name and the URL are all workspace configuration. The message must not carry
 /// the provider's body, which can quote the key back.
 #[tokio::test]
@@ -70,8 +70,8 @@ async fn a_provider_error_is_reported_without_leaking_the_key() {
 }
 
 /// `InferenceConfig` holds a workspace's API key, and a derived `Debug` would print it. Anything
-/// that formats the struct -- a tracing field, an error context, one `dbg!` left in during a
-/// debugging session -- would then put the credential in a log, where nothing removes it.
+/// that formats the struct (a tracing field, an error context, one `dbg!` left in during a
+/// debugging session) would then put the credential in a log, where nothing removes it.
 ///
 /// Asserted rather than left to the hand-written impl staying hand-written: adding `Debug` back
 /// to the derive list is a one-word edit that reads as tidying up.
@@ -89,7 +89,7 @@ fn debug_does_not_render_the_api_key() {
         !rendered.contains("sk-must-not-appear"),
         "the key reached Debug output: {rendered}"
     );
-    // The endpoint and model still show -- redaction should not cost the fields a reader wants.
+    // The endpoint and model still show: redaction should not cost the fields a reader wants.
     assert!(rendered.contains("api.example.com"));
     assert!(rendered.contains("gpt-4o-mini"));
 }

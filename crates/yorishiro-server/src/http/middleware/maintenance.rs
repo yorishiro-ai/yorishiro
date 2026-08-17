@@ -1,7 +1,7 @@
 //! Refuses requests while the deployment is in maintenance.
 //!
 //! Runs before routing so it covers REST and MCP alike, and reads the state per request rather
-//! than caching it — an operator turning maintenance off expects the next request to be
+//! than caching it: an operator turning maintenance off expects the next request to be
 //! served, not the one after some TTL.
 
 use axum::extract::{Request, State};

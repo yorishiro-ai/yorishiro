@@ -16,7 +16,7 @@ use crate::state::AppState;
 /// Emits a `warn` for a request rejected before it reaches a handler (bad/missing key, or
 /// insufficient scope). The access log only records these as anonymous 401/403s, so this is
 /// what lets an operator see credential brute-forcing or a misconfigured client. The presented
-/// key is never logged -- only the caller IP (when `ConnectInfo` is present), the path, and the
+/// key is never logged: only the caller IP (when `ConnectInfo` is present), the path, and the
 /// reason.
 fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
     let client = parts
@@ -182,7 +182,7 @@ where
 
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s
 /// scope, without acquiring a DB connection. Handlers that do slow work (e.g. generating an
-/// embedding) before touching the database — search, for instance — would otherwise hold a
+/// embedding) before touching the database (search, for instance) would otherwise hold a
 /// pool connection idle through `Authorized<R>`; use this instead and call
 /// `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified<R> {

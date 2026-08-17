@@ -20,7 +20,7 @@ pub struct HealthResponse {
 
 /// The `/up` handler: a liveness probe that only confirms the process is running and able
 /// to answer HTTP requests. Unlike `/health`, it never touches the database, so it stays
-/// fast and healthy even during a DB outage — an orchestrator should use this to decide
+/// fast and healthy even during a DB outage: an orchestrator should use this to decide
 /// whether to restart the process, and `/health` to decide whether to route traffic to it.
 pub async fn up_check() -> (StatusCode, Json<HealthResponse>) {
     (StatusCode::OK, Json(HealthResponse { status: "ok" }))

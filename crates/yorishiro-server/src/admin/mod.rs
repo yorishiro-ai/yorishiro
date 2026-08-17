@@ -11,7 +11,7 @@ use yorishiro_core::services::auth::ApiKeyScope;
 use commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key};
 
 /// Subcommands under `yorishiro-server admin`. API keys are stored only as SHA-256 hashes and
-/// user passwords only as argon2 hashes, so neither can be provisioned by hand in SQL — this
+/// user passwords only as argon2 hashes, so neither can be provisioned by hand in SQL: this
 /// CLI is the only bootstrap mechanism.
 #[derive(Subcommand)]
 pub enum AdminCommand {
@@ -356,7 +356,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
             )
             .await
             .map_err(anyhow::Error::from)?;
-            println!("invite created (the plaintext token is shown ONLY once — send it now)");
+            println!("invite created (the plaintext token is shown ONLY once, send it now)");
             println!("  token:      {token}");
             println!("  invite id:  {}", invite.id);
             println!("  tenant id:  {}", invite.tenant_id);
@@ -374,7 +374,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
         } => {
             let scope = ApiKeyScope::from(scope);
             let created = create_api_key(pool, workspace_id, scope, user).await?;
-            println!("api key created (the plaintext key is shown ONLY once — store it now)");
+            println!("api key created (the plaintext key is shown ONLY once, store it now)");
             println!("  key:          {}", created.plaintext);
             println!("  key id:       {}", created.id);
             println!("  workspace id: {}", created.workspace_id);

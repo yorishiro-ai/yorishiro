@@ -2,7 +2,7 @@
 //! `crate::templates` (the built-in templates shipped with the binary and served from memory):
 //! these are tenant-scoped, DB-backed templates that a tenant's members create and manage
 //! through `/api/template-library`. Operates on `&PgPool` (the identity pool) rather than an
-//! RLS-scoped connection, matching the rest of this module -- `identity.templates` has no RLS
+//! RLS-scoped connection, matching the rest of this module: `identity.templates` has no RLS
 //! of its own, so every function here takes a `tenant_id` and filters/checks ownership
 //! explicitly.
 

@@ -14,7 +14,7 @@ use utoipa::OpenApi;
 /// `/api-docs/openapi.json` route, and `axum::Router::merge` panics on a duplicate path, so a
 /// single combined document is not something this side can produce.
 ///
-/// The result is two specs from one process, each canonical for its own half -- the community
+/// The result is two specs from one process, each canonical for its own half: the community
 /// API at `/api-docs/openapi.json`, and this crate's own routes at
 /// `/api-docs/hosted-openapi.json`.
 /// Unifying them needs a `build_app` variant upstream that accepts an extra `OpenApi`.
@@ -76,7 +76,7 @@ use utoipa::OpenApi;
 pub struct HostedApiDoc;
 
 /// Declares the bearer scheme `tenant_overview` references. utoipa has no attribute form for
-/// this -- a security scheme has to be attached through a `Modify` implementation.
+/// this: a security scheme has to be attached through a `Modify` implementation.
 struct BearerKeySecurity;
 
 impl utoipa::Modify for BearerKeySecurity {

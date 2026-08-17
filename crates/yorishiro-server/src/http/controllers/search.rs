@@ -44,7 +44,7 @@ pub async fn search_entities(
     };
 
     // Charged before embedding, since embedding is the work the budget protects. Counting is
-    // cheap here -- a query is short -- which is why search is metered in tokens while writes
+    // cheap here (a query is short), which is why search is metered in tokens while writes
     // stay on request counts.
     let tokens = state.embedding_provider.count_tokens(&params.query_text);
     if !state

@@ -40,7 +40,7 @@ async fn read_only_refuses_writes_with_423_and_a_retry_after(pool: PgPool) {
     assert_eq!(status, StatusCode::LOCKED);
     assert_eq!(retry_after.as_deref(), Some("45"));
 
-    // A read is not a write, so it gets past the guard -- 401 here is the auth layer behind
+    // A read is not a write, so it gets past the guard: 401 here is the auth layer behind
     // it, which is exactly what "the guard let this through" looks like.
     let (status, _) = status_of(&app, "GET", "/api/entities").await;
     assert_ne!(status, StatusCode::LOCKED);
@@ -62,7 +62,7 @@ async fn full_lock_refuses_reads_too_with_503(pool: PgPool) {
 }
 
 /// The probes answer even under full lock. Refusing them would have an orchestrator restart a
-/// server that is deliberately paused -- and restarting would not clear the state, which lives
+/// server that is deliberately paused. Restarting would not clear the state, which lives
 /// in the database, so the loop would never converge.
 #[sqlx::test(migrations = "../../migrations")]
 async fn liveness_probes_answer_under_full_lock(pool: PgPool) {

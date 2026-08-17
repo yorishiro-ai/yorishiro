@@ -25,7 +25,7 @@ fn parse(value: serde_json::Value) -> MetaSchemaDefinition {
 
 /// `MAX_OBJECT_DEPTH` is the point of the nesting check: a definition may nest object fields up
 /// to it, and one level further must be rejected. Asserting the constant is positive proves
-/// nothing -- this walks the boundary from both sides, so raising or lowering the limit without
+/// nothing: this walks the boundary from both sides, so raising or lowering the limit without
 /// meaning to fails here.
 #[test]
 fn object_nesting_is_allowed_up_to_the_limit_and_rejected_past_it() {

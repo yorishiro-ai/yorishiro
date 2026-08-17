@@ -74,7 +74,7 @@ pub(super) enum AuthzOutcome {
     ScopeDenied(CallToolResult),
 }
 
-/// Copies the request's headers into the shape `auth::Authenticator` takes -- the same thing the
+/// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the
 /// REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
 fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
     parts

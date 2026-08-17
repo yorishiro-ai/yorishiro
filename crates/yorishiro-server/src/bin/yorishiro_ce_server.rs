@@ -2,12 +2,12 @@
 //!
 //! The default artifact is the one `ee/` builds, which runs exactly this feature set until a
 //! licence key is present. This binary exists for the deployment that cannot have proprietary
-//! code on disk at all — a distribution policy, a redistribution requirement, an audit that
+//! code on disk at all: a distribution policy, a redistribution requirement, an audit that
 //! reads the package rather than the configuration. Everyone else wants the `-ee` package,
 //! which is a superset and behaves identically without a licence key.
 //!
 //! **It is headless.** The web UI is the paid edition's SPA and is licensed with it, so there
-//! is nothing here to serve at `/` — the fallback answers `404`. The REST API, the MCP server,
+//! is nothing here to serve at `/`: the fallback answers `404`. The REST API, the MCP server,
 //! and the admin CLI are all present and behave identically.
 //!
 //! Keep this file free of any path into `ee/`. That is the whole point of it, and a `use` line
@@ -120,7 +120,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Wait for the embedding sync of already-written entities before exiting, or recently
     // created entities stay permanently missing from search. A second signal during that wait
-    // exits immediately -- without it an operator who interrupts again sees nothing happen until
+    // exits immediately: without it an operator who interrupts again sees nothing happen until
     // the 30s timeout, since the first signal's `ctrl_c()` has already resolved.
     embedding_tasks.close();
     tokio::select! {

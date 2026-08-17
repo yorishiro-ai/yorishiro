@@ -422,7 +422,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
 ///
 /// This is what the two-query shape exists for. A single statement that ranks vector hits ahead
 /// of trigram-only ones needs `ORDER BY (embedding IS NULL), distance`, and that leading key
-/// takes the index out of play entirely — pgvector serves `ORDER BY embedding <=> $q LIMIT k`
+/// takes the index out of play entirely: pgvector serves `ORDER BY embedding <=> $q LIMIT k`
 /// and nothing else. Measured before the split: a sequential scan over every row in the
 /// workspace, at any size.
 ///
@@ -465,7 +465,7 @@ async fn the_vector_half_uses_the_hnsw_index(pool: PgPool) {
     .unwrap();
 
     // On the pool, not on `conn`: the scoped connection runs as `yorishiro_app`, which cannot
-    // ANALYZE a table it does not own -- Postgres answers with a WARNING and skips it, so the
+    // ANALYZE a table it does not own: Postgres answers with a WARNING and skips it, so the
     // statistics never update and the planner has no reason to prefer the index. Production
     // analyses as the owner (autovacuum, or an operator), which is what this reproduces.
     sqlx::query("ANALYZE content.entities")

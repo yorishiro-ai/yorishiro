@@ -7,18 +7,18 @@ use crate::services::oauth::OAuthConfig;
 
 /// Shared state for the hosted admin dashboard/Stripe webhook/OAuth router. `identity_pool`
 /// connects as the admin/migration role (same as `yorishiro-server`'s `AppState::identity_pool`),
-/// since every operation here -- billing, usage aggregation across a tenant's workspaces, member
-/// listing, OAuth user provisioning -- is a control-plane concern that predates or spans RLS's
+/// since every operation here (billing, usage aggregation across a tenant's workspaces, member
+/// listing, OAuth user provisioning) is a control-plane concern that predates or spans RLS's
 /// per-workspace scoping.
 #[derive(Clone)]
 pub struct HostedState {
     pub identity_pool: PgPool,
     /// The RLS-scoped pool, for the routes here that read or write tenant *content* rather than
-    /// control-plane records -- a workspace's own schema fork, for instance. `identity_pool`
+    /// control-plane records: a workspace's own schema fork, for instance. `identity_pool`
     /// bypasses RLS entirely and must not be used for those.
     pub tenant_db: TenantDb,
     pub stripe_config: StripeConfig,
-    /// `None` when `YORISHIRO_OAUTH_ISSUER_URL` is unset -- see `OAuthConfig::from_env`. Every
+    /// `None` when `YORISHIRO_OAUTH_ISSUER_URL` is unset: see `OAuthConfig::from_env`. Every
     /// `/auth/oauth/*` route checks this first and returns `404 Not Found` when it's `None`, so
     /// OAuth is a purely additive, opt-in feature: a deployment that never sets it behaves
     /// exactly as it did before this feature existed.

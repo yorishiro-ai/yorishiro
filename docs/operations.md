@@ -57,7 +57,7 @@ To move to a different model, re-embed:
 ```console
 $ # 1. Stop the server, then replace models/model.onnx and models/tokenizer.json.
 $ # 2. Set YORISHIRO_EMBEDDING_DIMENSIONS to the new model's width.
-$ # 3. Clear the existing vectors -- they belong to the old model:
+$ # 3. Clear the existing vectors: they belong to the old model.
 $ psql "$DATABASE_URL" -c "UPDATE content.entities SET embedding = NULL"
 $ # 4. Start the server, then regenerate per workspace:
 $ yorishiro-server admin resync-embeddings <workspace-id>

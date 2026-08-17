@@ -128,7 +128,7 @@ async fn rejects_non_success_status() {
 }
 
 /// A rate-limited provider is telling the caller to come back, not that the request is wrong.
-/// Reported as its own variant so the embedding sync waits instead of dropping the work — an
+/// Reported as its own variant so the embedding sync waits instead of dropping the work: an
 /// embedding lost to a 429 leaves the entity out of search until someone runs a resync.
 #[tokio::test]
 async fn a_rate_limited_provider_is_reported_as_busy_with_its_own_delay() {
@@ -227,7 +227,7 @@ async fn a_rejected_request_is_not_treated_as_busy() {
 ///
 /// Port 1 on the loopback address: privileged, so an unprivileged test process could not have
 /// bound it, and nothing in the test environment does. The connection is refused immediately
-/// rather than hanging until the 30s timeout. Dropping a `MockServer` is not equivalent -- the
+/// rather than hanging until the 30s timeout. Dropping a `MockServer` is not equivalent: the
 /// port can still answer, and this test then fails on a 404 from whatever picked it up, which
 /// looks like the bug it is meant to catch.
 #[tokio::test]

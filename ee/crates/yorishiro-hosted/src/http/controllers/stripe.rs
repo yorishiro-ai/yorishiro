@@ -21,7 +21,7 @@ use crate::state::HostedState;
 /// replay. Stripe's own guidance uses 5 minutes.
 const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
-/// Configuration for the Stripe integration. Both fields are absent by default -- a deployment
+/// Configuration for the Stripe integration. Both fields are absent by default: a deployment
 /// with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of
 /// silently accepting unverifiable requests, matching this session's deferral of real Stripe
 /// credentials.
@@ -43,7 +43,7 @@ impl StripeConfig {
 /// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`),
 /// checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches
 /// the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret. Both checks are
-/// required -- the timestamp check alone doesn't authenticate anything, and the signature check
+/// required: the timestamp check alone doesn't authenticate anything, and the signature check
 /// alone doesn't prevent a captured request from being replayed indefinitely.
 ///
 /// `pub(crate)`: the only caller is `stripe_webhook` below, and the tests reach it as
@@ -89,7 +89,7 @@ struct StripeEvent {
     id: String,
     #[serde(rename = "type")]
     event_type: String,
-    /// Unix timestamp of when Stripe created this event -- used to detect a delayed/retried
+    /// Unix timestamp of when Stripe created this event: used to detect a delayed/retried
     /// delivery that arrives after a newer event for the same customer has already landed (see
     /// `is_stale_for_customer`).
     created: i64,
@@ -123,7 +123,7 @@ struct StripeEventData {
         (status = 200, description = "Event verified and applied, or of a type this deployment does not act on. A repeat of an already-recorded event id is also accepted here so Stripe stops retrying it", body = String),
         (status = 400, description = "Missing/invalid `Stripe-Signature`, or a malformed JSON body", body = String),
         (status = 500, description = "The event was valid but applying it failed", body = String),
-        (status = 501, description = "`YORISHIRO_STRIPE_WEBHOOK_SECRET` is unset -- Stripe billing is opt-in, and unverifiable requests are refused rather than accepted", body = String),
+        (status = 501, description = "`YORISHIRO_STRIPE_WEBHOOK_SECRET` is unset: Stripe billing is opt-in, and unverifiable requests are refused rather than accepted", body = String),
     ),
     tag = "hosted",
 )]
@@ -227,15 +227,15 @@ async fn is_stale_for_customer(
 ///
 /// `ON CONFLICT (event_id) DO NOTHING`: `apply_stripe_event`'s [`is_event_processed`] check and
 /// this insert are not wrapped in a shared transaction, so two truly concurrent deliveries of the
-/// same brand-new event id can both pass that check and both dispatch (harmless -- the handlers
+/// same brand-new event id can both pass that check and both dispatch (harmless, the handlers
 /// below are idempotent, e.g. `set_tenant_plan` just sets the same plan twice). Without the
 /// conflict clause, the loser's insert would then fail on the `event_id` primary key and surface
 /// as a spurious `500`; Stripe would retry, and the retry's own `is_event_processed` check would
 /// find the winner's already-recorded row and correctly skip re-dispatch. The conflict clause
 /// just avoids that unnecessary `500`/retry round trip.
 ///
-/// `event_type` is written but never read back by any query here, which makes it look removable
-/// -- it isn't. This table is the billing audit trail: when a tenant's plan or cap ends up wrong,
+/// `event_type` is written but never read back by any query here, which makes it look removable.
+/// It isn't. This table is the billing audit trail: when a tenant's plan or cap ends up wrong,
 /// the only record of which Stripe event types actually landed (and in what order, via
 /// `stripe_created`/`processed_at`) is these rows. Dropping the column would leave an
 /// investigator able to see *that* an event was applied but not *what it did*, right when that
@@ -298,7 +298,7 @@ async fn resolve_tenant_by_customer(
 /// The Stripe object's linkage to our tenant is intentionally simple for this skeleton: the
 /// checkout session that starts a subscription is expected to have been created with
 /// `client_reference_id` set to our tenant id, which is recorded (`link_stripe_customer`) so
-/// later subscription events -- keyed only by Stripe customer id -- can be traced back to it.
+/// later subscription events (keyed only by Stripe customer id) can be traced back to it.
 ///
 /// Idempotency and ordering are enforced up front (see `identity.stripe_processed_events`,
 /// `is_event_processed`/`is_stale_for_customer`): a duplicate delivery of an event already
@@ -325,7 +325,7 @@ async fn apply_stripe_event(state: &HostedState, event: StripeEvent) -> Result<(
     };
     // Only the subscription events are ordered per customer. `checkout.session.completed` also
     // carries a `customer` field, but it's a one-time link event with no ordering relationship to
-    // the subscription stream -- recording it here would set a staleness floor that can reject a
+    // the subscription stream, recording it here would set a staleness floor that can reject a
     // `customer.subscription.created` for the same purchase if it happens to arrive first with an
     // earlier `created` (Stripe does not guarantee delivery order between the two).
     let customer_id = matches!(

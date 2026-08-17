@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 
 /// A per-key fixed-window rate limiter, applied via [`apply_rate_limit_layer`] to whichever
 /// routes a caller considers reachable without a bearer token (in this crate, `/auth/signup`,
-/// `/auth/login`, `/setup`, `/setup/status`) -- the ones exposed to unauthenticated
+/// `/auth/login`, `/setup`, `/setup/status`): the ones exposed to unauthenticated
 /// credential/invite-token brute-forcing. A downstream crate adding its own unauthenticated
 /// routes (e.g. an OAuth callback) needs the same protection; see `apply_rate_limit_layer`'s
 /// doc comment. Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo`
@@ -36,7 +36,7 @@ impl RateLimiter {
     ///
     /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is
     /// known and is the thing whose consumption matters. The default is high enough that
-    /// ordinary use never reaches it — it is there to bound a runaway agent, not to ration.
+    /// ordinary use never reaches it: it is there to bound a runaway agent, not to ration.
     pub fn search_tokens_from_env() -> Self {
         let max_tokens = std::env::var("YORISHIRO_SEARCH_TOKENS_PER_MINUTE")
             .ok()
@@ -63,8 +63,8 @@ impl RateLimiter {
     /// quota for the current window. The window resets lazily on the first call after it
     /// elapses, rather than on a background timer.
     ///
-    /// `pub` (rather than private) solely so the crate-root `tests/` integration tests --
-    /// which only see this crate's public API -- can exercise the bucket logic directly
+    /// `pub` (rather than private) solely so the crate-root `tests/` integration tests
+    /// (which only see this crate's public API) can exercise the bucket logic directly
     /// instead of only through `enforce`.
     pub fn allow(&self, key: &str) -> bool {
         self.allow_cost(key, 1)
@@ -105,12 +105,12 @@ impl RateLimiter {
 /// this crate's routes alongside its own (e.g. a downstream crate adding an OAuth
 /// login/callback pair, which is exactly as reachable without a bearer token as
 /// `/auth/login`) can rate-limit its own unauthenticated routes the same way this crate does
-/// its own -- `axum::Router::merge` doesn't propagate a `.layer()` from either side to the
+/// its own: `axum::Router::merge` doesn't propagate a `.layer()` from either side to the
 /// other, so each sub-router must carry its own copy.
 ///
 /// Pass the *same* `Arc<RateLimiter>` used for this crate's own auth routes (for a downstream
 /// crate embedding [`crate::build_app`], reuse the limiter that produced its rate-limited
-/// routes -- see that function's doc comment) to share one quota across both; pass a fresh
+/// routes: see that function's doc comment) to share one quota across both; pass a fresh
 /// `Arc::new(RateLimiter::from_env())` instead for an independent quota.
 pub fn apply_rate_limit_layer<S>(router: Router<S>, limiter: Arc<RateLimiter>) -> Router<S>
 where

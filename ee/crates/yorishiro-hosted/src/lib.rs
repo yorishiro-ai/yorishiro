@@ -1,7 +1,7 @@
 //! The paid edition: Stripe billing, OAuth/OIDC, the marketplace, LLM-backed fill, and the SPA.
 //!
 //! This crate's binary is the only one the product ships, so a self-hosted deployment runs it
-//! too -- what a deployment gets is decided by its licence key and its configuration, not by
+//! too: what a deployment gets is decided by its licence key and its configuration, not by
 //! which binary it installed. The separation that matters is the dependency direction:
 //! `yorishiro-core` and `yorishiro-server` do not depend on this crate, and composing them here
 //! is what lets the paid half be removed without touching them.
@@ -26,7 +26,7 @@ use state::HostedState;
 /// `main` (or, alternatively, nested into `yorishiro-server`'s own router by a deployment that
 /// prefers a single process). `/auth/oauth/status` always returns `200` regardless of whether
 /// OAuth is configured, so the Web UI's login page can tell "OAuth not configured" apart from
-/// "this deployment predates OAuth entirely" -- see [`oauth_login_router`] for
+/// "this deployment predates OAuth entirely". See [`oauth_login_router`] for
 /// `/auth/oauth/authorize|callback`, which behave differently and are mounted separately.
 ///
 /// Reachable without a bearer token exactly like `yorishiro-server`'s own `/auth/*`/`/setup*`
@@ -38,7 +38,7 @@ use state::HostedState;
 /// be rate-limited (dropping a legitimate billing event on `429` is worse than not rate-limiting
 /// it), or is `/auth/oauth/status`, deliberately unlimited because the Web UI's login page polls
 /// it on every load. `apply_rate_limit_layer` itself lives in `yorishiro-server`, and a layer
-/// can only be applied where the routers are composed -- which is `yorishiro-server`'s `main`,
+/// can only be applied where the routers are composed, which is `yorishiro-server`'s `main`,
 /// since that is what merges these two sub-routers with the community edition's own. Applying
 /// it here instead would give the OAuth routes a second `RateLimiter`, so the same client would
 /// get two independent quotas rather than the one shared with `/auth/login`.
@@ -92,7 +92,7 @@ pub fn router() -> Router<HostedState> {
         // The shadowing rule applies again, across two namespaces. `infer-fill` is a distinct
         // trailing segment under `/api/schemas/active/{name}`, so base's own routes there are
         // untouched. `proposals` and `confirm` sit beside base's surviving `undo` on the
-        // `/api/migration-jobs/{job_id}` prefix -- distinct trailing segments again, so the
+        // `/api/migration-jobs/{job_id}` prefix, distinct trailing segments again, so the
         // three coexist and confirming still snapshots through the mechanism `undo` reverses.
         .route(
             "/api/workspace/llm-key",
@@ -114,7 +114,7 @@ pub fn router() -> Router<HostedState> {
         )
 }
 
-/// Serialized once on first request rather than per call -- the document is fixed at compile
+/// Serialized once on first request rather than per call: the document is fixed at compile
 /// time, and `to_json` walks the whole structure.
 static HOSTED_OPENAPI_JSON: LazyLock<String> = LazyLock::new(|| {
     HostedApiDoc::openapi()
@@ -122,14 +122,14 @@ static HOSTED_OPENAPI_JSON: LazyLock<String> = LazyLock::new(|| {
         .expect("the derived OpenAPI document is static and always serializable")
 });
 
-/// `GET /api-docs/hosted-openapi.json` -- the OpenAPI document for this crate's own routes.
+/// `GET /api-docs/hosted-openapi.json`: the OpenAPI document for this crate's own routes.
 ///
 /// A sibling of the community edition's `/api-docs/openapi.json` rather than an addition to it:
 /// `build_app` mounts that route itself from a `pub(crate)` `ApiDoc` this crate cannot reach,
 /// and `Router::merge` panics on a duplicate path. See [`http::controllers::HostedApiDoc`].
 ///
 /// Unauthenticated, matching how the community edition serves its own spec, and not
-/// rate-limited -- it is a static document containing no tenant data.
+/// rate-limited: it is a static document containing no tenant data.
 async fn hosted_openapi() -> impl axum::response::IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -137,9 +137,9 @@ async fn hosted_openapi() -> impl axum::response::IntoResponse {
     )
 }
 
-/// `/auth/oauth/authorize`/`/auth/oauth/callback` -- the two routes in this crate that need the
+/// `/auth/oauth/authorize`/`/auth/oauth/callback`: the two routes in this crate that need the
 /// same brute-force protection `yorishiro-server` applies to its own `/auth/login`/`/auth/signup`.
-/// Both are always mounted here -- they 404 internally (see `http::controllers::oauth`) rather
+/// Both are always mounted here: they 404 internally (see `http::controllers::oauth`) rather
 /// than being conditionally added, so their presence/absence never depends on route-table state,
 /// only on the request they each handle. See [`router`]'s doc comment for why these two are
 /// split into their own builder instead of living there.

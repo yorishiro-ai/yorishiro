@@ -1,6 +1,6 @@
 //! The `state` parameter carried through the OAuth2 authorization-code round trip.
 //!
-//! This process is stateless across `/auth/oauth/authorize` and `/auth/oauth/callback` -- there
+//! This process is stateless across `/auth/oauth/authorize` and `/auth/oauth/callback`: there
 //! is no server-side session store, and a hosted deployment may load-balance the two requests
 //! across different instances. So instead of storing the PKCE code verifier server-side and
 //! looking it up by an opaque id on callback, it's packed into the `state` value itself and
@@ -8,7 +8,7 @@
 //! style as the Stripe webhook signature in `http::controllers::stripe`) so the callback can
 //! trust whatever comes back without needing to have remembered it.
 //!
-//! The signature alone only proves this process issued *some* `state` at some point -- it says
+//! The signature alone only proves this process issued *some* `state` at some point: it says
 //! nothing about whether the browser presenting it is the one the flow was started for. That's
 //! what the CSRF cookie is for: `authorize` (see `http::controllers::oauth`) sets a random,
 //! per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds
@@ -36,7 +36,7 @@ pub const STATE_TTL_SECS: i64 = 600;
 
 /// Number of random bytes in the CSRF cookie value. Only its SHA-256 hash is ever embedded in
 /// `state`, so this can be shorter than a value that needed to resist offline brute-forcing on
-/// its own -- 16 bytes (128 bits) is already far beyond what onlookers could guess before the
+/// its own: 16 bytes (128 bits) is already far beyond what onlookers could guess before the
 /// cookie expires.
 const CSRF_COOKIE_BYTES: usize = 16;
 
@@ -86,12 +86,12 @@ pub fn issue(signing_key: &[u8]) -> IssuedState {
 
 /// Verifies a `state` value's signature and freshness, returning the PKCE verifier and expected
 /// CSRF hash it carries. Rejects anything that doesn't parse, doesn't verify, or has aged past
-/// [`STATE_TTL_SECS`] -- each is indistinguishable from the others to the caller (all map to the
+/// [`STATE_TTL_SECS`]: each is indistinguishable from the others to the caller (all map to the
 /// same `YorishiroError::Unauthenticated`), so a forged/expired/malformed `state` can't be
 /// distinguished by an attacker probing the endpoint.
 ///
-/// This alone does **not** prove the presenting browser is the one the flow was started for --
-/// see the module docs. Callers must separately check the returned `csrf_hash` against the
+/// This alone does **not** prove the presenting browser is the one the flow was started for.
+/// See the module docs. Callers must separately check the returned `csrf_hash` against the
 /// SHA-256 hash of the browser's CSRF cookie.
 pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     let mut parts = state.splitn(4, '.');

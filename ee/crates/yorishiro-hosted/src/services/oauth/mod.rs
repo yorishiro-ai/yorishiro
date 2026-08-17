@@ -68,7 +68,7 @@ pub struct CallbackIdentity {
 ///
 /// `csrf_cookie_value` is `None` when the browser presented no CSRF cookie at all (e.g. it was
 /// stripped, or the callback is being hit without ever having visited `/auth/oauth/authorize`
-/// first) -- treated the same as a mismatched cookie, both rejected before `state` is trusted.
+/// first): treated the same as a mismatched cookie, both rejected before `state` is trusted.
 pub async fn handle_callback(
     config: &OAuthConfig,
     code: &str,
@@ -128,7 +128,7 @@ pub async fn handle_callback(
 }
 
 /// Builds `base` (the provider's discovery document's `authorization_endpoint`, fetched live on
-/// every `/auth/oauth/authorize` request -- see `discovery::fetch_discovery_document`) with
+/// every `/auth/oauth/authorize` request: see `discovery::fetch_discovery_document`) with
 /// `params` appended as a query string. Returns an error rather than panicking on a malformed
 /// `base`, since it comes from an external, unvalidated network response: a misconfigured or
 /// misbehaving provider must not be able to crash the request-handling task.

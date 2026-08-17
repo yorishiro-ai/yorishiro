@@ -265,7 +265,7 @@ impl Inner {
 ///
 /// This is a property of the model, not a preference: a model trained with one and read with
 /// the other returns vectors that are still the right shape and still normalize, so nothing
-/// fails — the search results just quietly get worse. Sentence-transformers exports (BERT-style,
+/// fails: the search results just quietly get worse. Sentence-transformers exports (BERT-style,
 /// bge-small, multilingual-e5) want `Mean`; the Qwen3-Embedding family wants `LastToken`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Pooling {

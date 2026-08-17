@@ -28,7 +28,7 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
 /// function, which structurally prevents a scope check from being forgotten.
 /// The key is resolved through `authenticator` rather than by this function directly, so a
 /// deployment that replaces the rule (see [`Authenticator`]) is honoured on every path that
-/// authorizes -- REST and MCP alike -- rather than only where it remembered to look.
+/// authorizes (REST and MCP alike) rather than only where it remembered to look.
 /// `headers` is passed through untouched for an implementation that reads them.
 pub async fn authorize(
     tenant_db: &TenantDb,
@@ -55,7 +55,7 @@ pub async fn authorize(
 }
 
 /// A connection-free variant of `authorize`, used on paths (search queries) that need to run
-/// a slow step — like embedding generation — before touching the DB. `authorize` holds a
+/// a slow step (like embedding generation) before touching the DB. `authorize` holds a
 /// connection for the handler's entire lifetime, which would tie up a pool connection during
 /// embedding generation (unbounded wait time with LocalOnnx due to in-process serialization),
 /// letting pool exhaustion spill over onto unrelated endpoints. This function only performs

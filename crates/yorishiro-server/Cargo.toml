@@ -11,7 +11,7 @@ autotests = false
 
 # The community edition's binary: BUSL-1.1 only, nothing from `ee/`, and headless because the
 # web UI is the paid edition's. The default artifact is `ee/`'s `yorishiro-server`, which is a
-# superset -- this one exists for a deployment that cannot have proprietary code on disk.
+# superset. This one exists for a deployment that cannot have proprietary code on disk.
 #
 # The cargo target keeps `-ce-` because two bins in one workspace cannot share a name. The
 # package installs it as `/usr/bin/yorishiro-server`, the same path the enterprise package

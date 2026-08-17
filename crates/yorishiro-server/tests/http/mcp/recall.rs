@@ -1,6 +1,6 @@
 use super::*;
 
-/// Recall is the tool an agent calls to "remember" something, so only the entity is required --
+/// Recall is the tool an agent calls to "remember" something, so only the entity is required:
 /// every tuning parameter is optional and defaulted downstream.
 #[test]
 fn only_the_entity_is_required() {

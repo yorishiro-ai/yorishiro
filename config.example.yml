@@ -1,14 +1,14 @@
 # Yorishiro configuration.
 #
 # Copy this file to config.yml and edit it. Every setting is commented out and shows its
-# default, so an uncommented line is a deliberate change from stock behaviour -- and a stock
+# default, so an uncommented line is a deliberate change from stock behaviour, and a stock
 # deployment needs exactly one of them, `database_url`.
 #
 # Where this file goes:
 #   package install   /etc/yorishiro/config.yml   (the unit already points here)
 #   otherwise         config.yml in the working directory, or wherever YORISHIRO_CONFIG_PATH names
 #
-# A missing file is not an error, and neither is a missing key -- the default applies. An
+# A missing file is not an error, and neither is a missing key: the default applies. An
 # unrecognised key IS an error: the server refuses to start rather than run with a setting you
 # believe is in effect. That is deliberate, and it means a typo is caught at boot.
 #
@@ -31,8 +31,8 @@
 #   DATABASE_URL
 # database_url: postgres://yorishiro:PASSWORD@localhost:5432/yorishiro
 
-# Running only the database in Docker is a common shape -- the server from a package,
-# PostgreSQL from an image, nothing else containerised:
+# Running only the database in Docker is a common shape: the server from a package,
+# PostgreSQL from an image, nothing else containerised.
 #
 #   docker run -d --name yorishiro-db --restart unless-stopped \
 #     -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=PASSWORD -e POSTGRES_DB=yorishiro \
@@ -56,7 +56,7 @@
 # cors_origins: ""
 
 # How many tenants `admin create-tenant` may create. 1 is a single-tenant deployment; 0 is
-# unlimited. This also gates the first-run setup wizard at `/` -- the wizard is offered only
+# unlimited. This also gates the first-run setup wizard at `/`: the wizard is offered only
 # while the cap is an actual limit, so a deployment that sets 0 provisions through the admin
 # CLI or an invite instead. `POST /auth/signup` redeems invites into an existing tenant and is
 # unaffected either way.
@@ -72,7 +72,7 @@
 ### Embeddings #############################################################################
 
 # `local` runs an ONNX model in-process and needs no external service. `openai` calls an
-# OpenAI-compatible API -- Ollama, LM Studio, OpenAI itself.
+# OpenAI-compatible API: Ollama, LM Studio, OpenAI itself.
 #
 # Note the indentation: everything from here to the end of the section is one `embedding:`
 # block, so uncommenting a single line means uncommenting `embedding:` above it too.
@@ -90,7 +90,7 @@
 #   ## provider: local ##
 #   #
 #   # Download `onnx/model_quantized.onnx` and `tokenizer.json` from
-#   # https://huggingface.co/Xenova/multilingual-e5-large to the paths below -- which are
+#   # https://huggingface.co/Xenova/multilingual-e5-large to the paths below, which are
 #   # already the defaults, so with the files in place no embedding setting needs touching at
 #   # all. The server will not start without them; there is no fallback.
 #   #   YORISHIRO_ONNX_MODEL_PATH / YORISHIRO_ONNX_TOKENIZER_PATH
@@ -157,7 +157,7 @@
 #
 # `threshold` counts active connections. `sustain_secs` is how long it must stay exceeded
 # before switching, so a momentary spike does not trip it. `threshold: 0` is the only off
-# switch -- `poll_secs: 0` is not one, and falls back to 5.
+# switch. `poll_secs: 0` is not one, and falls back to 5.
 #   YORISHIRO_DB_LOAD_THRESHOLD / _SUSTAIN_SECS / _POLL_SECS
 # db_load_guard:
 #   threshold: 0
@@ -172,7 +172,7 @@
 #   RUST_LOG
 # rust_log: info
 
-# `stdout` suits systemd and containers, where the supervisor collects the output -- with the
+# `stdout` suits systemd and containers, where the supervisor collects the output. With the
 # packaged unit, `journalctl -u yorishiro` is the log. `single` and `daily` write files under
 # `dir`; `daily` rotates. `syslog` is Unix-only and fails at startup elsewhere rather than
 # quietly falling back.

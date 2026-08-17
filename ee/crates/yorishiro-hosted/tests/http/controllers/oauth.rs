@@ -20,7 +20,7 @@ fn router(state: HostedState) -> Router {
 }
 
 /// With no `YORISHIRO_OAUTH_ISSUER_URL` configured, both OAuth routes must behave exactly as if
-/// they didn't exist -- `404 Not Found` -- so a self-hosted/community-style deployment (or an
+/// they didn't exist (`404 Not Found`), so a self-hosted/community-style deployment (or an
 /// enterprise deployment that simply hasn't set up SSO) sees no difference from before this
 /// feature existed.
 #[sqlx::test(migrations = "../../../migrations")]
@@ -82,7 +82,7 @@ async fn find_or_create_provisions_a_tenant_and_membership_on_first_login(pool: 
         .unwrap();
     assert_eq!(role, Some(MembershipRole::Member));
     // A tenant auto-provisioned through SSO has no Stripe subscription, so it's Free in every
-    // way that matters -- the workspace it gets must carry Free's entity cap, not `None`
+    // way that matters: the workspace it gets must carry Free's entity cap, not `None`
     // (unlimited), the same way it would if the tenant had been created through any other path.
     assert_eq!(
         workspace.max_entities,
@@ -112,7 +112,7 @@ async fn find_or_create_resolves_the_same_user_on_a_second_login(pool: PgPool) {
     assert_eq!(first.workspace_id, second.workspace_id);
 }
 
-/// A different `subject_id` under the same `provider` must never resolve to an existing user --
+/// A different `subject_id` under the same `provider` must never resolve to an existing user:
 /// otherwise two distinct identities at the provider could collide onto one Yorishiro account.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn find_or_create_treats_distinct_subject_ids_as_distinct_users(pool: PgPool) {
@@ -144,7 +144,7 @@ async fn find_or_create_treats_distinct_subject_ids_as_distinct_users(pool: PgPo
     );
     // The two subject ids are genuinely distinct identities, so the advisory-lock-guarded
     // re-check in `find_or_create` (see `identity_lock_key`) finds no existing row for
-    // `("oidc", "subject-b")` and this insert genuinely fails on the `email` unique constraint --
+    // `("oidc", "subject-b")` and this insert genuinely fails on the `email` unique constraint,
     // surfacing as `CreateOauthUserError::UniqueViolation` and then this Conflict error, not a
     // same-identity race.
     match second {
@@ -158,7 +158,7 @@ async fn find_or_create_treats_distinct_subject_ids_as_distinct_users(pool: PgPo
     }
 }
 
-/// A concurrent first login for the exact same `(provider, subject_id)` is not a real conflict --
+/// A concurrent first login for the exact same `(provider, subject_id)` is not a real conflict:
 /// both requests are racing to provision the same identity's first login, so the second must
 /// resolve to whatever the first created rather than fail. This exercises the
 /// `pg_advisory_xact_lock` serialization in `find_or_create` (see `identity_lock_key`) by racing
@@ -188,7 +188,7 @@ async fn concurrent_first_logins_for_the_same_identity_both_resolve(pool: PgPool
     assert_eq!(first.workspace_id, second.workspace_id);
 }
 
-/// A provider that omits the `email` claim entirely can't be auto-provisioned -- there is no
+/// A provider that omits the `email` claim entirely can't be auto-provisioned: there is no
 /// email to create the account or tenant name from.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn find_or_create_rejects_a_new_identity_with_no_email_claim(pool: PgPool) {
@@ -199,7 +199,7 @@ async fn find_or_create_rejects_a_new_identity_with_no_email_claim(pool: PgPool)
 /// `find_or_create` runs `oauth::create_oauth_user` and `tenancy::add_member` on the same
 /// transaction (see their doc comments) so a failure between them rolls back the user-row insert
 /// instead of leaving an orphaned user with no tenant membership. Exercised directly at this
-/// level -- rather than by forcing `find_or_create` itself to fail partway through -- because
+/// level (rather than by forcing `find_or_create` itself to fail partway through) because
 /// `find_or_create`'s own tenant/workspace it creates always exists, so nothing inside it would
 /// ever hit `add_member`'s "tenant not found" path; a bogus tenant id is the simplest way to make
 /// `add_member` fail without special-casing a real caller. Mirrors base's
@@ -218,7 +218,7 @@ async fn create_oauth_user_and_add_member_roll_back_together_on_failure(pool: Pg
     .expect("insert should succeed inside the transaction");
 
     // A tenant id nothing points to: `add_member`'s own `get_tenant` call fails, so this must
-    // fail before the membership insert -- exactly the "insert, then fail" shape a mid-flight
+    // fail before the membership insert: exactly the "insert, then fail" shape a mid-flight
     // crash would produce if these two writes weren't sharing a transaction.
     let add_member_result = tenancy::add_member(
         &mut tx,
@@ -235,7 +235,7 @@ async fn create_oauth_user_and_add_member_roll_back_together_on_failure(pool: Pg
     tx.rollback().await.unwrap();
 
     let found = oauth::find_or_create(&pool, "oidc", "subject-rollback", None, None).await;
-    // No email claim would normally be a `ValidationFailed`, before any lookup happens -- so
+    // No email claim would normally be a `ValidationFailed`, before any lookup happens, so
     // getting anything else here means the lookup itself ran and is what's being asserted: were
     // the rollback incomplete, `find_by_oauth_identity` would find the orphaned row from above
     // and this would resolve through `resolve_existing_login` instead of failing on the missing

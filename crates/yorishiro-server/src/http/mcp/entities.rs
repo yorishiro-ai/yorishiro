@@ -181,7 +181,7 @@ impl YorishiroMcpServer {
         description = "Count what migrating a schema's entities to its active version would \
                            face, without doing it (requires read scope). Reports how many are \
                            current, how many are behind but still valid, and how many lack a \
-                           field the active version requires — the last being the work a \
+                           field the active version requires: the last being the work a \
                            migration would have to fill in."
     )]
     pub async fn migration_dry_run(

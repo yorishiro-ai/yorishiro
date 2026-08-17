@@ -31,7 +31,7 @@ fn require_https_or_loopback_rejects_plaintext_to_a_real_host() {
 
 #[test]
 fn is_https_or_loopback_rejects_a_public_http_url_regardless_of_where_it_was_reached_from() {
-    // `redirect_policy` calls this on every redirect *target* alone -- it must reject a
+    // `redirect_policy` calls this on every redirect *target* alone: it must reject a
     // public http:// URL on its own terms, not be satisfied because some earlier hop in the
     // chain happened to be loopback or https. A local dev IdP (loopback, http://) redirecting
     // to a public http:// host is exactly the case this guards: the loopback exemption is for
@@ -51,8 +51,8 @@ fn is_https_or_loopback_accepts_https_and_loopback_http_targets() {
 /// End-to-end version of the two unit tests above, through the real `reqwest::Client` built by
 /// `http_client()` rather than calling `is_https_or_loopback` directly: a plain `http://`
 /// loopback server (the legitimate local-dev case) issuing a `302` to a non-loopback `http://`
-/// target -- documented in RFC 5737 as never publicly routable, so this can never pass by
-/// actually reaching a real host -- must be refused, never followed.
+/// target (documented in RFC 5737 as never publicly routable, so this can never pass by
+/// actually reaching a real host) must be refused, never followed.
 #[tokio::test]
 async fn the_real_client_refuses_to_follow_a_loopback_redirect_to_a_public_http_target() {
     use axum::response::Redirect;
@@ -83,7 +83,7 @@ async fn the_real_client_refuses_to_follow_a_loopback_redirect_to_a_public_http_
 /// chain (nothing in it violates `is_https_or_loopback`), so the *only* thing that can stop an
 /// attacker-controlled server from redirecting this client in a loop forever is the chain-length
 /// limit `redirect_policy` delegates to `Policy::default()`. Confirms that delegation actually
-/// happens -- a bare `attempt.follow()` on every accepted hop (the bug `Policy::custom`'s own
+/// happens: a bare `attempt.follow()` on every accepted hop (the bug `Policy::custom`'s own
 /// docs warn about: a custom policy does not inherit the default 10-hop limit automatically)
 /// would make this test hang or loop far past `n`.
 #[tokio::test]

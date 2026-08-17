@@ -28,7 +28,7 @@ pub async fn authenticate(
 
     // Calling a SECURITY DEFINER function as the FROM-clause row source has no first-class
     // sea-query form (it isn't a table, so `.from()` can't target it without falling back to
-    // `Expr::cust()` -- which would just hide a raw SQL string inside a builder call rather
+    // `Expr::cust()`, which would just hide a raw SQL string inside a builder call rather
     // than actually building the query). This stays raw SQL for the same reason the session
     // commands in `db.rs` do.
     let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
@@ -60,7 +60,7 @@ pub async fn authenticate(
 /// affect authentication outcomes, so callers don't need to fail the whole request if it errors.
 ///
 /// Keyed on the API key's own id alone. The id is already unique, so also filtering on a
-/// workspace only narrows the match -- and would miss any key whose stored workspace is not the
+/// workspace only narrows the match, and would miss any key whose stored workspace is not the
 /// one the request resolved to.
 pub async fn touch_last_used(
     conn: &mut PgConnection,

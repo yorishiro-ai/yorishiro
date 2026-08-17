@@ -16,7 +16,7 @@ fn every_role_round_trips_through_its_database_representation() {
     }
 }
 
-/// The stored strings are the constraint's literal values, not an implementation detail -- they
+/// The stored strings are the constraint's literal values, not an implementation detail: they
 /// are pinned so a rename cannot silently start writing rows the constraint rejects.
 #[test]
 fn the_database_representation_matches_the_check_constraint() {
@@ -35,7 +35,7 @@ fn an_unknown_role_string_is_rejected_rather_than_defaulted() {
 }
 
 /// The JSON form is lowercase via `#[serde(rename_all)]`, and it is what API clients send and
-/// receive -- it must stay aligned with the database form rather than drifting from it.
+/// receive: it must stay aligned with the database form rather than drifting from it.
 #[test]
 fn the_json_representation_is_lowercase_and_matches_the_database_form() {
     for role in [

@@ -28,8 +28,8 @@ pub struct SeedOutcome {
 ///
 /// The publisher is a tenant row with **no members and no workspaces**: `identity.templates`
 /// requires a `tenant_id`, and the marketplace scopes ownership by it, so a listing has to
-/// belong to some tenant. Nobody can log into this one -- there is no membership to log in
-/// through -- and it holds no data of its own. It exists to satisfy the foreign key and to give
+/// belong to some tenant. Nobody can log into this one (there is no membership to log in
+/// through) and it holds no data of its own. It exists to satisfy the foreign key and to give
 /// official listings a stable owner, not to be used.
 ///
 /// Idempotent, and safe to run on every deployment: a template is matched by
@@ -83,8 +83,8 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
 
         // Same read-then-write race as `marketplace::publish_version`, and the same remedy: the
         // version is read by `max(version) + 1` inside the inserting statement, which locks no
-        // range at READ COMMITTED. Two deployments seeding at once -- a rolling restart is
-        // enough -- would otherwise both compute the same number and one would fail on
+        // range at READ COMMITTED. Two deployments seeding at once (a rolling restart is
+        // enough) would otherwise both compute the same number and one would fail on
         // `UNIQUE (template_id, version)`.
         //
         // `stable` rather than `draft`: a draft is visible only to its owning tenant, and this

@@ -12,7 +12,7 @@ use yorishiro_core::{ResultExt, YorishiroError};
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// These two endpoints are the only ones in the whole API reachable without a bearer token --
+/// These two endpoints are the only ones in the whole API reachable without a bearer token,
 /// by design, since their entire purpose is to hand one out. They read/write
 /// `identity.users`/`identity.tenant_memberships`/`identity.invites` through `state.identity_pool`
 /// (the admin/migration-role pool) rather than `state.tenant_db`, exactly like the admin CLI,
@@ -108,18 +108,18 @@ pub async fn signup(
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
-    /// Which of the account's workspaces to issue an API key for -- a key is always scoped to
+    /// Which of the account's workspaces to issue an API key for: a key is always scoped to
     /// exactly one workspace, same as one created through `admin create-api-key`. Omit this
     /// when the account can only ever log into one workspace (true by default, since
     /// `YORISHIRO_MAX_TENANTS` defaults to a single tenant with one
-    /// workspace) -- it resolves automatically. An account with access to more than one
+    /// workspace); it resolves automatically. An account with access to more than one
     /// workspace must specify which one explicitly (422 otherwise).
     pub workspace_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LoginResponse {
-    /// The freshly issued API key's plaintext. Shown only in this response -- only its hash is
+    /// The freshly issued API key's plaintext. Shown only in this response: only its hash is
     /// ever persisted, so it cannot be recovered afterward.
     pub api_key: String,
     pub api_key_id: Uuid,

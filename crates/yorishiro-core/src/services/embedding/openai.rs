@@ -150,7 +150,7 @@ mod tests;
 ///
 /// 429 and 503 are the two the providers use for "later"; everything else is a request that
 /// will fail again the same way. `Retry-After` is honoured when the provider sends it, since
-/// the provider knows its own window, and a default stands in when it does not — a missing
+/// the provider knows its own window, and a default stands in when it does not: a missing
 /// header is not a reason to hammer.
 fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     if status != 429 && status != 503 {

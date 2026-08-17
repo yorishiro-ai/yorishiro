@@ -10,7 +10,7 @@ pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
 /// What a piece of text is being embedded for.
 ///
-/// Asymmetric models — Qwen3-Embedding among them — expect a search query to carry an
+/// Asymmetric models (Qwen3-Embedding among them) expect a search query to carry an
 /// instruction prefix that a stored document must not have. Embedding both the same way costs
 /// nothing visible: the vectors are the right shape and normalize, the results are just worse.
 /// Providers that need no such distinction ignore this.
@@ -49,7 +49,7 @@ pub trait EmbeddingProvider: Send + Sync {
     /// Embeds `text` knowing what it is for.
     ///
     /// The default ignores `kind` and delegates to [`Self::embed`], which is correct for every
-    /// symmetric model — including this crate's defaults. A provider whose model treats queries
+    /// symmetric model, including this crate's defaults. A provider whose model treats queries
     /// and documents differently overrides this; one that does not needs no changes, which is
     /// why the method carries a default rather than being required.
     ///

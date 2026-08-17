@@ -391,7 +391,7 @@ fn tightening_a_constraint_is_breaking() {
 }
 
 /// The mirror image. Widening a constraint can only make previously-invalid data valid, so it
-/// must not force a new version -- otherwise every relaxation costs a migration for nothing.
+/// must not force a new version: otherwise every relaxation costs a migration for nothing.
 #[test]
 fn loosening_a_constraint_is_non_breaking() {
     for (label, old_attrs, new_attrs) in [

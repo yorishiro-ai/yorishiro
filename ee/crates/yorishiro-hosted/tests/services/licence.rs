@@ -145,8 +145,8 @@ fn the_licence_key_is_read_from_a_config_file() {
     );
 }
 
-/// The environment wins over the config file, and **set-but-empty is the environment winning**
-/// -- not an absence that lets the file through.
+/// The environment wins over the config file, and **set-but-empty is the environment winning**,
+/// not an absence that lets the file through.
 ///
 /// Without that, `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file,
 /// which is the opposite of what "the environment takes precedence" means. Every other setting

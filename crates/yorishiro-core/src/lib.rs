@@ -2,7 +2,7 @@
 //! HTTP/MCP server in this workspace and downstream crates outside it are built on.
 //!
 //! **This crate's `pub` API has consumers that aren't in this repository.** A `pub` item with no
-//! caller in this workspace is therefore not evidence that it's dead -- searching this repo can
+//! caller in this workspace is therefore not evidence that it's dead: searching this repo can
 //! only prove that *this repo* doesn't use it. Before removing or narrowing the visibility of
 //! anything `pub`, check the downstream consumers too; a dead-code sweep that skips that step
 //! has already come close to deleting a security-relevant function here.
@@ -80,7 +80,7 @@ pub(crate) mod test_support {
         id
     }
 
-    /// Seeds a tenant plus one workspace under it, returning `(tenant_id, workspace_id)` --
+    /// Seeds a tenant plus one workspace under it, returning `(tenant_id, workspace_id)`:
     /// the shape almost every test needs.
     pub async fn seed_tenant_and_workspace(pool: &PgPool) -> (Uuid, Uuid) {
         let tenant_id = seed_tenant(pool, "test-tenant").await;

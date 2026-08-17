@@ -13,7 +13,7 @@ fn oauth_is_optional_so_a_deployment_without_it_still_starts() {
 }
 
 /// The identity pool is the admin-role pool that bypasses RLS, and the Stripe config carries the
-/// webhook secret -- both are required rather than optional, so a misconfigured deployment fails
+/// webhook secret: both are required rather than optional, so a misconfigured deployment fails
 /// at startup instead of at the first webhook.
 #[test]
 fn the_required_state_is_not_optional() {

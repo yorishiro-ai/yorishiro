@@ -1,6 +1,6 @@
 # yorishiro-server
 
-HTTP server for [Yorishiro](https://github.com/yotsunagi/yorishiro) — an MCP-native, multi-tenant knowledge store with user-defined schemas.
+HTTP server for [Yorishiro](https://github.com/yotsunagi/yorishiro), an MCP-native, multi-tenant knowledge store with user-defined schemas.
 
 This crate is the HTTP layer: an axum router exposing `yorishiro-core`'s domain logic through a REST API (with OpenAPI/Swagger UI) and an MCP server (Streamable HTTP), plus the admin CLI and the logging/configuration infrastructure.
 

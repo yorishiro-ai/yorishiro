@@ -8,7 +8,7 @@
 //! these lines and rebuild. That is deliberate: the protection is `ee/LICENSE`, which makes
 //! using such a build a licence violation, not this function. Do not add obfuscation here under the impression it changes that.
 //!
-//! No key means the paid features are disabled, never that the process refuses to start -- a
+//! No key means the paid features are disabled, never that the process refuses to start: a
 //! deployment that only wants the free half must keep working with no licence configured at all.
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
@@ -22,12 +22,12 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../../keys/licence-public.pem");
 /// What a licence key asserts.
 ///
 /// `plan` is recorded and logged but gates nothing yet: every valid, unexpired key unlocks every
-/// paid feature. A plan-to-feature matrix is not provided -- there is one plan to sell, and a
+/// paid feature. A plan-to-feature matrix is not provided: there is one plan to sell, and a
 /// mapping built before the second one exists would encode a guess.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
     /// Who the licence was issued to. Free-form, and routinely an email address, so it is
-    /// deliberately not logged -- see `from_env`.
+    /// deliberately not logged, see `from_env`.
     pub sub: String,
     pub plan: String,
     /// Expiry, as a Unix timestamp. Checked at verification *and* again at each gate, so a key
@@ -36,7 +36,7 @@ pub struct LicenceClaims {
 }
 
 /// Which of the two sources wins, as a pure function so the precedence is testable without
-/// touching the process environment -- tests that set a variable race each other.
+/// touching the process environment: tests that set a variable race each other.
 ///
 /// The file is consulted only when the variable is **absent**. Set-but-empty means the
 /// environment has spoken and the answer is "no licence", matching every other setting: the
@@ -57,7 +57,7 @@ pub(crate) fn resolve_licence_key(
 /// loader.
 ///
 /// That loader copies every setting it parses into the environment, and doing so for this one
-/// would put the string `YORISHIRO_LICENSE_KEY` into the community binary -- which the release
+/// would put the string `YORISHIRO_LICENSE_KEY` into the community binary, which the release
 /// gate scans for and rejects, correctly: that build is meant to carry no trace of the paid
 /// edition. The shared struct therefore accepts the key and ignores it, and the edition that
 /// actually uses it reads the file itself.
@@ -69,7 +69,7 @@ fn licence_key_from_config() -> Option<String> {
 }
 
 /// The parse [`licence_key_from_config`] wraps, split out so it is testable without a file or
-/// the process environment -- tests that set `YORISHIRO_CONFIG_PATH` would race each other.
+/// the process environment: tests that set `YORISHIRO_CONFIG_PATH` would race each other.
 pub fn licence_key_in(yaml: &str) -> Option<String> {
     #[derive(serde::Deserialize)]
     struct JustTheLicence {
@@ -114,7 +114,7 @@ pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, Yoris
 /// The licence a running process holds, resolved once at startup.
 ///
 /// Verification happens at startup so a malformed key is reported then rather than on the first
-/// request that needs it. Expiry is *not* frozen at startup -- [`Self::is_active`] compares
+/// request that needs it. Expiry is *not* frozen at startup: [`Self::is_active`] compares
 /// against the current time, so a long-running process stops serving paid features when the key
 /// lapses.
 #[derive(Debug, Clone, Default)]
@@ -128,7 +128,7 @@ impl LicenceState {
     /// An absent or empty variable yields an unlicensed state, which is a supported way to run:
     /// the free half works and the paid gates answer 404. A *present but invalid* key also
     /// yields an unlicensed state rather than aborting startup, because refusing to boot would
-    /// take down the free half over a paid-feature misconfiguration -- but it is logged at
+    /// take down the free half over a paid-feature misconfiguration, but it is logged at
     /// `warn`, since it almost certainly means someone expected paid features to be on.
     pub fn from_env() -> Self {
         let from_env =

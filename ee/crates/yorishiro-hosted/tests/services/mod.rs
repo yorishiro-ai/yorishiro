@@ -24,7 +24,7 @@ fn bind_addr_falls_back_to_default_when_set_but_empty() {
 ///
 /// Every document, the `config.example.yml`, the Dockerfile's `EXPOSE` and the compose files
 /// say 8080. The binary said 8081 for as long, so an operator who installed the package and
-/// followed the documentation reached nothing -- the Docker image was the only path that
+/// followed the documentation reached nothing: the Docker image was the only path that
 /// agreed, because it set `YORISHIRO_BIND` to paper over the difference.
 ///
 /// Changing this constant is therefore a documentation change too. The assertion exists to make
@@ -76,7 +76,7 @@ fn rewrites_the_all_interfaces_ipv6_address() {
 
 /// The regression this whole fix exists for: `10.0.0.0:8081` contains the substring
 /// `"0.0.0.0"` but is a real, specific address, not an all-interfaces bind. The old
-/// `bind.replace("0.0.0.0", "localhost")` turned this into `1localhost:8081` -- neither
+/// `bind.replace("0.0.0.0", "localhost")` turned this into `1localhost:8081`: neither
 /// `localhost` nor the original address, just corrupted. Must pass through unchanged.
 #[test]
 fn does_not_corrupt_an_address_that_merely_contains_the_substring() {
@@ -93,7 +93,7 @@ fn leaves_a_specific_bracketed_ipv6_address_unchanged() {
     assert_eq!(rewrite_unspecified_host("[::1]:8081"), "[::1]:8081");
 }
 
-/// A hostname isn't a valid `SocketAddr`, so it can't be parsed and rewritten -- but it's
+/// A hostname isn't a valid `SocketAddr`, so it can't be parsed and rewritten, but it's
 /// already a real, browser-reachable host, so passing it through unchanged is correct, not a
 /// fallback failure.
 #[test]
@@ -105,7 +105,7 @@ fn leaves_an_already_valid_hostname_unchanged() {
 }
 
 /// An unbracketed IPv6 literal (ambiguous with `host:port` syntax) fails to parse as a
-/// `SocketAddr` at all. Falling through unchanged is the safe choice -- guessing at a rewrite
+/// `SocketAddr` at all. Falling through unchanged is the safe choice: guessing at a rewrite
 /// for a malformed address would only make things worse.
 #[test]
 fn leaves_an_unparseable_address_unchanged() {

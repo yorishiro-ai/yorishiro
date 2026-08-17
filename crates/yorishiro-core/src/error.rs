@@ -70,8 +70,8 @@ impl YorishiroError {
     }
 
     /// Maps this error to an HTTP status code and JSON response body. Every axum error wrapper
-    /// built on `YorishiroError` -- `yorishiro-server`'s `ApiError` and any downstream
-    /// equivalent -- delegates here so the status/body mapping is defined once and never
+    /// built on `YorishiroError` (`yorishiro-server`'s `ApiError` and any downstream
+    /// equivalent) delegates here so the status/body mapping is defined once and never
     /// duplicated as a second `match`. Internal errors are logged here (the caller should not
     /// log them again).
     pub fn into_http_parts(self) -> (u16, serde_json::Value) {
@@ -117,7 +117,7 @@ impl YorishiroError {
                 }),
             ),
             // 503 rather than 500: the request may well succeed later, and the caller is told
-            // when. Reaching a client at all is the unusual case -- this normally surfaces in
+            // when. Reaching a client at all is the unusual case: this normally surfaces in
             // background embedding, where the retry happens without anyone seeing it.
             Self::ProviderBusy {
                 message,
@@ -133,7 +133,7 @@ impl YorishiroError {
             ),
             // 502 rather than 503: this deployment is up and answering, and the thing that is
             // not is behind it. 503 is already taken by `ProviderBusy`, where the provider did
-            // answer and asked for a wait -- a caller that retried this one on the same schedule
+            // answer and asked for a wait. A caller that retried this one on the same schedule
             // would be waiting on a misconfiguration that no amount of waiting fixes.
             Self::ProviderUnreachable { url, message } => (
                 502,

@@ -41,7 +41,7 @@ fn a_field_only_upstream_added_is_taken() {
     );
 }
 
-/// The workspace's own field. Following the template must not delete it — this is the case
+/// The workspace's own field. Following the template must not delete it: this is the case
 /// the two-way comparison could not express, since "absent upstream" looked the same as
 /// "removed upstream".
 #[test]
@@ -93,7 +93,7 @@ fn a_field_both_sides_changed_is_a_conflict() {
     );
 }
 
-/// Both added the same field the same way. That is agreement, not a conflict — reporting it
+/// Both added the same field the same way. That is agreement, not a conflict: reporting it
 /// would make an operator adjudicate a decision already shared.
 #[test]
 fn the_same_change_on_both_sides_is_not_a_conflict() {
@@ -263,7 +263,7 @@ fn applying_an_empty_plan_changes_nothing() {
     );
 }
 
-/// Only the workspace changed the field's type -- base and upstream agree -- so the workspace's
+/// Only the workspace changed the field's type (base and upstream agree), so the workspace's
 /// own definition is kept rather than reported as a conflict. A conflict needs *both* sides to
 /// have moved, which `a_field_both_sides_changed_is_a_conflict` covers.
 #[test]

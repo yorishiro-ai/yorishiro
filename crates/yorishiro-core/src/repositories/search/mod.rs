@@ -85,13 +85,13 @@ const HIT_COLUMNS: [Entities; 10] = [
 /// Returns entities ordered by cosine distance between the given embedding vector and the
 /// `entities.embedding` column, closest first. As an auxiliary path, entities with no embedding
 /// are also included when `query_text` is a pg_trgm fuzzy match (`data::text % query_text`)
-/// against their data — this catches keyword/typo matches that vector search would miss (e.g.
+/// against their data: this catches keyword/typo matches that vector search would miss (e.g.
 /// entity_types with no `x-embed` field, or embedding generation that hasn't run yet). Vector
 /// matches are always ranked ahead of trgm-only matches; trgm-only matches are ordered by
 /// similarity.
 ///
-/// **Two queries, not one.** pgvector's HNSW index serves exactly one shape —
-/// `ORDER BY embedding <=> $q LIMIT k` — and any other leading sort key takes it out of play.
+/// **Two queries, not one.** pgvector's HNSW index serves exactly one shape
+/// (`ORDER BY embedding <=> $q LIMIT k`), and any other leading sort key takes it out of play.
 /// Ranking vector hits ahead of trigram-only ones in a single statement needs
 /// `ORDER BY (embedding IS NULL), distance`, and that leading key made the planner sort the
 /// whole workspace instead: measured as a `Seq Scan` over 5,000 rows where the same data with
@@ -130,7 +130,7 @@ pub async fn search_by_vector(
         .internal()?;
 
     // Trigram half, for what the vector half cannot reach: entities with no embedding at all.
-    // Only run when there is room left — a full page of vector hits already outranks every
+    // Only run when there is room left: a full page of vector hits already outranks every
     // trigram-only match, so the second query would be work whose results are discarded.
     if rows.len() < limit as usize {
         let data_as_text = Expr::col(Entities::Data).cast_as(Alias::new("text"));
@@ -164,7 +164,7 @@ pub async fn search_by_vector(
 }
 
 /// Composes `embed_query` + `search_by_vector`. Because this holds `conn` for the duration
-/// of embedding generation, don't use it on request paths — reserve it for tests and batch
+/// of embedding generation, don't use it on request paths: reserve it for tests and batch
 /// jobs where holding a connection isn't a problem (request handlers call `embed_query`
 /// before acquiring a connection).
 pub async fn search_by_text(

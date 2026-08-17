@@ -90,7 +90,7 @@ pub async fn list(
         .internal()
 }
 
-/// Counts a tenant's currently *active* schemas -- one row per distinct schema name, since
+/// Counts a tenant's currently *active* schemas: one row per distinct schema name, since
 /// `create_schema` archives the previous version before activating a new one. For
 /// tenant-detail summaries, this is a more meaningful "how many schemas does this tenant
 /// define" figure than counting every archived version too.
@@ -225,11 +225,11 @@ pub async fn create_schema(
 ///
 /// Only a library template is passed: a built-in has no row to point at, and a definition
 /// posted inline came from nowhere. Both leave the origin unset, which is what `detached`
-/// means for them — never linked, rather than linked and since orphaned.
+/// means for them: never linked, rather than linked and since orphaned.
 ///
 /// The merge base is taken to be the definition itself, which holds when the definition *is*
-/// the template's. A caller writing something else against a template — a copy with edits
-/// already applied — must state the template's own definition with
+/// the template's. A caller writing something else against a template (a copy with edits
+/// already applied) must state the template's own definition with
 /// [`create_schema_with_base`], or the base will claim the edits came from upstream and a
 /// later merge will remove them as an upstream deletion.
 pub async fn create_schema_from(
@@ -256,7 +256,7 @@ pub async fn create_schema_from(
 /// A copy's base is the copy itself, which is what [`create_schema_from`] records. A *merge*
 /// result's base is not: it is what upstream said at the moment of the merge. Recording the
 /// merged definition instead would leave the next merge reading this workspace's own edits as
-/// already present upstream, and dropping them as "unchanged here" — the exact failure the
+/// already present upstream, and dropping them as "unchanged here": the exact failure the
 /// three-way base exists to prevent.
 ///
 /// `origin_snapshot` is only consulted when there is an origin at all; without one there is
@@ -275,7 +275,7 @@ pub async fn create_schema_with_base(
 
     let mut tx = conn.begin().await.internal()?;
 
-    // `pg_advisory_xact_lock(...)` is a lock-acquisition function call, not a table operation --
+    // `pg_advisory_xact_lock(...)` is a lock-acquisition function call, not a table operation:
     // no SELECT/INSERT/UPDATE/DELETE form exists for sea-query to build, same category as the
     // session commands in `db.rs`/`auth.rs`.
     crate::db::lock_for_update(&mut tx, &format!("{workspace_id}:{name}"))
@@ -299,7 +299,7 @@ pub async fn create_schema_with_base(
     // Only the first version of a name mints a base from its own definition. Every later one
     // inherits the base it already had, unless the caller states a new one: editing a schema
     // does not change what the template said when it was copied, and resetting the base to the
-    // edit would record this workspace's own fields as upstream's -- after which the next merge
+    // edit would record this workspace's own fields as upstream's, after which the next merge
     // reads them as "unchanged here" and follows an upstream removal by deleting them.
     let mut inherited_snapshot = None;
 
@@ -363,7 +363,7 @@ pub async fn create_schema_with_base(
             // The merge base, in order of authority: what the caller states (a merge knows the
             // base moved to upstream), then what the previous version carried (an edit does
             // not move it), then this definition itself (the first copy is its own ancestor).
-            // Only meaningful with an origin -- without one there is nothing to be an ancestor
+            // Only meaningful with an origin: without one there is nothing to be an ancestor
             // of.
             match (
                 origin_template_id,
@@ -395,7 +395,7 @@ pub async fn create_schema_with_base(
         })?;
 
     // Inside the transaction: a workspace must not be left active by a schema insert that then
-    // rolls back. Unconditional and idempotent -- every version after the first finds it active
+    // rolls back. Unconditional and idempotent: every version after the first finds it active
     // already, and checking first would only add a round trip.
     crate::repositories::tenancy::mark_active(&mut tx, workspace_id, row.id).await?;
 

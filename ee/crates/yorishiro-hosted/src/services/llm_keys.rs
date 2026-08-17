@@ -35,7 +35,7 @@ enum WorkspaceLlmKeys {
 pub struct LlmKeyDescription {
     pub base_url: String,
     pub model: String,
-    /// Always true when present -- the row cannot exist without a key. Callers use the absence
+    /// Always true when present: the row cannot exist without a key. Callers use the absence
     /// of the whole description to mean "not configured".
     pub configured: bool,
 }
@@ -79,7 +79,7 @@ pub async fn set(
     }
     // Normalise once, then validate and store the same string. Checking `base_url.trim()` and
     // storing `base_url` would let "  https://host  " pass and be persisted with its padding,
-    // which `InferenceClient` then interpolates straight into a request URL -- the check and the
+    // which `InferenceClient` then interpolates straight into a request URL: the check and the
     // stored value have to be the same value.
     let base_url = base_url.trim().trim_end_matches('/');
     check_scheme(base_url)?;
@@ -157,7 +157,7 @@ pub async fn describe(
 /// The credentials themselves, for making a call.
 ///
 /// `None` means the workspace has configured none. Callers turn that into a refusal rather than
-/// a fallback -- inferring nothing and filling defaults instead would look, to the caller, like
+/// a fallback: inferring nothing and filling defaults instead would look, to the caller, like
 /// inference that produced default-shaped answers.
 pub async fn get(
     pool: &PgPool,

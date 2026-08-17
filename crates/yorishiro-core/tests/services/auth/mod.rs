@@ -158,7 +158,7 @@ async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
         .max_connections(1)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                // Same session-control statement as `db.rs`'s `TenantDb::connect` --
+                // Same session-control statement as `db.rs`'s `TenantDb::connect`:
                 // no query-builder form, stays raw SQL.
                 sqlx::query("SET ROLE yorishiro_app")
                     .execute(&mut *conn)
@@ -313,7 +313,7 @@ fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
         None,
         Some(""),
         // A `Bearer` with nothing after it. Hashing the empty string is a lookup that cannot
-        // match any key, so accepting it only costs a query -- but two adapters disagreeing on
+        // match any key, so accepting it only costs a query. But two adapters disagreeing on
         // the same request is the thing worth preventing.
         Some("Bearer "),
         Some("Bearer"),
@@ -332,7 +332,7 @@ fn bearer_credential_accepts_only_a_non_empty_bearer_token() {
     }
 }
 
-/// Whitespace inside the credential is preserved rather than trimmed -- an API key never
+/// Whitespace inside the credential is preserved rather than trimmed: an API key never
 /// contains a space, so a token that has one is wrong and must fail the key lookup rather than
 /// be silently repaired into a different string.
 #[test]
@@ -342,7 +342,7 @@ fn bearer_credential_does_not_trim_the_token() {
 
 /// `migration` sits above `schema`, and round-trips through the column.
 ///
-/// The operations it guards -- running a batch migration, undoing one -- rewrite rows already
+/// The operations it guards (running a batch migration, undoing one) rewrite rows already
 /// stored, where registering a schema adds a version nothing has been written against yet. A
 /// `schema` key must not reach them.
 #[test]

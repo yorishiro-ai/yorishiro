@@ -16,7 +16,7 @@ enum Workspaces {
 /// The pool `sqlx::test` provides is connected as the admin role (superuser) that ran
 /// the migrations, so `TenantDb::new` alone won't make RLS take effect. This test
 /// explicitly switches to `yorishiro_app` via `SET ROLE` and verifies that RLS actually
-/// blocks cross-tenant access — confirming the effect of the switch `TenantDb::connect`
+/// blocks cross-tenant access: confirming the effect of the switch `TenantDb::connect`
 /// performs in production.
 /// `identity.tenants` itself has no grant for `yorishiro_app` (see the role-separation
 /// migration), so this exercises RLS through `identity.workspaces` instead, which the
@@ -31,7 +31,7 @@ async fn rls_blocks_cross_tenant_access_under_restricted_role(pool: PgPool) {
 
     let mut conn = pool.acquire().await.unwrap();
     // Same session/connection-control statements as `TenantDb::connect`/
-    // `acquire_for_workspace` above -- no query-builder form, stays raw SQL.
+    // `acquire_for_workspace` above: no query-builder form, stays raw SQL.
     sqlx::query("SET ROLE yorishiro_app")
         .execute(conn.as_mut())
         .await
@@ -106,7 +106,7 @@ async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: Pg
 }
 
 /// The seam is only a seam if a caller can hold it without naming the implementation. This
-/// takes `&dyn Storage`, so it compiles against the trait alone -- an engine added later
+/// takes `&dyn Storage`, so it compiles against the trait alone: an engine added later
 /// satisfies the same signature without touching this function.
 async fn count_through_the_seam(storage: &dyn Storage, tenant_id: Uuid, workspace_id: Uuid) -> i64 {
     let mut conn = storage
@@ -204,7 +204,7 @@ async fn lock_for_update_serializes_transactions_on_the_same_key(pool: PgPool) {
     assert!(proceeds.is_ok(), "the lock should release on commit");
 }
 
-/// Different keys do not block each other -- otherwise the lock would serialize every
+/// Different keys do not block each other: otherwise the lock would serialize every
 /// workspace's writes against every other's.
 #[sqlx::test(migrations = "../../migrations")]
 async fn lock_for_update_does_not_serialize_different_keys(pool: PgPool) {

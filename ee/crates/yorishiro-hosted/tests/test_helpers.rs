@@ -7,7 +7,7 @@ use crate::services::licence::{LicenceClaims, LicenceState};
 use crate::state::HostedState;
 use sqlx::PgPool;
 
-/// A `HostedState` with default (unconfigured) Stripe config and OAuth disabled -- the baseline
+/// A `HostedState` with default (unconfigured) Stripe config and OAuth disabled: the baseline
 /// every test that only cares about a different field (or configures OAuth itself) starts from.
 /// Licensed by default: the tests here exercise the paid features, so an unlicensed baseline
 /// would make every one of them assert a 404 about licensing instead of the behaviour it is

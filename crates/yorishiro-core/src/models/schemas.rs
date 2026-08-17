@@ -16,7 +16,7 @@ pub struct SchemaRecord {
     ///
     /// `default` on deserialize because this type is also the JSONL export record, and an
     /// export taken before schemas became workspace-scoped carries no such field. Import
-    /// assigns the destination workspace regardless — it remaps every id it reads — so the
+    /// assigns the destination workspace regardless (it remaps every id it reads), so the
     /// value in the file is never the one that lands.
     #[serde(default)]
     pub workspace_id: Uuid,
@@ -32,11 +32,11 @@ pub struct SchemaRecord {
     /// such field.
     #[serde(default)]
     pub origin_template_id: Option<Uuid>,
-    /// `linked` while the origin is still there to follow, `detached` otherwise — including
+    /// `linked` while the origin is still there to follow, `detached` otherwise, including
     /// for every schema that never had one.
     #[serde(default = "default_origin_status")]
     pub origin_status: String,
-    /// The template's definition as it stood when this copy was taken — the common ancestor a
+    /// The template's definition as it stood when this copy was taken: the common ancestor a
     /// three-way merge compares against.
     ///
     /// `None` for a schema with no origin, and for one copied before this was recorded: what
@@ -60,7 +60,7 @@ pub const ORIGIN_STATUS_DETACHED: &str = "detached";
 
 /// A schema whose origin template has been edited since the copy was taken.
 ///
-/// The signal only — what changed and where — with no diff and no application. Whether to
+/// The signal only (what changed and where), with no diff and no application. Whether to
 /// follow the upstream edit is the workspace's call, since applying it could invalidate
 /// entities already stored against the current definition.
 #[derive(Debug, Clone, Serialize, ToSchema)]

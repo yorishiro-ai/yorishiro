@@ -9,7 +9,7 @@ pub type ScopedConnection = sqlx::pool::PoolConnection<sqlx::Postgres>;
 /// Where the deployment's data lives.
 ///
 /// The seam between the application and its database engine sits here, at the layer that hands
-/// out connections — not around the repositories. Those take `&mut PgConnection` and compose
+/// out connections, not around the repositories. Those take `&mut PgConnection` and compose
 /// their own transactions (advisory locks inside `create`, for one), so wrapping them would
 /// mean a second implementation of every one of the 59 functions under `repositories/`, while
 /// wrapping this means four methods.
@@ -30,7 +30,7 @@ pub trait Storage: Send + Sync {
     ) -> Result<ScopedConnection, sqlx::Error>;
 
     /// The underlying pool, for the control-plane paths that connect as the migration role and
-    /// so must not be scoped — signup, setup, the admin CLI.
+    /// so must not be scoped: signup, setup, the admin CLI.
     fn pool(&self) -> &PgPool;
 }
 
@@ -58,7 +58,7 @@ impl TenantDb {
     /// Wraps a raw pool as-is. Callers must separately guarantee that `app.current_tenant`/
     /// `app.current_workspace` get reset when a connection returns to the pool (use
     /// `connect` for production). This also doesn't switch roles, so tenant isolation won't
-    /// hold if `pool`'s connection role can bypass RLS — intended for direct use in
+    /// hold if `pool`'s connection role can bypass RLS: intended for direct use in
     /// migrations and tests.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -76,7 +76,7 @@ impl TenantDb {
             .max_connections(max_connections)
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
-                    // `SET ROLE` is a session/connection-control statement, not DML -- sea-query
+                    // `SET ROLE` is a session/connection-control statement, not DML: sea-query
                     // only builds SELECT/INSERT/UPDATE/DELETE, so this has no query-builder
                     // form and stays raw SQL.
                     sqlx::query("SET ROLE yorishiro_app")
@@ -87,7 +87,7 @@ impl TenantDb {
             })
             .after_release(|conn, _meta| {
                 Box::pin(async move {
-                    // `RESET` is a session-control statement (not DML) -- same reason as
+                    // `RESET` is a session-control statement (not DML): same reason as
                     // `SET ROLE` above for staying raw SQL.
                     sqlx::query("RESET app.current_tenant")
                         .execute(&mut *conn)
@@ -114,7 +114,7 @@ impl TenantDb {
     /// Using `is_local=false` (session-level) matters: `is_local=true` (equivalent to `SET
     /// LOCAL`) would be discarded as soon as the implicit single-statement transaction ends
     /// when called outside an explicit transaction, causing later queries to see
-    /// `current_setting(...)` as an empty string — i.e. isolation breaks.
+    /// `current_setting(...)` as an empty string, i.e. isolation breaks.
     pub async fn acquire_for_workspace(
         &self,
         tenant_id: Uuid,
@@ -133,7 +133,7 @@ impl TenantDb {
         sqlx::query("SET ROLE yorishiro_app")
             .execute(conn.as_mut())
             .await?;
-        // `set_config(...)` sets a session GUC for RLS to read via `current_setting(...)` --
+        // `set_config(...)` sets a session GUC for RLS to read via `current_setting(...)`:
         // it's a function call with no table operand, so it has no SELECT/INSERT/UPDATE/DELETE
         // form for sea-query to build; stays raw SQL like the session commands in `connect`.
         sqlx::query("SELECT set_config('app.current_tenant', $1, false)")
@@ -157,11 +157,11 @@ impl TenantDb {
 ///
 /// Collected here rather than written at each call site because it is the one piece of the
 /// exclusion that is engine-specific: advisory locks are PostgreSQL's, and an engine without
-/// them needs something else — SQLite would serialize the whole database with `BEGIN
+/// them needs something else: SQLite would serialize the whole database with `BEGIN
 /// IMMEDIATE`, which is coarser but sound for a deployment holding one tenant.
 pub async fn lock_for_update(conn: &mut sqlx::PgConnection, key: &str) -> Result<(), sqlx::Error> {
     // `pg_advisory_xact_lock(...)` is a function call with no table operand, so sea-query has
-    // no form for it -- the same category as the session commands above.
+    // no form for it: the same category as the session commands above.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(key)
         .execute(conn)

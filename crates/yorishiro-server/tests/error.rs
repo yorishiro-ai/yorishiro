@@ -5,7 +5,7 @@ use super::*;
 
 /// `ApiError` exists only to bridge `YorishiroError` into axum, and the rule is that it
 /// delegates to `into_http_parts()` rather than carrying a second `match`. If someone
-/// reintroduces a local mapping, these statuses drift from core's -- so they are pinned against
+/// reintroduces a local mapping, these statuses drift from core's, so they are pinned against
 /// core's own answer rather than against literals.
 #[tokio::test]
 async fn the_status_always_matches_what_core_maps_the_error_to() {
@@ -28,7 +28,7 @@ async fn the_status_always_matches_what_core_maps_the_error_to() {
     }
 }
 
-/// The wrapper must not change the body either -- a consumer parsing `error.message` sees
+/// The wrapper must not change the body either: a consumer parsing `error.message` sees
 /// whatever core produced.
 #[tokio::test]
 async fn the_body_is_core_s_body_verbatim() {

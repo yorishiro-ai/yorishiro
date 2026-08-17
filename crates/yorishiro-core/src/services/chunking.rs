@@ -2,7 +2,7 @@
 //!
 //! A worker that processes a whole job and then acknowledges loses everything if it dies at 99%.
 //! Splitting the job first bounds that loss to one chunk, and lets whatever runs the chunks be
-//! stateless — a node leaving is not a failed job, it is a handful of chunks nobody
+//! stateless: a node leaving is not a failed job, it is a handful of chunks nobody
 //! acknowledged.
 //!
 //! # What is here, and what is not
@@ -11,7 +11,7 @@
 //! **reassignment** is not, and cannot be: returning an unacknowledged chunk to the pool is a
 //! visibility timeout, which is a property of a queue that ships work between processes.
 //! `LocalQueue` runs tasks on this runtime, where a lost chunk and a lost process are the same
-//! event. A distributed driver brings its own timeout and reuses everything here —
+//! event. A distributed driver brings its own timeout and reuses everything here:
 //! [`ChunkProgress::outstanding`] is exactly the list it hands back.
 
 use crate::error::YorishiroError;
@@ -33,7 +33,7 @@ pub struct Chunk {
 /// Splits text into chunks of roughly `target` tokens, breaking at whitespace.
 ///
 /// Token counts are approximated by whitespace-separated words. The exact figure belongs to the
-/// tokenizer of whichever model will embed this, which this module does not know — and the
+/// tokenizer of whichever model will embed this, which this module does not know, and the
 /// window is a range precisely because it does not have to be exact.
 ///
 /// Never splits mid-word: a chunk ending halfway through one would embed a fragment that means
@@ -81,7 +81,7 @@ impl ChunkProgress {
         }
     }
 
-    /// Records that a chunk completed. Idempotent — a redelivered chunk acknowledged twice is
+    /// Records that a chunk completed. Idempotent: a redelivered chunk acknowledged twice is
     /// the normal case for an at-least-once queue, not an error.
     pub fn acknowledge(&mut self, index: usize) {
         if index < self.total {

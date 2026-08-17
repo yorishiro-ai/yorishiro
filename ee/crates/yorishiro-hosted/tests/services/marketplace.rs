@@ -91,7 +91,7 @@ async fn the_listing_skips_private_templates(pool: PgPool) {
     assert!(list_marketplace(&pool).await.unwrap().is_empty());
 }
 
-/// **The database does not enforce this** -- `template_versions` carries no RLS -- so the query
+/// **The database does not enforce this** (`template_versions` carries no RLS), so the query
 /// is the enforcement. A draft is unfinished work its owner has not chosen to show.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn another_tenant_cannot_see_draft_versions(pool: PgPool) {
@@ -338,7 +338,7 @@ async fn only_the_owner_can_change_visibility(pool: PgPool) {
 /// The version number is read by `max(version) + 1` inside the statement that inserts it, and at
 /// READ COMMITTED Postgres locks no range for rows that do not exist yet. Without the advisory
 /// lock in `publish_version`, two concurrent publishes of one template both read the same
-/// maximum, both write the same number, and `UNIQUE (template_id, version)` fails one of them --
+/// maximum, both write the same number, and `UNIQUE (template_id, version)` fails one of them:
 /// an opaque 500 for a caller that did nothing wrong.
 ///
 /// All of them must succeed, taking consecutive numbers.
@@ -347,7 +347,7 @@ async fn only_the_owner_can_change_visibility(pool: PgPool) {
 ///
 /// * The publishes are **spawned**, not `tokio::join!`ed. `join!` drives every future from one
 ///   task, so they interleave only at await points and each read lands after the previous
-///   insert -- the race never occurs and the test proves nothing. Separate tasks released by a
+///   insert, the race never occurs and the test proves nothing. Separate tasks released by a
 ///   barrier put them inside the read window together.
 /// * There are **eight**, not two. With two, removing the advisory lock failed this only about
 ///   one run in three: the window is narrow, and a test that catches a bug a third of the time

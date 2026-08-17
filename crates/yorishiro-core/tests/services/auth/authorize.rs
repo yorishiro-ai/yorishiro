@@ -11,8 +11,8 @@ fn ctx_with(scope: ApiKeyScope) -> AuthContext {
     }
 }
 
-/// `require_scope` is the gate every REST and MCP handler passes through, and it is pure -- no
-/// database involved -- so the whole ordering matrix is worth pinning exactly. Read scope must
+/// `require_scope` is the gate every REST and MCP handler passes through, and it is pure (no
+/// database involved), so the whole ordering matrix is worth pinning exactly. Read scope must
 /// not satisfy write, and write must not satisfy schema.
 #[test]
 fn a_key_satisfies_its_own_scope_and_every_weaker_one() {
@@ -38,7 +38,7 @@ fn a_key_satisfies_its_own_scope_and_every_weaker_one() {
     }
 }
 
-/// A rejection has to be a `ScopeInsufficient` (403), not an authentication failure (401) -- the
+/// A rejection has to be a `ScopeInsufficient` (403), not an authentication failure (401): the
 /// caller is known, it simply is not permitted, and the two map to different HTTP statuses.
 #[test]
 fn an_insufficient_scope_is_rejected_as_forbidden_not_unauthenticated() {
@@ -49,7 +49,7 @@ fn an_insufficient_scope_is_rejected_as_forbidden_not_unauthenticated() {
 }
 
 /// The rejection is actionable only if it says what was needed and what was held, and offers the
-/// remedy -- this message is what a user sees when their key is too weak.
+/// remedy: this message is what a user sees when their key is too weak.
 #[test]
 fn the_rejection_names_both_scopes_and_offers_a_remedy() {
     let error = require_scope(&ctx_with(ApiKeyScope::Read), ApiKeyScope::Write).unwrap_err();

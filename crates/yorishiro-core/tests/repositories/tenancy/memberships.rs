@@ -83,11 +83,11 @@ async fn add_member_rejects_unknown_tenant(pool: PgPool) {
 }
 
 /// The whole reason `create_user`/`add_member` take `&mut PgConnection` (rather than `&PgPool`,
-/// like most of this module) is so a caller can compose them into one transaction -- see
+/// like most of this module) is so a caller can compose them into one transaction: see
 /// `create_user`'s doc comment. This proves that composition actually prevents the bug it's
 /// meant to prevent: if `add_member` fails partway through a transaction that already ran
 /// `create_user`, rolling back the transaction must leave no orphaned user row behind (an
-/// orphan would be a user nobody can ever add to a tenant -- signup expects the email not to
+/// orphan would be a user nobody can ever add to a tenant: signup expects the email not to
 /// exist yet, `admin add-member` expects the user to already exist).
 #[sqlx::test(migrations = "../../migrations")]
 async fn create_user_and_add_member_roll_back_together_on_failure(pool: PgPool) {

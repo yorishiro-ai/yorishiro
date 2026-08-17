@@ -48,7 +48,7 @@ async fn concurrency_is_bounded() {
 }
 
 /// Draining waits for accepted work. Dropping it would leave an entity written but never
-/// embedded — absent from search with nothing to say why.
+/// embedded: absent from search with nothing to say why.
 #[tokio::test]
 async fn drain_waits_for_accepted_work() {
     let queue = LocalQueue::new(4);
@@ -133,7 +133,7 @@ async fn a_switchover_sends_new_work_on_and_lets_the_old_queue_finish() {
     );
 }
 
-/// Nothing sent through the switchover reaches the old queue — otherwise draining it would be
+/// Nothing sent through the switchover reaches the old queue: otherwise draining it would be
 /// chasing a target that keeps moving.
 #[tokio::test]
 async fn new_work_never_lands_on_the_old_queue() {

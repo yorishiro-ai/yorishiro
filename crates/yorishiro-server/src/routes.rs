@@ -19,17 +19,17 @@ use crate::state::AppState;
 ///
 /// The caller supplies that fallback rather than this crate reaching for one: the SPA is part of
 /// the paid edition under `ee/`, and a crate here must not depend on that direction. A caller
-/// with no UI to serve can pass any `MethodRouter` -- the tests pass one that always 404s.
+/// with no UI to serve can pass any `MethodRouter`: the tests pass one that always 404s.
 ///
 /// **Merging your own routes in.** `axum::Router::merge` does not propagate a `.layer()` from
-/// either side to the other -- so routes added via `some_router.merge(build_app(state,
+/// either side to the other, so routes added via `some_router.merge(build_app(state,
 /// static_fallback))` get none of this router's `DefaultBodyLimit`/rate-limit/CORS/trace-id layers
 /// unless applied to `some_router` directly, *before* merging. This crate factors those layers
 /// out for exactly that reason:
 ///
 /// ```ignore
 /// // `my_unauthenticated_routes` must already be `Router<()>` (call `.with_state(...)` on it
-/// // first if it was built as `Router<MyState>`) -- `apply_observability_layers` and
+/// // first if it was built as `Router<MyState>`): `apply_observability_layers` and
 /// // `apply_body_limit_layer` both take/return `Router` (i.e. `Router<()>`), matching what
 /// // `build_app`/`build_app_with_rate_limiter` themselves return.
 /// let rate_limiter = std::sync::Arc::new(RateLimiter::from_env());
@@ -43,7 +43,7 @@ use crate::state::AppState;
 /// `crate::http::middleware::rate_limit`; `apply_body_limit_layer`/`apply_observability_layers`
 /// are in this module.) Pass the same `Arc<RateLimiter>` to both sides to share one quota
 /// across this crate's `/auth/*`/`/setup*` routes and your own unauthenticated routes (e.g. an
-/// OAuth login/callback pair) -- see `build_app_with_rate_limiter`.
+/// OAuth login/callback pair): see `build_app_with_rate_limiter`.
 pub fn build_app(state: AppState, static_fallback: axum::routing::MethodRouter) -> Router {
     build_app_with_rate_limiter(
         state,
@@ -54,7 +54,7 @@ pub fn build_app(state: AppState, static_fallback: axum::routing::MethodRouter) 
 
 /// Like [`build_app`], but takes the `Arc<RateLimiter>` protecting this crate's own
 /// `/auth/signup`, `/auth/login`, `/setup`, `/setup/status` routes instead of constructing one
-/// internally -- for a downstream crate that wants to share that same quota with its own
+/// internally: for a downstream crate that wants to share that same quota with its own
 /// unauthenticated routes (see [`build_app`]'s doc comment for the full pattern).
 pub fn build_app_with_rate_limiter(
     state: AppState,
@@ -80,7 +80,7 @@ pub fn build_app_with_rate_limiter(
             SwaggerUi::new("/docs").url("/api-docs/openapi.json", controllers::ApiDoc::openapi()),
         );
     // Before with_state so the guard sees AppState, and inside build_app so every route this
-    // process serves is covered -- REST, MCP and the wizard alike. /up and /health opt out
+    // process serves is covered: REST, MCP and the wizard alike. /up and /health opt out
     // inside the guard itself.
     let router = router.layer(axum::middleware::from_fn_with_state(
         state.clone(),
@@ -92,7 +92,7 @@ pub fn build_app_with_rate_limiter(
 }
 
 /// Applies the 2 MiB request-body cap every route in this process needs. Factored out for the
-/// same reason as `apply_observability_layers` -- see that function's doc comment and
+/// same reason as `apply_observability_layers`: see that function's doc comment and
 /// `build_app`'s "Merging your own routes in" section.
 pub fn apply_body_limit_layer<S>(router: Router<S>) -> Router<S>
 where
@@ -104,7 +104,7 @@ where
 /// Applies the CORS / request-id / access-log stack that every API route in this process needs.
 /// Factored out of `build_app` so a process embedding this server alongside its own routes can
 /// apply the same stack to its own sub-router *before*
-/// merging it with `build_app`'s -- `axum::Router::merge` doesn't propagate layers from either
+/// merging it with `build_app`'s: `axum::Router::merge` doesn't propagate layers from either
 /// side to the other, so each sub-router must carry its own copy of this stack for every route
 /// to get it exactly once. Not applied to `build_app`'s static-asset fallback (added after this
 /// runs), which is deliberately left untraced.
@@ -116,7 +116,7 @@ pub fn apply_observability_layers(router: Router) -> Router {
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(
             // The default span/response levels are DEBUG, which a production `RUST_LOG=info`
-            // silently drops — raised to INFO so the access log (method, path, status,
+            // silently drops: raised to INFO so the access log (method, path, status,
             // latency) actually reaches whichever target `logging::init` selected. The span
             // carries `request_id` so any warn/error emitted while handling a request
             // correlates with its access-log line.

@@ -1,5 +1,5 @@
 //! Exercises how `yorishiro_server`'s `main` actually wires `apply_rate_limit_layer`/
-//! `apply_body_limit_layer` (see that file) -- `oauth_login_router()`'s two routes share the
+//! `apply_body_limit_layer` (see that file): `oauth_login_router()`'s two routes share the
 //! community server's own `/auth/login`/`/auth/signup`/`/setup*` rate-limit quota, while
 //! `router()`'s routes (the dashboard, the Stripe webhook, and `/auth/oauth/status`) are
 //! deliberately outside it; every route in both sub-routers still gets the 2 MiB body cap.
@@ -7,7 +7,7 @@
 //! `crate::router()` directly: the layers are applied where the sub-routers are composed with
 //! the community edition's own, which happens in the binary and nowhere else. A bare
 //! `crate::router()` is not the shape a deployment serves, so asserting a layer's effect
-//! against it would prove nothing -- `unlimited_router` below uses one deliberately, for the
+//! against it would prove nothing: `unlimited_router` below uses one deliberately, for the
 //! one property that is about a layer being *absent*.
 
 use std::time::Duration;
@@ -28,29 +28,29 @@ use test_helpers::hosted_state;
 /// Mirrors `yorishiro_server::run`'s `oauth_login_router` construction, with an
 /// injectable `RateLimiter` so tests can use a tiny limit instead of `from_env`'s default of 10
 /// requests/60s (which would make a "goes over the limit" test either slow or require sending
-/// 11 requests -- both avoidable).
+/// 11 requests, both avoidable).
 fn rate_limited_oauth_router(state: HostedState, limiter: std::sync::Arc<RateLimiter>) -> Router {
     apply_rate_limit_layer(crate::oauth_login_router().with_state(state), limiter)
 }
 
 /// The rest of `crate::router()`, isolating the one property these tests care about:
 /// no rate limiter attached, matching `main`. `main` itself also wraps this sub-router in
-/// `apply_body_limit_layer`/`apply_observability_layers` -- see `body_limited_router` below for
+/// `apply_body_limit_layer`/`apply_observability_layers`: see `body_limited_router` below for
 /// the body-limit half.
 fn unlimited_router(state: HostedState) -> Router {
     crate::router().with_state(state)
 }
 
 /// Mirrors `yorishiro_server::run`'s `hosted_router` construction: `router()`'s routes
-/// with the same 2 MiB body cap `build_app`'s own routes get, but no rate limiter -- see
+/// with the same 2 MiB body cap `build_app`'s own routes get, but no rate limiter: see
 /// `unlimited_router` for that half.
 fn body_limited_router(state: HostedState) -> Router {
     apply_body_limit_layer(crate::router().with_state(state))
 }
 
 /// `GET /auth/oauth/authorize` is one of the two routes `main` rate-limits. A request past the
-/// limit must get `429`, the same as base's own `/auth/login` under `apply_rate_limit_layer` --
-/// see `yorishiro-server`'s `http_middleware_rate_limit.rs` tests for the upstream equivalent
+/// limit must get `429`, the same as base's own `/auth/login` under `apply_rate_limit_layer`.
+/// See `yorishiro-server`'s `http_middleware_rate_limit.rs` tests for the upstream equivalent
 /// this mirrors.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn authorize_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
@@ -59,8 +59,8 @@ async fn authorize_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
 
     // First request consumes the only allowed slot for this test's shared bucket (no
     // `ConnectInfo` is populated by `oneshot`, so every call here falls into the same "unknown"
-    // key -- see `RateLimiter`'s doc comment). OAuth isn't configured, so the route itself 404s,
-    // but that happens *after* the rate-limit middleware runs -- what's asserted here is that
+    // key, see `RateLimiter`'s doc comment). OAuth isn't configured, so the route itself 404s,
+    // but that happens *after* the rate-limit middleware runs: what's asserted here is that
     // the first call reaches the handler at all (not a `429`), not what the handler then does.
     let first = app
         .clone()
@@ -86,7 +86,7 @@ async fn authorize_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
     assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// `GET /auth/oauth/callback` is the other rate-limited route -- it's the one that can actually
+/// `GET /auth/oauth/callback` is the other rate-limited route: it's the one that can actually
 /// end up issuing an API key from caller-supplied input (an authorization code), so it needs the
 /// same protection `authorize` gets, not a separate, looser one.
 #[sqlx::test(migrations = "../../../migrations")]
@@ -119,7 +119,7 @@ async fn callback_429s_once_the_rate_limit_is_exceeded(pool: PgPool) {
 }
 
 /// `authorize` and `callback` share one `Arc<RateLimiter>` in `main` (so an attacker who
-/// exhausts one can't get a fresh quota from the other) -- asserted the same way base's own
+/// exhausts one can't get a fresh quota from the other), asserted the same way base's own
 /// `apply_rate_limit_layer_shares_one_quota_when_given_the_same_arc` proves it for its own
 /// routes.
 #[sqlx::test(migrations = "../../../migrations")]
@@ -152,7 +152,7 @@ async fn authorize_and_callback_share_one_quota(pool: PgPool) {
     assert_eq!(third.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// `/auth/oauth/status` must never be rate-limited -- the Web UI's login page calls it on every
+/// `/auth/oauth/status` must never be rate-limited: the Web UI's login page calls it on every
 /// load, and it returns no secret, so there's nothing to protect by limiting it.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn status_is_never_rate_limited(pool: PgPool) {
@@ -177,7 +177,7 @@ async fn status_is_never_rate_limited(pool: PgPool) {
 /// Stripe itself calls, not an attacker-reachable unauthenticated route, and dropping a
 /// legitimate billing event on a `429` is worse than not rate-limiting it. Posting with no
 /// signature header gets a `401` from the handler's own verification, not a `429` from a rate
-/// limiter that was never applied to this route -- the repeated 401s themselves are the
+/// limiter that was never applied to this route: the repeated 401s themselves are the
 /// assertion that nothing here is counting or capping requests.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn stripe_webhook_is_never_rate_limited(pool: PgPool) {
@@ -199,7 +199,7 @@ async fn stripe_webhook_is_never_rate_limited(pool: PgPool) {
     }
 }
 
-/// Asserts the 2 MiB cap holds on `/hosted/stripe/webhook` -- not, on its own, that
+/// Asserts the 2 MiB cap holds on `/hosted/stripe/webhook`: not, on its own, that
 /// `apply_body_limit_layer` is what produces it: axum's `Bytes`/`Json`/`String` extractors fall
 /// back to the same 2 MiB default with no layer applied at all (see `docs/api.md`'s "Request
 /// bodies" paragraph), so a 3 MiB body was already rejected before `main` started applying this
@@ -263,7 +263,7 @@ fn guarded(router: Router, pool: PgPool) -> Router {
 /// Pausing the deployment has to stop this crate's writes too.
 ///
 /// The guard is applied inside `build_app`, and neither `merge` nor `fallback_service`
-/// propagates a layer any more than `.layer()` does -- so a router composed the way `main`
+/// propagates a layer any more than `.layer()` does, so a router composed the way `main`
 /// composes this one gets no guard unless `main` applies it separately. Without that, an
 /// operator who switched the deployment to read-only would still have `/hosted/stripe/webhook`
 /// accepting billing events: the community edition's `/api/*` would refuse while this crate's
@@ -328,7 +328,7 @@ async fn read_only_mode_still_serves_this_crates_reads(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-/// A full lock refuses reads as well, including the OAuth login pair -- letting someone start a
+/// A full lock refuses reads as well, including the OAuth login pair: letting someone start a
 /// login flow against a fully locked deployment would hand them an API key for a system that is
 /// about to refuse every call they make with it.
 #[sqlx::test(migrations = "../../../migrations")]

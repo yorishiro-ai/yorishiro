@@ -39,7 +39,7 @@ fn relation_columns() -> [Relations; 8] {
 
 /// Validates that relation_type doesn't conflict with the source/target entity_types.
 /// The metaschema definition is resolved against the schema the source entity was actually
-/// created with (the row `entities.schema_id` points to) — as with `entities::update`, so
+/// created with (the row `entities.schema_id` points to), as with `entities::update`, so
 /// existing relationships between entities don't silently break even as the active schema
 /// evolves.
 async fn validate_relation_type(
@@ -169,7 +169,7 @@ pub async fn set_status(
                 problem: format!("expected one of {}", RELATION_STATUSES.join(", ")),
             }],
             hint: format!(
-                "use one of {} — traversal follows '{RELATION_STATUS_ACTIVE}' only",
+                "use one of {}: traversal follows '{RELATION_STATUS_ACTIVE}' only",
                 RELATION_STATUSES.join(", ")
             ),
         });
@@ -389,7 +389,7 @@ pub async fn neighbors(
 
     // sea-query can express a UNION ALL of two joined SELECTs and an ORDER BY/LIMIT applied to
     // the union, but only by building each branch as a full, separate `Query::select()` and
-    // combining them -- for a query already this wide (14 aliased output columns each side,
+    // combining them: for a query already this wide (14 aliased output columns each side,
     // two joins, a computed direction literal), that ends up materially harder to read than
     // the plain SQL below, with no behavioral upside. Kept raw as a deliberate readability
     // call, not because it's structurally inexpressible (contrast the `db.rs`/`auth.rs`
@@ -432,7 +432,7 @@ pub async fn neighbors(
 /// returned count against `desired_limit` to detect truncation.
 /// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from
 /// the map rather than present with an empty vec. A duplicate id in `pivot_ids` contributes only
-/// once (deduped before querying) -- `unnest` would otherwise drive the lateral subquery twice
+/// once (deduped before querying): `unnest` would otherwise drive the lateral subquery twice
 /// for that id and double its entry in the result map.
 pub async fn neighbors_batch(
     conn: &mut PgConnection,
@@ -452,11 +452,11 @@ pub async fn neighbors_batch(
     }
 
     // For each pivot, the lateral subquery is the same UNION ALL/ORDER BY/LIMIT as `neighbors`,
-    // just correlated against `pivot.id` instead of a single bound parameter -- `source_id`
+    // just correlated against `pivot.id` instead of a single bound parameter: `source_id`
     // drives the 'out' branch and `target_id` drives the 'in' branch, exactly as in `neighbors`,
     // so per-pivot direction semantics are unchanged. The lateral's own ORDER BY/LIMIT already
     // picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY is what then
-    // guarantees those rows come back to Rust in per-pivot, most-recent-first order too --
+    // guarantees those rows come back to Rust in per-pivot, most-recent-first order too:
     // `CROSS JOIN LATERAL` doesn't otherwise promise the driving/inner join order is preserved
     // across pivots, and `recall_context` relies on that order when it truncates.
     let rows = sqlx::query_as::<_, BatchNeighborRow>(

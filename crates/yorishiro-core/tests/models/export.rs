@@ -1,7 +1,7 @@
 use super::*;
 
 /// The export format is a tagged union so a reader can tell record kinds apart without tracking
-/// line position. The tag and content keys are the on-disk format -- pinned here because a
+/// line position. The tag and content keys are the on-disk format: pinned here because a
 /// rename would make every previously exported file unreadable.
 #[test]
 fn each_kind_is_tagged_so_a_reader_can_discriminate_lines() {

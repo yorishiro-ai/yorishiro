@@ -66,7 +66,7 @@ impl InviteRow {
 
 /// Creates an invite token for `email` to join `tenant_id` with `role`. Returns the record
 /// alongside the plaintext token: like API keys, only its SHA-256 hash is persisted (a KDF
-/// like argon2 isn't needed here either, for the same reason -- the token already carries
+/// like argon2 isn't needed here either, for the same reason: the token already carries
 /// enough entropy that offline brute-forcing isn't realistic), so this is the only place the
 /// plaintext is ever available. Callers must surface it themselves (e.g. print it, or send it
 /// by email once a transactional-email integration exists).

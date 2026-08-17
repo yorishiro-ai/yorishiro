@@ -1,7 +1,7 @@
 use super::*;
 
 /// MCP tool arguments are deserialized straight from what an LLM client sends, so the optional
-/// fields have to actually be optional -- a client omitting `filter`/`limit`/`offset` is the
+/// fields have to actually be optional: a client omitting `filter`/`limit`/`offset` is the
 /// common case, and a required-by-accident field would fail every such call.
 #[test]
 fn listing_arguments_accept_an_empty_object() {
@@ -35,7 +35,7 @@ fn create_arguments_require_schema_type_and_body() {
     assert_eq!(args.data["title"], "write tests");
 }
 
-/// Ids arrive as strings over JSON and must parse as UUIDs -- a malformed id is a client error,
+/// Ids arrive as strings over JSON and must parse as UUIDs: a malformed id is a client error,
 /// not something to pass through to the query layer.
 #[test]
 fn id_arguments_reject_a_malformed_uuid() {

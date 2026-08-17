@@ -1,4 +1,4 @@
-//! OIDC discovery and token exchange. Deliberately not a full OAuth/OIDC client library --
+//! OIDC discovery and token exchange. Deliberately not a full OAuth/OIDC client library:
 //! per the design doc, the flow this crate needs is narrow (authorize redirect, code exchange,
 //! ID token parse), so this hand-rolls just those three HTTP calls against whatever the
 //! provider's own discovery document says, rather than pulling in a general-purpose crate whose
@@ -12,7 +12,7 @@ use yorishiro_core::{ResultExt, YorishiroError};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// `true` for a host that only ever means "this machine" -- the one case an `http://` OIDC
+/// `true` for a host that only ever means "this machine": the one case an `http://` OIDC
 /// endpoint is legitimate (local development against a mock/dev IdP with no TLS in front of it).
 /// Every other host must be reached over `https://`; see `redirect_policy`.
 fn is_loopback_host(host: &str) -> bool {
@@ -31,10 +31,10 @@ fn is_https_or_loopback(url: &reqwest::Url) -> bool {
 /// Rejects a redirect whose target isn't itself `https://`-or-loopback, regardless of the scheme
 /// the request that's being redirected started on. `reqwest`'s default policy follows redirects
 /// across schemes without restriction, which would let a compromised or misconfigured hop
-/// silently redirect an OIDC discovery/JWKS/token request to a plaintext, non-loopback target --
+/// silently redirect an OIDC discovery/JWKS/token request to a plaintext, non-loopback target,
 /// including one starting from the loopback exemption itself (a local dev IdP redirecting to a
 /// public `http://` host must not be treated as "already loopback, so anything goes"). Delegates
-/// every target this rule *accepts* to `Policy::default()`'s own `redirect` -- per `custom`'s own
+/// every target this rule *accepts* to `Policy::default()`'s own `redirect`: per `custom`'s own
 /// docs, a custom policy does not inherit the default policy's 10-hop chain limit/loop detection
 /// automatically, so this must apply that itself rather than always returning `attempt.follow()`.
 fn redirect_policy() -> reqwest::redirect::Policy {
@@ -54,7 +54,7 @@ fn http_client() -> reqwest::Client {
         .expect("reqwest client configuration is static and always valid")
 }
 
-/// Applies `is_https_or_loopback` to the initial request URL itself -- the same rule
+/// Applies `is_https_or_loopback` to the initial request URL itself: the same rule
 /// `redirect_policy` enforces for every redirect hop (discovery/JWKS/token endpoints are read
 /// from the issuer's own discovery document, which this crate does not otherwise validate the
 /// scheme of).
@@ -64,7 +64,7 @@ fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
         return Ok(());
     }
     Err(YorishiroError::Internal(anyhow::anyhow!(
-        "refusing a plaintext request to '{url}' -- OIDC endpoints must use https:// (loopback \
+        "refusing a plaintext request to '{url}': OIDC endpoints must use https:// (loopback \
          hosts are exempt for local development)"
     )))
 }
@@ -81,7 +81,7 @@ pub struct DiscoveryDocument {
 
 /// `GET`s `url` and parses the response body as JSON, failing with a `YorishiroError::Internal`
 /// that names `url` and the rejecting status if the response isn't a 2xx. Shared by
-/// `fetch_discovery_document`/`fetch_jwks` -- both are a plain unauthenticated `GET` returning
+/// `fetch_discovery_document`/`fetch_jwks`: both are a plain unauthenticated `GET` returning
 /// JSON, differing only in the URL and the response type.
 async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, YorishiroError> {
     require_https_or_loopback(url)?;
@@ -97,7 +97,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, Yorish
 
 /// Fetches and parses the issuer's discovery document. Not cached: this runs once per
 /// authorize/callback request rather than once at startup, trading a small amount of latency for
-/// never serving a stale endpoint/key set after a provider rotates either -- acceptable here
+/// never serving a stale endpoint/key set after a provider rotates either, acceptable here
 /// since login is not a hot path the way entity/search requests are.
 pub async fn fetch_discovery_document(
     issuer_url: &str,
@@ -114,7 +114,7 @@ pub async fn fetch_jwks(jwks_uri: &str) -> Result<JwkSet, YorishiroError> {
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
     pub id_token: String,
-    #[allow(dead_code)] // Not used past this exchange -- Yorishiro issues its own API key.
+    #[allow(dead_code)] // Not used past this exchange: Yorishiro issues its own API key.
     pub access_token: Option<String>,
 }
 

@@ -9,7 +9,7 @@ use crate::services::auth::{
 use crate::test_support;
 
 /// An authenticator that ignores the presented key entirely and resolves whatever the caller
-/// named in a header. Deliberately unlike the default rule in every respect -- a test that only
+/// named in a header. Deliberately unlike the default rule in every respect: a test that only
 /// varied it slightly could pass while the seam was being bypassed.
 struct HeaderAuthenticator {
     ctx: AuthContext,
@@ -80,7 +80,7 @@ async fn a_replaced_authenticator_decides_instead_of_the_default(pool: PgPool) {
     assert_eq!(ctx.tenant_id, tenant_id);
 }
 
-/// Scope is still enforced against whatever context the replacement returns -- replacing
+/// Scope is still enforced against whatever context the replacement returns: replacing
 /// authentication must not become a way past authorization.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_replaced_authenticator_does_not_bypass_scope(pool: PgPool) {

@@ -7,7 +7,7 @@
 //! # The signal
 //!
 //! **CPU is not available from SQL.** `pg_stat_database` carries cumulative I/O time and
-//! transaction counts, not an instantaneous load — measured, not assumed. The two candidates
+//! transaction counts, not an instantaneous load: measured, not assumed. The two candidates
 //! were connection count and a webhook from external monitoring; this takes the first.
 //!
 //! It is an approximation and worth naming as one: the pool has a ceiling, so real saturation
@@ -66,7 +66,7 @@ impl LoadGuardConfig {
             // `.filter(|v| *v > 0)` rather than `unwrap_or` alone: `tokio::time::interval`
             // panics on a zero period, and `0` is what an operator writes when they mean "off".
             // Falling back to the default keeps the guard running at 5s instead of taking the
-            // process down -- turning it off is what `YORISHIRO_DB_LOAD_THRESHOLD=0` is for.
+            // process down: turning it off is what `YORISHIRO_DB_LOAD_THRESHOLD=0` is for.
             poll: Duration::from_secs(
                 std::env::var("YORISHIRO_DB_LOAD_POLL_SECS")
                     .ok()

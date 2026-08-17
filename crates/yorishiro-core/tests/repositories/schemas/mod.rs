@@ -143,7 +143,7 @@ async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
         .await
         .unwrap();
 
-    // Same name, but each workspace starts its own version 1 -- the second is not a new
+    // Same name, but each workspace starts its own version 1: the second is not a new
     // version of the first.
     assert_eq!(a.version, 1);
     assert_eq!(b.version, 1);
@@ -161,7 +161,7 @@ async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
 }
 
 /// A schema written by hand claims no origin. "detached" here means never linked, not
-/// orphaned — told apart by origin_template_id having never been set.
+/// orphaned: told apart by origin_template_id having never been set.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_hand_written_schema_has_no_origin(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
@@ -235,7 +235,7 @@ async fn deleting_the_template_detaches_the_schema_without_destroying_it(pool: P
 
     let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
 
-    // The definition survives -- this is the whole point of copying rather than referencing.
+    // The definition survives: this is the whole point of copying rather than referencing.
     assert_eq!(after.definition.name, schema.definition.name);
     // And it no longer claims to be following anything.
     assert!(after.origin_template_id.is_none());
@@ -359,7 +359,7 @@ async fn creating_a_schema_names_it_on_the_workspace(pool: PgPool) {
 
 /// The request path runs as `yorishiro_app`, and creating a schema writes `identity.workspaces`.
 ///
-/// Every other test here connects as the owner, where grants are implicit — which is why a
+/// Every other test here connects as the owner, where grants are implicit: which is why a
 /// missing `GRANT UPDATE` on that table shipped and made `POST /api/schemas` answer 500 on both
 /// editions while the whole suite stayed green. This one issues `SET ROLE` first, so it fails
 /// the way the server does.

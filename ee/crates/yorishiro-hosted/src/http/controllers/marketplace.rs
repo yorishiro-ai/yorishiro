@@ -27,7 +27,7 @@ use crate::services::marketplace::{
 use crate::state::HostedState;
 
 /// The licence gate for every route in this module, paired with authentication so the two cannot
-/// drift apart -- a handler added here reaches for this rather than `authz::authenticate_tenant`
+/// drift apart: a handler added here reaches for this rather than `authz::authenticate_tenant`
 /// directly, and is gated by construction.
 ///
 /// The gate is not on `authenticate_tenant` itself: the tenant dashboard authenticates through
@@ -35,7 +35,7 @@ use crate::state::HostedState;
 /// close a page that must stay open.
 ///
 /// It is checked *before* authentication, so an unlicensed deployment answers the same `404`
-/// whether or not the caller holds a valid key -- a marketplace that 401s tells an anonymous
+/// whether or not the caller holds a valid key: a marketplace that 401s tells an anonymous
 /// prober that it exists here and is merely locked.
 async fn licensed_tenant(
     state: &HostedState,
@@ -45,7 +45,7 @@ async fn licensed_tenant(
     authz::authenticate_tenant(state, headers).await
 }
 
-/// `GET /api/marketplace` -- community-visible templates from every tenant.
+/// `GET /api/marketplace`: community-visible templates from every tenant.
 #[utoipa::path(
     get,
     path = "/api/marketplace",
@@ -60,14 +60,14 @@ pub async fn list_marketplace(
     State(state): State<HostedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<MarketplaceListing>>, HostedApiError> {
-    // The listing spans every tenant, so the identity is not read -- but a valid key is still
+    // The listing spans every tenant, so the identity is not read, but a valid key is still
     // required, which is what authenticating here enforces.
     let _ = licensed_tenant(&state, &headers).await?;
     let listings = marketplace::list_marketplace(&state.identity_pool).await?;
     Ok(Json(listings))
 }
 
-/// `GET /api/marketplace/{id}/versions` -- published versions, plus the caller's own drafts
+/// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts
 /// when it owns the template.
 #[utoipa::path(
     get,
@@ -90,7 +90,7 @@ pub async fn list_versions(
     Ok(Json(versions))
 }
 
-/// `POST /api/marketplace/{id}/versions` -- publish the next version of your own template.
+/// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
 #[utoipa::path(
     post,
     path = "/api/marketplace/{id}/versions",
@@ -140,7 +140,7 @@ pub async fn list_reviews(
     Ok(Json(reviews))
 }
 
-/// `POST /api/marketplace/{id}/reviews` -- leave or replace this tenant's review.
+/// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
 #[utoipa::path(
     post,
     path = "/api/marketplace/{id}/reviews",
@@ -180,7 +180,7 @@ pub struct ForkResponse {
     pub template_id: Uuid,
 }
 
-/// `POST /api/marketplace/{id}/fork` -- copy a published version into your own library.
+/// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
 #[utoipa::path(
     post,
     path = "/api/marketplace/{id}/fork",
@@ -223,7 +223,7 @@ pub struct SetVisibilityRequest {
     pub visibility: String,
 }
 
-/// `PUT /api/marketplace/{id}/visibility` -- list your own template, or take it back down.
+/// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
 #[utoipa::path(
     put,
     path = "/api/marketplace/{id}/visibility",

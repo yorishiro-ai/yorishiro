@@ -29,7 +29,7 @@ fn a_required_variable_names_itself_when_absent_or_empty() {
         let panicked =
             std::panic::catch_unwind(|| require_non_empty("YORISHIRO_OAUTH_CLIENT_ID", absent));
         if absent == Some("   ") {
-            // whitespace is a value, not an absence -- documented behaviour, pinned here
+            // whitespace is a value, not an absence: documented behaviour, pinned here
             assert!(panicked.is_ok());
         } else {
             assert!(panicked.is_err(), "expected {absent:?} to be rejected");

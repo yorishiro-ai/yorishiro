@@ -169,7 +169,7 @@ fn pooling_rejects_an_unknown_value() {
     );
 }
 
-/// With no instruction configured, a query and a document embed identically — this is the
+/// With no instruction configured, a query and a document embed identically: this is the
 /// path every symmetric model takes, including the current default.
 #[tokio::test]
 async fn without_an_instruction_queries_and_documents_agree() {

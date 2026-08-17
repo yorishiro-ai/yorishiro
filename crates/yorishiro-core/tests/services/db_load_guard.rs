@@ -61,7 +61,7 @@ fn lifts_only_what_it_set_itself() {
     );
 }
 
-/// A full lock is a deliberate act -- a restore, a migration. Load has nothing to say about it.
+/// A full lock is a deliberate act: a restore, a migration. Load has nothing to say about it.
 #[test]
 fn never_touches_a_full_lock() {
     assert_eq!(
@@ -144,7 +144,7 @@ impl Drop for LoadGuardEnv {
 }
 
 /// `tokio::time::interval` panics on a zero period, and `0` is what an operator writes when they
-/// mean "off" -- so the value that reaches it must never be zero, whatever the variable says.
+/// mean "off": so the value that reaches it must never be zero, whatever the variable says.
 /// Turning the guard off is `YORISHIRO_DB_LOAD_THRESHOLD=0`, which `from_env` already honours by
 /// returning `None`.
 #[test]

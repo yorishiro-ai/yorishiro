@@ -34,12 +34,12 @@ struct FileConfig {
     search_tokens_per_minute: Option<u32>,
     snapshot_retention_days: Option<i32>,
     /// Accepted and ignored here; `ee/` reads it. The key has to exist in this struct because
-    /// it is `deny_unknown_fields` and both editions parse the same file -- without it, a
+    /// it is `deny_unknown_fields` and both editions parse the same file: without it, a
     /// config carrying `license_key:` would refuse to start on the community build.
     ///
     /// Deliberately not applied to the environment from here. Doing that would put the string
     /// `YORISHIRO_LICENSE_KEY` in the community binary, which the release gate scans for and
-    /// would reject -- correctly, since that binary is meant to carry no trace of the paid
+    /// would reject: correctly, since that binary is meant to carry no trace of the paid
     /// edition.
     #[allow(dead_code)]
     license_key: Option<String>,
@@ -92,7 +92,7 @@ struct AuthRateLimitConfig {
 /// # Safety
 ///
 /// Must only be called from a synchronous prologue in `main`, before the tokio runtime (or any
-/// other thread) starts and before anything else reads or writes the environment -- `set_var`
+/// other thread) starts and before anything else reads or writes the environment: `set_var`
 /// is unsound under concurrent env access, which this ordering rules out.
 unsafe fn apply_if_unset(key: &str, value: Option<String>) {
     if let Some(value) = value

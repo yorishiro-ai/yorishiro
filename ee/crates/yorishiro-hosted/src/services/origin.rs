@@ -25,8 +25,8 @@ use crate::services::merge::{self, MergePlan};
 
 /// Schemas in this workspace whose origin template has changed since the copy was taken.
 ///
-/// Nothing is applied. The upstream edit does not reach the copy on its own — an automatic
-/// update could make stored entities invalid against a definition nobody here chose — so this
+/// Nothing is applied. The upstream edit does not reach the copy on its own (an automatic
+/// update could make stored entities invalid against a definition nobody here chose), so this
 /// reports and the workspace decides.
 ///
 /// A schema whose template was deleted is not reported: the trigger has already detached it,
@@ -64,8 +64,8 @@ pub async fn list_with_upstream_changes(
 
 /// What following the origin template would do to this schema.
 ///
-/// Reads the three definitions — the snapshot taken when the copy was made, the template as it
-/// stands now, and this schema — and classifies every field that differs. Nothing is written.
+/// Reads the three definitions (the snapshot taken when the copy was made, the template as it
+/// stands now, and this schema) and classifies every field that differs. Nothing is written.
 ///
 /// Refuses rather than guesses when a piece is missing: a schema with no origin has nothing to
 /// follow, and one copied before snapshots were recorded has no ancestor. Substituting the
@@ -105,7 +105,7 @@ async fn merge_sides(
     let schema =
         yorishiro_core::repositories::schemas::get_by_id(conn, workspace_id, schema_id).await?;
 
-    // `get_by_id` fetches any version, archived ones included -- it is how a caller reads an old
+    // `get_by_id` fetches any version, archived ones included: it is how a caller reads an old
     // definition. Merging into one is a different matter: `create_schema_with_base` archives
     // whatever is currently active and installs the result as the new active version, so merging
     // an archived version would resurrect an abandoned definition as the live one, and entities
@@ -158,7 +158,7 @@ async fn merge_sides(
 
 /// Follows the origin template: writes the merged definition as the schema's next version.
 ///
-/// Refuses a merge with conflicts, for the reason [`merge::apply_plan`] gives — a
+/// Refuses a merge with conflicts, for the reason [`merge::apply_plan`] gives: a
 /// partially applied merge is a definition neither side asked for.
 ///
 /// The result is a new version rather than an edit of the current one. Every schema write goes
