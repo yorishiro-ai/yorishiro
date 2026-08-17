@@ -1,7 +1,8 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { login, getOAuthStatus, getSetupStatus } from "@/lib/api";
+import { login, getOAuthStatus, getSetupStatus, ApiError } from "@/lib/api";
+import type { ValidationDetail } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { setSessionWorkspaceId, whoami } from "@/lib/api";
 import {
@@ -23,6 +24,7 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
   const [needsWorkspace, setNeedsWorkspace] = useState(false);
+  const [workspaceChoices, setWorkspaceChoices] = useState<ValidationDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [ssoEnabled, setSsoEnabled] = useState(false);
@@ -87,10 +89,19 @@ export function LoginPage() {
       loginSession(result.api_key, email, result.workspace_id);
       navigate("/dashboard");
     } catch (err) {
-      const status = (err as { status?: number }).status;
-      if (status === 422) {
+      if (err instanceof ApiError && err.status === 422) {
         setNeedsWorkspace(true);
-        setError("Multiple workspaces found. Please specify a workspace ID.");
+        // `details` is only present against a server new enough to send workspace candidates;
+        // an older one (or a malformed body) leaves it null, and the text input below is the
+        // fallback for that case.
+        if (err.details && err.details.length > 0) {
+          setWorkspaceChoices(err.details);
+          setWorkspaceId(err.details[0].field);
+          setError("Multiple workspaces found. Please choose one.");
+        } else {
+          setWorkspaceChoices(null);
+          setError("Multiple workspaces found. Please specify a workspace ID.");
+        }
       } else {
         const message = err instanceof Error ? err.message : "Login failed";
         setError(message);
@@ -131,7 +142,28 @@ export function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            {needsWorkspace && (
+            {needsWorkspace && workspaceChoices && (
+              <div className="w-full">
+                <label htmlFor="workspaceId" className="mb-1 block text-sm font-medium">
+                  Workspace
+                </label>
+                <select
+                  id="workspaceId"
+                  name="workspaceId"
+                  required
+                  value={workspaceId}
+                  onChange={(e) => setWorkspaceId(e.target.value)}
+                  className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {workspaceChoices.map((choice) => (
+                    <option key={choice.field} value={choice.field}>
+                      {choice.problem}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {needsWorkspace && !workspaceChoices && (
               <Input
                 label="Workspace ID"
                 type="text"

@@ -273,6 +273,31 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
     .await;
     crate::max_tenants_env_lock::set(None);
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The refusal names the candidates, so a client can offer a picker rather than send the
+    // operator elsewhere for an id. Without them the only way through this 422 is to already
+    // know a workspace id, which is what made the login form ask for one by hand.
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let details = json["error"]["details"]
+        .as_array()
+        .unwrap_or_else(|| panic!("422 carried no details array: {json}"));
+    assert_eq!(
+        details.len(),
+        2,
+        "both workspaces should be offered: {json}"
+    );
+    for detail in details {
+        let id = detail["field"].as_str().expect("field is the workspace id");
+        uuid::Uuid::parse_str(id).expect("field parses as a uuid");
+        assert_eq!(
+            detail["problem"].as_str(),
+            Some("main"),
+            "problem carries the workspace name"
+        );
+    }
 }
 
 #[sqlx::test(migrations = "../../migrations")]

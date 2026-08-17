@@ -129,7 +129,7 @@ $ curl localhost:8080/hosted/tenant/overview -H "Authorization: Bearer $YORISHIR
 
 | エンドポイント | スコープ | 用途 |
 |---|---|---|
-| `GET /api/marketplace` | 有効なAPIキー | 全テナント横断の公開テンプレート一覧。最新stableバージョンとレビュー集計を含む |
+| `GET /api/marketplace?limit=&offset=` | 有効なAPIキー | 全テナント横断の公開テンプレート一覧。最新stableバージョンとレビュー集計を含む。ページネーション対応(`limit`のデフォルト50、上限200。`offset`のデフォルト0)、name昇順・id昇順で並ぶ |
 | `GET /api/marketplace/{id}/versions` | 有効なAPIキー | 公開済みバージョン(新しい順)。draftは自テナント所有のテンプレートのみ含む |
 | `POST /api/marketplace/{id}/versions` | 有効なAPIキー | 自テナントのテンプレートの次バージョンを公開(`definition`、任意の`changelog`、`status`は`draft`/`pre`/`stable`) |
 | `GET /api/marketplace/{id}/reviews` | 有効なAPIキー | 閲覧できるテンプレートのレビュー一覧 |

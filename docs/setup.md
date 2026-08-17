@@ -372,7 +372,8 @@ A tenant owner/admin issues an invite (by CLI or, once they hold an API key, by 
    From then on, the user exchanges their password for a freshly issued API key, scoped to one workspace and capped at their role's `max_scope()` (see above).
 
    - `workspace_id` can be omitted: it's auto-resolved when the account has access to exactly one workspace, which is true for every deployment by default.
-   - It only needs to be passed explicitly when the account belongs to more than one, in which case a 422 asks for it:
+   - It only needs to be passed explicitly when the account belongs to more than one, in which case a 422 asks for it.
+   - That 422's `details` carries one entry per candidate workspace: `field` is the workspace id, `problem` is its name, so a client can render a picker from it.
 
    ```console
    $ curl -X POST localhost:8080/auth/login -H "Content-Type: application/json" \

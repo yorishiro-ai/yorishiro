@@ -116,7 +116,7 @@ Served by **this** edition: distributing templates between tenants is an enterpr
 
 | Endpoint | Scope | Purpose |
 |---|---|---|
-| `GET /api/marketplace` | any valid API key | Community-visible templates across every tenant, with the latest stable version and review aggregates |
+| `GET /api/marketplace?limit=&offset=` | any valid API key | Community-visible templates across every tenant, with the latest stable version and review aggregates. Paginated (`limit` default 50, max 200; `offset` default 0), ordered by name then id |
 | `GET /api/marketplace/{id}/versions` | any valid API key | Published versions, newest first. Your own drafts are included only for templates your tenant owns |
 | `POST /api/marketplace/{id}/versions` | any valid API key | Publish the next version of your own template (`definition`, optional `changelog`, `status` of `draft`/`pre`/`stable`) |
 | `GET /api/marketplace/{id}/reviews` | any valid API key | Reviews of a template you can see |

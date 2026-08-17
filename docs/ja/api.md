@@ -115,6 +115,7 @@ $ curl -X POST localhost:8080/auth/signup -H "Content-Type: application/json" \
 
 # メールアドレス/パスワードを、新しく発行されたrole上限付きのAPIキーと交換
 # workspace_idはアカウントが複数のワークスペースを持つ場合のみ必須(422で指定を促す)
+# この422の`details`には候補ワークスペースが1件ずつ入る: `field`がworkspace id、`problem`が名前
 $ curl -X POST localhost:8080/auth/login -H "Content-Type: application/json" \
     -d '{"email":"...","password":"..."}'
 
