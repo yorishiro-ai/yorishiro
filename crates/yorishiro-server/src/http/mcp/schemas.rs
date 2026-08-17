@@ -12,6 +12,7 @@ use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::metaschema::{self, MetaSchemaDefinition};
 use yorishiro_core::repositories::schemas;
+use yorishiro_core::repositories::tenancy;
 use yorishiro_core::services::auth::ApiKeyScope;
 use yorishiro_core::templates;
 
@@ -33,8 +34,9 @@ pub struct CreateSchemaArgs {
     /// If a schema with the same name already exists, whether the change is breaking or non-breaking is detected automatically and it is registered as a new version.
     /// Mutually exclusive with `template_id`; exactly one of the two must be set.
     pub definition: Option<Value>,
-    /// ID of a built-in template to use as the definition instead of supplying one inline.
-    /// See `list_templates` for the available IDs.
+    /// ID of a template to use as the definition instead of supplying one inline.
+    /// A UUID names one from the tenant's own library (see `list_template_library`); anything else names a built-in (see `list_templates`).
+    /// A library template also records where the schema came from, so `upstream-changes` can later report edits made to it.
     /// Mutually exclusive with `definition`; exactly one of the two must be set.
     pub template_id: Option<String>,
 }
@@ -106,6 +108,11 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let mut authorized = authorized!(&self.state, &parts, ApiKeyScope::Schema);
 
+        // Set only for a library template, exactly as in the REST adapter: a built-in has no row to
+        // point at, and an inline definition came from nowhere.
+        let mut origin_template_id = None;
+        let mut origin_snapshot = None;
+
         let definition: MetaSchemaDefinition = match (args.definition, args.template_id) {
             (Some(_), Some(_)) => {
                 return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
@@ -133,13 +140,33 @@ impl YorishiroMcpServer {
                     }));
                 }
             },
-            (None, Some(template_id)) => mcp_try!(templates::get_template(&template_id)),
+            (None, Some(template_id)) => {
+                let (definition, origin) = mcp_try!(
+                    tenancy::resolve_template_definition(
+                        &self.state.identity_pool,
+                        authorized.ctx.tenant_id,
+                        &template_id,
+                    )
+                    .await
+                );
+                origin_template_id = origin;
+                origin_snapshot = origin.map(|_| definition.clone());
+                definition
+            }
         };
 
         let tenant_id = authorized.ctx.tenant_id;
         let workspace_id = authorized.ctx.workspace_id;
         let (record, diff) = mcp_try!(
-            schemas::create_schema(authorized.conn(), tenant_id, workspace_id, definition).await
+            schemas::create_schema_with_base(
+                authorized.conn(),
+                tenant_id,
+                workspace_id,
+                definition,
+                origin_template_id,
+                origin_snapshot,
+            )
+            .await
         );
         ok_json(serde_json::json!({
             "schema": record,
