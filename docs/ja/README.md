@@ -14,8 +14,13 @@ flowchart TD
     MCPClient["MCPクライアント<br/>(Claude等)"]
     RESTClient["RESTクライアント<br/>(curl/SDK)"]
 
+    subgraph Paid["ee/ (有償版。同じバイナリに composeされる)"]
+        HostedMCP["HostedMcpServer<br/>(自身のツールの後、委譲する)"]
+        HostedREST["本版のルート<br/>(マーケットプレイス / 出自 / 課金 / OAuth)"]
+    end
+
     subgraph Server["yorishiro-server (axum)"]
-        MCPAdapter["MCPアダプタ"]
+        MCPAdapter["MCPアダプタ<br/>(YorishiroMcpServer、23ツール)"]
         RESTAdapter["RESTアダプタ"]
         Core["yorishiro-core<br/>(schemas / entities / relations /<br/>search / auth / embedding)"]
         MCPAdapter --> Core
@@ -24,10 +29,16 @@ flowchart TD
 
     DB[("PostgreSQL 18 + pgvector<br/>(identity/contentスキーマ、RLSによる分離)")]
 
-    MCPClient -->|"/mcp"| MCPAdapter
-    RESTClient -->|"/api/*"| RESTAdapter
+    MCPClient -->|"/mcp"| HostedMCP
+    RESTClient -->|"/api/*"| HostedREST
+    HostedMCP -->|"委譲"| MCPAdapter
+    HostedREST -->|"フォールバック"| RESTAdapter
+    HostedREST --> Core
     Core --> DB
 ```
+
+コミュニティ版バイナリ(`yorishiro-ce-server`)は内側のサブグラフ単体である。
+同じルートを、`ee/`を前段に置かずに提供する。
 
 - cargo workspace
   - `yorishiro-core`(ドメインロジック)と`yorishiro-server`(HTTPサーバ・アダプタ層)で構成されます。
@@ -40,12 +51,58 @@ flowchart TD
   - 全テーブルにPostgreSQLのRow Level Securityを適用します。
   - リクエストごとにAPIキーからワークスペース(とその所属テナント)を解決し、セッション変数`app.current_tenant`/`app.current_workspace`を設定したコネクションでのみデータへ到達できます。
   - アプリは専用ロール(`yorishiro_app`、`BYPASSRLS`なし)で動作し、制御プレーンのテーブル(`identity.tenants`/`identity.users`/`identity.tenant_memberships`)にはこのロールから一切アクセスできません(マイグレーションロールで動く管理CLIのみが操作可能です)。
+
+  1つのプロセスが同じデータベースへ2つのプールを持ち、どちらを通るかで到達できる範囲が決まります。
+
+```mermaid
+flowchart LR
+    Req["リクエスト<br/>(APIキーがワークスペースを解決)"]
+    Admin["管理CLI / サインアップ / セットアップ"]
+
+    subgraph Pools["1プロセス、2プール"]
+        Tenant["tenant_db<br/>SET ROLE yorishiro_app<br/>+ app.current_tenant / _workspace"]
+        Identity["identity_pool<br/>マイグレーションロール、SET ROLEなし"]
+    end
+
+    Content[("content.*<br/>ワークスペース単位でRLSが効く")]
+    Control[("identity.tenants / users / memberships<br/>yorishiro_appにGRANTが無い")]
+
+    Req --> Tenant
+    Admin --> Identity
+    Tenant --> Content
+    Tenant -. "permission denied" .-> Control
+    Identity --> Control
+```
+
+  点線が要点です。
+  リクエストは制御プレーンをクエリしても読めません。
+  ロールがそれらのテーブルにGRANTを持たないためです。
 - クォータ
   - テナントの`max_workspaces`とワークスペースの`max_entities`は、それぞれワークスペース作成時・エンティティ作成時に強制されます。
   - どちらもデフォルトは`NULL`(無制限)で、運用者がテナント/ワークスペースごとに明示的な上限を設定できます。
 - スキーマバージョニング
   - 同名スキーマの再登録は新バージョンとして追加され、破壊的変更(フィールド削除・型変更・必須化など)は差分として報告されます。
   - 既存エンティティは作成時点のスキーマバージョンに対して検証され続けます。
+
+  バージョン発行時に書き換えは起きないため、昨日書いたエンティティは書いた当時の規則のまま残ります。
+
+```mermaid
+flowchart TD
+    V1["スキーマ v1<br/>archived"]
+    V2["スキーマ v2<br/>active"]
+
+    E1["エンティティA<br/>schema_version = 1"]
+    E2["エンティティB<br/>schema_version = 2"]
+
+    V1 -->|"create_schema が v1 をarchiveし<br/>v2 をactiveにする"| V2
+    E1 -.->|"検証は引き続き"| V1
+    E2 -->|"検証は"| V2
+
+    New["新規エンティティ"] --> V2
+```
+
+  バージョンの発行は安価かつ非破壊です。
+  一括の書き換えは走らず、既存の行が無効になることもありません。
 - 単一バイナリ
   - 上記は全て単一の`yorishiro-server`バイナリに含まれており、既定でシングルテナント構成(`YORISHIRO_MAX_TENANTS=1`)として動作します(無制限にするには`0`を設定)。
   - この上限は初回セットアップウィザード(`/`のブラウザUI、または`POST /setup`)も有効にし、テナント・ワークスペース・ownerアカウントを一括作成できます。
@@ -86,6 +143,25 @@ flowchart TD
 $ git clone https://github.com/yotsunagi/yorishiro && cd yorishiro
 $ make init
 ```
+
+## エディション
+
+1リポジトリ、1イメージ、2バイナリです。
+どちらを動かすかで、ディスク上に何があるかが決まります。
+設定で切り替えるものではありません。
+
+| | `yorishiro-server` | `yorishiro-ce-server` |
+|---|---|---|
+| 含むもの | `ee/`を含めたすべて | BUSL-1.1のみ。`ee/`の痕跡なし |
+| 有償機能 | `YORISHIRO_LICENSE_KEY`で有効化。無ければ`404` | 存在しない |
+| Web UI | バイナリから配信 | 無し。`/`は`404` |
+| ライセンス | [BUSL-1.1](../../LICENSE)、`ee/`は[`ee/LICENSE`](../../ee/LICENSE) | [BUSL-1.1](../../LICENSE) |
+
+既定の成果物は`yorishiro-server`で、ライセンスキーが無ければコミュニティ版とまったく同じように振る舞います。
+`yorishiro-ce-server`は、プロプライエタリなコードをディスクに置けない配備のためにあります。
+配布方針、再配布の要件、設定ではなくパッケージを読む監査といった事情です。
+
+有償側は[`ee/README.md`](../../ee/docs/ja/README.md)が自分で説明します。
 
 ## ドキュメント一覧
 
