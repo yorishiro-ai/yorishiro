@@ -14,8 +14,13 @@ flowchart TD
     MCPClient["MCP client<br/>(Claude, etc.)"]
     RESTClient["REST client<br/>(curl/SDK)"]
 
+    subgraph Paid["ee/ (paid edition, composed into the same binary)"]
+        HostedMCP["HostedMcpServer<br/>(its own tools, then delegates)"]
+        HostedREST["hosted routes<br/>(marketplace / origin / billing / OAuth)"]
+    end
+
     subgraph Server["yorishiro-server (axum)"]
-        MCPAdapter["MCP adapter"]
+        MCPAdapter["MCP adapter<br/>(YorishiroMcpServer, 23 tools)"]
         RESTAdapter["REST adapter"]
         Core["yorishiro-core<br/>(schemas / entities / relations /<br/>search / auth / embedding)"]
         MCPAdapter --> Core
@@ -24,10 +29,16 @@ flowchart TD
 
     DB[("PostgreSQL 18 + pgvector<br/>(identity + content schemas, RLS isolation)")]
 
-    MCPClient -->|"/mcp"| MCPAdapter
-    RESTClient -->|"/api/*"| RESTAdapter
+    MCPClient -->|"/mcp"| HostedMCP
+    RESTClient -->|"/api/*"| HostedREST
+    HostedMCP -->|"delegates"| MCPAdapter
+    HostedREST -->|"falls back to"| RESTAdapter
+    HostedREST --> Core
     Core --> DB
 ```
+
+The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: the same API routes, without `ee/` in front of them.
+It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
   - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
@@ -42,7 +53,32 @@ flowchart TD
   - On each request, the workspace (and its owning tenant) are resolved from the API key.
   - Data can only be reached through a connection that has set the `app.current_tenant`/`app.current_workspace` session variables.
   - The application runs as a dedicated role (`yorishiro_app`, without `BYPASSRLS`).
-    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all: only the admin CLI, running as the migration role, can manage them.
+    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all.
+    They are managed over the migration-role pool instead: the admin CLI, and the signup and setup endpoints, which run before any tenant or workspace context exists for RLS to scope by.
+
+  One process holds two pools against the same database, and which one a request uses decides what it can reach:
+
+```mermaid
+flowchart LR
+    Req["a request<br/>(API key resolves a workspace)"]
+    Admin["admin CLI / signup / setup"]
+
+    subgraph Pools["one process, two pools"]
+        Tenant["tenant_db<br/>SET ROLE yorishiro_app<br/>+ app.current_tenant / _workspace"]
+        Identity["identity_pool<br/>the migration role, no SET ROLE"]
+    end
+
+    Content[("content.*<br/>RLS enforced per workspace")]
+    Control[("identity.tenants / users / memberships<br/>no grant to yorishiro_app")]
+
+    Req --> Tenant
+    Admin --> Identity
+    Tenant --> Content
+    Tenant -. "permission denied" .-> Control
+    Identity --> Control
+```
+
+  The dotted edge is the point: a request cannot read the control plane even if its query asks for it, because the role holds no grant on those tables.
 - Quotas
   - A tenant's `max_workspaces` and a workspace's `max_entities` are enforced at creation time (workspace creation / entity creation, respectively).
   - Both default to `NULL` (unlimited).
@@ -51,6 +87,25 @@ flowchart TD
   - Re-registering a schema with the same name adds a new version.
   - Breaking changes (removed fields, type changes, newly required fields, etc.) are reported as a diff.
   - Existing entities continue to be validated against the schema version that was active when they were created.
+
+  Nothing is rewritten when a version is issued, so an entity written yesterday keeps the rules it was written under:
+
+```mermaid
+flowchart TD
+    V1["schema v1<br/>archived"]
+    V2["schema v2<br/>active"]
+
+    E1["entity A<br/>schema_version = 1"]
+    E2["entity B<br/>schema_version = 2"]
+
+    V1 -->|"create_schema archives v1<br/>and activates v2"| V2
+    E1 -.->|"still validated against"| V1
+    E2 -->|"validated against"| V2
+
+    New["a new entity"] --> V2
+```
+
+  A version bump is therefore cheap and non-destructive: no bulk rewrite runs, and no existing row becomes invalid.
 - Single binary
   - Everything above ships in the single `yorishiro-server` binary.
   - Defaults to a single-tenant deployment (`YORISHIRO_MAX_TENANTS=1`; set it to `0` for unlimited tenants).
@@ -91,6 +146,24 @@ Prefer building from source? Clone the repo, place the model files as in step 1,
 $ git clone https://github.com/yotsunagi/yorishiro && cd yorishiro
 $ make init
 ```
+
+## Editions
+
+One repository, one image, two binaries.
+Which one you run decides what is on disk, not what you configure.
+
+| | `yorishiro-server` | `yorishiro-ce-server` |
+|---|---|---|
+| Contains | Everything, including `ee/` | BUSL-1.1 only, no trace of `ee/` |
+| Paid features | Enabled by `YORISHIRO_LICENSE_KEY`, otherwise `404` | Not present |
+| Web UI | Served from the binary | None: `/` answers `404` |
+| Licence | [BUSL-1.1](LICENSE) plus [`ee/LICENSE`](ee/LICENSE) for `ee/` | [BUSL-1.1](LICENSE) |
+
+The default artifact is `yorishiro-server`, and without a licence key its paid API surfaces answer `404`.
+It is still not the same as the community binary: `ee/` is on disk, and the Web UI is served either way, since the SPA is not licence-gated.
+`yorishiro-ce-server` exists for a deployment that cannot have proprietary code on disk at all: a distribution policy, a redistribution requirement, an audit that reads the package rather than the configuration.
+
+The paid half documents itself in [`ee/README.md`](ee/README.md) ([日本語](ee/docs/ja/README.md)).
 
 ## Documentation
 
