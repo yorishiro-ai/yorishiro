@@ -37,9 +37,10 @@ function downloadJsonl(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
 function timestampedFilename(): string {
   const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(
     now.getHours(),
   )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -193,7 +194,7 @@ export function WsSchemaPage() {
             // Name the member that failed: without it the error reads as if the whole archive
             // was malformed, and earlier members have already been imported.
             const message = err instanceof Error ? err.message : "Failed to import";
-            throw new Error(`${entry.name}: ${message}`);
+            throw new Error(`${entry.name}: ${message}`, { cause: err });
           }
         }
       } else {

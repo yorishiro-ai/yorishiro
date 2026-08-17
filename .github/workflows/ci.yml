@@ -50,11 +50,11 @@ jobs:
       # fails and every other web test passes against an empty embed. `pnpm run check` is the
       # web side's own gate (lint, format, typecheck, vitest) and ends in the build, so one step
       # covers both.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           package_json_file: ee/web/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: pnpm
@@ -182,7 +182,7 @@ jobs:
       # Handed to `package-install` rather than rebuilt there: these are the same release
       # binaries the two steps above just scanned, so the job that installs them tests the
       # artifact the gates passed, and skips a second cold ort/tokenizers build.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-binaries
           path: |
@@ -212,7 +212,7 @@ jobs:
 
       # Into `target/release/`, because nfpm resolves `src:` against the working directory
       # rather than against the config file.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-binaries
           path: target/release
@@ -358,11 +358,11 @@ jobs:
 
       # The embedded SPA is a build output; without it the binary links but serves a 404 at `/`,
       # which is exactly the kind of fault this job exists to catch before a deploy does.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           package_json_file: ee/web/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: pnpm

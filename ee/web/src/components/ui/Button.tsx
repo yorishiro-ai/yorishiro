@@ -30,7 +30,11 @@ export function Button({
   ...props
 }: ButtonProps) {
   return (
+    // A `<button>` with no `type` is a submit button, so one placed in a form without thinking
+    // about it submits the form. The literal here is the default; `{...props}` comes after it, so
+    // a caller that means to submit still says `type="submit"` and wins.
     <button
+      type="button"
       className={cn(baseStyles, variantStyles[variant], sizeStyles[size], className)}
       disabled={disabled}
       {...props}

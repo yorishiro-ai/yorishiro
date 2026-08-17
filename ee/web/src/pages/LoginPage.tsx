@@ -16,6 +16,11 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
+/// A full navigation rather than a router push: the provider redirect leaves the SPA entirely.
+function handleSsoClick() {
+  window.location.href = "/auth/oauth/authorize";
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const { loginSession } = useAuth();
@@ -109,10 +114,6 @@ export function LoginPage() {
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function handleSsoClick() {
-    window.location.href = "/auth/oauth/authorize";
   }
 
   return (
