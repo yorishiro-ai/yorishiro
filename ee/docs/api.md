@@ -22,7 +22,7 @@ They are separate rather than combined because `yorishiro-server` builds and mou
 Both are unauthenticated, so a client can fetch either without a key.
 
 Both are raw JSON.
-A Swagger UI is registered at `/docs`, but that path currently redirects to `/docs/` and 404s there: its bundled assets are not served.
+A Swagger UI is served at `/docs`, which redirects to `/docs/` and renders there against the community edition's document.
 Fetch the JSON directly rather than relying on the UI.
 
 ## Overriding a core route
