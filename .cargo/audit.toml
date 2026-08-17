@@ -2,10 +2,10 @@
 # that we cannot update directly.
 
 [advisories]
-# paste (unmaintained) — transitive dep of tokenizers. tokenizers hasn't
+# paste (unmaintained): transitive dep of tokenizers. tokenizers hasn't
 # migrated to pastey yet. No security vulnerability, just maintenance status.
-# paste (unmaintained) — transitive dep of tokenizers
-# rsa (Marvin Attack) — transitive dep of rmcp, no patched version exists
+# paste (unmaintained): transitive dep of tokenizers
+# rsa (Marvin Attack): transitive dep of rmcp, no patched version exists
 ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2023-0071"]
 
 [yanked]
