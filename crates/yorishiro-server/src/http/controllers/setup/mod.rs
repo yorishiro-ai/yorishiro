@@ -106,9 +106,17 @@ pub async fn setup(
         .into());
     }
 
-    let tenant = tenancy::create_tenant(&state.identity_pool, "default", None).await?;
-    let workspace = tenancy::create_workspace(
-        &state.identity_pool,
+    // The five writes go in one transaction, for the same reason `signup` wraps its two: a request
+    // that dies part-way leaves rows nothing can finish or undo. A tenant with no owner cannot be
+    // set up a second time, because the 409 above sees it and refuses, and a user with no
+    // membership can never be given one, since signup expects a user that does not exist and
+    // `admin add-member` one that does.
+    let mut tx = state.identity_pool.begin().await.internal()?;
+    let tenant =
+        tenancy::create_tenant_on(&mut tx, "default", None, tenancy::max_tenants_from_env()?)
+            .await?;
+    let workspace = tenancy::create_workspace_on(
+        &mut tx,
         tenant.id,
         "default",
         None,
@@ -120,23 +128,23 @@ pub async fn setup(
     )
     .await?;
 
-    let mut conn = state.identity_pool.acquire().await.internal()?;
     let user = tenancy::create_user(
-        &mut conn,
+        &mut tx,
         &body.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Owner).await?;
+    tenancy::add_member(&mut tx, tenant.id, user.id, MembershipRole::Owner).await?;
 
     let created = auth::create_api_key(
-        &mut conn,
+        &mut tx,
         workspace.id,
         MembershipRole::Owner.max_scope(),
         Some(user.id),
     )
     .await?;
+    tx.commit().await.internal()?;
 
     Ok((
         StatusCode::CREATED,

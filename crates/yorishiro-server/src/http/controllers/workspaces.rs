@@ -168,15 +168,8 @@ pub async fn delete_workspace(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
     get_workspace_in_tenant(&state, ctx.tenant_id, id).await?;
 
-    // A tenant with zero workspaces has no way to issue itself a new API key through this server's own REST API (login/create-workspace both require one), so this would be a self-lockout rather than a reversible mistake.
-    let remaining = tenancy::list_workspaces(&state.identity_pool, ctx.tenant_id).await?;
-    if remaining.len() <= 1 {
-        return Err(YorishiroError::Conflict {
-            message: "cannot delete a tenant's only remaining workspace".into(),
-        }
-        .into());
-    }
-
+    // Refusing a tenant's last workspace is `delete_workspace`'s own rule, enforced in the same
+    // statement as the delete, so two concurrent requests cannot both see a spare one and proceed.
     tenancy::delete_workspace(&state.identity_pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

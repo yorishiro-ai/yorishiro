@@ -2,8 +2,8 @@ use axum::Json;
 use axum::extract::{Query, State};
 use serde::Deserialize;
 use utoipa::IntoParams;
+use yorishiro_core::ResultExt;
 use yorishiro_core::repositories::search::{self, SearchHit};
-use yorishiro_core::{ResultExt, YorishiroError};
 
 use crate::error::ApiError;
 use crate::http::middleware::auth::{ReadScope, Verified};
@@ -42,25 +42,7 @@ pub async fn search_entities(
         limit: params.limit.unwrap_or(default.limit),
     };
 
-    // Charged before embedding, since embedding is the work the budget protects.
-    // Counting is cheap here (a query is short), which is why search is metered in tokens while writes stay on request counts.
-    let tokens = state.embedding_provider.count_tokens(&params.query_text);
-    if !state
-        .search_token_limiter
-        .allow_cost(&verified.ctx.workspace_id.to_string(), tokens)
-    {
-        tracing::warn!(
-            workspace_id = %verified.ctx.workspace_id,
-            tokens,
-            "search token budget exhausted"
-        );
-        return Err(YorishiroError::ValidationFailed {
-            message: "this workspace has spent its search token budget for the minute".to_string(),
-            details: vec![],
-            hint: "retry shortly, or raise YORISHIRO_SEARCH_TOKENS_PER_MINUTE".to_string(),
-        }
-        .into());
-    }
+    state.charge_search_tokens(verified.ctx.workspace_id, &params.query_text)?;
 
     // Embedding generation happens before acquiring a DB connection.
     // The LocalOnnx provider serializes inference within the process, so holding a connection while waiting would let pool exhaustion spill over to other endpoints too.

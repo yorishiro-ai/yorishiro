@@ -58,13 +58,27 @@ pub async fn create_tenant_with_cap(
     max_workspaces: Option<i32>,
     max_tenants: Option<i32>,
 ) -> Result<TenantRecord, YorishiroError> {
+    let mut conn = pool.acquire().await.internal()?;
+    create_tenant_on(&mut conn, name, max_workspaces, max_tenants).await
+}
+
+/// `create_tenant_with_cap` against a caller-supplied connection, so a bootstrap that also creates
+/// a workspace and an owner can run the whole sequence in one transaction.
+/// The cap check and the insert are not atomic against a concurrent creation on another
+/// connection; that race predates this and is unchanged by taking a connection here.
+pub async fn create_tenant_on(
+    conn: &mut PgConnection,
+    name: &str,
+    max_workspaces: Option<i32>,
+    max_tenants: Option<i32>,
+) -> Result<TenantRecord, YorishiroError> {
     if let Some(max) = max_tenants {
         let (sql, values) = Query::select()
             .expr(Func::count(Expr::col(Asterisk)))
             .from((Alias::new("identity"), Tenants::Table))
             .build_sqlx(PostgresQueryBuilder);
         let (count,): (i64,) = sqlx::query_as_with(&sql, values)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await
             .internal()?;
         if count >= i64::from(max) {
@@ -85,7 +99,7 @@ pub async fn create_tenant_with_cap(
         .build_sqlx(PostgresQueryBuilder);
 
     sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
-        .fetch_one(pool)
+        .fetch_one(conn)
         .await
         .internal()
 }

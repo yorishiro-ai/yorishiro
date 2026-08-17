@@ -19,7 +19,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::repositories::tenancy;
 
 use crate::state::AppState;
 
@@ -38,7 +38,8 @@ pub(crate) fn parse_filter_param(
     })
 }
 
-/// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope: a Member-role key can carry `write` scope for content operations while still having no business adding members or managing workspaces.
+/// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
+/// Which roles qualify is `MembershipRole::administers_tenant`, so the rule lives with the type rather than being restated at each caller.
 pub(crate) async fn require_tenant_admin(
     state: &AppState,
     tenant_id: Uuid,
@@ -47,7 +48,7 @@ pub(crate) async fn require_tenant_admin(
     let user_id = user_id.ok_or(YorishiroError::Unauthenticated)?;
     tenancy::get_membership_role(&state.identity_pool, tenant_id, user_id)
         .await?
-        .filter(|role| matches!(role, MembershipRole::Owner | MembershipRole::Admin))
+        .filter(|role| role.administers_tenant())
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
             message: "this operation is restricted to tenant owners/admins".into(),
             hint: "ask a tenant owner to grant you the admin role".into(),

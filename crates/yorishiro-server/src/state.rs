@@ -68,6 +68,31 @@ impl AppState {
         }
     }
 
+    /// Charges a search query against its workspace's token budget, refusing when the budget is spent.
+    ///
+    /// Charged before embedding, since embedding is the work the budget protects, and counting is cheap (a query is short), which is why search is metered in tokens while writes stay on request counts.
+    /// Lives here rather than in either adapter because both reach the same provider: a check written in only one of them leaves the other able to spend the budget it is meant to protect.
+    pub fn charge_search_tokens(
+        &self,
+        workspace_id: uuid::Uuid,
+        query_text: &str,
+    ) -> Result<(), YorishiroError> {
+        let tokens = self.embedding_provider.count_tokens(query_text);
+        if self
+            .search_token_limiter
+            .allow_cost(&workspace_id.to_string(), tokens)
+        {
+            return Ok(());
+        }
+
+        tracing::warn!(%workspace_id, tokens, "search token budget exhausted");
+        Err(YorishiroError::ValidationFailed {
+            message: "this workspace has spent its search token budget for the minute".to_string(),
+            details: vec![],
+            hint: "retry shortly, or raise YORISHIRO_SEARCH_TOKENS_PER_MINUTE".to_string(),
+        })
+    }
+
     /// Replaces how this process authenticates.
     /// See [`Authenticator`] for the contract an implementation must hold to.
     pub fn with_authenticator(mut self, authenticator: Arc<dyn Authenticator>) -> Self {
@@ -81,9 +106,7 @@ impl AppState {
         &self.embedding_tasks
     }
 
-    /// Syncs the `embedding` column in the background after an entity create/update succeeds.
-    /// The embedding API call can take up to tens of seconds, so the request isn't made to wait for it, and a fresh connection is acquired from the pool instead of reusing the request's own connection (satisfying the no-same-transaction constraint documented on `sync_embedding`).
-    /// Failures are only logged: embedding is an auxiliary Hands deferred work to this process's queue.
+    /// Hands deferred work to this process's queue.
     ///
     /// Where `spawn_embedding_sync` is the one deferred job this crate has and returns a handle its callers await in tests, this is the general seam: a deployment that needs work to survive the process supplies a driver that outlives it, and nothing at the call site changes.
     /// The embedding sync keeps its own path until there is a second driver to justify moving it: a refactor with no second implementation to prove it is a guess about what the second one will need.
@@ -97,7 +120,9 @@ impl AppState {
         self.queue.drain(timeout).await;
     }
 
-    /// feature and must not affect whether the entity write itself succeeds.
+    /// Syncs the `embedding` column in the background after an entity create/update succeeds.
+    /// The embedding API call can take up to tens of seconds, so the request isn't made to wait for it, and a fresh connection is acquired from the pool instead of reusing the request's own connection (satisfying the no-same-transaction constraint documented on `sync_embedding`).
+    /// Failures are only logged: embedding is an auxiliary feature and must not affect whether the entity write itself succeeds.
     pub fn spawn_embedding_sync(
         &self,
         tenant_id: Uuid,
