@@ -235,7 +235,7 @@ async fn run(cli: Cli) -> Result<()> {
     // reach the same door the base edition's do. The wrapper delegates to the base server, so
     // overriding the path serves both sets rather than replacing one with the other. It must
     // define every method `build_app`'s own `/mcp` does, since overriding a path overrides
-    // every method on it -- `nest_service` matches whatever the inner service accepts, as the
+    // every method on it: `nest_service` matches whatever the inner service accepts, as the
     // base router's does.
     let hosted_mcp = StreamableHttpService::new(
         {

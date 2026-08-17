@@ -9,7 +9,7 @@
 //! The four methods below are the whole of what the base server customises: `get_info`, and the
 //! three `#[tool_handler]` generates for it. Every other [`ServerHandler`] method is the trait
 //! default on both sides, so leaving them alone keeps the two editions identical rather than
-//! silently dropping behaviour -- add a delegation here if the base server ever overrides one.
+//! silently dropping behaviour. Add a delegation here if the base server ever overrides one.
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::{
@@ -63,8 +63,8 @@ impl ServerHandler for HostedMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        // Ours first, so a name this crate defines wins over a base tool of the same name --
-        // the same precedence `hosted_router` already has over the base router for REST paths.
+        // Ours first, so a name this crate defines wins over a base tool of the same name: the
+        // same precedence `hosted_router` already has over the base router for REST paths.
         if self.tool_router.has_route(request.name.as_ref()) {
             let context = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
             return self.tool_router.call(context).await;
