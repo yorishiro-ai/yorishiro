@@ -26,14 +26,14 @@ Entity types are defined with a JSON meta-schema (example: `templates/task-manag
 
 - `type`: one of `string` / `integer` / `number` / `boolean` / `array` / `object`
 - Constraints: `required`, `enum`, `minimum`/`maximum` (number/integer), `minLength`/`maxLength`/`pattern` (string), `minItems`/`maxItems`/`uniqueItems` (array), `format` (string; one of `date` / `date-time` / `uri` / `email` / `uuid`)
-- `array` fields need `items: { "type": ..., "properties": {...} }` -- item type is `string` or `object` (with `object` items needing their own `properties`)
+- `array` fields need `items: { "type": ..., "properties": {...} }`: item type is `string` or `object` (with `object` items needing their own `properties`)
 - `object` fields need `properties: { ...FieldDef }`, nesting up to 5 levels deep
 - `description` is optional at every level (schema, entity type, relation type, field)
 - `x-ui` on a field is an arbitrary JSON object of UI hints, preserved as-is (e.g. `{"widget": "textarea"}`)
 - A field marked `x-embed: true` (typically `string`) becomes a target for vector embedding; non-string values are stringified first
 - `relation_types` defines directed relations between entity types
 - A schema created from a library template records which one in `origin_template_id`, with `origin_status: "linked"`.
-  Deleting that template does not touch the copy — it only clears the link and moves the schema to `"detached"`, so a template can be withdrawn without breaking the workspaces using it.
+  Deleting that template does not touch the copy: it only clears the link and moves the schema to `"detached"`, so a template can be withdrawn without breaking the workspaces using it.
   A schema written by hand is `"detached"` from the start, having never had an origin.
 
 ## Compatible and breaking changes

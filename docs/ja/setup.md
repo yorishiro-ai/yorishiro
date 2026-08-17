@@ -5,7 +5,8 @@
 ## 前提条件
 
 サーバの起動には埋め込みモデルが必要です。
-既定のローカルONNXプロバイダは、モデルファイル以外の外部サービスや設定を必要としません — ただしこの手順を省略した場合、機能が縮退した状態で起動するわけではなく、`models/model.onnx`/`models/tokenizer.json`が存在しなければ(リスナーがbindする前に)プロセスの起動自体が失敗します。
+既定のローカルONNXプロバイダは、モデルファイル以外の外部サービスや設定を必要としません。
+ただしこの手順を省略した場合、機能が縮退した状態で起動するわけではなく、`models/model.onnx`/`models/tokenizer.json`が存在しなければ(リスナーがbindする前に)プロセスの起動自体が失敗します。
 リポジトリにもDockerイメージにもこれらのファイルは同梱されていません。
 
 1. 既定のモデル(multilingual-e5-large、1024次元、100言語以上)を取得します。
@@ -29,7 +30,8 @@ OpenAI互換エンドポイントを代わりに使う場合は[embedding-provid
 
    - `vector`(pgvector)がサーバに導入済みであること。
      `pg_trgm`はPostgreSQLのcontribに同梱されるため非superuserでも作成できますが、pgvectorは同梱されておらず、その導入自体がsuperuser(あるいはパッケージ)側の作業になります。
-     ロールがsuperuserでない場合は、両方の拡張を事前に作成してください — 対象データベース上か、あるいは`template1`上に作れば以降作成されるデータベースが継承します。
+     ロールがsuperuserでない場合は、両方の拡張を事前に作成してください。
+     対象データベース上か、あるいは`template1`上に作れば以降作成されるデータベースが継承します。
      マイグレーションは両方を`IF NOT EXISTS`付きで宣言するため、既に存在する拡張はそのまま通過します。
    - `SET ROLE yorishiro_app`が可能であること。
      サーバはリクエストをこのロールで処理します。
@@ -39,7 +41,8 @@ OpenAI互換エンドポイントを代わりに使う場合は[embedding-provid
    - 対象データベース上にスキーマを作成できること。
      マイグレーションは`identity`と`content`を宣言します。
      通常はそのデータベースの所有者であれば足り、そうでなければ`GRANT CREATE ON DATABASE <名前> TO <ロール>`が必要です。
-     **`CREATEDB`はこれに該当しません** — `CREATEDB`は新規データベースの作成を許可するもので、既存データベースへのスキーマ追加とは別です。
+     **`CREATEDB`はこれに該当しません。**
+     `CREATEDB`は新規データベースの作成を許可するもので、既存データベースへのスキーマ追加とは別です。
      他人が所有するデータベースを指した場合は`permission denied for database`で失敗します。
 
    これら以外では、非superuserの場合に`yorishiro_app`を作るための`CREATEROLE`と、データベース自体も作るなら`CREATEDB`が必要です。
@@ -85,7 +88,7 @@ apt/yumリポジトリの追加は不要で、ファイルを直接インスト�
 | パッケージ | リリースページ上のファイル | 中身 |
 |---|---|---|
 | `yorishiro-ee` | `yorishiro-ee_X.Y.Z_<arch>.deb`<br>`yorishiro-ee-X.Y.Z-1.<arch>.rpm` | エンタープライズ版。有償機能とWeb UIを含みますが、どちらも`YORISHIRO_LICENSE_KEY`を設定するまで無効のままなので、キーが無ければコミュニティ版とまったく同じ挙動になります。下の行に当てはまらない限り**こちらを入れてください**。 |
-| `yorishiro-ce` | `yorishiro-ce_X.Y.Z_<arch>.deb`<br>`yorishiro-ce-X.Y.Z-1.<arch>.rpm` | コミュニティ版。プロプライエタリなコードを一切置けない配備向けです。**headless**——Web UIは有償側の資産なので`/`では何も配信しません。REST API・MCPサーバ・管理CLIは同一です。 |
+| `yorishiro-ce` | `yorishiro-ce_X.Y.Z_<arch>.deb`<br>`yorishiro-ce-X.Y.Z-1.<arch>.rpm` | コミュニティ版。プロプライエタリなコードを一切置けない配備向けです。**headless**であり、Web UIは有償側の資産なので`/`では何も配信しません。REST API・MCPサーバ・管理CLIは同一です。 |
 
 エディションの区別はパッケージ名だけです。
 どちらも`/usr/bin/yorishiro-server`を置き、`yorishiro.service`を同梱し、`/etc/yorishiro/`を読みます。
@@ -135,7 +138,7 @@ $ sha256sum --check --ignore-missing checksums.txt
 ```
 
 これはファイルが公開物と同一であることの確認です。
-**どこで作られたか**——どのワークフローが、どのコミットからビルドしたか——は、各パッケージに付随するbuild provenanceで確認できます。
+**どこで作られたか**(どのワークフローが、どのコミットからビルドしたか)は、各パッケージに付随するbuild provenanceで確認できます。
 
 ```console
 $ gh attestation verify yorishiro-ee_X.Y.Z_amd64.deb --repo yotsunagi/yorishiro
@@ -151,13 +154,13 @@ attestationは公開されたtransparency logに記録され、`gh`がこのリ�
 パッケージの依存として宣言しているため、それより古いシステムではapt/dnfが導入を拒否し、起動できないバイナリが入ってしまうことはありません。
 
 この2点はプルリクエストごとに、パッケージを読むのではなく実際にインストールして検証しています。
-`packaging/test-install.sh`がUbuntu 24.04とFedora 39——glibcがちょうど2.38、サポート下限そのものの環境です——で導入と起動を確認し、下限未満のUbuntu 22.04とRocky 9が理由を明示して拒否することも要求します。
+`packaging/test-install.sh`がUbuntu 24.04とFedora 39(glibcがちょうど2.38、サポート下限そのものの環境です)で導入と起動を確認し、下限未満のUbuntu 22.04とRocky 9が理由を明示して拒否することも要求します。
 systemdでしか確認できない部分は`packaging/test-systemd.sh`が受け持ちます。
 未設定の起動が再試行せず止まること、設定済みなら`/up`を配信すること、再起動後に自力で復帰することの3点です。
 
 どちらもビルド済みパッケージの置かれたディレクトリを受け取り、Dockerを必要とします(systemd側は特権コンテナも必要です)。
 CIも同じ2本を実行するため、CIの失敗は手元で再現できます。
-パッケージのビルドはリポジトリのルートで`nfpm package --config packaging/nfpm-yorishiro.yaml --packager deb --target dist/`を実行し(`nfpm`は`src:`をカレントディレクトリ基準で解決します)、`--packager rpm`と`nfpm-yorishiro-ce.yaml`についても同様に繰り返します。
+パッケージのビルドはリポジトリのルートで`nfpm package --config packaging/nfpm-yorishiro-ee.yaml --packager deb --target dist/`を実行し(`nfpm`は`src:`をカレントディレクトリ基準で解決します)、`--packager rpm`と`nfpm-yorishiro-ce.yaml`についても同様に繰り返します。
 ホストのglibcが下限以下でない限り、バイナリはコンテナ内でビルドしてください。
 新しいglibcでは、パッケージが宣言していないシンボルを要求するバイナリができてしまいます。
 
@@ -205,7 +208,7 @@ Docker、Docker Compose、makeが必要です。
 | `http://localhost:8080/up` | Liveness probe。プロセスが起動していれば依存関係を見ず常に200 |
 | `http://localhost:8080/health` | Readiness check。DB接続も確認し、障害時は503 |
 | `http://localhost:8080/` | Web UI。バイナリに組み込み済み。実ディレクトリから配信させる場合は[configuration.md](configuration.md)の`YORISHIRO_WEB_DIR`を参照。何をカバーするかは下記[Web UI](#web-ui)を参照 |
-| `http://localhost:8080/docs` | Swagger UI(REST APIドキュメント) |
+| `http://localhost:8080/api-docs/openapi.json` | OpenAPI文書(REST APIリファレンス) |
 | `http://localhost:8080/api-docs/openapi.json` | OpenAPI仕様 |
 | `http://localhost:8080/mcp` | MCPエンドポイント(Streamable HTTP) |
 | `http://localhost:8080/whoami` | 認証確認。ワークスペース・テナント・scopeを返す |
@@ -294,7 +297,8 @@ $ make admin ARGS="list-tenants"
 
 `create-tenant <name> [--max-workspaces <n>] [--template <id>]`は既定ではテナントのみを作成します。
 `--max-workspaces`でそのテナントが作成できるワークスペース数の上限を設定できます(省略時は無制限)。
-作業を開始するには、まずスキーマを作成します — 組み込みテンプレートからでも独自の定義からでも、REST API・MCP・Web UI(スキーマ一覧の「Create Custom Schema」)のいずれでも可能です — 次に`--schema-id`を指定してワークスペースを作成します。
+作業を開始するには、まずスキーマを作成します(組み込みテンプレートからでも独自の定義からでも、REST API・MCP・Web UI(スキーマ一覧の「Create Custom Schema」)のいずれでも可能です)。
+次に`--schema-id`を指定してワークスペースを作成します。
 各ワークスペースは1つのスキーマと1:1で紐付きます。
 平文キーは発行時に一度だけ表示されます。
 管理コマンドは`DATABASE_URL`の接続ロールで直接DBへアクセスします。
@@ -328,7 +332,8 @@ $ make admin ARGS="list-tenants"
 キーは`ysr_`で始まる文字列で、発行時に一度だけ表示されます(DBにはSHA-256ハッシュのみ保存)。
 
 scopeは`read` < `write` < `schema` < `migration`の4段階で、上位は下位を兼ねます。
-`migration`は一括移行とその取り消しに必要です——これらは既に保存された行を書き換える操作であり、まだ何も書かれていないバージョンを足すだけのスキーマ登録とは別種の権限として扱います。
+`migration`は一括移行とその取り消しに必要です。
+これらは既に保存された行を書き換える操作であり、まだ何も書かれていないバージョンを足すだけのスキーマ登録とは別種の権限として扱います。
 
 ### キーをユーザーに紐付ける
 
@@ -444,11 +449,14 @@ roleによる上限はかかりません。
 
 初回セットアップ・ログイン・メンバー/ワークスペース管理(上記)に加えて、Web UIでは以下も操作できます。
 
-- **スキーマ**: テナントに登録されたスキーマと、スキーマごとのentity type一覧を閲覧できます。
-- **エンティティ**: ワークスペースのエンティティを閲覧・絞り込み・ページングできます。
-  詳細画面ではリレーションが表示され、個々のデータフィールド(JSON)を編集できます。
-  エンティティ・リレーションの**作成**や削除、組み込みテンプレートの適用を超えるスキーマ作成はできません(上記[テナント・ワークスペース・APIキーの発行](#テナントワークスペースapiキーの発行)参照)。
-  それらはREST APIまたはMCP経由で行います。
-- **テンプレートライブラリ**: テナントのDB保存テンプレートの一覧・作成・削除ができます(api.mdの[テンプレートライブラリ](api.md#テンプレートライブラリ)参照。フォークはREST/MCP限定でUIには未搭載)。
+- **スキーマ**: テナントのスキーマとentity typeを閲覧し、組み込みテンプレートの適用に加えて「Create Custom Schema」から独自定義を登録できます。
+- **エンティティ**: ワークスペースのエンティティを閲覧・絞り込み・ページングし、スキーマから生成されるフォームで作成できます。
+  詳細画面ではリレーションが表示され、データ本体を編集できます。
+- **検索とグラフ**: ワークスペース内の類似検索と、スキーマ構造またはエンティティのリレーションを対話的に表示するグラフです。
+- **インポート/エクスポート**: ワークスペース単位のJSON Lines入出力です。
 
-完全なデータ管理UIではありません — Web UIがカバーしない部分はREST API(`/docs`のSwagger UI)とMCPツールで補ってください。
+テナントのDB保存テンプレートライブラリ(`/api/template-library`)には画面がありません。
+REST APIとMCPからのみ利用できます。
+
+完全なデータ管理UIではありません。
+Web UIがカバーしない部分はREST API(`/api-docs/openapi.json`)とMCPツールで補ってください。

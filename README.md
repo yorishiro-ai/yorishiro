@@ -31,7 +31,7 @@ flowchart TD
 
 - Cargo workspace
   - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
-  - Only `yorishiro-server` accesses the database directly.
+  - `yorishiro-core` owns the repositories and issues every query; `yorishiro-server` adapts them to HTTP and MCP.
 - Two-tier tenancy
   - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer.
     A tenant owns one or more **workspaces**.
@@ -42,7 +42,7 @@ flowchart TD
   - On each request, the workspace (and its owning tenant) are resolved from the API key.
   - Data can only be reached through a connection that has set the `app.current_tenant`/`app.current_workspace` session variables.
   - The application runs as a dedicated role (`yorishiro_app`, without `BYPASSRLS`).
-    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all -- only the admin CLI, running as the migration role, can manage them.
+    Control-plane tables (`identity.tenants`/`identity.users`/`identity.tenant_memberships`) aren't reachable by that role at all: only the admin CLI, running as the migration role, can manage them.
 - Quotas
   - A tenant's `max_workspaces` and a workspace's `max_entities` are enforced at creation time (workspace creation / entity creation, respectively).
   - Both default to `NULL` (unlimited).

@@ -76,14 +76,14 @@ $ gh workflow run release.yml -f version=X.Y.Z
 ```
 
 Or from the Actions tab: select the `Release` workflow, "Run workflow", enter the version without the leading `v`.
-It must be dispatched from `master` -- the workflow refuses any other ref, since it pushes what it checks out.
+It must be dispatched from `master`: the workflow refuses any other ref, since it pushes what it checks out.
 
 What it does, in order:
 
 1. Validates the version is `x.y.z` with no leading zeros, and decides whether this is a fresh release or a resume (see below).
 2. Bumps `workspace.package.version` in the root `Cargo.toml`, runs `cargo update -w`, then pushes the bump commit and the `vX.Y.Z` tag to `master` together, atomically.
-3. Builds both editions for `x86_64` and `aarch64` Linux and packages each as a `.deb` and an `.rpm` -- eight files.
-   Both architectures build natively -- no QEMU -- matching the `ort`/onnxruntime build requirements.
+3. Builds both editions for `x86_64` and `aarch64` Linux and packages each as a `.deb` and an `.rpm`: eight files.
+   Both architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
 4. Builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` and `:latest`.
 5. **Pulls that published image and boots it against a real PostgreSQL**, failing the release if it does not answer `/up`.
 6. Creates the GitHub Release, attaching the eight packages and a `checksums.txt` over them.
@@ -99,7 +99,7 @@ The workflow tells the two states apart by whether the GitHub Release exists, no
 |---|---|
 | No tag | Normal release: bump, tag, publish |
 | Tag, no Release | Resumes: skips the bump, republishes from the existing tag |
-| Tag and Release | Fails loudly -- that version is already out |
+| Tag and Release | Fails loudly: that version is already out |
 
 The GitHub Release is created last, after every artifact is pushed and the smoke test passes, which is what makes it a reliable marker of "this version shipped".
 There is no need to delete a tag by hand or burn a patch number.

@@ -4,7 +4,7 @@
 
 ## REST API
 
-主なエンドポイント(全一覧と詳細は`/docs`のSwagger UIを参照):
+主なエンドポイント(全一覧と詳細は`/api-docs/openapi.json`のOpenAPI文書を参照):
 
 ```console
 # スキーマ登録(schema scope)
@@ -78,7 +78,7 @@ UUIDはライブラリのみ、それ以外は組み込みのみを検索しま�
 ### `GET /api/templates/{id}`
 
 組み込みテンプレートの完全な定義をIDで取得します(例: `general-notes`)。
-レスポンスは`MetaSchemaDefinition` JSONオブジェクト — `POST /api/schemas`が受け付けるのと同じ構造です。
+レスポンスは`MetaSchemaDefinition` JSONオブジェクトで、`POST /api/schemas`が受け付けるのと同じ構造です。
 
 ### テンプレートライブラリ
 
@@ -96,14 +96,16 @@ UUIDはライブラリのみ、それ以外は組み込みのみを検索しま�
 読み取り系エンドポイントは当該テナントの有効なAPIキーであれば呼び出せます(それ以上のテナントメンバーシップチェックはありません)。
 メンバー/ワークスペース管理と同様、書き込み系エンドポイントはさらにキー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
 
-フォークは元のテンプレートを記録するだけの独立したコピーなので、フォーク元のテンプレートを削除しても成功します — フォーク自体はそのまま有効なまま残り、削除された元テンプレートへの参照だけが失われます。
+フォークは元のテンプレートを記録するだけの独立したコピーなので、フォーク元のテンプレートを削除しても成功します。
+フォーク自体はそのまま有効なまま残り、削除された元テンプレートへの参照だけが失われます。
 
 ### 認証・メンバー管理・ワークスペース管理
 
 `/auth/signup`と`/auth/login`はbearerトークンを必要としません。
 これらの目的自体がトークンを発行することだからです。
 `/setup`/`/setup/status`([setup.md](setup.md#初回セットアップ)参照)と、生存確認・準備確認用の`/up`/`/health`も同様に認証不要です。
-このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`参照) — 生存確認用の`/up`/`/health`はレート制限の対象外です。
+このうち入力を受け付ける4つ(`/auth/signup`、`/auth/login`、`/setup`、`/setup/status`)は呼び出し元IPベースでレート制限されます(上限を超えると`429 Too Many Requests`。[configuration.md](configuration.md)の`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`参照)。
+生存確認用の`/up`/`/health`はレート制限の対象外です。
 招待からサインアップ・ログインまでの一連の流れは[setup.md](setup.md#サインアップログインメンバーワークスペース管理)を参照してください。
 
 ```console
@@ -131,14 +133,14 @@ $ curl -X POST localhost:8080/api/workspaces -H "Authorization: Bearer $YORISHIR
 メンバー管理の両エンドポイントは、キー自身のscopeとは独立に、呼び出し元のテナントrole(owner/admin)で制御されます。
 ワークスペース管理の`POST`/`DELETE`も同じ規則に従います(一覧取得と`GET /api/workspaces/{id}`による詳細取得はテナントの全メンバーに開放されています)。
 
-`GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には`schema_id`(UUID、null許容) — このワークスペースに紐づくスキーマ — が含まれます。
+`GET /api/workspaces/{id}`のレスポンス(`WorkspaceDetail`)には、このワークスペースに紐づくスキーマを示す`schema_id`(UUID、null許容)が含まれます。
 テナントに残る最後の1ワークスペースへの`DELETE`は`409 Conflict`で拒否されます。
 
 ### 認証によるキー解決の差し替え
 
 `authenticate`はこのクレート自身の規則です。
 提示されたキーは、そのキーに記録された1つのワークスペースへ解決され、リクエストのヘッダは結果に影響しません。
-別の規則を必要とするデプロイ——ワークスペースをリクエストごとに指定するキー、外部のID基盤が発行したキー、このクレートが知らないクレームを持つキー——は`yorishiro_core::services::auth::Authenticator`を実装し、`AppState::with_authenticator`で差し込みます。
+別の規則を必要とするデプロイ(ワークスペースをリクエストごとに指定するキー、外部のID基盤が発行したキー、このクレートが知らないクレームを持つキー)は`yorishiro_core::services::auth::Authenticator`を実装し、`AppState::with_authenticator`で差し込みます。
 
 認証を要する全経路がこの1つの値を経由します。
 `AuthContext`・`Authorized<R>`・`Verified<R>`の各抽出子と、MCPの2つの入口です。
@@ -159,12 +161,15 @@ RESTのルートとMCPのツールが呼び出し元の identity について食
 上記のAPIルートに一致しないリクエストパスは、すべてWeb UIの静的ファイルサーバーにフォールバックします。
 その挙動はパスが「ファイルらしく見えるか」によって変わります。
 
-- 拡張子なし(例: `/foo`、`/dashboard`、`/schemas/abc`) — 常にSPAの`index.html`を`200 OK`で返します。
-  これによりWeb UIのクライアントサイドルーティングが機能します — 認識できないパスは全て「存在しないリソース」ではなく「SPAのルート」とみなされます。
-- 拡張子あり(例: `/foo.js`、`/does-not-exist.txt`) — 該当ファイルが存在すれば返し(組み込み、または`YORISHIRO_WEB_DIR`設定時はそこから)、存在しなければSPAフォールバックなしの正真正銘の`404 Not Found`を返します。
+- 拡張子なし(例: `/foo`、`/dashboard`、`/schemas/abc`): 常にSPAの`index.html`を`200 OK`で返します。
+  これによりWeb UIのクライアントサイドルーティングが機能します。
+  認識できないパスは全て「存在しないリソース」ではなく「SPAのルート」とみなされます。
+- 拡張子あり(例: `/foo.js`、`/does-not-exist.txt`): 該当ファイルが存在すれば返し(組み込み、または`YORISHIRO_WEB_DIR`設定時はそこから)、存在しなければSPAフォールバックなしの正真正銘の`404 Not Found`を返します。
 
-そのため、拡張子のないパスはこのフォールバックを通じて404になることが決してありません — タイプミスしたAPIルート(例: `GET /api/entitites`)は`404`のJSONエラーではなくSPAのHTMLを返すため、クライアント側のデバッグ時に混乱の原因になり得ます。
-ドットファイル形式のパス(例: `/.env`)も拡張子なし扱いとなり、単純な404ではなく`index.html`にフォールバックします — 先頭のドットは拡張子の区切りではなくファイル名の一部として扱われるため、`Path::extension()`(およびこのフォールバックロジック)からは拡張子なしに見えます。
+そのため、拡張子のないパスはこのフォールバックを通じて404になることが決してありません。
+タイプミスしたAPIルート(例: `GET /api/entitites`)は`404`のJSONエラーではなくSPAのHTMLを返すため、クライアント側のデバッグ時に混乱の原因になり得ます。
+ドットファイル形式のパス(例: `/.env`)も拡張子なし扱いとなり、単純な404ではなく`index.html`にフォールバックします。
+先頭のドットは拡張子の区切りではなくファイル名の一部として扱われるため、`Path::extension()`(およびこのフォールバックロジック)からは拡張子なしに見えます。
 
 ## MCPツール
 

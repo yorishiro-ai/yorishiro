@@ -19,11 +19,12 @@
 - Use `yorishiro_core::ResultExt` (`.internal()`) for any fallible call that produces a non-`YorishiroError` error.
   Never write `map_err(|e| YorishiroError::Internal(e.into()))` by hand.
   `.internal()` only converts an existing error (`E: Into<anyhow::Error>`) and cannot attach a message, so it does not cover raising an `Internal` from a formatted string with no source error.
-  `services/embedding/onnx.rs` has a private `fn internal(message: impl Display)` for exactly that case — a local helper like it is the sanctioned pattern when a module needs it repeatedly.
+  `services/embedding/onnx.rs` has a private `fn internal(message: impl Display)` for exactly that case: a local helper like it is the sanctioned pattern when a module needs it repeatedly.
   Do not promote one to a shared API until a second module actually wants it.
 - Use `YorishiroError::not_found(msg)` for NotFound construction instead of building the struct literal directly.
 - The `into_response` mapping from `YorishiroError` to HTTP status+body lives in `YorishiroError::into_http_parts()` (in `yorishiro_core::error`).
-  `ApiError` calls it, and so must any other axum error wrapper built on `YorishiroError` — never duplicate the match block.
+  `ApiError` calls it, and so must any other axum error wrapper built on `YorishiroError`.
+  Never duplicate the match block.
   `ee/`'s `HostedApiError` delegates to it for the same reason.
   Both names are fixed; do not rename either.
 - The Stripe webhook (`stripe_webhook`) returns a plain `impl IntoResponse` with raw status codes, because Stripe expects simple text rather than a JSON error envelope.
@@ -52,11 +53,11 @@
 ## Visibility and dead code (yorishiro-core)
 
 - `yorishiro-core`'s consumers are all in this workspace now: `yorishiro-server` and `ee/crates/yorishiro-hosted`.
-  A workspace-wide grep therefore does settle whether a `pub` item is called -- but it has to include `ee/`, which is a member of this workspace and the only caller of much of what core exports.
+  A workspace-wide grep therefore does settle whether a `pub` item is called, but it has to include `ee/`, which is a member of this workspace and the only caller of much of what core exports.
   The five published contracts (`build_app`, `apply_observability_layers`, `into_http_parts()`, `hex_decode`, `bearer_credential`) stay regardless: they are the seam `ee/` composes against.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
 - `Authenticator` (`services/auth`) is a seam, not an internal detail.
-  Every authenticated path -- the `AuthContext`/`Authorized<R>`/`Verified<R>` extractors and both MCP entry points -- resolves through the one `AppState::authenticator`.
+  Every authenticated path resolves through the one `AppState::authenticator`: the `AuthContext`/`Authorized<R>`/`Verified<R>` extractors, and both MCP entry points.
   **A new authenticated entry point must resolve through it too**: one that calls `authenticate` directly would keep this crate's rule while every other path honours a replacement, so a REST route and an MCP tool would disagree about who the caller is.
 
 ## Module structure
@@ -80,7 +81,7 @@
   - **Private items are testable.** `pub(crate)` and private functions are reachable, so a test never needs visibility widened for its own sake.
   - **`autotests = false` is required** in `Cargo.toml`.
     Without it cargo also compiles each `tests/*.rs` as a standalone integration target, where `use crate::` fails.
-    This is also why the layout cannot be adopted one file at a time — all three crates are already on it, in ~77 places.
+    This is also why the layout cannot be adopted one file at a time: all three crates are already on it, in ~77 places.
 - Test-only fixtures live in a `#[cfg(test)]`, `pub(crate)` `test_support` module (`crates/yorishiro-core/src/lib.rs`).
   `tests/` reaches it as `crate::test_support`.
   Do **not** widen it to `pub` or drop the `#[cfg(test)]`: under the bridge neither is needed, and `pub` would put fixtures on the crate's public surface for no reader outside these tests.
@@ -90,14 +91,15 @@
 
 ## Imports
 
-- Always `use axum::http::StatusCode;` — never use the fully-qualified `axum::http::StatusCode` inline in function signatures or bodies.
+- Always `use axum::http::StatusCode;`.
+  Never use the fully-qualified `axum::http::StatusCode` inline in function signatures or bodies.
 - Group imports: std → external crates → workspace crates → crate-internal.
   `cargo fmt` handles ordering within groups.
 
 ## Naming
 
 - The newtype wrapper over `YorishiroError` for axum is `ApiError` (`yorishiro-server`).
-  The name is fixed — do not rename.
+  The name is fixed: do not rename.
 - Avoid naming collisions across layers.
   If a type name already exists in `yorishiro-core`, the server-layer type that wraps/extends it should have a distinct name (e.g. core's `AuthContext` vs. server's auth extractor).
 
@@ -127,5 +129,5 @@
 - `workspace.package.version` in the root `Cargo.toml` is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
 - Tag format: `v{version}` (e.g. `v0.8.1`).
-  Releases are cut by running the `Release` workflow (`workflow_dispatch` with a `version` input) from the Actions tab or `gh workflow run release.yml -f version=X.Y.Z` -- it bumps `Cargo.toml`/`Cargo.lock`, commits, and creates the tag itself.
+  Releases are cut by running the `Release` workflow (`workflow_dispatch` with a `version` input) from the Actions tab or `gh workflow run release.yml -f version=X.Y.Z`, which bumps `Cargo.toml`/`Cargo.lock`, commits, and creates the tag itself.
   Do not hand-edit the version or create the tag locally.
