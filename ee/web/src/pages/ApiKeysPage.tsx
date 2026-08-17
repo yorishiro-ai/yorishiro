@@ -68,7 +68,7 @@ export function ApiKeysPage() {
           <CardTitle className="text-lg">Managed via Admin CLI</CardTitle>
           <CardDescription>
             API keys are created, listed, and revoked using the admin CLI, not this web console.
-            There is no REST endpoint for managing keys — only the current session's identity can be
+            There is no REST endpoint for managing keys: only the current session's identity can be
             inspected here.
           </CardDescription>
         </CardHeader>

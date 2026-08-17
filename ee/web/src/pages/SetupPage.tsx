@@ -57,7 +57,7 @@ export function SetupPage() {
     } catch (err) {
       const status = (err as { status?: number }).status;
       // 409 and 404 both mean the form can never succeed: someone else finished setup first, or
-      // the wizard is disabled on this deployment. Say which, and show the way out — a message
+      // the wizard is disabled on this deployment. Say which, and show the way out: a message
       // telling the reader to sign in, on a page with no link to sign in, is a dead end.
       if (status === 409) {
         setTerminal(true);

@@ -1011,7 +1011,7 @@ fn task_schema_with_defaulted_field() -> MetaSchemaDefinition {
     .unwrap()
 }
 
-/// Mode A: a field added later, with a default, is filled into the entities that predate it — and those entities keep their own version, because filling a value is not migrating between definitions.
+/// Mode A: a field added later, with a default, is filled into the entities that predate it, and those entities keep their own version, because filling a value is not migrating between definitions.
 #[sqlx::test(migrations = "../../migrations")]
 async fn fill_defaults_fills_predating_entities_without_moving_their_version(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;

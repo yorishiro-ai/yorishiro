@@ -130,7 +130,7 @@ export function SchemasPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Schemas</h1>
           <p className="text-sm text-muted-foreground">
-            Your organization's schemas. Schemas are shared across your tenant — each workspace is
+            Your organization's schemas. Schemas are shared across your tenant: each workspace is
             created against one of these schemas.
           </p>
         </div>

@@ -37,7 +37,7 @@ function Stars({ value }: { value: number }) {
 /// A marketplace template's own page, at `/marketplace/:id`.
 ///
 /// The listing grid used to open a dialog, which meant a template could not be linked to,
-/// reloaded, or opened in a tab — and, more to the point, could not show the schema it contains.
+/// reloaded, or opened in a tab, and, more to the point, could not show the schema it contains.
 /// Forking is a decision about structure, so the page shows the same structure graph and
 /// entity/relation tables `/schemas/:id` does, from the definition the versions endpoint already
 /// returns.
@@ -269,7 +269,7 @@ export function MarketplaceDetailPage() {
         <CardHeader>
           <CardTitle className="text-lg">Reviews</CardTitle>
           <CardDescription>
-            One per organization — saving again replaces your previous review.
+            One per organization: saving again replaces your previous review.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

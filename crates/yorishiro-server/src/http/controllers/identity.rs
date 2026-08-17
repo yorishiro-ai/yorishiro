@@ -127,9 +127,9 @@ pub struct LoginResponse {
     responses(
         (status = 200, description = "A freshly issued API key, scoped to the caller's membership role", body = LoginResponse),
         (status = 401, description = "Invalid email or password", body = crate::error::ApiErrorBody),
-        (status = 403, description = "Not a member of this workspace's tenant", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Not a member of this workspace's tenant, or of any tenant at all", body = crate::error::ApiErrorBody),
         (status = 404, description = "Workspace not found", body = crate::error::ApiErrorBody),
-        (status = 422, description = "workspace_id omitted, and the account has zero or multiple workspaces to choose from. When there are several, `details` carries one entry per candidate: `field` is the workspace id and `problem` its name, so a client can offer a picker", body = crate::error::ApiErrorBody),
+        (status = 422, description = "workspace_id omitted, and the account can reach more than one workspace. `details` carries one entry per candidate: `field` is the workspace id and `problem` its name, so a client can offer a picker", body = crate::error::ApiErrorBody),
         (status = 429, description = "Too many requests from this caller; retry later"),
     ),
     security(()),

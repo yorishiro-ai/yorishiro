@@ -274,13 +274,9 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
     crate::max_tenants_env_lock::set(None);
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
-    // The refusal names the candidates, so a client can offer a picker rather than send the
-    // operator elsewhere for an id. Without them the only way through this 422 is to already
-    // know a workspace id, which is what made the login form ask for one by hand.
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    // The refusal has to name the candidates, or the caller is told to supply an id it has no way to discover.
+    // Both workspaces here are called "main", so the ids are the only thing telling them apart, which is why a picker needs them rather than the names.
+    let json = rest_json_body(response).await;
     let details = json["error"]["details"]
         .as_array()
         .unwrap_or_else(|| panic!("422 carried no details array: {json}"));
@@ -289,15 +285,22 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
         2,
         "both workspaces should be offered: {json}"
     );
-    for detail in details {
-        let id = detail["field"].as_str().expect("field is the workspace id");
-        uuid::Uuid::parse_str(id).expect("field parses as a uuid");
-        assert_eq!(
-            detail["problem"].as_str(),
-            Some("main"),
-            "problem carries the workspace name"
-        );
-    }
+    let mut ids: Vec<&str> = details
+        .iter()
+        .map(|detail| {
+            assert_eq!(
+                detail["problem"].as_str(),
+                Some("main"),
+                "problem carries the workspace name"
+            );
+            let id = detail["field"].as_str().expect("field is the workspace id");
+            Uuid::parse_str(id).expect("field parses as a uuid");
+            id
+        })
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "each candidate carries its own workspace id");
 }
 
 #[sqlx::test(migrations = "../../migrations")]

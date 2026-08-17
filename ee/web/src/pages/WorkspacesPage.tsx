@@ -183,7 +183,7 @@ export function WorkspacesPage() {
                           // a state `schema_id` (non-null) cannot even represent.
                           <span
                             className="text-muted-foreground font-mono text-xs"
-                            title={`Schema ${ws.schema_id} — names resolve only for the workspace you are signed in to`}
+                            title={`Schema ${ws.schema_id}: names resolve only for the workspace you are signed in to`}
                           >
                             {ws.schema_id.slice(0, 8)}
                           </span>

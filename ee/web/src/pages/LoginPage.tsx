@@ -155,11 +155,19 @@ export function LoginPage() {
                   onChange={(e) => setWorkspaceId(e.target.value)}
                   className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  {workspaceChoices.map((choice) => (
-                    <option key={choice.field} value={choice.field}>
-                      {choice.problem}
-                    </option>
-                  ))}
+                  {workspaceChoices.map((choice) => {
+                    // Two workspaces in different tenants can carry the same name, so a name on
+                    // its own leaves the picker with two identical options. The id disambiguates,
+                    // and only when it has to.
+                    const ambiguous =
+                      workspaceChoices.filter((other) => other.problem === choice.problem).length >
+                      1;
+                    return (
+                      <option key={choice.field} value={choice.field}>
+                        {ambiguous ? `${choice.problem} (${choice.field})` : choice.problem}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}

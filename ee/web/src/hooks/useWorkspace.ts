@@ -30,7 +30,7 @@ export function useWorkspace() {
   /// Forgets the remembered workspace *without* navigating.
   ///
   /// `TenantScope` calls this in an effect on every tenant-level route, so navigating from here
-  /// sent all of them to the dashboard on a full page load — `/marketplace`, `/schemas/:id` and
+  /// sent all of them to the dashboard on a full page load: `/marketplace`, `/schemas/:id` and
   /// `/schemas/templates/:id` were unreachable by URL. In-app navigation hid it, because the
   /// effect does not re-run when only the child route changes.
   const clearWorkspace = useCallback(() => {
@@ -38,8 +38,8 @@ export function useWorkspace() {
     notify();
   }, []);
 
-  /// Leaves the workspace *and* returns to the tenant dashboard — what the sidebar's "Back"
-  /// means, as opposed to merely forgetting which workspace was open.
+  /// Leaves the workspace *and* returns to the tenant dashboard, which is what the sidebar's
+  /// "Back" means, as opposed to merely forgetting which workspace was open.
   const leaveWorkspace = useCallback(() => {
     sessionStorage.removeItem(NAME_STORAGE_KEY);
     notify();
