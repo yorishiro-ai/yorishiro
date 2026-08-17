@@ -62,7 +62,9 @@ async fn the_listing_skips_templates_with_nothing_published(pool: PgPool) {
     .await
     .unwrap();
 
-    let listing = list_marketplace(&pool).await.unwrap();
+    let listing = list_marketplace(&pool, ListMarketplaceQuery::default())
+        .await
+        .unwrap();
     let names: Vec<_> = listing.iter().map(|l| l.name.as_str()).collect();
     assert_eq!(names, vec!["published"]);
     assert_eq!(listing[0].latest_stable_version, Some(1));
@@ -87,7 +89,48 @@ async fn the_listing_skips_private_templates(pool: PgPool) {
     .await
     .unwrap();
 
-    assert!(list_marketplace(&pool).await.unwrap().is_empty());
+    assert!(
+        list_marketplace(&pool, ListMarketplaceQuery::default())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// `limit`/`offset` slice the community listing rather than returning every row: with three
+/// published templates and `limit: 2, offset: 1`, only the second and third (alphabetically)
+/// come back.
+#[sqlx::test(migrations = "../../../migrations")]
+async fn listing_is_paginated(pool: PgPool) {
+    let tenant = seed_tenant(&pool, "publisher").await;
+    for name in ["alpha", "bravo", "charlie"] {
+        let template = seed_template(&pool, tenant, name, "community").await;
+        publish_version(
+            &pool,
+            tenant,
+            template,
+            None,
+            PublishVersionRequest {
+                definition: json!({}),
+                changelog: None,
+                status: "stable".into(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let page = list_marketplace(
+        &pool,
+        ListMarketplaceQuery {
+            limit: 2,
+            offset: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let names: Vec<_> = page.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, vec!["bravo", "charlie"]);
 }
 
 /// **The database does not enforce this** (`template_versions` carries no RLS), so the query is the enforcement.

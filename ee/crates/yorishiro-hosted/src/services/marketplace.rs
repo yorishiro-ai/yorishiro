@@ -1,4 +1,8 @@
 use chrono::{DateTime, Utc};
+use sea_query::{
+    Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query, SimpleExpr,
+};
+use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{PgPool, Row};
@@ -7,6 +11,34 @@ use uuid::Uuid;
 use yorishiro_core::ResultExt;
 use yorishiro_core::db;
 use yorishiro_core::error::YorishiroError;
+use yorishiro_core::models::entities::DEFAULT_LIST_LIMIT;
+
+#[derive(Iden)]
+enum Templates {
+    Table,
+    Id,
+    Name,
+    Description,
+    Tags,
+    Author,
+    TenantId,
+    Visibility,
+}
+
+#[derive(Iden)]
+enum TemplateVersions {
+    Table,
+    TemplateId,
+    Version,
+    Status,
+}
+
+#[derive(Iden)]
+enum TemplateReviews {
+    Table,
+    TemplateId,
+    Rating,
+}
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
 #[derive(Debug, Serialize, ToSchema)]
@@ -88,41 +120,122 @@ fn validate_status(status: &str) -> Result<(), YorishiroError> {
     }
 }
 
-/// Lists community-visible templates across every tenant.
+/// `GET /api/marketplace`'s `limit`/`offset`, clamped the same way `entities::list`'s are.
+#[derive(Debug, Clone, Copy)]
+pub struct ListMarketplaceQuery {
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl Default for ListMarketplaceQuery {
+    fn default() -> Self {
+        Self {
+            limit: DEFAULT_LIST_LIMIT,
+            offset: 0,
+        }
+    }
+}
+
+/// Lists community-visible templates across every tenant, ordered by name then id, one page at a time.
 ///
 /// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
-pub async fn list_marketplace(pool: &PgPool) -> Result<Vec<MarketplaceListing>, YorishiroError> {
-    let rows = sqlx::query(
-        r#"
-        SELECT t.id            AS template_id,
-               t.name          AS name,
-               t.description   AS description,
-               t.tags          AS tags,
-               t.author        AS author,
-               t.tenant_id     AS tenant_id,
-               (SELECT max(v.version) FROM identity.template_versions v
-                 WHERE v.template_id = t.id AND v.status = 'stable') AS latest_stable_version,
-               (SELECT count(*) FROM identity.template_reviews r
-                 WHERE r.template_id = t.id)                          AS review_count,
-               (SELECT avg(r.rating)::float8 FROM identity.template_reviews r
-                 WHERE r.template_id = t.id)                          AS average_rating
-          FROM identity.templates t
-         WHERE t.visibility = 'community'
-           AND EXISTS (
-                 SELECT 1 FROM identity.template_versions v
-                  WHERE v.template_id = t.id AND v.status <> 'draft'
-               )
-         ORDER BY t.name
-        "#,
-    )
-    .fetch_all(pool)
-    .await
-    .internal()?;
+///
+/// The three aggregates (latest stable version, review count, average rating) stay correlated subqueries rather than a `JOIN` + `GROUP BY`: with `limit` now bounding the page to at most 200 rows, their cost is bounded by the page size, and nothing here has measured the join rewrite as faster.
+pub async fn list_marketplace(
+    pool: &PgPool,
+    query: ListMarketplaceQuery,
+) -> Result<Vec<MarketplaceListing>, YorishiroError> {
+    let limit = query.limit.clamp(1, 200);
+    let offset = query.offset.max(0);
+
+    let latest_stable_version = SimpleExpr::SubQuery(
+        None,
+        Box::new(
+            Query::select()
+                .expr(Func::max(Expr::col(TemplateVersions::Version)))
+                .from((Alias::new("identity"), TemplateVersions::Table))
+                .and_where(
+                    Expr::col(TemplateVersions::TemplateId)
+                        .equals((Templates::Table, Templates::Id)),
+                )
+                .and_where(Expr::col(TemplateVersions::Status).eq("stable"))
+                .to_owned()
+                .into_sub_query_statement(),
+        ),
+    );
+    let review_count = SimpleExpr::SubQuery(
+        None,
+        Box::new(
+            Query::select()
+                .expr(Func::count(Expr::col(Asterisk)))
+                .from((Alias::new("identity"), TemplateReviews::Table))
+                .and_where(
+                    Expr::col(TemplateReviews::TemplateId)
+                        .equals((Templates::Table, Templates::Id)),
+                )
+                .to_owned()
+                .into_sub_query_statement(),
+        ),
+    );
+    let average_rating = SimpleExpr::SubQuery(
+        None,
+        Box::new(
+            Query::select()
+                .expr(Func::cast_as(
+                    Func::avg(Expr::col(TemplateReviews::Rating)),
+                    Alias::new("float8"),
+                ))
+                .from((Alias::new("identity"), TemplateReviews::Table))
+                .and_where(
+                    Expr::col(TemplateReviews::TemplateId)
+                        .equals((Templates::Table, Templates::Id)),
+                )
+                .to_owned()
+                .into_sub_query_statement(),
+        ),
+    );
+    let has_published_version = Expr::exists(
+        Query::select()
+            .expr(Expr::val(1))
+            .from((Alias::new("identity"), TemplateVersions::Table))
+            .and_where(
+                Expr::col(TemplateVersions::TemplateId).equals((Templates::Table, Templates::Id)),
+            )
+            .and_where(Expr::col(TemplateVersions::Status).ne("draft"))
+            .to_owned(),
+    );
+
+    let (sql, values) = Query::select()
+        .column((Templates::Table, Templates::Id))
+        .column((Templates::Table, Templates::Name))
+        .column((Templates::Table, Templates::Description))
+        .column((Templates::Table, Templates::Tags))
+        .column((Templates::Table, Templates::Author))
+        .column((Templates::Table, Templates::TenantId))
+        .expr_as(latest_stable_version, Alias::new("latest_stable_version"))
+        .expr_as(review_count, Alias::new("review_count"))
+        .expr_as(average_rating, Alias::new("average_rating"))
+        .from((Alias::new("identity"), Templates::Table))
+        .and_where(Expr::col(Templates::Visibility).eq("community"))
+        .and_where(has_published_version)
+        // `name` alone is not a stable order: it is unique per tenant, not globally, so two
+        // tenants can publish the same name and tie. `id` breaks that tie deterministically,
+        // which a page split across two requests needs.
+        .order_by((Templates::Table, Templates::Name), Order::Asc)
+        .order_by((Templates::Table, Templates::Id), Order::Asc)
+        .limit(limit as u64)
+        .offset(offset as u64)
+        .build_sqlx(PostgresQueryBuilder);
+
+    let rows = sqlx::query_with(&sql, values)
+        .fetch_all(pool)
+        .await
+        .internal()?;
 
     rows.into_iter()
         .map(|row| {
             Ok(MarketplaceListing {
-                template_id: row.try_get("template_id").internal()?,
+                template_id: row.try_get("id").internal()?,
                 name: row.try_get("name").internal()?,
                 description: row.try_get("description").internal()?,
                 tags: row.try_get("tags").internal()?,

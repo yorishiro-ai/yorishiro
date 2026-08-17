@@ -16,8 +16,8 @@ use uuid::Uuid;
 use crate::error::HostedApiError;
 use crate::services::authz;
 use crate::services::marketplace::{
-    self, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest, TemplateReviewRecord,
-    TemplateVersionRecord,
+    self, ListMarketplaceQuery, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest,
+    TemplateReviewRecord, TemplateVersionRecord,
 };
 use crate::state::HostedState;
 
@@ -34,12 +34,19 @@ async fn licensed_tenant(
     authz::authenticate_tenant(state, headers).await
 }
 
-/// `GET /api/marketplace`: community-visible templates from every tenant.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ListMarketplaceParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// `GET /api/marketplace`: community-visible templates from every tenant, ordered by name then id.
 #[utoipa::path(
     get,
     path = "/api/marketplace",
+    params(ListMarketplaceParams),
     responses(
-        (status = 200, description = "Community-visible templates with their latest stable version and review aggregates", body = Vec<MarketplaceListing>),
+        (status = 200, description = "One page of community-visible templates with their latest stable version and review aggregates", body = Vec<MarketplaceListing>),
         (status = 401, description = "Missing or invalid bearer key", body = crate::error::HostedApiErrorBody),
     ),
     security(("bearer_key" = [])),
@@ -48,10 +55,16 @@ async fn licensed_tenant(
 pub async fn list_marketplace(
     State(state): State<HostedState>,
     headers: HeaderMap,
+    Query(params): Query<ListMarketplaceParams>,
 ) -> Result<Json<Vec<MarketplaceListing>>, HostedApiError> {
     // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
     let _ = licensed_tenant(&state, &headers).await?;
-    let listings = marketplace::list_marketplace(&state.identity_pool).await?;
+    let default = ListMarketplaceQuery::default();
+    let query = ListMarketplaceQuery {
+        limit: params.limit.unwrap_or(default.limit),
+        offset: params.offset.unwrap_or(default.offset),
+    };
+    let listings = marketplace::list_marketplace(&state.identity_pool, query).await?;
     Ok(Json(listings))
 }
 

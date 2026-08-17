@@ -273,6 +273,34 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
     .await;
     crate::max_tenants_env_lock::set(None);
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The refusal has to name the candidates, or the caller is told to supply an id it has no way to discover.
+    // Both workspaces here are called "main", so the ids are the only thing telling them apart, which is why a picker needs them rather than the names.
+    let json = rest_json_body(response).await;
+    let details = json["error"]["details"]
+        .as_array()
+        .unwrap_or_else(|| panic!("422 carried no details array: {json}"));
+    assert_eq!(
+        details.len(),
+        2,
+        "both workspaces should be offered: {json}"
+    );
+    let mut ids: Vec<&str> = details
+        .iter()
+        .map(|detail| {
+            assert_eq!(
+                detail["problem"].as_str(),
+                Some("main"),
+                "problem carries the workspace name"
+            );
+            let id = detail["field"].as_str().expect("field is the workspace id");
+            Uuid::parse_str(id).expect("field parses as a uuid");
+            id
+        })
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "each candidate carries its own workspace id");
 }
 
 #[sqlx::test(migrations = "../../migrations")]

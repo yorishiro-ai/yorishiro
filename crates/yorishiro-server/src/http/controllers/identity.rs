@@ -5,6 +5,7 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
+use yorishiro_core::error::ValidationDetail;
 use yorishiro_core::repositories::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::{self, ApiKeyScope};
 use yorishiro_core::{ResultExt, YorishiroError};
@@ -104,7 +105,7 @@ pub struct LoginRequest {
     pub password: String,
     /// Which of the account's workspaces to issue an API key for: a key is always scoped to exactly one workspace, same as one created through `admin create-api-key`.
     /// Omit this when the account can only ever log into one workspace (true by default, since `YORISHIRO_MAX_TENANTS` defaults to a single tenant with one workspace); it resolves automatically.
-    /// An account with access to more than one workspace must specify which one explicitly (422 otherwise).
+    /// An account with access to more than one workspace must specify which one explicitly (422 otherwise), and that refusal lists the candidates so the caller does not have to look an id up elsewhere.
     pub workspace_id: Option<Uuid>,
 }
 
@@ -126,9 +127,9 @@ pub struct LoginResponse {
     responses(
         (status = 200, description = "A freshly issued API key, scoped to the caller's membership role", body = LoginResponse),
         (status = 401, description = "Invalid email or password", body = crate::error::ApiErrorBody),
-        (status = 403, description = "Not a member of this workspace's tenant", body = crate::error::ApiErrorBody),
+        (status = 403, description = "Not a member of this workspace's tenant, or of any tenant at all", body = crate::error::ApiErrorBody),
         (status = 404, description = "Workspace not found", body = crate::error::ApiErrorBody),
-        (status = 422, description = "workspace_id omitted, and the account has zero or multiple workspaces to choose from", body = crate::error::ApiErrorBody),
+        (status = 422, description = "workspace_id omitted, and the account can reach more than one workspace. `details` carries one entry per candidate: `field` is the workspace id and `problem` its name, so a client can offer a picker", body = crate::error::ApiErrorBody),
         (status = 429, description = "Too many requests from this caller; retry later"),
     ),
     security(()),
@@ -159,9 +160,19 @@ pub async fn login(
                     .into());
                 }
                 _ => {
+                    // The candidates go in `details`, one per workspace, so a client can offer a
+                    // picker instead of asking the operator to find an id elsewhere. This is the
+                    // only response that knows the list: the account is authenticated by now, and
+                    // every workspace named here is one it is already a member of.
                     return Err(YorishiroError::ValidationFailed {
                         message: "this account has access to more than one workspace".into(),
-                        details: vec![],
+                        details: workspaces
+                            .into_iter()
+                            .map(|w| ValidationDetail {
+                                field: w.id.to_string(),
+                                problem: w.name,
+                            })
+                            .collect(),
                         hint: "specify workspace_id explicitly".into(),
                     }
                     .into());

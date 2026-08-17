@@ -60,14 +60,43 @@ export function getSessionEmail(): string | null {
   }
 }
 
-class ApiError extends Error {
-  status: number;
+/// One `{field, problem}` pair the server error carries. On a 422 workspace-ambiguity response
+/// from `/auth/login`, `field` is a workspace id and `problem` is its display name; the generic
+/// `ValidationDetail` shape is reused rather than adding a dedicated one.
+export interface ValidationDetail {
+  field: string;
+  problem: string;
+}
 
-  constructor(status: number, message: string) {
+export class ApiError extends Error {
+  status: number;
+  details: ValidationDetail[] | null;
+
+  constructor(status: number, message: string, details: ValidationDetail[] | null = null) {
     super(message);
     this.status = status;
+    this.details = details;
     this.name = "ApiError";
   }
+}
+
+/// Reads `error.details` out of a hosted-API error body, when it is the `{field, problem}[]`
+/// shape. Anything else (missing, wrong shape, a community-API `{message}` body) yields `null`
+/// so the caller falls back to its pre-picker behaviour rather than trusting a malformed value.
+function errorDetails(body: string): ValidationDetail[] | null {
+  try {
+    const json = JSON.parse(body);
+    const details = json.error?.details;
+    if (
+      Array.isArray(details) &&
+      details.every((d) => d && typeof d.field === "string" && typeof d.problem === "string")
+    ) {
+      return details as ValidationDetail[];
+    }
+  } catch {
+    // Not JSON -- no details to offer.
+  }
+  return null;
 }
 
 /// The workspace the user is currently looking at, taken from the URL.
@@ -115,7 +144,12 @@ export function setSessionWorkspaceId(workspaceId: string): void {
 /// Shared by all three fetch paths in this file, which had each grown their own copy of the
 /// status mapping.
 async function failureMessage(res: Response): Promise<string> {
-  const text = await res.text();
+  return failureMessageFromText(res, await res.text());
+}
+
+/// Same mapping as `failureMessage`, taking an already-read body so a caller that also wants
+/// `errorDetails(text)` does not consume the response stream twice.
+function failureMessageFromText(res: Response, text: string): string {
   const message = errorMessage(text, res.statusText);
   if (res.status === 401) return "Session expired. Please sign in again.";
   // The workspace header is refused when the key is bound to a different workspace. Saying so
@@ -145,7 +179,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   const res = await fetch(path, { ...options, headers });
   if (!res.ok) {
-    throw new ApiError(res.status, await failureMessage(res));
+    const text = await res.text();
+    throw new ApiError(res.status, failureMessageFromText(res, text), errorDetails(text));
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

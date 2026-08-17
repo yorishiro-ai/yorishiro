@@ -11,9 +11,12 @@ async fn seeding_publishes_every_builtin_template(pool: PgPool) {
     assert_eq!(outcome.published.len(), builtin_count);
     assert!(outcome.updated.is_empty());
 
-    let listings = crate::services::marketplace::list_marketplace(&pool)
-        .await
-        .unwrap();
+    let listings = crate::services::marketplace::list_marketplace(
+        &pool,
+        crate::services::marketplace::ListMarketplaceQuery::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(listings.len(), builtin_count);
     for listing in &listings {
         assert_eq!(listing.tenant_id, OFFICIAL_TENANT_ID);

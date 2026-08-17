@@ -105,6 +105,8 @@ $ curl -X POST localhost:8080/auth/signup -H "Content-Type: application/json" \
 
 # Exchange email/password for a freshly issued, role-capped API key. workspace_id is only
 # required if the account has access to more than one workspace (a 422 asks for it then).
+# The 422's `details` then carries one entry per candidate workspace: `field` is its id,
+# `problem` is its name, so a client can render a picker.
 $ curl -X POST localhost:8080/auth/login -H "Content-Type: application/json" \
     -d '{"email":"...","password":"..."}'
 
