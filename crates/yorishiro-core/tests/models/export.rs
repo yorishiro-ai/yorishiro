@@ -63,7 +63,7 @@ async fn exports_schemas_entities_and_relations_for_the_tenant(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: a.id,

@@ -118,7 +118,7 @@ pub async fn import_jsonl(
                     relation_type: relation.relation_type,
                     properties: relation.properties,
                 };
-                relations::create(&mut tx, workspace_id, input)
+                relations::create(&mut *tx, workspace_id, input)
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 result.relations += 1;

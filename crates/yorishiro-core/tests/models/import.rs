@@ -79,7 +79,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut source_conn,
+        &mut *source_conn,
         source_workspace,
         CreateRelationInput {
             source_id: a.id,

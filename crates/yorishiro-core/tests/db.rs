@@ -320,9 +320,10 @@ async fn a_dropped_guard_frees_the_lock_without_release(pool: sqlx::PgPool) {
     regained.release().await.unwrap();
 }
 
-/// Proves the generic bounds `models/entities::get`/`count`/`update` carry are satisfiable by `SqliteConnection`, at the type level only.
+/// Proves the generic bounds `models/entities::get`/`count`/`update` and `models/relations::create` carry are satisfiable by `SqliteConnection`, at the type level only.
 /// Naming the function items is enough: it does not run, so a mismatched bound is a compile error here rather than a monomorphization failure deep in some future SQLite-only caller.
-/// `update` is the one that matters most here: it calls into `schemas::get_by_id`, so this is also the check that a cross-module call's transcribed field bounds (see `entities::update`'s where clause) actually hold for a second engine, not just for Postgres.
+/// `update` calls into `schemas::get_by_id`, so this is also the check that a cross-module call's transcribed field bounds (see `entities::update`'s where clause) actually hold for a second engine, not just for Postgres.
+/// `relations::create` is the deepest chain so far: it calls `entities::get` and, through `validate_relation_type`, `schemas::get_by_id`, so it exercises the transcription on top of another module's own bounds.
 /// This says nothing about the SQL those functions build or how it behaves on Sqlite (`Alias::new("content")` schema-qualification, the RLS substitute): that is step 4's problem, not this one.
 #[cfg(feature = "sqlite")]
 #[test]
@@ -330,4 +331,5 @@ fn sqlite_satisfies_the_generic_bounds() {
     let _ = crate::models::entities::get::<sqlx::SqliteConnection>;
     let _ = crate::models::entities::count::<sqlx::SqliteConnection>;
     let _ = crate::models::entities::update::<sqlx::SqliteConnection>;
+    let _ = crate::models::relations::create::<sqlx::SqliteConnection>;
 }

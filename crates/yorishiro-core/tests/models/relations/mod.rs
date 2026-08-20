@@ -80,7 +80,7 @@ async fn creates_and_fetches_relation(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let created = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -95,7 +95,7 @@ async fn creates_and_fetches_relation(pool: PgPool) {
     assert_eq!(created.relation_type, "belongs_to");
     assert_eq!(created.properties, json!({}));
 
-    let fetched = get(&mut conn, workspace_id, created.id).await.unwrap();
+    let fetched = get(&mut *conn, workspace_id, created.id).await.unwrap();
     assert_eq!(fetched.source_id, task.id);
     assert_eq!(fetched.target_id, project.id);
 }
@@ -112,7 +112,7 @@ async fn rejects_relation_type_with_mismatched_source_target(pool: PgPool) {
 
     // reversed: belongs_to expects source=task target=project, not the other way around.
     let err = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: project.id,
@@ -138,7 +138,7 @@ async fn rejects_relation_with_nonexistent_source(pool: PgPool) {
     let (_, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let err = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: Uuid::nil(),
@@ -164,7 +164,7 @@ async fn rejects_unknown_relation_type(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let err = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -190,7 +190,7 @@ async fn rejects_duplicate_relation(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -203,7 +203,7 @@ async fn rejects_duplicate_relation(pool: PgPool) {
     .unwrap();
 
     let err = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -229,7 +229,7 @@ async fn deleting_entity_cascades_relation_deletion(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let relation = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -245,7 +245,9 @@ async fn deleting_entity_cascades_relation_deletion(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = get(&mut conn, workspace_id, relation.id).await.unwrap_err();
+    let err = get(&mut *conn, workspace_id, relation.id)
+        .await
+        .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
 }
 
@@ -260,7 +262,7 @@ async fn deletes_relation(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     let relation = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -272,9 +274,11 @@ async fn deletes_relation(pool: PgPool) {
     .await
     .unwrap();
 
-    delete(&mut conn, workspace_id, relation.id).await.unwrap();
+    delete(&mut *conn, workspace_id, relation.id).await.unwrap();
 
-    let err = get(&mut conn, workspace_id, relation.id).await.unwrap_err();
+    let err = get(&mut *conn, workspace_id, relation.id)
+        .await
+        .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
 }
 
@@ -287,7 +291,7 @@ async fn delete_reports_not_found_for_missing_relation(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = delete(&mut conn, workspace_id, Uuid::nil())
+    let err = delete(&mut *conn, workspace_id, Uuid::nil())
         .await
         .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
@@ -305,7 +309,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .unwrap();
     let (task, project) = seed_task_and_project(&mut conn_a, tenant_a_tenant, tenant_a).await;
     let relation = create(
-        &mut conn_a,
+        &mut *conn_a,
         tenant_a,
         CreateRelationInput {
             source_id: task.id,
@@ -321,12 +325,12 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_b_tenant, tenant_b)
         .await
         .unwrap();
-    let result = get(&mut conn_b, tenant_b, relation.id).await;
+    let result = get(&mut *conn_b, tenant_b, relation.id).await;
     assert!(matches!(result, Err(YorishiroError::NotFound { .. })));
 
     // tenant_b can't see tenant_a's entities either, so the source/target existence check itself reports NotFound.
     let cross_tenant_err = create(
-        &mut conn_b,
+        &mut *conn_b,
         tenant_b,
         CreateRelationInput {
             source_id: task.id,
@@ -351,7 +355,7 @@ async fn lists_relations_filtered_by_source(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -364,7 +368,7 @@ async fn lists_relations_filtered_by_source(pool: PgPool) {
     .unwrap();
 
     let relations = list(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         ListRelationsQuery {
             source_id: Some(task.id),
@@ -389,7 +393,7 @@ async fn neighbors_returns_both_directions_with_relation_type(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -401,7 +405,7 @@ async fn neighbors_returns_both_directions_with_relation_type(pool: PgPool) {
     .await
     .unwrap();
 
-    let from_task = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
+    let from_task = neighbors(&mut *conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
         .await
         .unwrap();
     assert_eq!(from_task.len(), 1);
@@ -409,9 +413,14 @@ async fn neighbors_returns_both_directions_with_relation_type(pool: PgPool) {
     assert_eq!(from_task[0].relation_type, "belongs_to");
     assert_eq!(from_task[0].entity.id, project.id);
 
-    let from_project = neighbors(&mut conn, workspace_id, project.id, DEFAULT_NEIGHBORS_LIMIT)
-        .await
-        .unwrap();
+    let from_project = neighbors(
+        &mut *conn,
+        workspace_id,
+        project.id,
+        DEFAULT_NEIGHBORS_LIMIT,
+    )
+    .await
+    .unwrap();
     assert_eq!(from_project.len(), 1);
     assert_eq!(from_project[0].direction, "in");
     assert_eq!(from_project[0].relation_type, "belongs_to");
@@ -429,7 +438,7 @@ async fn neighbors_is_empty_when_no_relations_exist(pool: PgPool) {
     let (task, _project) =
         seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
-    let result = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
+    let result = neighbors(&mut *conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -446,7 +455,7 @@ async fn neighbors_batch_matches_per_id_neighbors_calls_for_multiple_pivots(pool
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -508,7 +517,7 @@ async fn neighbors_batch_dedups_a_repeated_pivot_id(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, workspace_id_tenant, workspace_id).await;
 
     create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -580,7 +589,7 @@ async fn neighbors_batch_applies_limit_per_pivot_not_across_the_whole_batch(pool
             .await
             .unwrap();
             create(
-                &mut conn,
+                &mut *conn,
                 workspace_id,
                 CreateRelationInput {
                     source_id: task.id,
@@ -650,7 +659,7 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
         .await
         .unwrap();
         create(
-            &mut conn,
+            &mut *conn,
             workspace_id,
             CreateRelationInput {
                 source_id: task.id,
@@ -665,7 +674,7 @@ async fn neighbors_batch_orders_each_pivots_neighbors_most_recent_first(pool: Pg
     }
 
     // limit=2 against 3 relations: truncation must drop the oldest (alpha), keeping gamma then beta.
-    // That is the same outcome a single `neighbors(&mut conn, workspace_id, task.id, 2)` call would produce.
+    // That is the same outcome a single `neighbors(&mut *conn, workspace_id, task.id, 2)` call would produce.
     let batch = neighbors_batch(&mut conn, workspace_id, &[task.id], 2)
         .await
         .unwrap();
@@ -690,7 +699,7 @@ async fn relation_is_created_active(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
 
     let created = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -717,7 +726,7 @@ async fn traversal_skips_non_active_relations(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
 
     let relation = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -729,26 +738,31 @@ async fn traversal_skips_non_active_relations(pool: PgPool) {
     .await
     .unwrap();
 
-    let out = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
+    let out = neighbors(&mut *conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
         .await
         .unwrap();
     assert_eq!(out.len(), 1, "active relation is traversed");
 
-    let updated = set_status(&mut conn, workspace_id, relation.id, "deprecated")
+    let updated = set_status(&mut *conn, workspace_id, relation.id, "deprecated")
         .await
         .unwrap();
     assert_eq!(updated.status, "deprecated");
 
     // Outbound, from the source.
-    let out = neighbors(&mut conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
+    let out = neighbors(&mut *conn, workspace_id, task.id, DEFAULT_NEIGHBORS_LIMIT)
         .await
         .unwrap();
     assert!(out.is_empty(), "deprecated relation is not traversed");
 
     // Inbound, from the target: the 'in' branch of the union is a separate WHERE clause and would keep returning the relation if only the 'out' branch had been filtered.
-    let inbound = neighbors(&mut conn, workspace_id, project.id, DEFAULT_NEIGHBORS_LIMIT)
-        .await
-        .unwrap();
+    let inbound = neighbors(
+        &mut *conn,
+        workspace_id,
+        project.id,
+        DEFAULT_NEIGHBORS_LIMIT,
+    )
+    .await
+    .unwrap();
     assert!(inbound.is_empty(), "not traversed from the target either");
 
     // The batched path is a separate query and has to filter too.
@@ -761,7 +775,7 @@ async fn traversal_skips_non_active_relations(pool: PgPool) {
     );
 
     // The record survives; this is what distinguishes deprecating from deleting.
-    let fetched = get(&mut conn, workspace_id, relation.id).await.unwrap();
+    let fetched = get(&mut *conn, workspace_id, relation.id).await.unwrap();
     assert_eq!(fetched.status, "deprecated");
 }
 
@@ -776,7 +790,7 @@ async fn lists_by_status_and_defaults_to_every_state(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
 
     let relation = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -787,18 +801,18 @@ async fn lists_by_status_and_defaults_to_every_state(pool: PgPool) {
     )
     .await
     .unwrap();
-    set_status(&mut conn, workspace_id, relation.id, "archived")
+    set_status(&mut *conn, workspace_id, relation.id, "archived")
         .await
         .unwrap();
 
     // No status filter: an archived relation is still listed, so a caller that predates the column does not silently lose rows.
-    let all = list(&mut conn, workspace_id, ListRelationsQuery::default())
+    let all = list(&mut *conn, workspace_id, ListRelationsQuery::default())
         .await
         .unwrap();
     assert_eq!(all.len(), 1);
 
     let archived = list(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         ListRelationsQuery {
             status: Some("archived".into()),
@@ -810,7 +824,7 @@ async fn lists_by_status_and_defaults_to_every_state(pool: PgPool) {
     assert_eq!(archived.len(), 1);
 
     let active = list(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         ListRelationsQuery {
             status: Some("active".into()),
@@ -833,7 +847,7 @@ async fn rejects_unknown_status(pool: PgPool) {
     let (task, project) = seed_task_and_project(&mut conn, tenant_id, workspace_id).await;
 
     let relation = create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -846,7 +860,7 @@ async fn rejects_unknown_status(pool: PgPool) {
     .unwrap();
 
     // Validated in Rust, so this is a 422 naming the field rather than the check constraint surfacing as an Internal.
-    let err = set_status(&mut conn, workspace_id, relation.id, "retired")
+    let err = set_status(&mut *conn, workspace_id, relation.id, "retired")
         .await
         .unwrap_err();
     assert!(
@@ -864,7 +878,7 @@ async fn set_status_on_missing_relation_is_not_found(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = set_status(&mut conn, workspace_id, Uuid::nil(), "archived")
+    let err = set_status(&mut *conn, workspace_id, Uuid::nil(), "archived")
         .await
         .unwrap_err();
     assert!(
