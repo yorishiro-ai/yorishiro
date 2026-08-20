@@ -50,5 +50,14 @@ uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+thirtyfour.workspace = true
 tower.workspace = true
 tracing-test = { workspace = true, features = ["no-env-filter"] }
+
+# The browser suite, separate from the crate's own `tests/` tree because it needs things the
+# unit tests do not: a running licensed server, a built SPA, and a chromedriver to drive.
+# `autotests = false` means nothing here is picked up implicitly, so it is named explicitly.
+# Every test in it is `#[ignore]`, so `cargo test` stays the same for anyone who has none of that.
+[[test]]
+name = "e2e"
+path = "tests/e2e/main.rs"
