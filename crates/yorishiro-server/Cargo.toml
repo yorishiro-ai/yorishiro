@@ -6,7 +6,7 @@ license.workspace = true
 description = "HTTP server (REST + MCP) for Yorishiro, an MCP-native knowledge store"
 repository.workspace = true
 readme = "README.md"
-include = ["src/**/*", "README.md", "../../migrations/**/*"]
+include = ["src/**/*", "README.md", "migrations/**/*"]
 autotests = false
 
 # The community edition's binary: BUSL-1.1 only, nothing from `ee/`, and headless because the
@@ -21,7 +21,9 @@ name = "yorishiro-ce-server"
 path = "src/bin/yorishiro_ce_server.rs"
 
 [dependencies]
-yorishiro-core = { path = "../yorishiro-core" }
+# `version` is required for `cargo publish`: a path dependency with none is rejected as unresolvable off this filesystem.
+# The release workflow's version-bump step updates this alongside the workspace version (see `.github/workflows/release.yml`), so it always matches.
+yorishiro-core = { path = "../yorishiro-core", version = "0.49.1" }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true

@@ -73,9 +73,7 @@ async fn run(cli: Cli) -> Result<()> {
     let database_url =
         database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;
-    sqlx::migrate!("../../migrations")
-        .run(&identity_pool)
-        .await?;
+    sqlx::migrate!("./migrations").run(&identity_pool).await?;
 
     if let Some(Command::Admin { command }) = cli.command {
         return admin::run_with_pool(&identity_pool, command).await;

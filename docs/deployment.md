@@ -81,17 +81,18 @@ It must be dispatched from `master`: the workflow refuses any other ref, since i
 What it does, in order:
 
 1. Validates the version is `x.y.z` with no leading zeros, and decides whether this is a fresh release or a resume (see below).
-2. Bumps `workspace.package.version` in the root `Cargo.toml`, runs `cargo update -w`, then pushes the bump commit and the `vX.Y.Z` tag to `master` together, atomically.
+2. Bumps `workspace.package.version` in the root `Cargo.toml`, along with the explicit `version` on `yorishiro-server`'s path dependency on `yorishiro-core` (required for step 6, below), runs `cargo update -w`, then pushes the bump commit and the `vX.Y.Z` tag to `master` together, atomically.
 3. Builds both editions for `x86_64` and `aarch64` Linux and packages each as a `.deb` and an `.rpm`: eight files.
    Both architectures build natively (no QEMU), matching the `ort`/onnxruntime build requirements.
 4. Builds and pushes a multi-arch Docker image to `ghcr.io/yotsunagi/yorishiro:vX.Y.Z` and `:latest`.
 5. **Pulls that published image and boots it against a real PostgreSQL**, failing the release if it does not answer `/up`.
-6. Creates the GitHub Release, attaching the eight packages and a `checksums.txt` over them.
+6. Publishes `yorishiro-core` and `yorishiro-server` (the two BUSL-1.1 crates; `ee/`'s `yorishiro-hosted` carries `publish = false` and is never a candidate) to [crates.io](https://crates.io/crates/yorishiro-core), skipping a crate already at this version so a resumed release does not fail on the one that already went through.
+7. Creates the GitHub Release, attaching the eight packages and a `checksums.txt` over them.
    It counts each group first and fails before publishing if any is empty, since a glob that matches nothing is not an error to the upload action.
 
 ### Recovering from a failed release
 
-The tag lands atomically with the bump in step 2, so a failure in steps 3-5 leaves the tag on `master` with no GitHub Release.
+The tag lands atomically with the bump in step 2, so a failure in steps 3-6 leaves the tag on `master` with no GitHub Release.
 **Dispatch the same version again.**
 The workflow tells the two states apart by whether the GitHub Release exists, not by whether the tag does:
 
