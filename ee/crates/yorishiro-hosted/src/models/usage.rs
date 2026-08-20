@@ -93,5 +93,5 @@ pub async fn compute_tenant_usage(
 }
 
 #[cfg(test)]
-#[path = "../../tests/services/usage.rs"]
+#[path = "../../tests/models/usage.rs"]
 mod tests;

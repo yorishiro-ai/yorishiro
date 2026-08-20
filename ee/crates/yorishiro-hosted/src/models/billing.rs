@@ -128,5 +128,5 @@ pub async fn set_plan(pool: &PgPool, tenant_id: Uuid, plan: &str) -> Result<(), 
 }
 
 #[cfg(test)]
-#[path = "../../tests/services/billing.rs"]
+#[path = "../../tests/models/billing.rs"]
 mod tests;

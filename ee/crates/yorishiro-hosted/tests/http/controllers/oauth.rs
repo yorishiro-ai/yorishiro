@@ -7,7 +7,7 @@ use axum::http::{Request, StatusCode};
 use sqlx::PgPool;
 use tower::ServiceExt;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 
 use crate::tests::test_helpers;
 use test_helpers::hosted_state;

@@ -6,7 +6,7 @@ use crate::tests::test_helpers;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::db::TenantDb;
 use yorishiro_core::metaschema::MetaSchemaDefinition;
-use yorishiro_core::repositories::schemas::{
+use yorishiro_core::models::schemas::{
     create_schema, create_schema_from, create_schema_with_base, get_active_schema, get_by_id,
 };
 

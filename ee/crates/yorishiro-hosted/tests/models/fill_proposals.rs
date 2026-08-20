@@ -1,7 +1,7 @@
 use super::*;
 use crate::tests::test_helpers::{seed_tenant, seed_workspace};
 use sqlx::PgPool;
-use yorishiro_core::repositories::{entities, schemas};
+use yorishiro_core::models::{entities, schemas};
 
 /// A schema with one required field and one the model might fill in.
 async fn seed_entity(pool: &PgPool) -> (Uuid, Uuid) {

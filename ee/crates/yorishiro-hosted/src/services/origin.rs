@@ -13,9 +13,7 @@ use uuid::Uuid;
 use yorishiro_core::ResultExt;
 use yorishiro_core::error::YorishiroError;
 use yorishiro_core::metaschema::{MetaSchemaDefinition, VersioningDiff};
-use yorishiro_core::repositories::schemas::{
-    SchemaRecord, UpstreamChange, create_schema_with_base,
-};
+use yorishiro_core::models::schemas::{SchemaRecord, UpstreamChange, create_schema_with_base};
 
 use crate::services::merge::{self, MergePlan};
 
@@ -93,8 +91,7 @@ async fn merge_sides(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<MergeSides, YorishiroError> {
-    let schema =
-        yorishiro_core::repositories::schemas::get_by_id(conn, workspace_id, schema_id).await?;
+    let schema = yorishiro_core::models::schemas::get_by_id(conn, workspace_id, schema_id).await?;
 
     // `get_by_id` fetches any version, archived ones included: it is how a caller reads an old definition.
     // Merging into one is a different matter: `create_schema_with_base` archives whatever is currently active and installs the result as the new active version, so merging an archived version would resurrect an abandoned definition as the live one, and entities written against the current active version would find their schema replaced by an older lineage.
@@ -134,7 +131,7 @@ async fn merge_sides(
     };
 
     let template =
-        yorishiro_core::repositories::tenancy::get_template(pool, tenant_id, template_id).await?;
+        yorishiro_core::models::tenancy::get_template(pool, tenant_id, template_id).await?;
 
     Ok(MergeSides {
         base,

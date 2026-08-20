@@ -43,7 +43,7 @@ pub fn unlicensed_hosted_state(pool: PgPool) -> HostedState {
 /// Seeds a tenant, returning its id.
 #[allow(dead_code)]
 pub async fn seed_tenant(pool: &PgPool, name: &str) -> uuid::Uuid {
-    yorishiro_core::repositories::tenancy::create_tenant(pool, name, None)
+    yorishiro_core::models::tenancy::create_tenant(pool, name, None)
         .await
         .unwrap()
         .id
@@ -52,7 +52,7 @@ pub async fn seed_tenant(pool: &PgPool, name: &str) -> uuid::Uuid {
 /// Seeds a workspace under an existing tenant, returning its id.
 #[allow(dead_code)]
 pub async fn seed_workspace(pool: &PgPool, tenant_id: uuid::Uuid, name: &str) -> uuid::Uuid {
-    yorishiro_core::repositories::tenancy::create_workspace(pool, tenant_id, name, None, None, None)
+    yorishiro_core::models::tenancy::create_workspace(pool, tenant_id, name, None, None, None)
         .await
         .unwrap()
         .id

@@ -8,7 +8,7 @@ use tower::ServiceExt;
 use tracing_test::traced_test;
 use uuid::Uuid;
 use yorishiro_core::db::TenantDb;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::{ApiKeyScope, create_api_key};
 
 use crate::tests::test_helpers;

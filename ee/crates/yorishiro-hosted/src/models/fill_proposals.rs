@@ -13,7 +13,7 @@ use sqlx::{Connection, PgConnection};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use yorishiro_core::repositories::entities;
+use yorishiro_core::models::entities;
 use yorishiro_core::{ResultExt, YorishiroError};
 
 #[derive(Iden)]
@@ -191,5 +191,5 @@ pub async fn confirm(
 }
 
 #[cfg(test)]
-#[path = "../../tests/services/fill_proposals.rs"]
+#[path = "../../tests/models/fill_proposals.rs"]
 mod tests;

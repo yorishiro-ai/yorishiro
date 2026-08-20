@@ -1,11 +1,11 @@
-use crate::services::usage::compute_tenant_usage;
+use crate::models::usage::compute_tenant_usage;
 use serde_json::json;
 use sqlx::PgPool;
 use yorishiro_core::db::TenantDb;
 use yorishiro_core::metaschema::MetaSchemaDefinition;
-use yorishiro_core::repositories::entities::{self, CreateEntityInput};
-use yorishiro_core::repositories::schemas;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::entities::{self, CreateEntityInput};
+use yorishiro_core::models::schemas;
+use yorishiro_core::models::tenancy;
 
 fn note_schema() -> MetaSchemaDefinition {
     serde_json::from_value(json!({

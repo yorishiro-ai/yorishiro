@@ -18,7 +18,7 @@ use uuid::Uuid;
 use yorishiro_core::ResultExt;
 use yorishiro_core::error::YorishiroError;
 use yorishiro_core::metaschema::VersioningDiff;
-use yorishiro_core::repositories::schemas::{SchemaRecord, UpstreamChange};
+use yorishiro_core::models::schemas::{SchemaRecord, UpstreamChange};
 use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
 
 use crate::error::HostedApiError;

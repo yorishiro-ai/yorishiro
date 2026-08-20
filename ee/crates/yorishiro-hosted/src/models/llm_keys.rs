@@ -181,5 +181,5 @@ pub async fn get(
 }
 
 #[cfg(test)]
-#[path = "../../tests/services/llm_keys.rs"]
+#[path = "../../tests/models/llm_keys.rs"]
 mod tests;

@@ -1,13 +1,13 @@
 //! Find-or-create for OAuth-provisioned users, plus the tenant/workspace auto-provisioning that happens the first time a given identity logs in.
-//! Lives in this crate (not `yorishiro_core::repositories::tenancy`) because `oauth_provider`/`oauth_subject_id` are columns this repo's own migration adds (see `migrations/20260730100001_oauth_identity.sql`).
+//! Lives in this crate (not `yorishiro_core::models::tenancy`) because `oauth_provider`/`oauth_subject_id` are columns this repo's own migration adds (see `migrations/20260730100001_oauth_identity.sql`).
 //! `yorishiro-core`'s `UserRecord`/`users` repository module knows nothing about them, and this crate isn't allowed to modify that upstream crate.
 
 use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
-use yorishiro_core::repositories::schemas;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::schemas;
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::{ResultExt, YorishiroError};
 
 use crate::services::plan::Plan;
@@ -64,7 +64,7 @@ pub enum CreateOauthUserError {
 /// Creates a new OAuth-provisioned user row (`password_hash` left `NULL`, per the migration's CHECK constraint).
 /// Does not touch tenancy: see `find_or_create` for the caller that wires a freshly created user into a tenant/workspace/membership.
 ///
-/// Takes `&mut PgConnection` (rather than `&PgPool`) so `find_or_create` can run this on the same transaction as `tenancy::add_member`, mirroring how base's `yorishiro_core::repositories:: tenancy::create_user`/`add_member` compose (see their doc comments): both must run in one transaction, or a crash between this insert and `add_member` would leave an orphaned user row with no tenant membership, and every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
+/// Takes `&mut PgConnection` (rather than `&PgPool`) so `find_or_create` can run this on the same transaction as `tenancy::add_member`, mirroring how base's `yorishiro_core::models:: tenancy::create_user`/`add_member` compose (see their doc comments): both must run in one transaction, or a crash between this insert and `add_member` would leave an orphaned user row with no tenant membership, and every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
 ///
 /// `pub` (and re-exported from `oauth::mod`) purely so `crates/yorishiro-hosted/tests/` can exercise the same-transaction rollback directly, without going through the advisory-lock machinery `find_or_create` wraps it in.
 pub async fn create_oauth_user(
@@ -134,7 +134,7 @@ const LOCK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(1
 /// A lookup done *before* acquiring the lock (a tempting "fast path" for the common returning-user case) reopens exactly that window, so there is deliberately no such fast path: every login pays for the lock acquisition, which is cheap and never contended across distinct identities.
 ///
 /// The user-row insert and `add_member` both run on `lock_conn`'s transaction (see `acquire_identity_lock`), so a crash between them rolls back the insert instead of leaving an orphaned user row with no tenant membership, which every later login for that identity would otherwise resolve to a permanent `ScopeInsufficient`.
-/// This mirrors how base's `yorishiro_core::repositories::tenancy::create_user`/`add_member` compose in one transaction (see their doc comments); `tenancy::create_tenant`/`create_workspace` remain on `&PgPool` (base hasn't changed their signature), so tenant/schema/workspace creation in between is still its own set of separate commits.
+/// This mirrors how base's `yorishiro_core::models::tenancy::create_user`/`add_member` compose in one transaction (see their doc comments); `tenancy::create_tenant`/`create_workspace` remain on `&PgPool` (base hasn't changed their signature), so tenant/schema/workspace creation in between is still its own set of separate commits.
 /// An orphaned *tenant* with no membership is still possible, but that's harmless (nothing ever looks a tenant up by "was it ever joined"), unlike the orphaned *user* row this closes.
 /// The embedding model name and width to stamp a workspace with, resolved the same way `yorishiro_server::embedding_model_name()` and `build_embedding_provider()` resolve them.
 ///
