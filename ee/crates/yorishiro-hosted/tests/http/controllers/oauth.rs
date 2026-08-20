@@ -197,7 +197,7 @@ async fn create_oauth_user_and_add_member_roll_back_together_on_failure(pool: Pg
 
     // A tenant id nothing points to: `add_member`'s own `get_tenant` call fails, so this must fail before the membership insert: exactly the "insert, then fail" shape a mid-flight crash would produce if these two writes weren't sharing a transaction.
     let add_member_result = tenancy::add_member(
-        &mut tx,
+        &mut *tx,
         uuid::Uuid::new_v4(),
         user.id,
         MembershipRole::Member,

@@ -11,11 +11,11 @@ async fn owner_can_create_list_and_delete_workspaces(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
+    let owner = tenancy::create_user(&mut *conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant.id,
         owner.id,
         tenancy::MembershipRole::Owner,
@@ -109,11 +109,11 @@ async fn cannot_delete_a_tenants_only_workspace(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
+    let owner = tenancy::create_user(&mut *conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant.id,
         owner.id,
         tenancy::MembershipRole::Owner,
@@ -150,11 +150,11 @@ async fn member_role_cannot_create_or_delete_workspaces(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let member = tenancy::create_user(&mut conn, "member@example.com", "hunter2-hunter2", None)
+    let member = tenancy::create_user(&mut *conn, "member@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant.id,
         member.id,
         tenancy::MembershipRole::Member,
@@ -225,11 +225,11 @@ async fn workspace_endpoints_enforce_tenant_isolation(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let owner_a = tenancy::create_user(&mut conn, "owner-a@example.com", "hunter2-hunter2", None)
+    let owner_a = tenancy::create_user(&mut *conn, "owner-a@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant_a.id,
         owner_a.id,
         tenancy::MembershipRole::Owner,

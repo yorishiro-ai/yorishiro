@@ -46,7 +46,7 @@ pub async fn tenant_overview(
         })?;
 
     let mut conn = state.identity_pool.acquire().await.internal()?;
-    let tenant = tenancy::get_tenant(&mut conn, tenant_id).await?;
+    let tenant = tenancy::get_tenant(&mut *conn, tenant_id).await?;
     let billing = billing::get_billing(&state.identity_pool, tenant_id).await?;
     let usage = usage::compute_tenant_usage(&state.identity_pool, tenant_id).await?;
     let members = tenancy::list_members(&state.identity_pool, tenant_id).await?;

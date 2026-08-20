@@ -444,7 +444,7 @@ pub async fn create_schema_with_base(
 
     // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.
     // Unconditional and idempotent: every version after the first finds it active already, and checking first would only add a round trip.
-    crate::models::tenancy::mark_active(&mut tx, workspace_id, row.id).await?;
+    crate::models::tenancy::mark_active(&mut *tx, workspace_id, row.id).await?;
 
     tx.commit().await.internal()?;
 

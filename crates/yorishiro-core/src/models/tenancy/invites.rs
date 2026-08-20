@@ -75,7 +75,7 @@ pub async fn create_invite(
     ttl: Duration,
 ) -> Result<(InviteRecord, String), YorishiroError> {
     let mut conn = pool.acquire().await.internal()?;
-    get_tenant(&mut conn, tenant_id).await?;
+    get_tenant(&mut *conn, tenant_id).await?;
 
     let token = random_hex(INVITE_TOKEN_BYTES);
     let token_hash = hash_key(&token);

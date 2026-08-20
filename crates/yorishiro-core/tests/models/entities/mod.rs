@@ -512,7 +512,7 @@ async fn creating_the_first_schema_activates_the_workspace(pool: PgPool) {
         .unwrap();
 
     assert!(
-        crate::models::tenancy::is_schema_pending(&mut conn, workspace_id)
+        crate::models::tenancy::is_schema_pending(&mut *conn, workspace_id)
             .await
             .unwrap(),
         "a fresh workspace starts pending"
@@ -523,7 +523,7 @@ async fn creating_the_first_schema_activates_the_workspace(pool: PgPool) {
         .unwrap();
 
     assert!(
-        !crate::models::tenancy::is_schema_pending(&mut conn, workspace_id)
+        !crate::models::tenancy::is_schema_pending(&mut *conn, workspace_id)
             .await
             .unwrap(),
         "the first schema activates it"
@@ -562,7 +562,7 @@ async fn a_further_schema_version_leaves_the_workspace_active(pool: PgPool) {
         .unwrap();
 
     assert!(
-        !crate::models::tenancy::is_schema_pending(&mut conn, workspace_id)
+        !crate::models::tenancy::is_schema_pending(&mut *conn, workspace_id)
             .await
             .unwrap()
     );

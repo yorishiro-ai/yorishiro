@@ -143,7 +143,7 @@ pub async fn find_or_create(
         schemas::create_schema(&mut conn, tenant.id, workspace.id, definition).await?;
     drop(conn);
     tenancy::set_workspace_schema(pool, workspace.id, schema.id).await?;
-    tenancy::add_member(&mut lock_conn, tenant.id, user.id, MembershipRole::Member).await?;
+    tenancy::add_member(&mut *lock_conn, tenant.id, user.id, MembershipRole::Member).await?;
 
     // Commits the user row and membership (see the doc comment above), and releases the advisory lock: the latter is the signal a waiting `acquire_identity_lock` retry loop is polling for, so this must not happen until provisioning has fully committed.
     lock_conn.commit().await.internal()?;

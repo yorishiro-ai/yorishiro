@@ -11,11 +11,11 @@ async fn owner_can_list_and_add_members(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
+    let owner = tenancy::create_user(&mut *conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant.id,
         owner.id,
         tenancy::MembershipRole::Owner,
@@ -32,7 +32,7 @@ async fn owner_can_list_and_add_members(pool: PgPool) {
     .await;
 
     // The invitee must already have an account before they can be added by email.
-    let invitee = tenancy::create_user(&mut conn, "invitee@example.com", "hunter2-hunter2", None)
+    let invitee = tenancy::create_user(&mut *conn, "invitee@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     drop(conn);
@@ -82,11 +82,11 @@ async fn add_member_rejects_an_email_with_no_account(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let owner = tenancy::create_user(&mut conn, "owner@example.com", "hunter2-hunter2", None)
+    let owner = tenancy::create_user(&mut *conn, "owner@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant.id,
         owner.id,
         tenancy::MembershipRole::Owner,
@@ -126,11 +126,11 @@ async fn member_role_cannot_manage_members(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let member = tenancy::create_user(&mut conn, "member@example.com", "hunter2-hunter2", None)
+    let member = tenancy::create_user(&mut *conn, "member@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant.id,
         member.id,
         tenancy::MembershipRole::Member,

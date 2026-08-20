@@ -338,7 +338,7 @@ pub async fn create(
 
     // Before resolving the schema, so an empty workspace is told it is empty.
     // Resolving first would report the schema name as not found, which reads as a typo rather than as "nothing has been defined here yet".
-    if crate::models::tenancy::is_schema_pending(&mut tx, workspace_id).await? {
+    if crate::models::tenancy::is_schema_pending(&mut *tx, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "workspace '{workspace_id}' has no schema yet, so there is nothing to \

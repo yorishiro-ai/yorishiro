@@ -147,7 +147,7 @@ async fn login_rejects_an_incorrect_password(pool: PgPool) {
         .await
         .unwrap();
     tenancy::create_user(
-        &mut pool.acquire().await.unwrap(),
+        &mut *pool.acquire().await.unwrap(),
         "someone@example.com",
         "correct-horse",
         None,
@@ -237,11 +237,11 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
         .unwrap();
 
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, "multi@example.com", "hunter2-hunter2", None)
+    let user = tenancy::create_user(&mut *conn, "multi@example.com", "hunter2-hunter2", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant_a.id,
         user.id,
         tenancy::MembershipRole::Member,
@@ -249,7 +249,7 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
     .await
     .unwrap();
     tenancy::add_member(
-        &mut conn,
+        &mut *conn,
         tenant_b.id,
         user.id,
         tenancy::MembershipRole::Member,
@@ -306,7 +306,7 @@ async fn login_requires_workspace_id_when_the_account_has_access_to_more_than_on
 #[sqlx::test(migrations = "../../migrations")]
 async fn login_rejects_an_account_with_no_tenant_membership(pool: PgPool) {
     tenancy::create_user(
-        &mut pool.acquire().await.unwrap(),
+        &mut *pool.acquire().await.unwrap(),
         "orphan@example.com",
         "hunter2-hunter2",
         None,

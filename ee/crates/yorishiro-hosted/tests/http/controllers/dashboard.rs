@@ -47,10 +47,10 @@ async fn owner_can_read_the_tenant_overview(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, "owner@acme.test", "password123", None)
+    let user = tenancy::create_user(&mut *conn, "owner@acme.test", "password123", None)
         .await
         .unwrap();
-    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Owner)
+    tenancy::add_member(&mut *conn, tenant.id, user.id, MembershipRole::Owner)
         .await
         .unwrap();
     let key = issue_key(&pool, tenant.id, workspace.id, Some(user.id)).await;
@@ -84,10 +84,10 @@ async fn member_role_is_forbidden_from_the_dashboard(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, "member@acme.test", "password123", None)
+    let user = tenancy::create_user(&mut *conn, "member@acme.test", "password123", None)
         .await
         .unwrap();
-    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Member)
+    tenancy::add_member(&mut *conn, tenant.id, user.id, MembershipRole::Member)
         .await
         .unwrap();
     let key = issue_key(&pool, tenant.id, workspace.id, Some(user.id)).await;
