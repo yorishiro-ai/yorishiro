@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::config::{PACKAGED_CONFIG_PATH, config_path_from, load_and_apply_env_overrides};
 
-// Env vars are process-wide state; serialize tests through this lock rather than racing each other (same pattern as `yorishiro_core::repositories::tenancy`'s env tests).
+// Env vars are process-wide state; serialize tests through this lock rather than racing each other (same pattern as `yorishiro_core::models::tenancy`'s env tests).
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct EnvGuard {

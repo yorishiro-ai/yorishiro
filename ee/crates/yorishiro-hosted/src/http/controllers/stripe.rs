@@ -6,11 +6,11 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
-use crate::services::billing;
+use crate::models::billing;
+use crate::models::stripe_events;
 use crate::services::plan::{Plan, StripePriceMapping};
-use crate::services::stripe_events;
 use crate::services::{hmac_sign, non_empty_env};
 use crate::state::HostedState;
 

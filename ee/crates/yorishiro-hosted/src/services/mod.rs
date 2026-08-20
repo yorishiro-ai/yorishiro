@@ -1,19 +1,14 @@
 pub(crate) mod authz;
-pub mod billing;
-pub mod fill_proposals;
 pub(crate) mod hmac_sign;
 pub mod inference;
 pub mod licence;
-pub mod llm_keys;
 pub mod marketplace;
 pub mod merge;
 pub mod oauth;
 pub mod official_templates;
 pub mod origin;
 pub mod plan;
-pub mod stripe_events;
 pub mod tenant_auth;
-pub mod usage;
 
 // The bind address and the empty-string fold are not edition-specific, so they live in `yorishiro-server` where the community binary can reach them too.
 // Re-exported rather than re-implemented: two copies of "what counts as unset" is how the two drift apart.

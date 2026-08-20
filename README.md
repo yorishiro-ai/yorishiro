@@ -42,7 +42,7 @@ It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
   - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
-  - `yorishiro-core` owns the repositories and issues every query; `yorishiro-server` adapts them to HTTP and MCP.
+  - `yorishiro-core` owns the models and issues every query; `yorishiro-server` adapts them to HTTP and MCP.
 - Two-tier tenancy
   - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer.
     A tenant owns one or more **workspaces**.
@@ -176,6 +176,7 @@ The paid half documents itself in [`ee/README.md`](ee/README.md) ([日本語](ee
 | [docs/configuration.md](docs/configuration.md) | Environment variable / `config.yml` reference |
 | [docs/deployment.md](docs/deployment.md) | Production deployment guide |
 | [docs/operations.md](docs/operations.md) | Operational notes: backups, rate limiting, observability |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Where code goes, how `tests/` mirrors `src/`, what to run before pushing |
 
 ## Development
 

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use sqlx::PgPool;
 
-use crate::repositories::maintenance::MaintenanceMode;
+use crate::models::maintenance::MaintenanceMode;
 use crate::services::db_load_guard::{AUTO_REASON, LoadGuardConfig, active_connections, decide};
 
 const SUSTAIN: Duration = Duration::from_secs(30);
@@ -84,7 +84,7 @@ async fn counts_the_connections_it_claims_to(pool: PgPool) {
 }
 
 /// Serializes the tests below, which set process-wide environment variables.
-/// Same shape and same reasoning as `MaxTenantsGuard` in `tests/repositories/tenancy/tenants.rs`, including taking the lock with `unwrap_or_else(|e| e.into_inner())` so one panicking test does not cascade into unrelated failures.
+/// Same shape and same reasoning as `MaxTenantsGuard` in `tests/models/tenancy/tenants.rs`, including taking the lock with `unwrap_or_else(|e| e.into_inner())` so one panicking test does not cascade into unrelated failures.
 static LOAD_GUARD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct LoadGuardEnv {

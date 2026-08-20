@@ -12,14 +12,14 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use yorishiro_core::ResultExt;
 use yorishiro_core::error::YorishiroError;
-use yorishiro_core::repositories::schemas;
+use yorishiro_core::models::schemas;
 use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
 
 use crate::error::HostedApiError;
+use crate::models::fill_proposals::{self, ConfirmReport, FillProposal};
+use crate::models::llm_keys::{self, LlmKeyDescription};
 use crate::services::authz;
-use crate::services::fill_proposals::{self, ConfirmReport, FillProposal};
 use crate::services::inference::InferenceClient;
-use crate::services::llm_keys::{self, LlmKeyDescription};
 use crate::state::HostedState;
 
 /// The community edition's `Authorized<Scope>` extractor is not reachable from here, so the scope check is written out.

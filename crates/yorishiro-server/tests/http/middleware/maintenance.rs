@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sqlx::PgPool;
 use tower::ServiceExt;
-use yorishiro_core::repositories::maintenance::{MaintenanceMode, set};
+use yorishiro_core::models::maintenance::{MaintenanceMode, set};
 
 use crate::build_app;
 use crate::test_support::*;

@@ -2,7 +2,7 @@ use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::{self, Authenticator};
 
 use crate::state::HostedState;

@@ -143,14 +143,13 @@ pub async fn create_tenant_api_key(
     }
 
     if let Some(user_id) = user_id {
-        let role =
-            yorishiro_core::repositories::tenancy::get_membership_role(pool, tenant_id, user_id)
-                .await?
-                .ok_or_else(|| {
-                    YorishiroError::not_found(format!(
-                        "user '{user_id}' is not a member of tenant '{tenant_id}'"
-                    ))
-                })?;
+        let role = yorishiro_core::models::tenancy::get_membership_role(pool, tenant_id, user_id)
+            .await?
+            .ok_or_else(|| {
+                YorishiroError::not_found(format!(
+                    "user '{user_id}' is not a member of tenant '{tenant_id}'"
+                ))
+            })?;
         if scope > role.max_scope() {
             return Err(YorishiroError::ScopeInsufficient {
                 message: format!(

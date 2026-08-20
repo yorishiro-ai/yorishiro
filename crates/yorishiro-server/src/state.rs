@@ -6,7 +6,7 @@ use tokio::sync::Semaphore;
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 use yorishiro_core::db::TenantDb;
-use yorishiro_core::repositories::entities::EntityRecord;
+use yorishiro_core::models::entities::EntityRecord;
 use yorishiro_core::services::auth::{Authenticator, default_authenticator};
 use yorishiro_core::services::embedding::EmbeddingProvider;
 use yorishiro_core::services::embedding::sync as embedding_sync;

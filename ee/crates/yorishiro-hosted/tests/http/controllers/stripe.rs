@@ -1,5 +1,5 @@
 use crate::http::controllers::stripe::{StripeConfig, stripe_webhook, verify_stripe_signature};
-use crate::services::billing;
+use crate::models::billing;
 use crate::services::plan::StripePriceMapping;
 use crate::state::HostedState;
 use axum::Router;
@@ -11,7 +11,7 @@ use serde_json::json;
 use sha2::Sha256;
 use sqlx::PgPool;
 use tower::ServiceExt;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
 use crate::tests::test_helpers;
 
@@ -121,7 +121,7 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 /// Reads the tenant's workspace cap, which the plan change writes alongside the plan itself.
 async fn tenant_max_workspaces(pool: &PgPool, tenant_id: uuid::Uuid) -> Option<i32> {
     let mut conn = pool.acquire().await.unwrap();
-    yorishiro_core::repositories::tenancy::get_tenant(&mut conn, tenant_id)
+    yorishiro_core::models::tenancy::get_tenant(&mut conn, tenant_id)
         .await
         .unwrap()
         .max_workspaces
@@ -324,7 +324,7 @@ async fn a_checkout_completion_does_not_block_an_earlier_created_subscription_ev
 /// Missing the cap would leave a cancelled tenant with a paid tier's limits, which is the expensive direction to get wrong.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_cancellation_returns_the_tenant_to_free(pool: PgPool) {
-    let tenant = yorishiro_core::repositories::tenancy::create_tenant(&pool, "acme", None)
+    let tenant = yorishiro_core::models::tenancy::create_tenant(&pool, "acme", None)
         .await
         .unwrap();
     billing::link_stripe_customer(&pool, tenant.id, "cus_cancel")

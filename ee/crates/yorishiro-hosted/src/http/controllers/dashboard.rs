@@ -4,12 +4,12 @@ use axum::http::HeaderMap;
 use serde::Serialize;
 use uuid::Uuid;
 use yorishiro_core::ResultExt;
-use yorishiro_core::repositories::tenancy::{self, MembershipRecord};
+use yorishiro_core::models::tenancy::{self, MembershipRecord};
 
 use crate::error::HostedApiError;
+use crate::models::billing;
+use crate::models::usage::{self, TenantUsage};
 use crate::services::authz::authenticate_tenant_admin;
-use crate::services::billing;
-use crate::services::usage::{self, TenantUsage};
 use crate::state::HostedState;
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]

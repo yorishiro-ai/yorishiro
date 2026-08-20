@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
-use yorishiro_core::repositories::relations;
+use yorishiro_core::models::relations;
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};

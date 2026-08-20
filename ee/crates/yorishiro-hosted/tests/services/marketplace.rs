@@ -22,7 +22,7 @@ async fn seed_template(pool: &PgPool, tenant_id: Uuid, name: &str, visibility: &
 }
 
 async fn seed_tenant(pool: &PgPool, name: &str) -> Uuid {
-    yorishiro_core::repositories::tenancy::create_tenant(pool, name, None)
+    yorishiro_core::models::tenancy::create_tenant(pool, name, None)
         .await
         .unwrap()
         .id

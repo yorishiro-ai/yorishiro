@@ -180,6 +180,7 @@ $ make init
 | [docs/ja/configuration.md](configuration.md) | 環境変数/`config.yml`リファレンス |
 | [docs/ja/deployment.md](deployment.md) | 本番デプロイ手順 |
 | [docs/ja/operations.md](operations.md) | 運用上の注意(バックアップ・レート制限・可観測性) |
+| [docs/ja/contributing.md](contributing.md) | コードをどこに置くか、`tests/` が `src/` を写す仕組み、push前に走らせるもの |
 
 ## 開発
 

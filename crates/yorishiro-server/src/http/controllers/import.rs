@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::http::StatusCode;
-use yorishiro_core::repositories::import::{self, ImportResult};
+use yorishiro_core::models::import::{self, ImportResult};
 
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, SchemaScope};

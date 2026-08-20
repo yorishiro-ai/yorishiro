@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use yorishiro_core::repositories::tenancy::WorkspaceRecord;
-use yorishiro_core::repositories::{entities, relations, schemas, tenancy};
+use yorishiro_core::models::tenancy::WorkspaceRecord;
+use yorishiro_core::models::{entities, relations, schemas, tenancy};
 use yorishiro_core::{ResultExt, YorishiroError};
 
 use crate::error::ApiError;

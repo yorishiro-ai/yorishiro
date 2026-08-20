@@ -8,7 +8,7 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
-use yorishiro_core::repositories::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
+use yorishiro_core::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};

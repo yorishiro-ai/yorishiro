@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::repositories::search;
+use yorishiro_core::models::search;
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use super::{YorishiroMcpServer, mcp_try, ok_json, verified};

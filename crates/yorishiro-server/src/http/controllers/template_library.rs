@@ -6,7 +6,7 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 use yorishiro_core::metaschema::MetaSchemaDefinition;
-use yorishiro_core::repositories::tenancy::{
+use yorishiro_core::models::tenancy::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
 

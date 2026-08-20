@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::EntityTypeDef;
 use crate::models::entities::EntityRecord;
-use crate::repositories::schemas;
+use crate::models::schemas;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 /// `pub` (rather than private) only so the crate-root integration test in `tests/` can build its own query against this table; `#[doc(hidden)]` keeps it out of the public API docs.

@@ -229,9 +229,9 @@ fn guarded(router: Router, pool: PgPool) -> Router {
 /// Without that, an operator who switched the deployment to read-only would still have `/hosted/stripe/webhook` accepting billing events: the community edition's `/api/*` would refuse while this crate's routes kept writing, which is worse than either refusing everything or refusing nothing, because the two halves of one deployment would disagree about whether it is paused.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn read_only_mode_refuses_this_crates_writes(pool: PgPool) {
-    yorishiro_core::repositories::maintenance::set(
+    yorishiro_core::models::maintenance::set(
         &pool,
-        yorishiro_core::repositories::maintenance::MaintenanceMode::ReadOnly,
+        yorishiro_core::models::maintenance::MaintenanceMode::ReadOnly,
         30,
         None,
     )
@@ -262,9 +262,9 @@ async fn read_only_mode_refuses_this_crates_writes(pool: PgPool) {
 /// `/auth/oauth/status` is what the login page polls, so refusing it would make a paused deployment look broken rather than paused.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn read_only_mode_still_serves_this_crates_reads(pool: PgPool) {
-    yorishiro_core::repositories::maintenance::set(
+    yorishiro_core::models::maintenance::set(
         &pool,
-        yorishiro_core::repositories::maintenance::MaintenanceMode::ReadOnly,
+        yorishiro_core::models::maintenance::MaintenanceMode::ReadOnly,
         30,
         None,
     )
@@ -289,9 +289,9 @@ async fn read_only_mode_still_serves_this_crates_reads(pool: PgPool) {
 /// A full lock refuses reads as well, including the OAuth login pair: letting someone start a login flow against a fully locked deployment would hand them an API key for a system that is about to refuse every call they make with it.
 #[sqlx::test(migrations = "../../../migrations")]
 async fn a_full_lock_refuses_the_oauth_login_routes(pool: PgPool) {
-    yorishiro_core::repositories::maintenance::set(
+    yorishiro_core::models::maintenance::set(
         &pool,
-        yorishiro_core::repositories::maintenance::MaintenanceMode::FullLock,
+        yorishiro_core::models::maintenance::MaintenanceMode::FullLock,
         30,
         None,
     )

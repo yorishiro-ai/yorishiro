@@ -86,11 +86,11 @@ async fn seed_embedded_entity(
         }
     }))
     .unwrap();
-    yorishiro_core::repositories::schemas::create_schema(conn, tenant_id, workspace_id, definition)
+    yorishiro_core::models::schemas::create_schema(conn, tenant_id, workspace_id, definition)
         .await
         .unwrap();
 
-    let record = yorishiro_core::repositories::entities::create(
+    let record = yorishiro_core::models::entities::create(
         conn,
         workspace_id,
         yorishiro_core::models::entities::CreateEntityInput {

@@ -6,10 +6,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
-use yorishiro_core::repositories::entities::{
+use yorishiro_core::models::entities::{
     self, EntityDrift, EntityRecord, FillDefaultsReport, MigrationDryRun, UndoReport,
 };
-use yorishiro_core::repositories::recall::{self, RecallContext, RecallQuery};
+use yorishiro_core::models::recall::{self, RecallContext, RecallQuery};
 
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, MigrationScope, ReadScope, WriteScope};
