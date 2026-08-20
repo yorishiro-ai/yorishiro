@@ -314,3 +314,30 @@ $ curl -i localhost:8080/auth/oauth/authorize
 HTTP/1.1 302 Found
 location: https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=...
 ```
+
+## Entity table columns
+
+The create form builds its fields from the schema.
+The table that lists the results showed the same four columns for every workspace, so a schema declaring `status` and `priority` hid both until you opened a row.
+
+| Endpoint | Scope | Purpose |
+|---|---|---|
+| `GET /api/workspace/entity-columns` | read | Every stored choice in the workspace |
+| `PUT /api/workspace/entity-columns/{entity_type}` | write | The visible columns for one entity type, in display order |
+| `DELETE /api/workspace/entity-columns/{entity_type}` | write | Forget the choice, so the schema decides again |
+
+`write`, not `schema`: which columns a table shows is a display preference, so a key that may create entities may also decide how they are listed.
+
+**The choice is per workspace, not per user.** Everyone looking at a workspace sees the same table.
+
+**An absent choice and an empty one are different.** No stored row means the workspace has never chosen and the table derives its columns from the schema; a stored empty list means it chose to show none.
+`DELETE` removes the row rather than storing `[]`, which is what keeps the two distinguishable.
+
+At most 12 columns can be shown at once.
+A table wider than the screen stops being a table, and a schema with sixty fields would otherwise let one click produce one.
+
+A field name the schema no longer defines stays stored and is skipped when rendering.
+Cleaning it up on write would make a schema migration responsible for display settings.
+
+Field-level filtering uses `GET /api/entities`'s `filter` parameter, which is JSONB containment (`data @> filter`).
+Containment matches exactly, so it cannot express a range or a substring, and the UI only offers an input for fields whose values are a closed set: enums and booleans.
