@@ -22,10 +22,10 @@ async fn seed_member(pool: &PgPool, email: &str, role: tenancy::MembershipRole) 
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, email, "hunter2-hunter2", None)
+    let user = tenancy::create_user(&mut *conn, email, "hunter2-hunter2", None)
         .await
         .unwrap();
-    tenancy::add_member(&mut conn, tenant.id, user.id, role)
+    tenancy::add_member(&mut *conn, tenant.id, user.id, role)
         .await
         .unwrap();
     drop(conn);

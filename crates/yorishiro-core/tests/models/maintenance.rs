@@ -86,7 +86,7 @@ fn an_unknown_stored_mode_is_not_read_as_off() {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_fresh_deployment_is_not_in_maintenance(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap();
-    let current = get(&mut conn).await.unwrap();
+    let current = get(&mut *conn).await.unwrap();
     assert_eq!(current.mode, MaintenanceMode::Off);
 }
 
@@ -102,14 +102,14 @@ async fn set_then_get_round_trips(pool: PgPool) {
     .unwrap();
 
     let mut conn = pool.acquire().await.unwrap();
-    let current = get(&mut conn).await.unwrap();
+    let current = get(&mut *conn).await.unwrap();
     assert_eq!(current.mode, MaintenanceMode::ReadOnly);
     assert_eq!(current.retry_after, 45);
     assert_eq!(current.reason.as_deref(), Some("migrating"));
 
     // And back off again, clearing the reason with it.
     set(&pool, MaintenanceMode::Off, 300, None).await.unwrap();
-    let current = get(&mut conn).await.unwrap();
+    let current = get(&mut *conn).await.unwrap();
     assert_eq!(current.mode, MaintenanceMode::Off);
     assert!(current.reason.is_none());
 }

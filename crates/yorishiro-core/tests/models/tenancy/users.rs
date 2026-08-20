@@ -6,7 +6,7 @@ use crate::models::tenancy::{create_user, verify_login};
 #[sqlx::test(migrations = "../../migrations")]
 async fn creates_user_and_verifies_login(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap();
-    let user = create_user(&mut conn, "alice@example.com", "hunter2", Some("Alice"))
+    let user = create_user(&mut *conn, "alice@example.com", "hunter2", Some("Alice"))
         .await
         .unwrap();
     drop(conn);
@@ -31,10 +31,10 @@ async fn creates_user_and_verifies_login(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn rejects_duplicate_email(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap();
-    create_user(&mut conn, "bob@example.com", "pw", None)
+    create_user(&mut *conn, "bob@example.com", "pw", None)
         .await
         .unwrap();
-    let err = create_user(&mut conn, "bob@example.com", "pw2", None)
+    let err = create_user(&mut *conn, "bob@example.com", "pw2", None)
         .await
         .unwrap_err();
     assert!(matches!(err, YorishiroError::Conflict { .. }));

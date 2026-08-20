@@ -8,6 +8,12 @@ repository.workspace = true
 readme = "README.md"
 autotests = false
 
+[features]
+# Type-level only: proves the generic bounds in models/ are satisfiable by Sqlite.
+# Says nothing about the emitted SQL or runtime behavior (step 4's concern).
+# Off by default so no shipped binary links libsqlite3-sys from this crate.
+sqlite = ["sqlx/sqlite", "sea-query-binder/sqlx-sqlite"]
+
 [dependencies]
 anyhow.workspace = true
 argon2.workspace = true

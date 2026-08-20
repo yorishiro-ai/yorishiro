@@ -4,7 +4,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use chrono::{DateTime, Utc};
 use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -42,12 +42,18 @@ fn verify_password(password: &str, hash: &str) -> bool {
 ///
 /// Takes `&mut PgConnection` (rather than `&PgPool`) so a caller can compose this with `add_member` (and anything else) in one transaction: the two must succeed or fail together, or a failure between them leaves an orphaned user row that can never join a tenant (a real bug this signature exists to make impossible: see `signup`, which now wraps both calls in one transaction on `identity_pool`, the only pool with insert privileges on `identity.users`/`identity.tenant_memberships` (`yorishiro_app`, the tenant-scoped role, has none)).
 /// Pass `&mut pool.acquire().await?` for a standalone call.
-pub async fn create_user(
-    conn: &mut PgConnection,
+pub async fn create_user<C>(
+    conn: &mut C,
     email: &str,
     password: &str,
     display_name: Option<&str>,
-) -> Result<UserRecord, YorishiroError> {
+) -> Result<UserRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    UserRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let password_hash = hash_password(password)?;
     let (sql, values) = Query::insert()
         .into_table((Alias::new("identity"), Users::Table))
@@ -59,7 +65,7 @@ pub async fn create_user(
             Users::DisplayName,
             Users::CreatedAt,
         ]))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, UserRecord, _>(&sql, values)
         .fetch_one(&mut *conn)
@@ -84,10 +90,16 @@ pub async fn create_user(
 /// This does *not* prevent two concurrent callbacks for the same new email from both seeing "no user" and both attempting `create_user`: one still loses to `create_user`'s unique-email constraint and its whole transaction rolls back.
 /// What the shared transaction buys is that the loser's flow fails cleanly (a `Conflict`, safe to retry as a plain lookup) instead of leaving a user row with no tenant membership, the way two independent pool round-trips would.
 /// Pass `&mut pool.acquire().await?` for a standalone call.
-pub async fn get_user_by_email(
-    conn: &mut PgConnection,
+pub async fn get_user_by_email<C>(
+    conn: &mut C,
     email: &str,
-) -> Result<Option<UserRecord>, YorishiroError> {
+) -> Result<Option<UserRecord>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    UserRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns([
             Users::Id,
@@ -97,7 +109,7 @@ pub async fn get_user_by_email(
         ])
         .from((Alias::new("identity"), Users::Table))
         .and_where(Expr::col(Users::Email).eq(email))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, UserRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)

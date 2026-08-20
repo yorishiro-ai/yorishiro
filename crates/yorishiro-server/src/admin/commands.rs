@@ -149,7 +149,7 @@ pub async fn resync_embeddings(
     for (entity_id,) in ids {
         let result = async {
             let record =
-                yorishiro_core::models::entities::get(&mut conn, workspace_id, entity_id).await?;
+                yorishiro_core::models::entities::get(&mut *conn, workspace_id, entity_id).await?;
             yorishiro_core::services::embedding::sync::sync_embedding_for_record(
                 &mut conn,
                 workspace_id,

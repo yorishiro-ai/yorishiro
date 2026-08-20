@@ -121,7 +121,7 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 /// Reads the tenant's workspace cap, which the plan change writes alongside the plan itself.
 async fn tenant_max_workspaces(pool: &PgPool, tenant_id: uuid::Uuid) -> Option<i32> {
     let mut conn = pool.acquire().await.unwrap();
-    yorishiro_core::models::tenancy::get_tenant(&mut conn, tenant_id)
+    yorishiro_core::models::tenancy::get_tenant(&mut *conn, tenant_id)
         .await
         .unwrap()
         .max_workspaces

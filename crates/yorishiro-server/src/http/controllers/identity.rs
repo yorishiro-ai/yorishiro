@@ -69,13 +69,13 @@ pub async fn signup(
     // See `create_user`'s doc comment.
     let mut tx = state.identity_pool.begin().await.internal()?;
     let user = tenancy::create_user(
-        &mut tx,
+        &mut *tx,
         &invite.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenancy::add_member(&mut tx, invite.tenant_id, user.id, invite.role).await?;
+    tenancy::add_member(&mut *tx, invite.tenant_id, user.id, invite.role).await?;
     tx.commit().await.internal()?;
 
     let workspaces = tenancy::list_workspaces(&state.identity_pool, invite.tenant_id)

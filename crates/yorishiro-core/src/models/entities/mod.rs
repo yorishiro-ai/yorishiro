@@ -299,12 +299,18 @@ async fn check_entity_quota(
 }
 
 /// Counts how many entities a workspace holds, for both quota enforcement (`create`, above) and workspace-detail summaries.
-pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, YorishiroError> {
+pub async fn count<C>(conn: &mut C, workspace_id: Uuid) -> Result<i64, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
         .fetch_one(&mut *conn)
         .await
@@ -332,7 +338,7 @@ pub async fn create(
 
     // Before resolving the schema, so an empty workspace is told it is empty.
     // Resolving first would report the schema name as not found, which reads as a typo rather than as "nothing has been defined here yet".
-    if crate::models::tenancy::is_schema_pending(&mut tx, workspace_id).await? {
+    if crate::models::tenancy::is_schema_pending(&mut *tx, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "workspace '{workspace_id}' has no schema yet, so there is nothing to \
@@ -345,7 +351,7 @@ pub async fn create(
         });
     }
 
-    let schema = schemas::get_active_schema(&mut tx, workspace_id, &input.schema_name).await?;
+    let schema = schemas::get_active_schema(&mut *tx, workspace_id, &input.schema_name).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 
@@ -380,17 +386,23 @@ pub async fn create(
     Ok(row)
 }
 
-pub async fn get(
-    conn: &mut PgConnection,
+pub async fn get<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     id: Uuid,
-) -> Result<EntityRecord, YorishiroError> {
+) -> Result<EntityRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(entity_columns())
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)
@@ -402,13 +414,28 @@ pub async fn get(
 /// Fully replaces an existing entity's `data`.
 /// Validation is done against the schema version the entity was actually created with (i.e. the row `entities.schema_id` points to), so existing entities don't silently break compatibility even if the active version has since moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
-pub async fn update(
-    conn: &mut PgConnection,
+pub async fn update<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     id: Uuid,
     data: Value,
     updated_by: Option<Uuid>,
-) -> Result<EntityRecord, YorishiroError> {
+) -> Result<EntityRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    // The transcribed field-level bounds `schemas::get_by_id` needs: its private `SchemaRow` cannot be named here, and a trait where-clause on `Engine` does not elaborate to call sites (rust-lang/rust#20671), so this is the only way to prove `C` satisfies it.
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+{
     let existing = get(conn, workspace_id, id).await?;
     let schema = schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
@@ -422,7 +449,7 @@ pub async fn update(
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
         .returning(Query::returning().columns(entity_columns()))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)
@@ -431,23 +458,24 @@ pub async fn update(
         .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }
 
-pub async fn delete(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    id: Uuid,
-) -> Result<(), YorishiroError> {
+pub async fn delete<C>(conn: &mut C, workspace_id: Uuid, id: Uuid) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+{
     let (sql, values) = Query::delete()
         .from_table((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     let result = sqlx::query_with(&sql, values)
         .execute(&mut *conn)
         .await
         .internal()?;
 
-    if result.rows_affected() == 0 {
+    if C::rows_affected(result) == 0 {
         Err(YorishiroError::not_found(format!(
             "entity '{id}' was not found"
         )))
@@ -491,16 +519,22 @@ pub async fn list(
 }
 
 /// Fetches every entity for the tenant, with no pagination limit, for a full-tenant export.
-pub async fn export_all(
-    conn: &mut PgConnection,
+pub async fn export_all<C>(
+    conn: &mut C,
     workspace_id: Uuid,
-) -> Result<Vec<EntityRecord>, YorishiroError> {
+) -> Result<Vec<EntityRecord>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(entity_columns())
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .order_by(Entities::CreatedAt, Order::Asc)
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
         .fetch_all(&mut *conn)
@@ -518,11 +552,26 @@ mod tests;
 /// This distinguishes that from a field its author left blank: the entity's own definition is compared against the active one, and the fields only the active one defines are returned.
 ///
 /// An entity already on the active version reports no missing fields, and neither does one whose newer version only altered fields it already carries.
-pub async fn drift(
-    conn: &mut PgConnection,
+pub async fn drift<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     entity_id: Uuid,
-) -> Result<EntityDrift, YorishiroError> {
+) -> Result<EntityDrift, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    // Transcribed from `schemas::get_by_id`/`get_active_schema`'s private `SchemaRow` bound; see `update`'s where clause for why this can't be named directly.
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+{
     let entity = get(conn, workspace_id, entity_id).await?;
     let own = schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
     let active = schemas::get_active_schema(conn, workspace_id, &own.definition.name).await?;
@@ -567,16 +616,33 @@ pub async fn drift(
 /// Reads only.
 /// The counting is done in one query per entity type rather than one per entity:
 /// a workspace can hold far more entities than it holds versions, and the answer is the same.
-pub async fn migration_dry_run(
-    conn: &mut PgConnection,
+pub async fn migration_dry_run<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     schema_name: &str,
-) -> Result<MigrationDryRun, YorishiroError> {
+) -> Result<MigrationDryRun, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (String, Uuid, i64): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    for<'q> &'q str: sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    // Transcribed from `schemas::get_active_schema`/`get_by_id`'s private `SchemaRow` bound.
+    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+{
     let active = schemas::get_active_schema(conn, workspace_id, schema_name).await?;
 
     // (entity_type, schema_id, count) for everything under this schema name, whatever version.
     // Grouping by schema_id is what keeps this proportional to the number of versions in use rather than to the number of entities.
-    let rows: Vec<(String, Uuid, i64)> = sqlx::query_as(
+    let rows: Vec<(String, Uuid, i64)> = sqlx::query_as::<C::Db, (String, Uuid, i64)>(
         "SELECT e.entity_type, e.schema_id, count(*) \
          FROM content.entities e \
          JOIN content.schemas s ON s.id = e.schema_id \
@@ -672,14 +738,20 @@ pub async fn migration_dry_run(
 ///
 /// Called before an overwrite.
 /// Taking the image from the row rather than from the caller means it is what the database actually holds, not what the caller believed it held.
-pub async fn snapshot(
-    conn: &mut PgConnection,
+pub async fn snapshot<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     entity_id: Uuid,
     job_id: Uuid,
-) -> Result<(), YorishiroError> {
+) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+{
     // One statement: reading then writing would leave a window in which a concurrent update slips between, and the image would be of a state that no longer existed when it was taken.
-    let affected = sqlx::query(
+    let result = sqlx::query::<C::Db>(
         "INSERT INTO content.entity_snapshots \
              (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
          SELECT $3, workspace_id, id, schema_id, schema_version, data \
@@ -691,8 +763,8 @@ pub async fn snapshot(
     .bind(job_id)
     .execute(&mut *conn)
     .await
-    .internal()?
-    .rows_affected();
+    .internal()?;
+    let affected = C::rows_affected(result);
 
     if affected == 0 {
         return Err(YorishiroError::not_found(format!(
@@ -703,12 +775,19 @@ pub async fn snapshot(
 }
 
 /// The snapshots taken by one job, newest first.
-pub async fn snapshots_for_job(
-    conn: &mut PgConnection,
+pub async fn snapshots_for_job<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     job_id: Uuid,
-) -> Result<Vec<EntitySnapshot>, YorishiroError> {
-    sqlx::query_as::<_, EntitySnapshot>(
+) -> Result<Vec<EntitySnapshot>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    EntitySnapshot: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
+    sqlx::query_as::<C::Db, EntitySnapshot>(
         "SELECT id, job_id, entity_id, schema_id, schema_version, data, created_at \
          FROM content.entity_snapshots \
          WHERE workspace_id = $1 AND job_id = $2 \
@@ -726,14 +805,24 @@ pub async fn snapshots_for_job(
 /// All in one transaction: a half-undone batch is a state nobody asked for, and worse than either end of it.
 /// An entity deleted since the snapshot is counted rather than failed:
 /// refusing the whole undo because one row is gone would leave the rest wrong.
-pub async fn undo_job(
-    conn: &mut PgConnection,
+pub async fn undo_job<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     job_id: Uuid,
-) -> Result<UndoReport, YorishiroError> {
+) -> Result<UndoReport, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'q> &'q Value: sqlx::Encode<'q, C::Db>,
+    Value: sqlx::Type<C::Db>,
+    i32: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    EntitySnapshot: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let mut tx = conn.begin().await.internal()?;
 
-    let snapshots = sqlx::query_as::<_, EntitySnapshot>(
+    let snapshots = sqlx::query_as::<C::Db, EntitySnapshot>(
         "SELECT id, job_id, entity_id, schema_id, schema_version, data, created_at \
          FROM content.entity_snapshots \
          WHERE workspace_id = $1 AND job_id = $2 \
@@ -756,7 +845,7 @@ pub async fn undo_job(
 
     for snapshot in &snapshots {
         // schema_id and schema_version go back too: an undo that restored the data but left the entity claiming a newer version would leave it validating against a definition its data no longer matches.
-        let affected = sqlx::query(
+        let result = sqlx::query::<C::Db>(
             "UPDATE content.entities \
              SET data = $3, schema_id = $4, schema_version = $5, updated_at = now() \
              WHERE workspace_id = $1 AND id = $2",
@@ -768,8 +857,8 @@ pub async fn undo_job(
         .bind(snapshot.schema_version)
         .execute(&mut *tx)
         .await
-        .internal()?
-        .rows_affected();
+        .internal()?;
+        let affected = C::rows_affected(result);
 
         if affected == 0 {
             missing += 1;
@@ -780,12 +869,14 @@ pub async fn undo_job(
 
     // The snapshots go with the undo.
     // Keeping them would let the same job be undone twice, the second time restoring what the first already put back over whatever came after.
-    sqlx::query("DELETE FROM content.entity_snapshots WHERE workspace_id = $1 AND job_id = $2")
-        .bind(workspace_id)
-        .bind(job_id)
-        .execute(&mut *tx)
-        .await
-        .internal()?;
+    sqlx::query::<C::Db>(
+        "DELETE FROM content.entity_snapshots WHERE workspace_id = $1 AND job_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(job_id)
+    .execute(&mut *tx)
+    .await
+    .internal()?;
 
     tx.commit().await.internal()?;
 

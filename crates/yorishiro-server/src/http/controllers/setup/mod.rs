@@ -113,10 +113,10 @@ pub async fn setup(
     // `admin add-member` one that does.
     let mut tx = state.identity_pool.begin().await.internal()?;
     let tenant =
-        tenancy::create_tenant_on(&mut tx, "default", None, tenancy::max_tenants_from_env()?)
+        tenancy::create_tenant_on(&mut *tx, "default", None, tenancy::max_tenants_from_env()?)
             .await?;
     let workspace = tenancy::create_workspace_on(
-        &mut tx,
+        &mut *tx,
         tenant.id,
         "default",
         None,
@@ -129,13 +129,13 @@ pub async fn setup(
     .await?;
 
     let user = tenancy::create_user(
-        &mut tx,
+        &mut *tx,
         &body.email,
         &body.password,
         body.display_name.as_deref(),
     )
     .await?;
-    tenancy::add_member(&mut tx, tenant.id, user.id, MembershipRole::Owner).await?;
+    tenancy::add_member(&mut *tx, tenant.id, user.id, MembershipRole::Owner).await?;
 
     let created = auth::create_api_key(
         &mut tx,

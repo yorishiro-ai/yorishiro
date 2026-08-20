@@ -1,6 +1,6 @@
 use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -59,24 +59,31 @@ pub async fn create_tenant_with_cap(
     max_tenants: Option<i32>,
 ) -> Result<TenantRecord, YorishiroError> {
     let mut conn = pool.acquire().await.internal()?;
-    create_tenant_on(&mut conn, name, max_workspaces, max_tenants).await
+    create_tenant_on(&mut *conn, name, max_workspaces, max_tenants).await
 }
 
 /// `create_tenant_with_cap` against a caller-supplied connection, so a bootstrap that also creates
 /// a workspace and an owner can run the whole sequence in one transaction.
 /// The cap check and the insert are not atomic against a concurrent creation on another
 /// connection; that race predates this and is unchanged by taking a connection here.
-pub async fn create_tenant_on(
-    conn: &mut PgConnection,
+pub async fn create_tenant_on<C>(
+    conn: &mut C,
     name: &str,
     max_workspaces: Option<i32>,
     max_tenants: Option<i32>,
-) -> Result<TenantRecord, YorishiroError> {
+) -> Result<TenantRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    TenantRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     if let Some(max) = max_tenants {
         let (sql, values) = Query::select()
             .expr(Func::count(Expr::col(Asterisk)))
             .from((Alias::new("identity"), Tenants::Table))
-            .build_sqlx(PostgresQueryBuilder);
+            .build_sqlx(C::builder());
         let (count,): (i64,) = sqlx::query_as_with(&sql, values)
             .fetch_one(&mut *conn)
             .await
@@ -96,7 +103,7 @@ pub async fn create_tenant_on(
         .columns([Tenants::Name, Tenants::MaxWorkspaces])
         .values_panic([name.into(), max_workspaces.into()])
         .returning(Query::returning().columns(tenant_columns()))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
         .fetch_one(conn)
@@ -115,15 +122,18 @@ fn tenant_columns() -> [Tenants; 4] {
 
 /// Takes `&mut PgConnection` (rather than `&PgPool`, like most of this module) so a caller can compose it into a larger transaction: e.g. `add_member` calls this as part of its own atomic user-creation-plus-membership flow.
 /// Pass `&mut pool.acquire().await?` for a standalone call.
-pub async fn get_tenant(
-    conn: &mut PgConnection,
-    tenant_id: Uuid,
-) -> Result<TenantRecord, YorishiroError> {
+pub async fn get_tenant<C>(conn: &mut C, tenant_id: Uuid) -> Result<TenantRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    TenantRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(tenant_columns())
         .from((Alias::new("identity"), Tenants::Table))
         .and_where(Expr::col(Tenants::Id).eq(tenant_id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, TenantRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)

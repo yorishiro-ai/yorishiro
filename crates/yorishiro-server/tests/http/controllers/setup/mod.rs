@@ -160,7 +160,7 @@ async fn setup_leaves_nothing_behind_when_a_later_step_fails(pool: PgPool) {
     set_max_tenants(Some("1"));
 
     tenancy::create_user(
-        &mut pool.acquire().await.unwrap(),
+        &mut *pool.acquire().await.unwrap(),
         "taken@example.com",
         "hunter2-hunter2",
         None,

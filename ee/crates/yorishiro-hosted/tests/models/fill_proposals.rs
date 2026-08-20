@@ -59,7 +59,7 @@ async fn recording_a_proposal_does_not_touch_the_entity(pool: PgPool) {
     .await
     .unwrap();
 
-    let entity = entities::get(&mut conn, workspace_id, entity_id)
+    let entity = entities::get(&mut *conn, workspace_id, entity_id)
         .await
         .unwrap();
     assert!(
@@ -94,16 +94,16 @@ async fn confirming_applies_the_proposals_and_undo_reverses_them(pool: PgPool) {
     assert_eq!(report.applied, 1);
     assert_eq!(report.skipped, 0);
 
-    let after = entities::get(&mut conn, workspace_id, entity_id)
+    let after = entities::get(&mut *conn, workspace_id, entity_id)
         .await
         .unwrap();
     assert_eq!(after.data["category"], serde_json::json!("fiction"));
 
-    entities::undo_job(&mut conn, workspace_id, job_id)
+    entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap();
 
-    let restored = entities::get(&mut conn, workspace_id, entity_id)
+    let restored = entities::get(&mut *conn, workspace_id, entity_id)
         .await
         .unwrap();
     assert!(
@@ -162,7 +162,7 @@ async fn a_proposal_the_schema_rejects_is_skipped(pool: PgPool) {
     assert_eq!(report.applied, 0);
     assert_eq!(report.skipped, 1);
 
-    let after = entities::get(&mut conn, workspace_id, entity_id)
+    let after = entities::get(&mut *conn, workspace_id, entity_id)
         .await
         .unwrap();
     assert_eq!(after.data["title"], serde_json::json!("a note"));

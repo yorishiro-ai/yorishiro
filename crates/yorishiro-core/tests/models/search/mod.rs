@@ -334,7 +334,7 @@ async fn filters_by_data_field_value(pool: PgPool) {
     )
     .await;
     let active_entity = entities::update(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         active.id,
         json!({ "title": "active one", "status": "active" }),
@@ -345,7 +345,7 @@ async fn filters_by_data_field_value(pool: PgPool) {
     let done =
         seed_embedded_entity(&mut conn, workspace_id, "task", "done one", unit_vector(0)).await;
     entities::update(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         done.id,
         json!({ "title": "done one", "status": "done" }),

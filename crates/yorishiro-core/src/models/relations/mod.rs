@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
+use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, Query};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -114,13 +114,27 @@ fn relation_columns() -> [Relations; 8] {
 
 /// Validates that relation_type doesn't conflict with the source/target entity_types.
 /// The metaschema definition is resolved against the schema the source entity was actually created with (the row `entities.schema_id` points to), as with `entities::update`, so existing relationships between entities don't silently break even as the active schema evolves.
-async fn validate_relation_type(
-    conn: &mut PgConnection,
+async fn validate_relation_type<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     source: &entities::EntityRecord,
     target: &entities::EntityRecord,
     relation_type: &str,
-) -> Result<(), YorishiroError> {
+) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    // Transcribed from `schemas::get_by_id`'s private `SchemaRow` bound; see `entities::update`'s where clause for why this can't be named directly.
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+{
     let schema = schemas::get_by_id(conn, workspace_id, source.schema_id).await?;
 
     let relation_def = schema
@@ -148,11 +162,27 @@ async fn validate_relation_type(
 }
 
 /// Creates a new relation: verifies both the source and target entities exist and that relation_type matches the metaschema's source/target constraint, then persists it.
-pub async fn create(
-    conn: &mut PgConnection,
+pub async fn create<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     input: CreateRelationInput,
-) -> Result<RelationRecord, YorishiroError> {
+) -> Result<RelationRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    // Transcribed from `schemas::get_by_id`'s private `SchemaRow` bound, needed by `validate_relation_type`.
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
+    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+{
     let source = entities::get(conn, workspace_id, input.source_id).await?;
     let target = entities::get(conn, workspace_id, input.target_id).await?;
     validate_relation_type(conn, workspace_id, &source, &target, &input.relation_type).await?;
@@ -180,7 +210,7 @@ pub async fn create(
             properties.into(),
         ])
         .returning(Query::returning().columns(relation_columns()))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
         .fetch_one(&mut *conn)
@@ -204,17 +234,23 @@ pub async fn create(
         })
 }
 
-pub async fn get(
-    conn: &mut PgConnection,
+pub async fn get<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     id: Uuid,
-) -> Result<RelationRecord, YorishiroError> {
+) -> Result<RelationRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(relation_columns())
         .from((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)
@@ -225,12 +261,18 @@ pub async fn get(
 
 /// Moves a relation to another state.
 /// Retiring a relation this way keeps the record that it existed, which deleting it does not; traversal stops following it either way.
-pub async fn set_status(
-    conn: &mut PgConnection,
+pub async fn set_status<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     id: Uuid,
     status: &str,
-) -> Result<RelationRecord, YorishiroError> {
+) -> Result<RelationRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     if !is_valid_relation_status(status) {
         return Err(YorishiroError::ValidationFailed {
             message: format!("'{status}' is not a relation status"),
@@ -251,7 +293,7 @@ pub async fn set_status(
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
         .returning(Query::returning().columns(relation_columns()))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)
@@ -260,23 +302,24 @@ pub async fn set_status(
         .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
 }
 
-pub async fn delete(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    id: Uuid,
-) -> Result<(), YorishiroError> {
+pub async fn delete<C>(conn: &mut C, workspace_id: Uuid, id: Uuid) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+{
     let (sql, values) = Query::delete()
         .from_table((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     let result = sqlx::query_with(&sql, values)
         .execute(&mut *conn)
         .await
         .internal()?;
 
-    if result.rows_affected() == 0 {
+    if C::rows_affected(result) == 0 {
         Err(YorishiroError::not_found(format!(
             "relation '{id}' was not found"
         )))
@@ -285,11 +328,17 @@ pub async fn delete(
     }
 }
 
-pub async fn list(
-    conn: &mut PgConnection,
+pub async fn list<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     query: ListRelationsQuery,
-) -> Result<Vec<RelationRecord>, YorishiroError> {
+) -> Result<Vec<RelationRecord>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let limit = query.limit.clamp(1, 200);
     let offset = query.offset.max(0);
 
@@ -314,7 +363,7 @@ pub async fn list(
         .order_by(Relations::CreatedAt, Order::Desc)
         .limit(limit as u64)
         .offset(offset as u64);
-    let (sql, values) = builder.build_sqlx(PostgresQueryBuilder);
+    let (sql, values) = builder.build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
         .fetch_all(&mut *conn)
@@ -323,16 +372,22 @@ pub async fn list(
 }
 
 /// Fetches every relation for the tenant, with no pagination limit, for a full-tenant export.
-pub async fn export_all(
-    conn: &mut PgConnection,
+pub async fn export_all<C>(
+    conn: &mut C,
     workspace_id: Uuid,
-) -> Result<Vec<RelationRecord>, YorishiroError> {
+) -> Result<Vec<RelationRecord>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(relation_columns())
         .from((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .order_by(Relations::CreatedAt, Order::Asc)
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, RelationRecord, _>(&sql, values)
         .fetch_all(&mut *conn)
@@ -341,12 +396,18 @@ pub async fn export_all(
 }
 
 /// Counts how many relations a workspace holds, for workspace-detail summaries.
-pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, YorishiroError> {
+pub async fn count<C>(conn: &mut C, workspace_id: Uuid) -> Result<i64, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
         .from((Alias::new("content"), Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
         .fetch_one(&mut *conn)
         .await
@@ -446,17 +507,27 @@ impl BatchNeighborRow {
 
 /// Returns the entities directly connected to `entity_id` by a relation, in either direction, together with the relation_type and direction of each connection.
 /// Ordered by the relation's creation time, most recent first.
-pub async fn neighbors(
-    conn: &mut PgConnection,
+// `NeighborRow` stays private: its `FromRow` impl is generic over any `Row`, so no external caller ever needs to name it to satisfy this bound.
+#[allow(private_bounds)]
+pub async fn neighbors<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     entity_id: Uuid,
     limit: i64,
-) -> Result<Vec<Neighbor>, YorishiroError> {
+) -> Result<Vec<Neighbor>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    NeighborRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    i64: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+{
     let limit = limit.clamp(1, 200);
 
     // sea-query can express a UNION ALL of two joined SELECTs and an ORDER BY/LIMIT applied to the union, but only by building each branch as a full, separate `Query::select()` and combining them: for a query already this wide (14 aliased output columns each side, two joins, a computed direction literal), that ends up materially harder to read than the plain SQL below, with no behavioral upside.
     // Kept raw as a deliberate readability call, not because it's structurally inexpressible (contrast the `db.rs`/`auth.rs` session-command and SECURITY DEFINER cases, which have no builder form at all).
-    let rows = sqlx::query_as::<_, NeighborRow>(
+    let rows = sqlx::query_as::<C::Db, NeighborRow>(
         "SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
                 r.created_at AS relation_created_at, \
                 e.id AS entity_id, e.workspace_id AS entity_tenant_id, e.schema_id AS entity_schema_id, \

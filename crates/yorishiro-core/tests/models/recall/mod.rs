@@ -102,7 +102,7 @@ async fn returns_entity_with_shallow_neighbors_by_default(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -180,7 +180,7 @@ async fn full_flag_returns_the_neighbors_entire_data(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -253,7 +253,7 @@ async fn sets_truncated_when_more_neighbors_exist_than_the_limit(pool: PgPool) {
         .await
         .unwrap();
         relations::create(
-            &mut conn,
+            &mut *conn,
             workspace_id,
             CreateRelationInput {
                 source_id: task.id,
@@ -363,7 +363,7 @@ async fn depth_two_reaches_the_second_hop_neighbor(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -375,7 +375,7 @@ async fn depth_two_reaches_the_second_hop_neighbor(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: project.id,
@@ -479,7 +479,7 @@ async fn depth_beyond_the_maximum_is_clamped_not_rejected(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: task.id,
@@ -556,7 +556,7 @@ async fn depth_two_expands_every_node_in_a_multi_node_frontier(pool: PgPool) {
         .await
         .unwrap();
         relations::create(
-            &mut conn,
+            &mut *conn,
             workspace_id,
             CreateRelationInput {
                 source_id: task.id,
@@ -581,7 +581,7 @@ async fn depth_two_expands_every_node_in_a_multi_node_frontier(pool: PgPool) {
         .await
         .unwrap();
         relations::create(
-            &mut conn,
+            &mut *conn,
             workspace_id,
             CreateRelationInput {
                 source_id: project.id,

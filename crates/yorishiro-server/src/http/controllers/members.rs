@@ -59,7 +59,7 @@ pub async fn add_member(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
     let mut conn = state.identity_pool.acquire().await.internal()?;
-    let user = tenancy::get_user_by_email(&mut conn, &body.email)
+    let user = tenancy::get_user_by_email(&mut *conn, &body.email)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found(format!(
@@ -68,7 +68,7 @@ pub async fn add_member(
             ))
         })?;
 
-    tenancy::add_member(&mut conn, ctx.tenant_id, user.id, body.role).await?;
+    tenancy::add_member(&mut *conn, ctx.tenant_id, user.id, body.role).await?;
 
     Ok((
         StatusCode::CREATED,

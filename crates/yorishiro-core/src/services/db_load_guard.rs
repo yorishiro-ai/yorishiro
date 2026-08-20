@@ -142,7 +142,7 @@ pub async fn run(pool: PgPool, config: LoadGuardConfig) {
                 continue;
             }
         };
-        let state = match maintenance::get(&mut conn).await {
+        let state = match maintenance::get(&mut *conn).await {
             Ok(s) => s,
             Err(err) => {
                 tracing::warn!(error = %err, "db load guard could not read maintenance state");

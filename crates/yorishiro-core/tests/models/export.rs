@@ -63,7 +63,7 @@ async fn exports_schemas_entities_and_relations_for_the_tenant(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         CreateRelationInput {
             source_id: a.id,
@@ -75,7 +75,7 @@ async fn exports_schemas_entities_and_relations_for_the_tenant(pool: PgPool) {
     .await
     .unwrap();
 
-    let records = export_all(&mut conn, workspace_id).await.unwrap();
+    let records = export_all(&mut *conn, workspace_id).await.unwrap();
 
     let schema_count = records
         .iter()
@@ -107,7 +107,7 @@ async fn export_is_empty_for_a_tenant_with_no_data(pool: PgPool) {
         .await
         .unwrap();
 
-    let records = export_all(&mut conn, workspace_id).await.unwrap();
+    let records = export_all(&mut *conn, workspace_id).await.unwrap();
     assert!(records.is_empty());
 }
 

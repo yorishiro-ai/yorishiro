@@ -130,9 +130,9 @@ pub async fn get_workspace(
         .acquire_for_workspace(ctx.tenant_id, workspace.id)
         .await
         .internal()?;
-    let entity_count = entities::count(&mut conn, workspace.id).await?;
-    let relation_count = relations::count(&mut conn, workspace.id).await?;
-    let schema_count = schemas::count_active(&mut conn, workspace.tenant_id).await?;
+    let entity_count = entities::count(&mut *conn, workspace.id).await?;
+    let relation_count = relations::count(&mut *conn, workspace.id).await?;
+    let schema_count = schemas::count_active(&mut *conn, workspace.tenant_id).await?;
 
     Ok(Json(WorkspaceDetail {
         id: workspace.id,

@@ -146,7 +146,7 @@ pub async fn confirm(
     }
 
     for (entity_id, fields) in by_entity {
-        let Ok(existing) = entities::get(&mut tx, workspace_id, entity_id).await else {
+        let Ok(existing) = entities::get(&mut *tx, workspace_id, entity_id).await else {
             // Deleted between proposal and confirmation.
             skipped += fields.len() as i64;
             continue;
@@ -161,9 +161,9 @@ pub async fn confirm(
             object.insert(field.field_name.clone(), field.proposed.clone());
         }
 
-        entities::snapshot(&mut tx, workspace_id, entity_id, job_id).await?;
+        entities::snapshot(&mut *tx, workspace_id, entity_id, job_id).await?;
 
-        match entities::update(&mut tx, workspace_id, entity_id, data, None).await {
+        match entities::update(&mut *tx, workspace_id, entity_id, data, None).await {
             Ok(_) => applied += fields.len() as i64,
             // The schema rejected a guess.
             // The other entities in this batch were reviewed too, so one bad guess does not discard them.

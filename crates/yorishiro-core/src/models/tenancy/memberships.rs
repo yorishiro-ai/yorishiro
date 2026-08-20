@@ -1,6 +1,6 @@
 use sea_query::{Alias, Expr, Iden, OnConflict, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::get_tenant;
@@ -21,12 +21,18 @@ pub(super) enum TenantMemberships {
 ///
 /// Takes `&mut PgConnection` (rather than `&PgPool`) so a caller can compose this with `create_user` (and anything else) in one transaction: see `create_user`'s doc comment for why.
 /// Pass `&mut pool.acquire().await?` for a standalone call.
-pub async fn add_member(
-    conn: &mut PgConnection,
+pub async fn add_member<C>(
+    conn: &mut C,
     tenant_id: Uuid,
     user_id: Uuid,
     role: MembershipRole,
-) -> Result<(), YorishiroError> {
+) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    crate::models::tenancy::TenantRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     get_tenant(&mut *conn, tenant_id).await?;
 
     let (sql, values) = Query::insert()
@@ -42,7 +48,7 @@ pub async fn add_member(
                 .update_column(TenantMemberships::Role)
                 .to_owned(),
         )
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_with(&sql, values)
         .execute(&mut *conn)

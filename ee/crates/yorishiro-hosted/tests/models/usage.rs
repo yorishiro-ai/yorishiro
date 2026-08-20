@@ -30,11 +30,11 @@ async fn counts_workspaces_members_and_entities_across_a_tenant(pool: PgPool) {
         .unwrap();
 
     let mut identity_conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut identity_conn, "owner@acme.test", "password123", None)
+    let user = tenancy::create_user(&mut *identity_conn, "owner@acme.test", "password123", None)
         .await
         .unwrap();
     tenancy::add_member(
-        &mut identity_conn,
+        &mut *identity_conn,
         tenant.id,
         user.id,
         tenancy::MembershipRole::Owner,

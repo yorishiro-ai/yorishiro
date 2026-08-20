@@ -84,7 +84,7 @@ pub async fn import_jsonl(
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {
-                        schemas::get_by_id(&mut tx, workspace_id, entity.schema_id)
+                        schemas::get_by_id(&mut *tx, workspace_id, entity.schema_id)
                             .await
                             .map_err(|err| annotate_line(line_no, err))?
                             .name
@@ -118,7 +118,7 @@ pub async fn import_jsonl(
                     relation_type: relation.relation_type,
                     properties: relation.properties,
                 };
-                relations::create(&mut tx, workspace_id, input)
+                relations::create(&mut *tx, workspace_id, input)
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 result.relations += 1;

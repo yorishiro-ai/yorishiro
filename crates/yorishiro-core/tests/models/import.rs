@@ -79,7 +79,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
     .await
     .unwrap();
     relations::create(
-        &mut source_conn,
+        &mut *source_conn,
         source_workspace,
         CreateRelationInput {
             source_id: a.id,
@@ -91,7 +91,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
     .await
     .unwrap();
 
-    let records = export_all(&mut source_conn, source_workspace)
+    let records = export_all(&mut *source_conn, source_workspace)
         .await
         .unwrap();
     let jsonl = to_jsonl(&records);
@@ -117,7 +117,7 @@ async fn imports_schema_entities_and_relations_from_jsonl(pool: PgPool) {
     assert_eq!(result.relations, 1);
     assert!(result.errors.is_empty());
 
-    let dest_records = export_all(&mut dest_conn, dest_workspace).await.unwrap();
+    let dest_records = export_all(&mut *dest_conn, dest_workspace).await.unwrap();
     assert_eq!(dest_records.len(), 4);
 
     // Relation endpoints were remapped to the newly generated entity IDs, not the originals (which don't even exist in this workspace).
@@ -188,7 +188,7 @@ async fn import_is_all_or_nothing_on_a_bad_relation_reference(pool: PgPool) {
     let message = err.to_string();
     assert!(message.contains("line 2"), "message was: {message}");
 
-    let records = export_all(&mut conn, workspace_id).await.unwrap();
+    let records = export_all(&mut *conn, workspace_id).await.unwrap();
     assert!(
         records.is_empty(),
         "schema insert from line 1 should have been rolled back too, got: {records:?}"

@@ -1,6 +1,6 @@
 use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::get_tenant;
@@ -39,7 +39,7 @@ pub async fn create_workspace(
 ) -> Result<WorkspaceRecord, YorishiroError> {
     let mut conn = pool.acquire().await.internal()?;
     create_workspace_on(
-        &mut conn,
+        &mut *conn,
         tenant_id,
         name,
         max_entities,
@@ -51,14 +51,22 @@ pub async fn create_workspace(
 
 /// `create_workspace` against a caller-supplied connection, so a bootstrap that also creates the
 /// tenant and its owner can run the whole sequence in one transaction.
-pub async fn create_workspace_on(
-    conn: &mut PgConnection,
+pub async fn create_workspace_on<C>(
+    conn: &mut C,
     tenant_id: Uuid,
     name: &str,
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
     embedding: Option<(&str, i32)>,
-) -> Result<WorkspaceRecord, YorishiroError> {
+) -> Result<WorkspaceRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    crate::models::tenancy::TenantRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    WorkspaceRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let tenant = get_tenant(&mut *conn, tenant_id).await?;
 
     if let Some(max) = tenant.max_workspaces {
@@ -66,7 +74,7 @@ pub async fn create_workspace_on(
             .expr(Func::count(Expr::col(Asterisk)))
             .from((Alias::new("identity"), Workspaces::Table))
             .and_where(Expr::col(Workspaces::TenantId).eq(tenant_id))
-            .build_sqlx(PostgresQueryBuilder);
+            .build_sqlx(C::builder());
         let (count,): (i64,) = sqlx::query_as_with(&sql, values)
             .fetch_one(&mut *conn)
             .await
@@ -107,7 +115,7 @@ pub async fn create_workspace_on(
             embedding.map(|(_, dimensions)| dimensions).into(),
         ])
         .returning(Query::returning().columns(workspace_columns()))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, WorkspaceRecord, _>(&sql, values)
         .fetch_one(conn)
@@ -136,13 +144,20 @@ fn workspace_columns() -> [Workspaces; 9] {
 /// `schema_id` is only filled when it is NULL.
 /// The column names *the* schema of a workspace, from when a workspace had exactly one; a workspace may now hold several, and letting each new one claim the column would make it mean "the most recently created", which is not what anything reading it expects.
 /// Entity operations resolve by schema name and never consult it: what does read it is the workspace listing, which is why leaving it stale showed the wrong schema there.
-pub async fn mark_active(
-    conn: &mut PgConnection,
+pub async fn mark_active<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     schema_id: Uuid,
-) -> Result<(), YorishiroError> {
+) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    &'static str: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+{
     // One statement: reading the column and then writing it would let two concurrent schema creations both see NULL, and the second would overwrite the first.
-    sqlx::query(
+    sqlx::query::<C::Db>(
         "UPDATE identity.workspaces \
          SET status = $2, schema_id = COALESCE(schema_id, $3) \
          WHERE id = $1",
@@ -157,15 +172,18 @@ pub async fn mark_active(
 }
 
 /// Whether the workspace is still waiting for its first schema.
-pub async fn is_schema_pending(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-) -> Result<bool, YorishiroError> {
+pub async fn is_schema_pending<C>(conn: &mut C, workspace_id: Uuid) -> Result<bool, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (String,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .column(Workspaces::Status)
         .from((Alias::new("identity"), Workspaces::Table))
         .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     let status: Option<(String,)> = sqlx::query_as_with(&sql, values)
         .fetch_optional(&mut *conn)
@@ -247,12 +265,16 @@ pub async fn get_workspace(
 /// Resolves the `tenant_id` a workspace belongs to.
 /// Schema repository functions (and other tenant-scoped queries) take `tenant_id` rather than `workspace_id` since the tenant-scoped schema refactor, so callers that only have a `workspace_id` in hand (e.g. an entity/relation repository function) use this to bridge the two.
 /// Takes a `PgConnection` (rather than the `PgPool` the rest of this module uses) so it can be called from within an existing transaction/connection instead of checking out a second one from the pool.
-pub async fn resolve_tenant_id(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-) -> Result<Uuid, YorishiroError> {
+pub async fn resolve_tenant_id<C>(conn: &mut C, workspace_id: Uuid) -> Result<Uuid, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    (Uuid,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+{
     let row: Option<(Uuid,)> =
-        sqlx::query_as("SELECT tenant_id FROM identity.workspaces WHERE id = $1")
+        sqlx::query_as::<C::Db, (Uuid,)>("SELECT tenant_id FROM identity.workspaces WHERE id = $1")
             .bind(workspace_id)
             .fetch_optional(&mut *conn)
             .await

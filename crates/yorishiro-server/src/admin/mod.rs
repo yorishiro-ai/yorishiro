@@ -305,7 +305,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
                 .acquire()
                 .await
                 .context("failed to acquire a connection")?;
-            let user = tenancy::create_user(&mut conn, &email, &password, display_name.as_deref())
+            let user = tenancy::create_user(&mut *conn, &email, &password, display_name.as_deref())
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("user created");
@@ -321,7 +321,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
                 .acquire()
                 .await
                 .context("failed to acquire a connection")?;
-            tenancy::add_member(&mut conn, tenant_id, user_id, role.into())
+            tenancy::add_member(&mut *conn, tenant_id, user_id, role.into())
                 .await
                 .map_err(anyhow::Error::from)?;
             println!("membership added: user {user_id} is now {role:?} of tenant {tenant_id}");
@@ -439,7 +439,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
         }
         AdminCommand::MaintenanceStatus => {
             let mut conn = pool.acquire().await?;
-            let state = maintenance::get(&mut conn).await?;
+            let state = maintenance::get(&mut *conn).await?;
             println!(
                 "mode={} retry_after={}s reason={}",
                 state.mode.as_db_str(),

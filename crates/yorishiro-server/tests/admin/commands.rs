@@ -57,10 +57,10 @@ async fn create_api_key_for_user_is_capped_by_their_role(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, "viewer@example.com", "pw", None)
+    let user = tenancy::create_user(&mut *conn, "viewer@example.com", "pw", None)
         .await
         .unwrap();
-    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Viewer)
+    tenancy::add_member(&mut *conn, tenant.id, user.id, MembershipRole::Viewer)
         .await
         .unwrap();
     drop(conn);
@@ -86,7 +86,7 @@ async fn create_api_key_rejects_a_user_who_is_not_a_member(pool: PgPool) {
         .await
         .unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, "outsider@example.com", "pw", None)
+    let user = tenancy::create_user(&mut *conn, "outsider@example.com", "pw", None)
         .await
         .unwrap();
     drop(conn);
@@ -196,10 +196,10 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
 async fn creates_tenant_workspace_user_and_membership(pool: PgPool) {
     let tenant = tenancy::create_tenant(&pool, "acme", None).await.unwrap();
     let mut conn = pool.acquire().await.unwrap();
-    let user = tenancy::create_user(&mut conn, "owner@example.com", "pw", None)
+    let user = tenancy::create_user(&mut *conn, "owner@example.com", "pw", None)
         .await
         .unwrap();
-    tenancy::add_member(&mut conn, tenant.id, user.id, MembershipRole::Owner)
+    tenancy::add_member(&mut *conn, tenant.id, user.id, MembershipRole::Owner)
         .await
         .unwrap();
     drop(conn);

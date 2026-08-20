@@ -45,7 +45,7 @@ pub async fn maintenance_guard(
         Err(_) => return next.run(request).await,
     };
 
-    let current = match maintenance::get(&mut conn).await {
+    let current = match maintenance::get(&mut *conn).await {
         Ok(current) => current,
         Err(err) => return ApiError::from(err).into_response(),
     };
