@@ -166,7 +166,7 @@ pub async fn run(command: AdminCommand) -> Result<()> {
     let pool = PgPool::connect(&database_url)
         .await
         .context("failed to connect to database")?;
-    sqlx::migrate!("../../migrations")
+    sqlx::migrate!("./migrations")
         .set_ignore_missing(true)
         .run(&pool)
         .await?;

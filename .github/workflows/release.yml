@@ -118,6 +118,14 @@ jobs:
             exit 1
           fi
 
+          # yorishiro-server's `yorishiro-core` path dependency carries an explicit `version` for `cargo publish` (a path dependency with none is unresolvable off this filesystem), so it has to move in step with the workspace version.
+          server_manifest=crates/yorishiro-server/Cargo.toml
+          sed -i "s/^yorishiro-core = { path = \"..\/yorishiro-core\", version = \".*\" }$/yorishiro-core = { path = \"..\/yorishiro-core\", version = \"$VERSION\" }/" "$server_manifest"
+          if [ "$(grep -c "^yorishiro-core = { path = \"../yorishiro-core\", version = \"$VERSION\" }$" "$server_manifest")" -ne 1 ]; then
+            echo "Expected yorishiro-core's path dependency in $server_manifest to carry version \"$VERSION\" after the bump." >&2
+            exit 1
+          fi
+
       # -w only: a bare `cargo update` would also move git dependencies to newer commits on the
       # same tag ref than what this release was built and tested against.
       - name: Update Cargo.lock
@@ -137,7 +145,7 @@ jobs:
           if [ "$RESUMED" = "true" ]; then
             echo "Resuming: $TAG already points at the release commit, not re-bumping."
           else
-            git add Cargo.toml Cargo.lock
+            git add Cargo.toml Cargo.lock crates/yorishiro-server/Cargo.toml
             if git diff --quiet --cached; then
               # Nothing to commit: the version is already what was asked for, because a PR
               # already carried the bump. Tag the commit that brought it in rather than
@@ -437,8 +445,73 @@ jobs:
 
           echo "::notice::${IMAGE}:${TAG} booted, answered /up, and served the SPA"
 
+  # Publishes the two BUSL-1.1 crates to crates.io, keeping that channel in step with what the
+  # Docker image and OS packages ship.
+  # `ee/`'s `yorishiro-hosted` carries `publish = false` and is never a candidate.
+  # Runs after `smoke` and before `github-release` deliberately: the GitHub Release is what
+  # marks a version "already released" (see `prepare`), so a crates.io failure here leaves the
+  # version resumable by re-dispatching, the same as every other step.
+  # A crates.io outage therefore blocks the whole release rather than being skipped, which
+  # matches `smoke`'s own stated philosophy.
+  crates-publish:
+    needs: [smoke, prepare]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Once yorishiro-core@$VERSION is uploaded, that version is burned on crates.io: yankable,
+      # never erasable (the same lesson the workspace checklist already carries for `yorishiro`
+      # itself). So catch a packaging fault in yorishiro-server *before* core goes out, not
+      # after. `crates/yorishiro-server/migrations` is a symlink to the workspace-root
+      # `migrations/`, which `include` only picks up if cargo actually resolves the link; count
+      # is the same "a glob matching nothing is not an error" shape `github-release`'s artifact
+      # check already guards against.
+      - name: Confirm yorishiro-server packages its migrations before publishing anything
+        run: |
+          count=$(cargo package --list -p yorishiro-server | grep -c '^migrations/')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::yorishiro-server's package listing carries no migrations/ files; publishing core first would burn its version for nothing." >&2
+            exit 1
+          fi
+          echo "::notice::yorishiro-server packages $count migration file(s)."
+
+      # Publish order matters: yorishiro-server depends on yorishiro-core, and crates.io's
+      # index has to carry core's just-published version before server's manifest (which names
+      # it as a versioned dependency, not a bare path) resolves.
+      #
+      # Idempotent per crate: a re-dispatch resuming a partially failed publish (one crate went
+      # through, the other didn't) must not fail on the crate that is already there.
+      # crates.io 403s a request with no User-Agent rather than 404ing, so this sets one
+      # explicitly.
+      # Treating a 403 as "already published" would misread a block as a skip.
+      - name: Publish yorishiro-core and yorishiro-server
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          already_published() {
+            status=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: yorishiro-release (github-actions)' \
+              "https://crates.io/api/v1/crates/$1/$VERSION")
+            [ "$status" = "200" ]
+          }
+
+          for crate in yorishiro-core yorishiro-server; do
+            if already_published "$crate"; then
+              echo "::notice::$crate@$VERSION is already on crates.io, skipping."
+            else
+              cargo publish -p "$crate"
+            fi
+          done
+
   github-release:
-    needs: [binary, smoke, prepare]
+    needs: [binary, smoke, crates-publish, prepare]
     runs-on: ubuntu-latest
 
     steps:

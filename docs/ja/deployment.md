@@ -81,18 +81,23 @@ Actionsタブからも実行できます(`Release`ワークフローを選択 �
 実行内容は以下の順です。
 
 1. バージョンが先頭ゼロなしの`x.y.z`形式か検証し、新規リリースか再開かを判定します(後述)。
-2. ルート`Cargo.toml`の`workspace.package.version`を更新し、`cargo update -w`を実行した上で、bumpコミットと`vX.Y.Z`タグを**まとめて(atomicに)**`master`へpushします。
+2. ルート`Cargo.toml`の`workspace.package.version`を更新します。
+   同時に`yorishiro-server`が`yorishiro-core`へのpath依存に持つ明示的な`version`も更新します(手順6のために必須)。
+   `cargo update -w`を実行した上で、bumpコミットと`vX.Y.Z`タグを**まとめて(atomicに)**`master`へpushします。
 3. 両エディションを`x86_64`と`aarch64`のLinux向けにビルドし、それぞれ`.deb`と`.rpm`に梱包します(計8ファイル)。
    どちらのLinuxアーキテクチャも`ort`/onnxruntimeのビルド要件に合わせQEMUを使わずネイティブビルドします。
 4. マルチアーキのDockerイメージを`ghcr.io/yotsunagi/yorishiro:vX.Y.Z`および`:latest`としてビルド・pushします。
 5. **公開したイメージを実際にpullし、本物のPostgreSQLに対して起動**します。
    `/up`が応答しなければリリースを失敗させます。
-6. GitHub Releaseを作成し、8つのパッケージとそれらを対象とした`checksums.txt`を添付します。
+6. `yorishiro-core`と`yorishiro-server`([crates.io](https://crates.io/crates/yorishiro-core)、BUSL-1.1の2クレート)を公開します。
+   `ee/`の`yorishiro-hosted`は`publish = false`を持ち、公開対象に一切なりません。
+   このバージョンで既に公開済みのクレートはスキップするため、再開時に公開済みの側で失敗することはありません。
+7. GitHub Releaseを作成し、8つのパッケージとそれらを対象とした`checksums.txt`を添付します。
    添付前に各グループの個数を数え、1つでも空なら公開せず失敗します(何にもマッチしないglobはアップロードアクションにとってエラーにならないため)。
 
 ### 失敗したリリースからの復旧
 
-手順2でタグはbumpコミットとまとめて確定するため、手順3〜5で失敗すると**タグはあるがGitHub Releaseが無い**状態になります。
+手順2でタグはbumpコミットとまとめて確定するため、手順3〜6で失敗すると**タグはあるがGitHub Releaseが無い**状態になります。
 この場合は**同じバージョンでもう一度実行してください。** ワークフローはタグの有無ではなく**GitHub Releaseの有無**で状態を判定します。
 
 | 状態 | 実行時の挙動 |
