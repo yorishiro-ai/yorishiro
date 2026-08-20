@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -20,6 +19,8 @@ pub enum ExportRecord {
 
 /// Fetches every schema (all versions, including archived), entity, and relation for the workspace, for a full-workspace data export.
 /// Schemas come first so a reader can resolve the entity_types/relation_types that the entities and relations after them reference.
+// `schemas::SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
+#[allow(private_bounds)]
 pub async fn export_all<C>(
     conn: &mut C,
     workspace_id: Uuid,
@@ -30,15 +31,8 @@ where
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
     RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
-    // Transcribed from `schemas::export_all`'s private `SchemaRow` bound; see `entities::update`'s where clause for why this can't be named directly.
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+    // `schemas::export_all`'s bound; see `entities::update`'s where clause for why this still has to be restated.
+    schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let mut records = Vec::new();
     records.extend(

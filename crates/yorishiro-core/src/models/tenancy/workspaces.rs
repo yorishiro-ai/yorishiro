@@ -264,7 +264,7 @@ pub async fn get_workspace(
 
 /// Resolves the `tenant_id` a workspace belongs to.
 /// Schema repository functions (and other tenant-scoped queries) take `tenant_id` rather than `workspace_id` since the tenant-scoped schema refactor, so callers that only have a `workspace_id` in hand (e.g. an entity/relation repository function) use this to bridge the two.
-/// Takes a `PgConnection` (rather than the `PgPool` the rest of this module uses) so it can be called from within an existing transaction/connection instead of checking out a second one from the pool.
+/// Takes a connection generic over `db::Engine` (rather than the `PgPool` the rest of this module uses) so it can be called from within an existing transaction/connection instead of checking out a second one from the pool.
 pub async fn resolve_tenant_id<C>(conn: &mut C, workspace_id: Uuid) -> Result<Uuid, YorishiroError>
 where
     C: crate::db::Engine,

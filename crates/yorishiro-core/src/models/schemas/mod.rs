@@ -98,8 +98,9 @@ enum Schemas {
     CreatedAt,
 }
 
+/// `pub(crate)` so a cross-module caller transcribing this bound (e.g. `entities::update`) can name `SchemaRow` directly instead of copying its field-level `Decode`/`Type` bounds one by one: a trait where-clause on `Engine` doesn't elaborate to call sites (rust-lang/rust#20671), so the bound itself still has to be restated, but as one line instead of eight.
 #[derive(sqlx::FromRow)]
-struct SchemaRow {
+pub(crate) struct SchemaRow {
     id: Uuid,
     tenant_id: Uuid,
     workspace_id: Uuid,
@@ -203,7 +204,7 @@ fn schema_columns() -> [Schemas; 11] {
 }
 
 /// Fetches the currently active schema (the latest version with status='active') for the given tenant and name.
-// `SchemaRow` stays private: its `FromRow` impl is generic over any `Row`, so no external caller ever needs to name it to satisfy this bound.
+// `SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
 #[allow(private_bounds)]
 pub async fn get_active_schema<C>(
     conn: &mut C,
@@ -239,6 +240,7 @@ where
 }
 
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
+// `SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
 #[allow(private_bounds)]
 pub async fn get_by_id<C>(
     conn: &mut C,
@@ -271,6 +273,7 @@ where
 }
 
 /// Fetches every schema version for the tenant (including archived), with no pagination limit and the full `definition` body, for a full-tenant export.
+// `SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
 #[allow(private_bounds)]
 pub async fn export_all<C>(
     conn: &mut C,

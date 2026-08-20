@@ -125,15 +125,8 @@ where
     C: crate::db::Engine,
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
-    // Transcribed from `schemas::get_by_id`'s private `SchemaRow` bound; see `entities::update`'s where clause for why this can't be named directly.
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+    // `schemas::get_by_id`'s bound; see `entities::update`'s where clause for why this still has to be restated.
+    schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let schema = schemas::get_by_id(conn, workspace_id, source.schema_id).await?;
 
@@ -162,6 +155,8 @@ where
 }
 
 /// Creates a new relation: verifies both the source and target entities exist and that relation_type matches the metaschema's source/target constraint, then persists it.
+// `schemas::SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
+#[allow(private_bounds)]
 pub async fn create<C>(
     conn: &mut C,
     workspace_id: Uuid,
@@ -173,15 +168,8 @@ where
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     RelationRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
     EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
-    // Transcribed from `schemas::get_by_id`'s private `SchemaRow` bound, needed by `validate_relation_type`.
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+    // `schemas::get_by_id`'s bound, needed by `validate_relation_type`; see `entities::update`'s where clause for why this still has to be restated.
+    schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let source = entities::get(conn, workspace_id, input.source_id).await?;
     let target = entities::get(conn, workspace_id, input.target_id).await?;
