@@ -36,10 +36,11 @@ Some `sqlx::query` calls outside it are correct and stay:
 - `crates/yorishiro-core/src/db.rs` and `services/db_load_guard.rs` are connection handling, not table access
 - `crates/yorishiro-server/src/http/controllers/health.rs`'s `SELECT 1` is a liveness probe with no table to belong to
 - `crates/yorishiro-core/src/services/auth/` reads keys as part of deciding a request's identity, which is a decision rather than a record
+- `ee/crates/yorishiro-hosted/src/services/official_templates.rs` is a seeder, and seeders sit outside the model by the same mapping that puts `migrations/` there
 
 Others are known debt rather than intent, and are being moved a few at a time:
 `crates/yorishiro-server/src/admin/commands.rs`, `http/controllers/setup/mod.rs`, `services/embedding/sync/`,
-and in `ee/`, `services/marketplace.rs`, `official_templates.rs`, `tenant_auth.rs`, `oauth/users.rs`, `origin.rs` and `http/controllers/inference.rs`.
+and in `ee/`, `services/marketplace.rs`, `tenant_auth.rs`, `oauth/users.rs` and `http/controllers/inference.rs`.
 If you are already editing one, moving its queries into `models/` is welcome.
 If not, leave it: a move with no reason to touch the file is a diff nobody can review against a behaviour change.
 

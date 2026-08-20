@@ -22,6 +22,7 @@ use yorishiro_core::models::schemas::{SchemaRecord, UpstreamChange};
 use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
 
 use crate::error::HostedApiError;
+use crate::models::origin as origin_model;
 use crate::services::merge::MergePlan;
 use crate::services::{authz, origin};
 use crate::state::HostedState;
@@ -66,7 +67,7 @@ pub async fn list_upstream_changes(
 
     // The control-plane pool: this joins identity.templates, which the request role cannot read.
     let changes =
-        origin::list_with_upstream_changes(&state.identity_pool, ctx.workspace_id).await?;
+        origin_model::list_with_upstream_changes(&state.identity_pool, ctx.workspace_id).await?;
     Ok(Json(changes))
 }
 
