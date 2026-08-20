@@ -23,7 +23,7 @@ path = "src/bin/yorishiro_ce_server.rs"
 [dependencies]
 # `version` is required for `cargo publish`: a path dependency with none is rejected as unresolvable off this filesystem.
 # The release workflow's version-bump step updates this alongside the workspace version (see `.github/workflows/release.yml`), so it always matches.
-yorishiro-core = { path = "../yorishiro-core", version = "0.49.1" }
+yorishiro-core = { path = "../yorishiro-core", version = "0.50.0" }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
