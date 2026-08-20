@@ -27,20 +27,42 @@ function Stars({ value }: { value: number }) {
   );
 }
 
+/// Matches the server's own default page size, so "a full page came back" means "there may be
+/// more" rather than depending on a number the two sides could disagree about silently.
+const PAGE_SIZE = 50;
+
 export function MarketplacePage() {
   const [listings, setListings] = useState<MarketplaceListing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      setListings(await listMarketplace());
+      const first = await listMarketplace({ limit: PAGE_SIZE });
+      setListings(first);
+      setHasMore(first.length === PAGE_SIZE);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load the marketplace");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMore() {
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const next = await listMarketplace({ offset: listings.length, limit: PAGE_SIZE });
+      setListings((prev) => [...prev, ...next]);
+      setHasMore(next.length === PAGE_SIZE);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more templates");
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -116,6 +138,14 @@ export function MarketplacePage() {
           </Card>
         ))}
       </div>
+
+      {hasMore && (
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
