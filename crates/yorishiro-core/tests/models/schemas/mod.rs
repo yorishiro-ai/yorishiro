@@ -89,10 +89,10 @@ async fn creating_new_version_archives_previous_and_reports_breaking_diff(pool: 
     assert_eq!(v2.version, 2);
     assert!(diff.is_breaking, "reasons: {:?}", diff.reasons);
 
-    let archived = get_by_id(&mut conn, workspace_id, v1.id).await.unwrap();
+    let archived = get_by_id(&mut *conn, workspace_id, v1.id).await.unwrap();
     assert_eq!(archived.status, "archived");
 
-    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+    let active = get_active_schema(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
     assert_eq!(active.id, v2.id);
@@ -107,7 +107,7 @@ async fn get_active_schema_reports_not_found_when_absent(pool: PgPool) {
         .await
         .unwrap();
 
-    let err = get_active_schema(&mut conn, workspace_id, "does-not-exist")
+    let err = get_active_schema(&mut *conn, workspace_id, "does-not-exist")
         .await
         .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
@@ -145,10 +145,10 @@ async fn schemas_do_not_leak_between_workspaces_of_one_tenant(pool: PgPool) {
     assert_ne!(a.id, b.id);
 
     // B cannot read A's schema.
-    assert!(get_by_id(&mut conn_b, workspace_b, a.id).await.is_err());
+    assert!(get_by_id(&mut *conn_b, workspace_b, a.id).await.is_err());
 
     // And B's listing shows only its own.
-    let listed = crate::models::schemas::list(&mut conn_b, workspace_b)
+    let listed = crate::models::schemas::list(&mut *conn_b, workspace_b)
         .await
         .unwrap();
     assert_eq!(listed.len(), 1);
@@ -227,7 +227,9 @@ async fn deleting_the_template_detaches_the_schema_without_destroying_it(pool: P
         .await
         .unwrap();
 
-    let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
+    let after = get_by_id(&mut *conn, workspace_id, schema.id)
+        .await
+        .unwrap();
 
     // The definition survives: this is the whole point of copying rather than referencing.
     assert_eq!(after.definition.name, schema.definition.name);
@@ -293,7 +295,9 @@ async fn a_copy_keeps_the_definition_it_was_made_from(pool: PgPool) {
 
     // The base does not.
     // This is what lets a merge tell an upstream addition from a local one.
-    let after = get_by_id(&mut conn, workspace_id, schema.id).await.unwrap();
+    let after = get_by_id(&mut *conn, workspace_id, schema.id)
+        .await
+        .unwrap();
     let base = after.origin_snapshot.expect("still there");
     assert!(
         !base.entity_types["task"].fields.contains_key("priority"),

@@ -330,7 +330,7 @@ async fn merge_apply_takes_upstream_and_keeps_local(pool: PgPool) {
         .await
         .unwrap();
 
-    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+    let active = get_active_schema(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
     let (merged, _) = merge_apply(&mut conn, &pool, tenant_id, workspace_id, active.id)
@@ -349,7 +349,9 @@ async fn merge_apply_takes_upstream_and_keeps_local(pool: PgPool) {
     assert_eq!(merged.version, active.version + 1);
     assert_eq!(merged.status, "active");
     // Superseded, not deleted: entities written against it still validate against it.
-    let previous = get_by_id(&mut conn, workspace_id, active.id).await.unwrap();
+    let previous = get_by_id(&mut *conn, workspace_id, active.id)
+        .await
+        .unwrap();
     assert_eq!(previous.status, "archived");
     assert_eq!(schema.version, 1);
 }
@@ -385,7 +387,7 @@ async fn merge_apply_advances_the_base_to_upstream(pool: PgPool) {
         .await
         .unwrap();
 
-    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+    let active = get_active_schema(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
     let (merged, _) = merge_apply(&mut conn, &pool, tenant_id, workspace_id, active.id)
@@ -455,7 +457,7 @@ async fn merge_apply_refuses_a_conflict(pool: PgPool) {
         .await
         .unwrap();
 
-    let active = get_active_schema(&mut conn, workspace_id, "task-management")
+    let active = get_active_schema(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
     let err = merge_apply(&mut conn, &pool, tenant_id, workspace_id, active.id)
@@ -467,7 +469,7 @@ async fn merge_apply_refuses_a_conflict(pool: PgPool) {
     );
 
     // Nothing written: the active version is the one that was active before.
-    let still = get_active_schema(&mut conn, workspace_id, "task-management")
+    let still = get_active_schema(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
     assert_eq!(still.id, active.id);
@@ -500,7 +502,7 @@ async fn an_archived_version_cannot_be_merged_into(pool: PgPool) {
     create_schema(&mut conn, tenant_id, workspace_id, task_schema(true))
         .await
         .unwrap();
-    let archived = get_by_id(&mut conn, workspace_id, first.id).await.unwrap();
+    let archived = get_by_id(&mut *conn, workspace_id, first.id).await.unwrap();
     assert_eq!(
         archived.status, "archived",
         "the first version must be archived"

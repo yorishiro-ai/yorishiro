@@ -137,10 +137,13 @@ impl SchemaRow {
 }
 
 /// Lists all of a tenant's schemas (every version, including archived) ordered by name and version.
-pub async fn list(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-) -> Result<Vec<SchemaSummary>, YorishiroError> {
+pub async fn list<C>(conn: &mut C, workspace_id: Uuid) -> Result<Vec<SchemaSummary>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    SchemaSummary: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns([
             Schemas::Id,
@@ -153,7 +156,7 @@ pub async fn list(
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .order_by(Schemas::Name, Order::Asc)
         .order_by(Schemas::Version, Order::Asc)
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, SchemaSummary, _>(&sql, values)
         .fetch_all(&mut *conn)
@@ -163,16 +166,19 @@ pub async fn list(
 
 /// Counts a tenant's currently *active* schemas: one row per distinct schema name, since `create_schema` archives the previous version before activating a new one.
 /// For tenant-detail summaries, this is a more meaningful "how many schemas does this tenant define" figure than counting every archived version too.
-pub async fn count_active(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-) -> Result<i64, YorishiroError> {
+pub async fn count_active<C>(conn: &mut C, workspace_id: Uuid) -> Result<i64, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
         .from((Alias::new("content"), Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Schemas::Status).eq("active"))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
         .fetch_one(&mut *conn)
         .await
@@ -197,11 +203,19 @@ fn schema_columns() -> [Schemas; 11] {
 }
 
 /// Fetches the currently active schema (the latest version with status='active') for the given tenant and name.
-pub async fn get_active_schema(
-    conn: &mut PgConnection,
+// `SchemaRow` stays private: its `FromRow` impl is generic over any `Row`, so no external caller ever needs to name it to satisfy this bound.
+#[allow(private_bounds)]
+pub async fn get_active_schema<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     name: &str,
-) -> Result<SchemaRecord, YorishiroError> {
+) -> Result<SchemaRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
@@ -210,7 +224,7 @@ pub async fn get_active_schema(
         .and_where(Expr::col(Schemas::Status).eq("active"))
         .order_by(Schemas::Version, Order::Desc)
         .limit(1)
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let row: Option<SchemaRow> = sqlx::query_as_with(&sql, values)
         .fetch_optional(&mut *conn)
         .await
@@ -225,17 +239,24 @@ pub async fn get_active_schema(
 }
 
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
-pub async fn get_by_id(
-    conn: &mut PgConnection,
+#[allow(private_bounds)]
+pub async fn get_by_id<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     schema_id: Uuid,
-) -> Result<SchemaRecord, YorishiroError> {
+) -> Result<SchemaRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Schemas::Id).eq(schema_id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let row: Option<SchemaRow> = sqlx::query_as_with(&sql, values)
         .fetch_optional(&mut *conn)
         .await
@@ -250,17 +271,24 @@ pub async fn get_by_id(
 }
 
 /// Fetches every schema version for the tenant (including archived), with no pagination limit and the full `definition` body, for a full-tenant export.
-pub async fn export_all(
-    conn: &mut PgConnection,
+#[allow(private_bounds)]
+pub async fn export_all<C>(
+    conn: &mut C,
     workspace_id: Uuid,
-) -> Result<Vec<SchemaRecord>, YorishiroError> {
+) -> Result<Vec<SchemaRecord>, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(schema_columns())
         .from((Alias::new("content"), Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .order_by(Schemas::Name, Order::Asc)
         .order_by(Schemas::Version, Order::Asc)
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let rows: Vec<SchemaRow> = sqlx::query_as_with(&sql, values)
         .fetch_all(&mut *conn)
         .await

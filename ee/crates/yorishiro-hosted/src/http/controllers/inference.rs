@@ -164,7 +164,7 @@ pub async fn infer_fill(
             hint: "PUT /api/workspace/llm-key, or use fill-defaults instead".into(),
         })?;
 
-    let active = schemas::get_active_schema(&mut conn, workspace_id, &name).await?;
+    let active = schemas::get_active_schema(&mut *conn, workspace_id, &name).await?;
     let job_id = Uuid::new_v4();
     let client = InferenceClient::new(config);
 

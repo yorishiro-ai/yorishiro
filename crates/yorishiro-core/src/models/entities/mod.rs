@@ -351,7 +351,7 @@ pub async fn create(
         });
     }
 
-    let schema = schemas::get_active_schema(&mut tx, workspace_id, &input.schema_name).await?;
+    let schema = schemas::get_active_schema(&mut *tx, workspace_id, &input.schema_name).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 
