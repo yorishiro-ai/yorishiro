@@ -41,7 +41,7 @@ rmcp = { version = "3.0.1", features = ["server", "macros", "schemars", "transpo
 # answers on the host. Release builds always embed, so this only ever affected development.
 rust-embed = { version = "8", features = ["debug-embed"] }
 schemars = { version = "1", features = ["uuid1"] }
-sea-query = { version = "0.32", features = ["with-uuid", "with-chrono", "with-json", "postgres-vector", "postgres-array"] }
+sea-query = { version = "1.0", features = ["with-uuid", "with-chrono", "with-json", "postgres-vector", "postgres-array"] }
 sea-query-binder = { version = "0.7", features = ["sqlx-postgres", "with-uuid", "with-chrono", "with-json", "postgres-vector", "postgres-array"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -3151,6 +3151,19 @@ dependencies = [
  "chrono",
  "inherent",
  "pgvector",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "sea-query"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "546040c653a705e60ec65ecd3191a809603734bebbc225775916dea9ae409b31"
+dependencies = [
+ "chrono",
+ "itoa",
+ "pgvector",
  "sea-query-derive",
  "serde_json",
  "uuid",
@@ -3164,7 +3177,7 @@ checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
 dependencies = [
  "chrono",
  "pgvector",
- "sea-query",
+ "sea-query 0.32.7",
  "serde_json",
  "sqlx",
  "uuid",
@@ -3172,9 +3185,9 @@ dependencies = [
 
 [[package]]
 name = "sea-query-derive"
-version = "0.4.3"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bae0cbad6ab996955664982739354128c58d16e126114fe88c2a493642502aab"
+checksum = "a0b0f466921cdd3cf4b89d5c3ac2173dba89a873ab395b123a645de181ec7537"
 dependencies = [
  "darling 0.20.11",
  "heck 0.4.1",
@@ -4906,7 +4919,7 @@ dependencies = [
  "rand 0.10.2",
  "regex",
  "reqwest 0.13.4",
- "sea-query",
+ "sea-query 1.0.2",
  "sea-query-binder",
  "serde",
  "serde_json",
@@ -4941,7 +4954,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rmcp",
  "rust-embed",
- "sea-query",
+ "sea-query 1.0.2",
  "sea-query-binder",
  "serde",
  "serde_json",
@@ -4972,7 +4985,7 @@ dependencies = [
  "clap",
  "rmcp",
  "schemars",
- "sea-query",
+ "sea-query 1.0.2",
  "sea-query-binder",
  "serde",
  "serde_json",
