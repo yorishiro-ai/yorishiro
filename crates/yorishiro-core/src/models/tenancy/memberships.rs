@@ -36,7 +36,7 @@ where
     get_tenant(&mut *conn, tenant_id).await?;
 
     let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), TenantMemberships::Table))
+        .into_table(C::schema_table("identity", TenantMemberships::Table))
         .columns([
             TenantMemberships::TenantId,
             TenantMemberships::UserId,

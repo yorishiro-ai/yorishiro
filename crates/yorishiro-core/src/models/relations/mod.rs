@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, Query};
+use sea_query::{Asterisk, Expr, Func, Iden, Order, Query};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -182,7 +182,7 @@ where
     };
 
     let (sql, values) = Query::insert()
-        .into_table((Alias::new("content"), Relations::Table))
+        .into_table(C::schema_table("content", Relations::Table))
         .columns([
             Relations::WorkspaceId,
             Relations::SourceId,
@@ -235,7 +235,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(relation_columns())
-        .from((Alias::new("content"), Relations::Table))
+        .from(C::schema_table("content", Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
         .build_sqlx(C::builder());
@@ -276,7 +276,7 @@ where
     }
 
     let (sql, values) = Query::update()
-        .table((Alias::new("content"), Relations::Table))
+        .table(C::schema_table("content", Relations::Table))
         .values([(Relations::Status, status.into())])
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
@@ -297,7 +297,7 @@ where
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
 {
     let (sql, values) = Query::delete()
-        .from_table((Alias::new("content"), Relations::Table))
+        .from_table(C::schema_table("content", Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Relations::Id).eq(id))
         .build_sqlx(C::builder());
@@ -333,7 +333,7 @@ where
     let mut builder = Query::select();
     builder
         .columns(relation_columns())
-        .from((Alias::new("content"), Relations::Table))
+        .from(C::schema_table("content", Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id));
     if let Some(source_id) = query.source_id {
         builder.and_where(Expr::col(Relations::SourceId).eq(source_id));
@@ -372,7 +372,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(relation_columns())
-        .from((Alias::new("content"), Relations::Table))
+        .from(C::schema_table("content", Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .order_by(Relations::CreatedAt, Order::Asc)
         .build_sqlx(C::builder());
@@ -393,7 +393,7 @@ where
 {
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
-        .from((Alias::new("content"), Relations::Table))
+        .from(C::schema_table("content", Relations::Table))
         .and_where(Expr::col(Relations::WorkspaceId).eq(workspace_id))
         .build_sqlx(C::builder());
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)

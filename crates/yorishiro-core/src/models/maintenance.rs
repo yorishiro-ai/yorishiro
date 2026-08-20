@@ -107,7 +107,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(columns())
-        .from((Alias::new("identity"), Maintenance::Table))
+        .from(C::schema_table("identity", Maintenance::Table))
         .build_sqlx(C::builder());
 
     let row: Option<(String, i32, Option<String>)> = sqlx::query_as_with(&sql, values)

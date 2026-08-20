@@ -72,7 +72,7 @@ where
     if let Some(max) = tenant.max_workspaces {
         let (sql, values) = Query::select()
             .expr(Func::count(Expr::col(Asterisk)))
-            .from((Alias::new("identity"), Workspaces::Table))
+            .from(C::schema_table("identity", Workspaces::Table))
             .and_where(Expr::col(Workspaces::TenantId).eq(tenant_id))
             .build_sqlx(C::builder());
         let (count,): (i64,) = sqlx::query_as_with(&sql, values)
@@ -90,7 +90,7 @@ where
     }
 
     let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), Workspaces::Table))
+        .into_table(C::schema_table("identity", Workspaces::Table))
         .columns([
             Workspaces::TenantId,
             Workspaces::Name,
@@ -152,22 +152,26 @@ pub async fn mark_active<C>(
 where
     C: crate::db::Engine,
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    &'static str: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
 {
     // One statement: reading the column and then writing it would let two concurrent schema creations both see NULL, and the second would overwrite the first.
-    sqlx::query::<C::Db>(
-        "UPDATE identity.workspaces \
-         SET status = $2, schema_id = COALESCE(schema_id, $3) \
-         WHERE id = $1",
-    )
-    .bind(workspace_id)
-    .bind(WORKSPACE_STATUS_ACTIVE)
-    .bind(schema_id)
-    .execute(&mut *conn)
-    .await
-    .internal()?;
+    let (sql, values) = Query::update()
+        .table(C::schema_table("identity", Workspaces::Table))
+        .value(Workspaces::Status, WORKSPACE_STATUS_ACTIVE)
+        .value(
+            Workspaces::SchemaId,
+            Func::coalesce([
+                Expr::col(Workspaces::SchemaId).into(),
+                Expr::val(schema_id).into(),
+            ]),
+        )
+        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
+        .build_sqlx(C::builder());
+
+    sqlx::query_with(&sql, values)
+        .execute(&mut *conn)
+        .await
+        .internal()?;
     Ok(())
 }
 
@@ -181,7 +185,7 @@ where
 {
     let (sql, values) = Query::select()
         .column(Workspaces::Status)
-        .from((Alias::new("identity"), Workspaces::Table))
+        .from(C::schema_table("identity", Workspaces::Table))
         .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
         .build_sqlx(C::builder());
 
@@ -269,16 +273,19 @@ pub async fn resolve_tenant_id<C>(conn: &mut C, workspace_id: Uuid) -> Result<Uu
 where
     C: crate::db::Engine,
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     (Uuid,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
-    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
 {
-    let row: Option<(Uuid,)> =
-        sqlx::query_as::<C::Db, (Uuid,)>("SELECT tenant_id FROM identity.workspaces WHERE id = $1")
-            .bind(workspace_id)
-            .fetch_optional(&mut *conn)
-            .await
-            .internal()?;
+    let (sql, values) = Query::select()
+        .column(Workspaces::TenantId)
+        .from(C::schema_table("identity", Workspaces::Table))
+        .and_where(Expr::col(Workspaces::Id).eq(workspace_id))
+        .build_sqlx(C::builder());
+
+    let row: Option<(Uuid,)> = sqlx::query_as_with(&sql, values)
+        .fetch_optional(&mut *conn)
+        .await
+        .internal()?;
     match row {
         Some((tenant_id,)) => Ok(tenant_id),
         None => Err(YorishiroError::not_found(format!(
