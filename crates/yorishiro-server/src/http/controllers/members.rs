@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use utoipa::ToSchema;
-use yorishiro_core::repositories::tenancy::{self, MembershipRecord, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRecord, MembershipRole};
 use yorishiro_core::{ResultExt, YorishiroError};
 
 use crate::error::ApiError;

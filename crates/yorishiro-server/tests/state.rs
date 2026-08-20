@@ -76,7 +76,7 @@ async fn seed_embeddable(
     .unwrap();
 
     let mut conn = pool.acquire().await.unwrap();
-    let (schema, _) = yorishiro_core::repositories::schemas::create_schema(
+    let (schema, _) = yorishiro_core::models::schemas::create_schema(
         &mut conn,
         tenant_id,
         workspace_id,
@@ -220,7 +220,7 @@ async fn app_state_runs_and_drains_queued_work(pool: PgPool) {
 /// handler, so a test entering only through `GET /api/search` would have passed the whole time.
 #[sqlx::test(migrations = "../../migrations")]
 async fn search_tokens_are_charged_per_workspace_and_run_out(pool: PgPool) {
-    use yorishiro_core::repositories::tenancy;
+    use yorishiro_core::models::tenancy;
 
     // Real workspaces, so the ids are the `DEFAULT uuidv7()` ones the database issues.
     // Nothing in this process mints an id (see the technical spec: "アプリ側でのID生成はしない"),

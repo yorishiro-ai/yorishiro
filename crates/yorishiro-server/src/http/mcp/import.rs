@@ -7,7 +7,7 @@ use rmcp::tool;
 use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use yorishiro_core::repositories::import;
+use yorishiro_core::models::import;
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};

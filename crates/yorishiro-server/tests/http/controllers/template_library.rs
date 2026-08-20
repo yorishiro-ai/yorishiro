@@ -3,7 +3,7 @@ use crate::test_support::*;
 use axum::http::StatusCode;
 use sqlx::PgPool;
 use uuid::Uuid;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
 fn sample_definition(name: &str) -> serde_json::Value {
     serde_json::json!({

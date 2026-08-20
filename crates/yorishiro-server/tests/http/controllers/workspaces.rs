@@ -2,7 +2,7 @@ use crate::build_app;
 use crate::test_support::*;
 use axum::http::StatusCode;
 use sqlx::PgPool;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn owner_can_create_list_and_delete_workspaces(pool: PgPool) {

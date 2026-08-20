@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use sqlx::PgPool;
 
-use crate::repositories::maintenance::MaintenanceMode;
+use crate::models::maintenance::MaintenanceMode;
 use crate::services::db_load_guard::{AUTO_REASON, LoadGuardConfig, active_connections, decide};
 
 const SUSTAIN: Duration = Duration::from_secs(30);

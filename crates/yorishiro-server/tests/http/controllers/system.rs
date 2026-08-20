@@ -2,7 +2,7 @@ use crate::build_app;
 use crate::test_support::*;
 use axum::http::StatusCode;
 use sqlx::PgPool;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
 async fn get_json(app: &axum::Router, path: &str, key: &str) -> serde_json::Value {
     let response = rest_request(app, "GET", path, Some(&format!("Bearer {key}")), None).await;

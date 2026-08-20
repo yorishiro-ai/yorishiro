@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::db::TenantDb;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::embedding::EmbeddingProvider;
 
 async fn request(

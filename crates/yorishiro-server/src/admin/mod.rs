@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use clap::{Subcommand, ValueEnum};
 use sqlx::PgPool;
 use uuid::Uuid;
-use yorishiro_core::repositories::maintenance::{self, MaintenanceMode};
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::maintenance::{self, MaintenanceMode};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key};
@@ -212,7 +212,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
                 .await?;
 
                 let mut conn = pool.acquire().await.context("acquire connection")?;
-                let (schema, _diff) = yorishiro_core::repositories::schemas::create_schema(
+                let (schema, _diff) = yorishiro_core::models::schemas::create_schema(
                     &mut conn,
                     tenant.id,
                     workspace.id,

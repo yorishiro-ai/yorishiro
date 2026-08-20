@@ -8,7 +8,7 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 use yorishiro_core::services::auth::ApiKeyScope;
 
 use super::{YorishiroMcpServer, mcp_try, ok_json, verified};

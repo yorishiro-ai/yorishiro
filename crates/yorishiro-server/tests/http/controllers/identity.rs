@@ -3,7 +3,7 @@ use crate::test_support::*;
 use axum::http::StatusCode;
 use sqlx::PgPool;
 use uuid::Uuid;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn signup_consumes_invite_and_creates_membership(pool: PgPool) {

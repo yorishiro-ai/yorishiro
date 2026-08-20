@@ -7,7 +7,7 @@ use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth;
 use yorishiro_core::{ResultExt, YorishiroError};
 

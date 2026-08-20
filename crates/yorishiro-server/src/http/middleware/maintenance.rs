@@ -5,7 +5,7 @@
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use yorishiro_core::repositories::maintenance;
+use yorishiro_core::models::maintenance;
 
 use crate::error::ApiError;
 use crate::state::AppState;

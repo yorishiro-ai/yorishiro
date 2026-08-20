@@ -213,7 +213,7 @@ async fn rest_creates_a_schema_from_a_library_template(pool: PgPool) {
     drop(conn);
 
     let definition = yorishiro_core::templates::get_template("worldbuilding").unwrap();
-    let template = yorishiro_core::repositories::tenancy::create_template(
+    let template = yorishiro_core::models::tenancy::create_template(
         &pool,
         tenant_id,
         None,
@@ -265,11 +265,11 @@ async fn rest_cannot_create_a_schema_from_another_tenants_template(pool: PgPool)
     drop(conn);
 
     // A second tenant, with a private template of its own.
-    let other = yorishiro_core::repositories::tenancy::create_tenant(&pool, "other-tenant", None)
+    let other = yorishiro_core::models::tenancy::create_tenant(&pool, "other-tenant", None)
         .await
         .unwrap();
     let definition = yorishiro_core::templates::get_template("worldbuilding").unwrap();
-    let theirs = yorishiro_core::repositories::tenancy::create_template(
+    let theirs = yorishiro_core::models::tenancy::create_template(
         &pool,
         other.id,
         None,

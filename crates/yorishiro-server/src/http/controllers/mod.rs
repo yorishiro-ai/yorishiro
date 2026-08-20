@@ -19,7 +19,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 
 use crate::state::AppState;
 
@@ -134,15 +134,15 @@ impl Modify for SecurityAddon {
         setup::SetupRequest,
         setup::SetupResponse,
         members::AddMemberRequest,
-        yorishiro_core::repositories::tenancy::MembershipRole,
-        yorishiro_core::repositories::tenancy::MembershipRecord,
-        yorishiro_core::repositories::tenancy::WorkspaceRecord,
-        yorishiro_core::repositories::entities::EntityDrift,
-        yorishiro_core::repositories::entities::DriftField,
-        yorishiro_core::repositories::entities::MigrationDryRun,
-        yorishiro_core::repositories::entities::DryRunByType,
-        yorishiro_core::repositories::entities::FillDefaultsReport,
-        yorishiro_core::repositories::entities::UndoReport,
+        yorishiro_core::models::tenancy::MembershipRole,
+        yorishiro_core::models::tenancy::MembershipRecord,
+        yorishiro_core::models::tenancy::WorkspaceRecord,
+        yorishiro_core::models::entities::EntityDrift,
+        yorishiro_core::models::entities::DriftField,
+        yorishiro_core::models::entities::MigrationDryRun,
+        yorishiro_core::models::entities::DryRunByType,
+        yorishiro_core::models::entities::FillDefaultsReport,
+        yorishiro_core::models::entities::UndoReport,
         yorishiro_core::services::auth::ApiKeyScope,
         entities::CreateEntityRequest,
         entities::UpdateEntityRequest,
@@ -150,10 +150,10 @@ impl Modify for SecurityAddon {
         relations::SetRelationStatusRequest,
         schemas::CreateSchemaResponse,
         schemas::CreateSchemaRequest,
-        yorishiro_core::repositories::import::ImportResult,
+        yorishiro_core::models::import::ImportResult,
         workspaces::CreateWorkspaceRequest,
         workspaces::WorkspaceDetail,
-        yorishiro_core::repositories::tenancy::TemplateRecord,
+        yorishiro_core::models::tenancy::TemplateRecord,
         template_library::CreateTemplateRequest,
         template_library::UpdateTemplateRequest,
         template_library::ForkTemplateRequest,

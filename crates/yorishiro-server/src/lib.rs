@@ -52,7 +52,7 @@ pub(crate) mod test_support {
     use uuid::Uuid;
     use yorishiro_core::YorishiroError;
     use yorishiro_core::db::TenantDb;
-    use yorishiro_core::repositories::tenancy;
+    use yorishiro_core::models::tenancy;
     use yorishiro_core::services::auth::create_api_key;
     use yorishiro_core::services::embedding::EmbeddingProvider;
 

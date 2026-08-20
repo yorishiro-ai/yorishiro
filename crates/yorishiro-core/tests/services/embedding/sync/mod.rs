@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::YorishiroError;
 use crate::db::TenantDb;
 use crate::metaschema::MetaSchemaDefinition;
-use crate::repositories::entities::{self, CreateEntityInput};
-use crate::repositories::schemas;
+use crate::models::entities::{self, CreateEntityInput};
+use crate::models::schemas;
 use crate::services::embedding::EmbeddingProvider;
 use crate::services::embedding::sync::{
     Entities, compose_embedding_text, sync_embedding, sync_embedding_for_record,

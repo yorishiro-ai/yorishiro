@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use yorishiro_core::repositories::maintenance::{self, MaintenanceMode, MaintenanceState};
+use yorishiro_core::models::maintenance::{self, MaintenanceMode, MaintenanceState};
 
 use crate::error::ApiError;
 use crate::http::middleware::auth::{Authorized, MigrationScope};

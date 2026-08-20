@@ -14,7 +14,7 @@ fn scope_arguments_convert_to_their_core_scope() {
 /// Same for roles: the CLI accepts four, and they must map onto the four the membership check constraint permits.
 #[test]
 fn role_arguments_convert_to_their_core_role() {
-    use yorishiro_core::repositories::tenancy::MembershipRole;
+    use yorishiro_core::models::tenancy::MembershipRole;
 
     assert_eq!(MembershipRole::from(RoleArg::Owner), MembershipRole::Owner);
     assert_eq!(MembershipRole::from(RoleArg::Admin), MembershipRole::Admin);

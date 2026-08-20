@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::admin::commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key};
 use sea_query::{Alias, Expr, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
-use yorishiro_core::repositories::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::{self, ApiKeyScope};
 
 #[derive(sea_query::Iden)]
@@ -150,7 +150,7 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
         }
     }))
     .unwrap();
-    yorishiro_core::repositories::schemas::create_schema(
+    yorishiro_core::models::schemas::create_schema(
         &mut conn,
         workspace_id_tenant,
         workspace_id,
@@ -159,10 +159,10 @@ async fn resync_fills_missing_embeddings(pool: PgPool) {
     .await
     .unwrap();
     // core's create doesn't write the embedding (that's the adapter's background sync job), so this entity reproduces one left behind by a failed sync.
-    let entity = yorishiro_core::repositories::entities::create(
+    let entity = yorishiro_core::models::entities::create(
         &mut conn,
         workspace_id,
-        yorishiro_core::repositories::entities::CreateEntityInput {
+        yorishiro_core::models::entities::CreateEntityInput {
             schema_name: "task-management".into(),
             entity_type: "task".into(),
             data: serde_json::json!({ "title": "orphaned" }),

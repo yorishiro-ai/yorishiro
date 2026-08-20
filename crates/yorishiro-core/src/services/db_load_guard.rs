@@ -18,7 +18,7 @@ use sqlx::PgPool;
 use tokio::time::interval;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::repositories::maintenance::{self, MaintenanceMode};
+use crate::models::maintenance::{self, MaintenanceMode};
 
 /// Written as the reason when this guard trips, and matched when deciding whether to lift.
 ///

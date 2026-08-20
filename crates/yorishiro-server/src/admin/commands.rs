@@ -3,7 +3,7 @@ use sea_query::{Alias, Expr, Iden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use uuid::Uuid;
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::tenancy;
 use yorishiro_core::services::auth::{self, ApiKeyScope, CreatedApiKey};
 
 #[derive(Iden)]
@@ -149,8 +149,7 @@ pub async fn resync_embeddings(
     for (entity_id,) in ids {
         let result = async {
             let record =
-                yorishiro_core::repositories::entities::get(&mut conn, workspace_id, entity_id)
-                    .await?;
+                yorishiro_core::models::entities::get(&mut conn, workspace_id, entity_id).await?;
             yorishiro_core::services::embedding::sync::sync_embedding_for_record(
                 &mut conn,
                 workspace_id,

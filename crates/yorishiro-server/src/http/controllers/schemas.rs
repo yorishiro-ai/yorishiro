@@ -7,8 +7,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
-use yorishiro_core::repositories::schemas::{self, SchemaRecord, SchemaSummary};
-use yorishiro_core::repositories::tenancy;
+use yorishiro_core::models::schemas::{self, SchemaRecord, SchemaSummary};
+use yorishiro_core::models::tenancy;
 use yorishiro_core::templates::{self, TemplateSummary};
 
 use crate::error::ApiError;
