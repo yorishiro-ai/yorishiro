@@ -5,7 +5,9 @@ use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
+use yorishiro_core::ResultExt;
 use yorishiro_core::YorishiroError;
+use yorishiro_core::db;
 use yorishiro_core::models::tenancy;
 
 use crate::models::billing;
@@ -213,6 +215,25 @@ async fn apply_stripe_event(state: &HostedState, event: StripeEvent) -> Result<(
             .map(str::to_owned)
     })
     .flatten();
+
+    // Everything from here to `record_processed_event` is one customer's ordering decision plus
+    // the writes it authorises, and each step takes its own connection from the pool.
+    // Without this, two deliveries for the same customer can both pass the staleness check
+    // before either records itself, and the older one applies last: `set_plan` is a plain write,
+    // so last-writer-wins means a cancelled subscription can be resurrected by a delayed
+    // `created` event, or a downgrade can undo an upgrade that already landed.
+    //
+    // Session-scoped rather than `lock_for_update`, because there is no shared transaction here
+    // to scope a transaction lock to. Keyed per customer, so unrelated customers stay parallel.
+    // Events with no customer (the one-time checkout link) need no ordering and take no lock.
+    let _order_lock = match customer_id.as_deref() {
+        Some(customer_id) => Some(
+            db::SessionLock::acquire(pool, &format!("stripe-customer:{customer_id}"))
+                .await
+                .internal()?,
+        ),
+        None => None,
+    };
 
     if let Some(customer_id) = customer_id.as_deref()
         && stripe_events::is_stale_for_customer(pool, customer_id, created).await?

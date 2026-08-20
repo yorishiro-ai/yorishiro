@@ -214,3 +214,81 @@ async fn lock_for_update_does_not_serialize_different_keys(pool: PgPool) {
 
     first_tx.commit().await.unwrap();
 }
+
+/// The lock must actually exclude, and the check has to be able to fail.
+///
+/// Eight racers rather than two: a race that reproduces one run in three reads as a flaky test rather than a broken guard, and two contenders are not enough to lose reliably.
+/// Spawned behind a barrier because `tokio::join!` polls on one thread and never overlaps the critical section.
+///
+/// What it measures is the shape the Stripe webhook needs: each racer takes its own connection, reads a value, and writes back one higher.
+/// Without exclusion the reads interleave and the final count is below eight; with it, every increment is serialised and the count is exactly eight.
+#[sqlx::test(migrations = "../../migrations")]
+async fn eight_racers_holding_the_same_key_do_not_interleave(pool: sqlx::PgPool) {
+    sqlx::query("CREATE TABLE counter (id INT PRIMARY KEY, n INT NOT NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO counter (id, n) VALUES (1, 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(8));
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let pool = pool.clone();
+        let barrier = barrier.clone();
+        handles.push(tokio::spawn(async move {
+            barrier.wait().await;
+            let mut guard = super::SessionLock::acquire(&pool, "race-test")
+                .await
+                .unwrap();
+
+            // On the guard's own connection, not a second one from the pool: eight holders each
+            // taking two connections exhaust it, and the test would then fail on `PoolTimedOut`
+            // whether or not the lock works. Measured, not assumed.
+            let (n,): (i32,) = sqlx::query_as("SELECT n FROM counter WHERE id = 1")
+                .fetch_one(guard.conn())
+                .await
+                .unwrap();
+            // The window the lock exists to close: without it every racer reads the same `n`.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            sqlx::query("UPDATE counter SET n = $1 WHERE id = 1")
+                .bind(n + 1)
+                .execute(guard.conn())
+                .await
+                .unwrap();
+
+            guard.release().await.unwrap();
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    let (n,): (i32,) = sqlx::query_as("SELECT n FROM counter WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 8, "increments interleaved: the lock did not exclude");
+}
+
+/// Two different keys must not block each other, or the Stripe webhook would serialise every customer behind whichever one arrived first.
+#[sqlx::test(migrations = "../../migrations")]
+async fn different_keys_do_not_block_each_other(pool: sqlx::PgPool) {
+    let first = super::SessionLock::acquire(&pool, "customer-a")
+        .await
+        .unwrap();
+
+    // Would hang rather than fail if the key were ignored, so it is bounded: a timeout here is the failure.
+    let second = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        super::SessionLock::acquire(&pool, "customer-b"),
+    )
+    .await
+    .expect("a lock on a different key blocked, so the key is not part of the exclusion")
+    .unwrap();
+
+    second.release().await.unwrap();
+    first.release().await.unwrap();
+}

@@ -137,6 +137,54 @@ pub async fn lock_for_update(conn: &mut sqlx::PgConnection, key: &str) -> Result
     Ok(())
 }
 
+/// A held advisory lock, released when dropped or when its connection returns to the pool.
+///
+/// [`lock_for_update`] ends with its transaction, which is the right scope when everything guarded runs on one connection.
+/// A caller whose steps each take their own connection from the pool cannot use it: there is no shared transaction for the lock to live in, and each step would take and release its own.
+///
+/// This is the session-scoped form for that case.
+/// The lock lives on the connection rather than a transaction, so holding the connection is what holds the lock, and the guard exists to make dropping it release the lock rather than leaving it until the connection is recycled.
+pub struct SessionLock {
+    conn: sqlx::pool::PoolConnection<sqlx::Postgres>,
+    key: String,
+}
+
+impl SessionLock {
+    /// Blocks until the lock is held, then keeps it until [`release`](Self::release) or drop.
+    ///
+    /// Same key derivation as [`lock_for_update`], so the two exclude each other on the same string.
+    pub async fn acquire(pool: &PgPool, key: &str) -> Result<Self, sqlx::Error> {
+        let mut conn = pool.acquire().await?;
+        sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
+            .bind(key)
+            .execute(&mut *conn)
+            .await?;
+        Ok(Self {
+            conn,
+            key: key.to_string(),
+        })
+    }
+
+    /// The connection the lock is held on.
+    ///
+    /// Exposed because holding this guard means holding one connection out of the pool: a caller that goes back to the pool for its guarded work needs two connections per holder, and enough concurrent holders then exhaust the pool rather than queueing on the lock.
+    /// Work that can run here should.
+    pub fn conn(&mut self) -> &mut sqlx::PgConnection {
+        &mut self.conn
+    }
+
+    /// Releases the lock and reports whether that failed.
+    ///
+    /// Dropping does the same thing without a result to check, which is why this exists: a caller that can act on the failure should not have to learn about it from a log line.
+    pub async fn release(mut self) -> Result<(), sqlx::Error> {
+        sqlx::query("SELECT pg_advisory_unlock(hashtextextended($1, 0))")
+            .bind(&self.key)
+            .execute(&mut *self.conn)
+            .await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/db.rs"]
 mod tests;
