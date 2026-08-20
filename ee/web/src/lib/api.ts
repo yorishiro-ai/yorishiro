@@ -252,8 +252,17 @@ export async function getTenantOverview(): Promise<TenantOverview> {
   return request<TenantOverview>("/hosted/tenant/overview");
 }
 
-export async function listMarketplace(): Promise<MarketplaceListing[]> {
-  return request<MarketplaceListing[]>("/api/marketplace");
+export async function listMarketplace(params?: {
+  offset?: number;
+  limit?: number;
+}): Promise<MarketplaceListing[]> {
+  // The server has always taken these and defaulted to 50, so a page that sent neither showed
+  // the first 50 templates and no way to reach the rest.
+  const searchParams = new URLSearchParams();
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const qs = searchParams.toString();
+  return request<MarketplaceListing[]>(`/api/marketplace${qs ? `?${qs}` : ""}`);
 }
 
 export async function listTemplateVersions(templateId: string): Promise<TemplateVersion[]> {
