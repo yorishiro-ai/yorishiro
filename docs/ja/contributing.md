@@ -47,7 +47,7 @@ Eloquent のモデルが両方を持つのと同じです。
 
 残りは意図ではなく既知の負債で、少しずつ移しています。
 `crates/yorishiro-server/src/admin/commands.rs`、`http/controllers/setup/mod.rs`、`services/embedding/sync/`、
-`ee/` 側の `services/marketplace.rs`、`http/controllers/inference.rs` です。
+`ee/` 側の `http/controllers/inference.rs` です。
 すでにそのファイルを編集しているなら、クエリを `models/` に寄せてもらえると助かります。
 そうでないなら触らないでください。
 動作の変更と一緒に読めない移動だけの差分は、レビューできません。

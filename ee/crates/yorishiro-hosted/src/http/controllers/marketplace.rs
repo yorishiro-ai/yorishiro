@@ -14,11 +14,12 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::error::HostedApiError;
-use crate::services::authz;
-use crate::services::marketplace::{
-    self, ListMarketplaceQuery, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest,
-    TemplateReviewRecord, TemplateVersionRecord,
+use crate::models::marketplace::{
+    self as marketplace_models, ListMarketplaceQuery, MarketplaceListing, PublishVersionRequest,
+    SubmitReviewRequest, TemplateReviewRecord, TemplateVersionRecord,
 };
+use crate::services::authz;
+use crate::services::marketplace;
 use crate::state::HostedState;
 
 /// The licence gate for every route in this module, paired with authentication so the two cannot drift apart: a handler added here reaches for this rather than `authz::authenticate_tenant` directly, and is gated by construction.
@@ -64,7 +65,7 @@ pub async fn list_marketplace(
         limit: params.limit.unwrap_or(default.limit),
         offset: params.offset.unwrap_or(default.offset),
     };
-    let listings = marketplace::list_marketplace(&state.identity_pool, query).await?;
+    let listings = marketplace_models::list_marketplace(&state.identity_pool, query).await?;
     Ok(Json(listings))
 }
 
@@ -86,7 +87,8 @@ pub async fn list_versions(
     Path(template_id): Path<Uuid>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, HostedApiError> {
     let (tenant_id, _) = licensed_tenant(&state, &headers).await?;
-    let versions = marketplace::list_versions(&state.identity_pool, tenant_id, template_id).await?;
+    let versions =
+        marketplace_models::list_versions(&state.identity_pool, tenant_id, template_id).await?;
     Ok(Json(versions))
 }
 
@@ -136,7 +138,8 @@ pub async fn list_reviews(
     Path(template_id): Path<Uuid>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, HostedApiError> {
     let (tenant_id, _) = licensed_tenant(&state, &headers).await?;
-    let reviews = marketplace::list_reviews(&state.identity_pool, tenant_id, template_id).await?;
+    let reviews =
+        marketplace_models::list_reviews(&state.identity_pool, tenant_id, template_id).await?;
     Ok(Json(reviews))
 }
 
