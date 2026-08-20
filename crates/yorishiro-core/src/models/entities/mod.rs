@@ -308,7 +308,7 @@ where
 {
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
-        .from((Alias::new("content"), Entities::Table))
+        .from(C::schema_table("content", Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .build_sqlx(C::builder());
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
@@ -399,7 +399,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(entity_columns())
-        .from((Alias::new("content"), Entities::Table))
+        .from(C::schema_table("content", Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
         .build_sqlx(C::builder());
@@ -437,9 +437,9 @@ where
     validate_data(entity_type_def, &data)?;
 
     let (sql, values) = Query::update()
-        .table((Alias::new("content"), Entities::Table))
+        .table(C::schema_table("content", Entities::Table))
         .value(Entities::Data, data)
-        .value(Entities::UpdatedAt, Expr::cust("now()"))
+        .value(Entities::UpdatedAt, Expr::current_timestamp())
         .value(Entities::UpdatedBy, updated_by)
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
@@ -460,7 +460,7 @@ where
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
 {
     let (sql, values) = Query::delete()
-        .from_table((Alias::new("content"), Entities::Table))
+        .from_table(C::schema_table("content", Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
         .build_sqlx(C::builder());
@@ -526,7 +526,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(entity_columns())
-        .from((Alias::new("content"), Entities::Table))
+        .from(C::schema_table("content", Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .order_by(Entities::CreatedAt, Order::Asc)
         .build_sqlx(C::builder());

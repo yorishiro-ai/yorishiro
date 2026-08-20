@@ -56,7 +56,7 @@ where
 {
     let password_hash = hash_password(password)?;
     let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), Users::Table))
+        .into_table(C::schema_table("identity", Users::Table))
         .columns([Users::Email, Users::PasswordHash, Users::DisplayName])
         .values_panic([email.into(), password_hash.into(), display_name.into()])
         .returning(Query::returning().columns([
@@ -107,7 +107,7 @@ where
             Users::DisplayName,
             Users::CreatedAt,
         ])
-        .from((Alias::new("identity"), Users::Table))
+        .from(C::schema_table("identity", Users::Table))
         .and_where(Expr::col(Users::Email).eq(email))
         .build_sqlx(C::builder());
 

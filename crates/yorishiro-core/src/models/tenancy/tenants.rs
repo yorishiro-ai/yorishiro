@@ -82,7 +82,7 @@ where
     if let Some(max) = max_tenants {
         let (sql, values) = Query::select()
             .expr(Func::count(Expr::col(Asterisk)))
-            .from((Alias::new("identity"), Tenants::Table))
+            .from(C::schema_table("identity", Tenants::Table))
             .build_sqlx(C::builder());
         let (count,): (i64,) = sqlx::query_as_with(&sql, values)
             .fetch_one(&mut *conn)
@@ -99,7 +99,7 @@ where
     }
 
     let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), Tenants::Table))
+        .into_table(C::schema_table("identity", Tenants::Table))
         .columns([Tenants::Name, Tenants::MaxWorkspaces])
         .values_panic([name.into(), max_workspaces.into()])
         .returning(Query::returning().columns(tenant_columns()))
@@ -131,7 +131,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(tenant_columns())
-        .from((Alias::new("identity"), Tenants::Table))
+        .from(C::schema_table("identity", Tenants::Table))
         .and_where(Expr::col(Tenants::Id).eq(tenant_id))
         .build_sqlx(C::builder());
 

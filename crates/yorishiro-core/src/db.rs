@@ -20,6 +20,15 @@ pub trait Engine: sqlx::Connection {
 
     /// `rows_affected` is inherent on `PgQueryResult`/`SqliteQueryResult`, not a method `sqlx::Database::QueryResult` guarantees, so a generic caller cannot reach it through a trait bound.
     fn rows_affected(result: <Self::Db as sqlx::Database>::QueryResult) -> u64;
+
+    /// A table reference, schema-qualified on Postgres and bare on Sqlite.
+    ///
+    /// Postgres has `identity`/`content` as real schemas; Sqlite has no schema concept for a single-file database, so qualifying a table there is a syntax error, not a no-op.
+    /// A caller writes `.from(C::schema_table("content", Entities::Table))` in place of `.from((Alias::new("content"), Entities::Table))`; the emitted table name is otherwise identical.
+    fn schema_table<T: sea_query::Iden + 'static>(
+        schema: &'static str,
+        table: T,
+    ) -> sea_query::TableRef;
 }
 
 impl Engine for sqlx::PgConnection {
@@ -28,6 +37,14 @@ impl Engine for sqlx::PgConnection {
 
     fn rows_affected(result: sqlx::postgres::PgQueryResult) -> u64 {
         result.rows_affected()
+    }
+
+    fn schema_table<T: sea_query::Iden + 'static>(
+        schema: &'static str,
+        table: T,
+    ) -> sea_query::TableRef {
+        use sea_query::IntoTableRef;
+        (sea_query::Alias::new(schema), table).into_table_ref()
     }
 }
 
@@ -40,6 +57,14 @@ impl Engine for sqlx::SqliteConnection {
 
     fn rows_affected(result: sqlx::sqlite::SqliteQueryResult) -> u64 {
         result.rows_affected()
+    }
+
+    fn schema_table<T: sea_query::Iden + 'static>(
+        _schema: &'static str,
+        table: T,
+    ) -> sea_query::TableRef {
+        use sea_query::IntoTableRef;
+        table.into_table_ref()
     }
 }
 

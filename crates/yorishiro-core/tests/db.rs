@@ -335,3 +335,41 @@ fn sqlite_satisfies_the_generic_bounds() {
     let _ = crate::models::relations::create::<sqlx::SqliteConnection>;
     let _ = crate::models::export::export_all::<sqlx::SqliteConnection>;
 }
+
+/// `Engine::schema_table` must actually change what SQL comes out for Postgres, not just compile.
+#[test]
+fn schema_table_qualifies_on_postgres() {
+    let pg_sql = Query::select()
+        .column(Workspaces::Name)
+        .from(<sqlx::PgConnection as crate::db::Engine>::schema_table(
+            "identity",
+            Workspaces::Table,
+        ))
+        .to_string(PostgresQueryBuilder);
+    assert!(
+        pg_sql.contains(r#""identity"."workspaces""#),
+        "Postgres output must carry the schema qualification: {pg_sql}"
+    );
+}
+
+/// The Sqlite half of the same check: `Engine::schema_table` must drop the qualifier, through the trait impl itself rather than a hand-built `TableRef` that only looks like what the impl would produce.
+/// Sqlite has no schema concept for a single-file database, so `identity`/`content` qualifying a table there is a syntax error, not a no-op.
+#[cfg(feature = "sqlite")]
+#[test]
+fn schema_table_stays_bare_on_sqlite() {
+    let sqlite_sql = Query::select()
+        .column(Workspaces::Name)
+        .from(<sqlx::SqliteConnection as crate::db::Engine>::schema_table(
+            "identity",
+            Workspaces::Table,
+        ))
+        .to_string(sea_query::SqliteQueryBuilder);
+    assert!(
+        !sqlite_sql.contains("identity"),
+        "the qualifier must be absent: {sqlite_sql}"
+    );
+    assert!(
+        sqlite_sql.contains(r#""workspaces""#),
+        "the bare table name must still be present: {sqlite_sql}"
+    );
+}

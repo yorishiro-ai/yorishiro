@@ -153,7 +153,7 @@ where
             Schemas::Status,
             Schemas::CreatedAt,
         ])
-        .from((Alias::new("content"), Schemas::Table))
+        .from(C::schema_table("content", Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .order_by(Schemas::Name, Order::Asc)
         .order_by(Schemas::Version, Order::Asc)
@@ -176,7 +176,7 @@ where
 {
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
-        .from((Alias::new("content"), Schemas::Table))
+        .from(C::schema_table("content", Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Schemas::Status).eq("active"))
         .build_sqlx(C::builder());
@@ -219,7 +219,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(schema_columns())
-        .from((Alias::new("content"), Schemas::Table))
+        .from(C::schema_table("content", Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Schemas::Name).eq(name))
         .and_where(Expr::col(Schemas::Status).eq("active"))
@@ -255,7 +255,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(schema_columns())
-        .from((Alias::new("content"), Schemas::Table))
+        .from(C::schema_table("content", Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Schemas::Id).eq(schema_id))
         .build_sqlx(C::builder());
@@ -287,7 +287,7 @@ where
 {
     let (sql, values) = Query::select()
         .columns(schema_columns())
-        .from((Alias::new("content"), Schemas::Table))
+        .from(C::schema_table("content", Schemas::Table))
         .and_where(Expr::col(Schemas::WorkspaceId).eq(workspace_id))
         .order_by(Schemas::Name, Order::Asc)
         .order_by(Schemas::Version, Order::Asc)
