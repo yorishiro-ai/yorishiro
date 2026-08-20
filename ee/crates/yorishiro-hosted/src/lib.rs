@@ -17,7 +17,9 @@ use axum::Router;
 use axum::routing::{get, post, put};
 use utoipa::OpenApi;
 
-use http::controllers::{HostedApiDoc, dashboard, inference, marketplace, oauth, origin, stripe};
+use http::controllers::{
+    HostedApiDoc, dashboard, entity_columns, inference, marketplace, oauth, origin, stripe,
+};
 use state::HostedState;
 
 /// The hosted dashboard/webhook/OAuth-status router, mounted by `yorishiro-server`'s `main` (or, alternatively, nested into `yorishiro-server`'s own router by a deployment that prefers a single process).
@@ -87,6 +89,16 @@ pub fn router() -> Router<HostedState> {
         .route(
             "/api/migration-jobs/{job_id}/confirm",
             post(inference::confirm_proposals),
+        )
+        // Which columns the Entities table shows, per workspace and entity type.
+        // Base defines nothing under `/api/workspace/`, so no path here shadows one of its routes.
+        .route(
+            "/api/workspace/entity-columns",
+            get(entity_columns::list_columns),
+        )
+        .route(
+            "/api/workspace/entity-columns/{entity_type}",
+            put(entity_columns::set_columns).delete(entity_columns::reset_columns),
         )
 }
 

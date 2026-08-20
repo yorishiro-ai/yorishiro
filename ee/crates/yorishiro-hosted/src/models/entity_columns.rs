@@ -139,7 +139,10 @@ pub async fn set(
                 EntityColumnPreferences::EntityType,
             ])
             .update_columns([EntityColumnPreferences::Columns])
-            .value(EntityColumnPreferences::UpdatedAt, Expr::current_timestamp())
+            .value(
+                EntityColumnPreferences::UpdatedAt,
+                Expr::current_timestamp(),
+            )
             .to_owned(),
         )
         .build_sqlx(PostgresQueryBuilder);

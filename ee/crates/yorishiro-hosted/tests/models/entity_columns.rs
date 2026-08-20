@@ -9,7 +9,12 @@ async fn a_workspace_that_never_chose_has_no_preference(pool: PgPool) {
     let (_tenant_id, workspace_id) = seed_tenant_and_workspace(&pool).await;
     let mut conn = pool.acquire().await.unwrap();
 
-    assert!(get(&mut conn, workspace_id, "task").await.unwrap().is_none());
+    assert!(
+        get(&mut conn, workspace_id, "task")
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(list(&mut conn, workspace_id).await.unwrap().is_empty());
 }
 
@@ -19,7 +24,11 @@ async fn the_stored_order_is_the_order_read_back(pool: PgPool) {
     let (_tenant_id, workspace_id) = seed_tenant_and_workspace(&pool).await;
     let mut conn = pool.acquire().await.unwrap();
 
-    let chosen = vec!["priority".to_string(), "title".to_string(), "done".to_string()];
+    let chosen = vec![
+        "priority".to_string(),
+        "title".to_string(),
+        "done".to_string(),
+    ];
     set(&mut conn, workspace_id, "task", &chosen).await.unwrap();
 
     let stored = get(&mut conn, workspace_id, "task").await.unwrap().unwrap();
@@ -37,13 +46,21 @@ async fn saving_again_replaces_rather_than_appends(pool: PgPool) {
     set(&mut conn, workspace_id, "task", &["title".to_string()])
         .await
         .unwrap();
-    set(&mut conn, workspace_id, "task", &["done".to_string(), "title".to_string()])
-        .await
-        .unwrap();
+    set(
+        &mut conn,
+        workspace_id,
+        "task",
+        &["done".to_string(), "title".to_string()],
+    )
+    .await
+    .unwrap();
 
     let all = list(&mut conn, workspace_id).await.unwrap();
     assert_eq!(all.len(), 1);
-    assert_eq!(all[0].columns, vec!["done".to_string(), "title".to_string()]);
+    assert_eq!(
+        all[0].columns,
+        vec!["done".to_string(), "title".to_string()]
+    );
 }
 
 /// Two entity types in one workspace have different fields, so they must not share a row.
@@ -60,11 +77,19 @@ async fn each_entity_type_keeps_its_own_columns(pool: PgPool) {
         .unwrap();
 
     assert_eq!(
-        get(&mut conn, workspace_id, "task").await.unwrap().unwrap().columns,
+        get(&mut conn, workspace_id, "task")
+            .await
+            .unwrap()
+            .unwrap()
+            .columns,
         vec!["title".to_string()]
     );
     assert_eq!(
-        get(&mut conn, workspace_id, "note").await.unwrap().unwrap().columns,
+        get(&mut conn, workspace_id, "note")
+            .await
+            .unwrap()
+            .unwrap()
+            .columns,
         vec!["body".to_string()]
     );
     assert_eq!(list(&mut conn, workspace_id).await.unwrap().len(), 2);
@@ -82,7 +107,12 @@ async fn clearing_restores_absence_rather_than_storing_emptiness(pool: PgPool) {
         .unwrap();
     clear(&mut conn, workspace_id, "task").await.unwrap();
 
-    assert!(get(&mut conn, workspace_id, "task").await.unwrap().is_none());
+    assert!(
+        get(&mut conn, workspace_id, "task")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// An explicit empty selection is a choice and must be stored as one, distinct from never having chosen.
@@ -118,7 +148,10 @@ async fn a_repeated_column_is_refused(pool: PgPool) {
         "expected a duplicate-column refusal, got {err:?}"
     );
     assert!(
-        get(&mut conn, workspace_id, "task").await.unwrap().is_none(),
+        get(&mut conn, workspace_id, "task")
+            .await
+            .unwrap()
+            .is_none(),
         "a refused save must not leave a row behind"
     );
 }
@@ -131,17 +164,28 @@ async fn more_columns_than_the_maximum_are_refused(pool: PgPool) {
     let mut conn = pool.acquire().await.unwrap();
 
     let at_limit: Vec<String> = (0..MAX_VISIBLE_COLUMNS).map(|i| format!("f{i}")).collect();
-    set(&mut conn, workspace_id, "task", &at_limit).await.unwrap();
+    set(&mut conn, workspace_id, "task", &at_limit)
+        .await
+        .unwrap();
 
-    let over: Vec<String> = (0..MAX_VISIBLE_COLUMNS + 1).map(|i| format!("f{i}")).collect();
-    let err = set(&mut conn, workspace_id, "task", &over).await.unwrap_err();
+    let over: Vec<String> = (0..MAX_VISIBLE_COLUMNS + 1)
+        .map(|i| format!("f{i}"))
+        .collect();
+    let err = set(&mut conn, workspace_id, "task", &over)
+        .await
+        .unwrap_err();
 
     assert!(
         format!("{err:?}").contains("at most"),
         "expected a column-count refusal, got {err:?}"
     );
     assert_eq!(
-        get(&mut conn, workspace_id, "task").await.unwrap().unwrap().columns.len(),
+        get(&mut conn, workspace_id, "task")
+            .await
+            .unwrap()
+            .unwrap()
+            .columns
+            .len(),
         MAX_VISIBLE_COLUMNS,
         "the refused save must not have replaced the accepted one"
     );
