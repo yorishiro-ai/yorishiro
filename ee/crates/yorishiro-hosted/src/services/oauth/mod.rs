@@ -9,9 +9,12 @@ mod users;
 
 pub use config::{OAuthConfig, require_non_empty, rewrite_unspecified_host};
 pub use state_token::STATE_TTL_SECS;
-pub use users::{
-    CreateOauthUserError, OAuthUser, ProvisionedLogin, create_oauth_user, find_or_create,
-};
+pub use users::{ProvisionedLogin, find_or_create};
+
+// Re-exported (rather than imported by `tests/` directly from `models::oauth_users`) so
+// `crates/yorishiro-hosted/tests/` can exercise the same-transaction rollback through the same
+// path a caller like `users::find_or_create` uses, without knowing the query lives in `models/`.
+pub use crate::models::oauth_users::{CreateOauthUserError, OAuthUser, create_oauth_user};
 
 use yorishiro_core::YorishiroError;
 

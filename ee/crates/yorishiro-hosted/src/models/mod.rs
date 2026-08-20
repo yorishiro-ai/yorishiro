@@ -10,6 +10,7 @@ pub mod billing;
 pub mod entity_columns;
 pub mod fill_proposals;
 pub mod llm_keys;
+pub mod oauth_users;
 pub mod origin;
 pub mod stripe_events;
 pub mod usage;

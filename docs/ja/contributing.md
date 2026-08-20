@@ -41,11 +41,13 @@ Eloquent のモデルが両方を持つのと同じです。
 - `crates/yorishiro-core/src/db.rs` と `services/db_load_guard.rs` は接続の扱いであって、テーブルへのアクセスではありません
 - `crates/yorishiro-server/src/http/controllers/health.rs` の `SELECT 1` は死活監視で、属するテーブルがありません
 - `crates/yorishiro-core/src/services/auth/` はリクエストの身元を決める過程でキーを読みます。これはレコードではなく判断です
+- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs` は同じ例外の EE 側です。`TenantScopedAuthenticator::authenticate` はこのクレートの `Authenticator` 実装そのもので、`create_tenant_api_key` は `create_api_key` にテナント存在確認とロール上限チェックを重ねたものです。どちらもレコードではなく判断です
 - `ee/crates/yorishiro-hosted/src/services/official_templates.rs` は seeder です。`migrations/` を外に置くのと同じ対応で、seeder もモデルの外にあります
+- `ee/crates/yorishiro-hosted/src/services/oauth/users.rs` の `pg_try_advisory_xact_lock` 呼び出しは `db.rs` と同種の例外です。アドバイザリロックはどのテーブルにも属しません
 
 残りは意図ではなく既知の負債で、少しずつ移しています。
 `crates/yorishiro-server/src/admin/commands.rs`、`http/controllers/setup/mod.rs`、`services/embedding/sync/`、
-`ee/` 側の `services/marketplace.rs`、`tenant_auth.rs`、`oauth/users.rs`、`http/controllers/inference.rs` です。
+`ee/` 側の `services/marketplace.rs`、`http/controllers/inference.rs` です。
 すでにそのファイルを編集しているなら、クエリを `models/` に寄せてもらえると助かります。
 そうでないなら触らないでください。
 動作の変更と一緒に読めない移動だけの差分は、レビューできません。
