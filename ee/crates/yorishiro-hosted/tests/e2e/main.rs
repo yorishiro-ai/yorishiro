@@ -201,14 +201,19 @@ async fn select_entity_type(driver: &WebDriver, entity_type: &str) -> WebDriverR
         .select_by_value(entity_type)
         .await?;
 
-    // The type column is the marker that the new type's rows have landed, not just that the
-    // select changed: asserting immediately would read the previous type's table.
-    for _ in 0..40 {
-        if headers(driver).await?.len() > 3 {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
+    // Waits for the Columns button, which renders only once a type is selected, rather than for
+    // the header count: a workspace whose saved set is exactly the three built-ins would satisfy
+    // a count check while still showing the "All types" table, and the assertion after it would
+    // read the wrong page. That is not hypothetical; it is what made this suite fail one run in
+    // four before the wait keyed off something that means what it is being asked.
+    //
+    // A timeout is an error rather than a silent return, so "the table never rebuilt" cannot
+    // reach the caller disguised as "the table rebuilt into something unexpected".
+    driver
+        .query(By::XPath("//button[contains(., 'Columns')]"))
+        .wait(Duration::from_secs(15), Duration::from_millis(250))
+        .first()
+        .await?;
     Ok(())
 }
 
