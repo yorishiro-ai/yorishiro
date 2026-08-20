@@ -1,13 +1,20 @@
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, X } from "lucide-react";
-import { listEntities, listSchemas, searchEntities, getActiveSchema } from "@/lib/api";
-import type { Entity, SchemaDetail } from "@/types/api";
+import {
+  listEntities,
+  listSchemas,
+  searchEntities,
+  getActiveSchema,
+  listColumnPreferences,
+  setColumnPreference,
+  resetColumnPreference,
+} from "@/lib/api";
+import type { Entity, FieldDef, SchemaDetail } from "@/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import {
   Table,
@@ -17,9 +24,19 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/Table";
-import { formatDate, truncateId, dataPreview, entityLabel } from "@/lib/format";
+import {
+  ColumnPicker,
+  ColumnPickerButton,
+  defaultColumns,
+} from "@/components/entities/ColumnPicker";
+import { EntityCell, columnHeader } from "@/components/entities/EntityCell";
 
 const PAGE_SIZE = 50;
+
+/// Mirrors `MAX_VISIBLE_COLUMNS` in `ee/crates/yorishiro-hosted/src/models/entity_columns.rs`.
+/// The server refuses more than this; the picker stops before asking so the refusal is not the
+/// first the reader hears of the limit.
+const MAX_COLUMNS = 12;
 
 export function EntitiesPage() {
   const navigate = useNavigate();
@@ -32,28 +49,73 @@ export function EntitiesPage() {
 
   const [entityTypes, setEntityTypes] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<string>("");
+  /// Every active schema's fields, keyed by entity type, so the table and the picker can both
+  /// ask what a type is made of without another round trip.
+  const [fieldsByType, setFieldsByType] = useState<Record<string, Record<string, FieldDef>>>({});
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [searching, setSearching] = useState(false);
 
-  const fetchPage = useCallback(async (offset: number, entityType: string) => {
-    const results = await listEntities({
-      entity_type: entityType || undefined,
-      offset,
-      limit: PAGE_SIZE,
-    });
-    return results;
-  }, []);
+  /// Field-level filters, as exact values. The server matches with JSONB containment, so this
+  /// cannot express a range or a substring; the input is only offered for fields where equality
+  /// is the natural question (enums and booleans).
+  const [fieldFilters, setFieldFilters] = useState<Record<string, string>>({});
+
+  const [preferences, setPreferences] = useState<Record<string, string[]>>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [savingColumns, setSavingColumns] = useState(false);
+
+  // Memoised on the map and the key, not derived inline: a fresh `{}` each render would make
+  // every `useMemo` below recompute, and the load effect depends on one of them, so the page
+  // would refetch in a loop.
+  const activeFields = useMemo(() => fieldsByType[typeFilter] ?? {}, [fieldsByType, typeFilter]);
+
+  /// What the table renders. A stored preference wins; otherwise the schema decides.
+  const columns = useMemo(() => {
+    if (!typeFilter) return ["__label", "__type", "__created"];
+    return preferences[typeFilter] ?? defaultColumns(activeFields);
+  }, [typeFilter, preferences, activeFields]);
+
+  /// Only fields whose values are a closed set, since containment matches exactly.
+  /// Offering a free-text box over `@>` would look like search and behave like an exact match.
+  const filterableFields = useMemo(
+    () =>
+      Object.entries(activeFields).filter(
+        ([, def]) => (def.enum && def.enum.length > 0) || def.type === "boolean",
+      ),
+    [activeFields],
+  );
+
+  const activeFilter = useMemo(() => {
+    const out: Record<string, unknown> = {};
+    for (const [name, raw] of Object.entries(fieldFilters)) {
+      if (!raw) continue;
+      const def = activeFields[name];
+      out[name] = def?.type === "boolean" ? raw === "true" : raw;
+    }
+    return out;
+  }, [fieldFilters, activeFields]);
+
+  const fetchPage = useCallback(
+    async (offset: number, entityType: string, filter: Record<string, unknown>) =>
+      listEntities({
+        entity_type: entityType || undefined,
+        offset,
+        limit: PAGE_SIZE,
+        filter,
+      }),
+    [],
+  );
 
   const loadInitial = useCallback(
-    async (entityType: string) => {
+    async (entityType: string, filter: Record<string, unknown>) => {
       setLoading(true);
       setError(null);
       setSearchActive(false);
       setSearchQuery("");
       try {
-        const results = await fetchPage(0, entityType);
+        const results = await fetchPage(0, entityType, filter);
         setEntities(results);
         setHasMore(results.length === PAGE_SIZE);
       } catch (err) {
@@ -66,8 +128,8 @@ export function EntitiesPage() {
   );
 
   useEffect(() => {
-    loadInitial(typeFilter);
-  }, [typeFilter, loadInitial]);
+    loadInitial(typeFilter, activeFilter);
+  }, [typeFilter, activeFilter, loadInitial]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,19 +143,30 @@ export function EntitiesPage() {
           active.map((s) => getActiveSchema(s.name).catch(() => null as SchemaDetail | null)),
         );
         if (cancelled) return;
-        const types = new Set<string>();
+        const byType: Record<string, Record<string, FieldDef>> = {};
         for (const detail of details) {
           if (!detail) continue;
-          for (const t of Object.keys(detail.definition.entity_types ?? {})) {
-            types.add(t);
+          for (const [name, def] of Object.entries(detail.definition.entity_types ?? {})) {
+            byType[name] = def.fields ?? {};
           }
         }
-        setEntityTypes(Array.from(types).toSorted());
+        setFieldsByType(byType);
+        setEntityTypes(Object.keys(byType).toSorted());
       } catch {
-        // Non-fatal: filter dropdown just stays empty.
+        // Non-fatal: the type dropdown stays empty and the table keeps its built-in columns.
+      }
+    }
+    async function loadPreferences() {
+      try {
+        const stored = await listColumnPreferences();
+        if (cancelled) return;
+        setPreferences(Object.fromEntries(stored.map((p) => [p.entity_type, p.columns])));
+      } catch {
+        // Non-fatal: every type falls back to its schema-derived default.
       }
     }
     loadSchemas();
+    loadPreferences();
     return () => {
       cancelled = true;
     };
@@ -103,7 +176,7 @@ export function EntitiesPage() {
     setLoadingMore(true);
     setError(null);
     try {
-      const results = await fetchPage(entities.length, typeFilter);
+      const results = await fetchPage(entities.length, typeFilter, activeFilter);
       setEntities((prev) => [...prev, ...results]);
       setHasMore(results.length === PAGE_SIZE);
     } catch (err) {
@@ -117,15 +190,13 @@ export function EntitiesPage() {
     event.preventDefault();
     const query = searchQuery.trim();
     if (!query) {
-      loadInitial(typeFilter);
+      loadInitial(typeFilter, activeFilter);
       return;
     }
     setSearching(true);
     setError(null);
     try {
-      const hits = await searchEntities(query, {
-        entity_type: typeFilter || undefined,
-      });
+      const hits = await searchEntities(query, { entity_type: typeFilter || undefined });
       setEntities(hits.map((hit) => hit.entity));
       setHasMore(false);
       setSearchActive(true);
@@ -136,9 +207,36 @@ export function EntitiesPage() {
     }
   }
 
-  function handleClearSearch() {
-    setSearchQuery("");
-    loadInitial(typeFilter);
+  async function handleSaveColumns(next: string[]) {
+    setSavingColumns(true);
+    setError(null);
+    try {
+      const saved = await setColumnPreference(typeFilter, next);
+      setPreferences((prev) => ({ ...prev, [saved.entity_type]: saved.columns }));
+      setPickerOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save columns");
+    } finally {
+      setSavingColumns(false);
+    }
+  }
+
+  async function handleResetColumns() {
+    setSavingColumns(true);
+    setError(null);
+    try {
+      await resetColumnPreference(typeFilter);
+      setPreferences((prev) => {
+        const next = { ...prev };
+        delete next[typeFilter];
+        return next;
+      });
+      setPickerOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset columns");
+    } finally {
+      setSavingColumns(false);
+    }
   }
 
   const showLoadMore = !searchActive && hasMore && !loading && entities.length > 0;
@@ -177,7 +275,10 @@ export function EntitiesPage() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={handleClearSearch}
+                  onClick={() => {
+                    setSearchQuery("");
+                    loadInitial(typeFilter, activeFilter);
+                  }}
                   aria-label="Clear search"
                 >
                   <X className="h-4 w-4" />
@@ -189,7 +290,11 @@ export function EntitiesPage() {
             </form>
             <select
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                // Filters name fields of the old type, which the new one may not define.
+                setFieldFilters({});
+              }}
               className="h-10 rounded-md border border-input px-3 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filter by entity type"
             >
@@ -200,9 +305,48 @@ export function EntitiesPage() {
                 </option>
               ))}
             </select>
+            {/* Columns are chosen per entity type, so the button needs one selected. */}
+            {typeFilter && <ColumnPickerButton onClick={() => setPickerOpen(true)} />}
           </div>
         </CardHeader>
         <CardContent>
+          {filterableFields.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              {filterableFields.map(([name, def]) => (
+                <label key={name} className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-muted-foreground">{name}</span>
+                  <select
+                    value={fieldFilters[name] ?? ""}
+                    onChange={(e) =>
+                      setFieldFilters((prev) => ({ ...prev, [name]: e.target.value }))
+                    }
+                    className="h-9 rounded-md border border-input px-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"
+                    aria-label={`Filter by ${name}`}
+                  >
+                    <option value="">Any</option>
+                    {def.type === "boolean" ? (
+                      <>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </>
+                    ) : (
+                      def.enum?.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+              ))}
+              {Object.values(fieldFilters).some(Boolean) && (
+                <Button variant="ghost" size="sm" onClick={() => setFieldFilters({})}>
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error}
@@ -226,10 +370,9 @@ export function EntitiesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Data Preview</TableHead>
-                    <TableHead>Created</TableHead>
+                    {columns.map((column) => (
+                      <TableHead key={column}>{columnHeader(column)}</TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -239,23 +382,15 @@ export function EntitiesPage() {
                       className="cursor-pointer"
                       onClick={() => navigate(entity.id)}
                     >
-                      {/* The name, with the id beneath it. Ids are time-ordered, so a column
-                          of id prefixes reads as the same value repeated on every row. */}
-                      <TableCell>
-                        <div className="font-medium">{entityLabel(entity)}</div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {truncateId(entity.id)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{entity.entity_type}</Badge>
-                      </TableCell>
-                      <TableCell className="max-w-md truncate text-muted-foreground">
-                        {dataPreview(entity.data)}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {formatDate(entity.created_at)}
-                      </TableCell>
+                      {columns.map((column) => (
+                        <TableCell key={column} className="max-w-xs truncate">
+                          <EntityCell
+                            entity={entity}
+                            column={column}
+                            def={fieldsByType[entity.entity_type]?.[column]}
+                          />
+                        </TableCell>
+                      ))}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -272,6 +407,20 @@ export function EntitiesPage() {
           )}
         </CardContent>
       </Card>
+
+      {typeFilter && (
+        <ColumnPicker
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          entityType={typeFilter}
+          fields={activeFields}
+          selected={columns}
+          maxColumns={MAX_COLUMNS}
+          saving={savingColumns}
+          onSave={handleSaveColumns}
+          onReset={handleResetColumns}
+        />
+      )}
     </div>
   );
 }

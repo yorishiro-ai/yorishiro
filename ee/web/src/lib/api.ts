@@ -1,4 +1,5 @@
 import type {
+  ColumnPreference,
   Entity,
   EntityContext,
   ImportResult,
@@ -359,11 +360,17 @@ export async function listEntities(params?: {
   entity_type?: string;
   offset?: number;
   limit?: number;
+  /// JSONB containment, e.g. `{status: "active"}`. The server has always accepted this
+  /// (`data @> filter`); it matches exactly, so it cannot express a range or a substring.
+  filter?: Record<string, unknown>;
 }): Promise<Entity[]> {
   const searchParams = new URLSearchParams();
   if (params?.entity_type) searchParams.set("entity_type", params.entity_type);
   if (params?.offset) searchParams.set("offset", String(params.offset));
   if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.filter && Object.keys(params.filter).length > 0) {
+    searchParams.set("filter", JSON.stringify(params.filter));
+  }
   const qs = searchParams.toString();
   return request<Entity[]>(`/api/entities${qs ? `?${qs}` : ""}`);
 }
@@ -397,6 +404,27 @@ export async function deleteEntity(id: string): Promise<void> {
 export async function getEntityContext(id: string, depth?: number): Promise<EntityContext> {
   const qs = depth ? `?depth=${depth}` : "";
   return request<EntityContext>(`/api/entities/${id}/context${qs}`);
+}
+
+// Entity column preferences
+export async function listColumnPreferences(): Promise<ColumnPreference[]> {
+  return request<ColumnPreference[]>("/api/workspace/entity-columns");
+}
+
+export async function setColumnPreference(
+  entityType: string,
+  columns: string[],
+): Promise<ColumnPreference> {
+  return request<ColumnPreference>(
+    `/api/workspace/entity-columns/${encodeURIComponent(entityType)}`,
+    { method: "PUT", body: JSON.stringify({ columns }) },
+  );
+}
+
+export async function resetColumnPreference(entityType: string): Promise<void> {
+  return request(`/api/workspace/entity-columns/${encodeURIComponent(entityType)}`, {
+    method: "DELETE",
+  });
 }
 
 // Search
