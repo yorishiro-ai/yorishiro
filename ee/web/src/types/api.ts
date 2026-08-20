@@ -235,3 +235,12 @@ export interface ImportResult {
   /** Non-empty only when the import was rolled back; the counts are then not committed. */
   errors: string[];
 }
+
+/// Which columns the Entities table shows for one entity type, in display order.
+///
+/// Absent from the list entirely means the workspace has never chosen, and the table derives
+/// columns from the schema. A present entry with an empty `columns` is a choice: show none.
+export interface ColumnPreference {
+  entity_type: string;
+  columns: string[];
+}

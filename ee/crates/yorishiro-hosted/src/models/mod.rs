@@ -7,6 +7,7 @@
 //! A module in `services` owns a decision, and calls these when it needs one persisted.
 
 pub mod billing;
+pub mod entity_columns;
 pub mod fill_proposals;
 pub mod llm_keys;
 pub mod stripe_events;

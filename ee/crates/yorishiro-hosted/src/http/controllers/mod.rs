@@ -1,4 +1,5 @@
 pub mod dashboard;
+pub mod entity_columns;
 pub mod inference;
 pub mod marketplace;
 pub mod oauth;
@@ -37,6 +38,9 @@ use utoipa::OpenApi;
         inference::infer_fill,
         inference::list_proposals,
         inference::confirm_proposals,
+        entity_columns::list_columns,
+        entity_columns::set_columns,
+        entity_columns::reset_columns,
     ),
     components(schemas(
         dashboard::TenantOverview,
