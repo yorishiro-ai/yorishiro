@@ -44,9 +44,9 @@
 - Use the `mcp_try!` macro to wrap fallible repository/service calls that should return a tool-level error on failure.
   Do not hand-roll `match call.await { Ok(x) => ..., Err(e) => Ok(err_to_tool_result(e)) }`.
 
-## Repository column lists (yorishiro-core)
+## Model column lists (yorishiro-core)
 
-- When a repository queries/returns/inserts the same set of columns in multiple places, extract a `fn <table>_columns() -> [<Iden>; N]` helper (see `schema_columns()` in `repositories/schemas/mod.rs` for the pattern).
+- When a model queries/returns/inserts the same set of columns in multiple places, extract a `fn <table>_columns() -> [<Iden>; N]` helper (see `schema_columns()` in `models/schemas/mod.rs` for the pattern).
   All `.columns(...)` call sites use this helper.
   Adding a column means updating one place.
 
@@ -71,7 +71,7 @@
 
   ```rust
   #[cfg(test)]
-  #[path = "../../tests/repositories/schemas/mod.rs"]
+  #[path = "../../../tests/models/schemas/mod.rs"]
   mod tests;
   ```
 
