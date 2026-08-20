@@ -292,3 +292,30 @@ async fn different_keys_do_not_block_each_other(pool: sqlx::PgPool) {
     second.release().await.unwrap();
     first.release().await.unwrap();
 }
+
+/// Dropping the guard without calling `release` must still free the lock.
+///
+/// The whole exclusion rests on this: a task that panics inside the guarded section never reaches `release`, and if the lock outlived the connection's return to the pool, every later delivery for that customer would queue behind a holder that no longer exists.
+/// `pg_advisory_lock` is session-scoped, so what actually frees it is the session ending or the pool resetting the connection.
+/// Which of those sqlx does is an unstated property of the library rather than of this code, so it is measured here instead of assumed.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_dropped_guard_frees_the_lock_without_release(pool: sqlx::PgPool) {
+    {
+        let _guard = super::SessionLock::acquire(&pool, "dropped-key")
+            .await
+            .unwrap();
+        // Falls out of scope without `release`, which is what a panicking task would do.
+    }
+
+    // Bounded: if the lock survived the drop this blocks forever rather than failing, and a
+    // hanging test reads as a stuck runner rather than as a broken guarantee.
+    let regained = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        super::SessionLock::acquire(&pool, "dropped-key"),
+    )
+    .await
+    .expect("a dropped guard left its lock held, so a panicking holder would block the key forever")
+    .unwrap();
+
+    regained.release().await.unwrap();
+}

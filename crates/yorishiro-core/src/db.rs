@@ -153,6 +153,10 @@ impl SessionLock {
     /// Blocks until the lock is held, then keeps it until [`release`](Self::release) or drop.
     ///
     /// Same key derivation as [`lock_for_update`], so the two exclude each other on the same string.
+    ///
+    /// **No timeout, deliberately.** `pg_advisory_lock` waits indefinitely, and a timeout here would turn "wait your turn" into "skip the ordering check", which is the thing being protected.
+    /// What makes that safe is that the guarded section is bounded database work: a caller must not hold this across an outbound network call, where a hung request would queue every later holder of the same key behind it.
+    /// A holder that panics is fine either way, since dropping the guard frees the lock (`a_dropped_guard_frees_the_lock_without_release` measures that rather than trusting it).
     pub async fn acquire(pool: &PgPool, key: &str) -> Result<Self, sqlx::Error> {
         let mut conn = pool.acquire().await?;
         sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
