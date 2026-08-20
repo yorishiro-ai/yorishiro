@@ -241,7 +241,7 @@ async fn deleting_entity_cascades_relation_deletion(pool: PgPool) {
     .await
     .unwrap();
 
-    entities::delete(&mut conn, workspace_id, task.id)
+    entities::delete(&mut *conn, workspace_id, task.id)
         .await
         .unwrap();
 

@@ -99,7 +99,7 @@ async fn confirming_applies_the_proposals_and_undo_reverses_them(pool: PgPool) {
         .unwrap();
     assert_eq!(after.data["category"], serde_json::json!("fiction"));
 
-    entities::undo_job(&mut conn, workspace_id, job_id)
+    entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap();
 

@@ -392,7 +392,7 @@ async fn silently_succeeds_when_entity_no_longer_exists(pool: PgPool) {
         .unwrap();
     let entity_type_def = &schema.definition.entity_types["task"];
 
-    entities::delete(&mut conn, workspace_id, entity.id)
+    entities::delete(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
 

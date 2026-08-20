@@ -221,7 +221,7 @@ async fn update_validates_against_creation_time_schema_version(pool: PgPool) {
         .unwrap();
 
     let updated = entities::update(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         entity.id,
         json!({ "title": "v1 task updated" }),
@@ -257,7 +257,7 @@ async fn delete_removes_entity(pool: PgPool) {
     .await
     .unwrap();
 
-    entities::delete(&mut conn, workspace_id, entity.id)
+    entities::delete(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
     let err = entities::get(&mut *conn, workspace_id, entity.id)
@@ -620,7 +620,7 @@ async fn drift_reports_fields_the_entity_predates(pool: PgPool) {
     .await
     .unwrap();
 
-    let drift = entities::drift(&mut conn, workspace_id, entity.id)
+    let drift = entities::drift(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
 
@@ -664,7 +664,7 @@ async fn drift_is_empty_for_a_current_entity(pool: PgPool) {
     .await
     .unwrap();
 
-    let drift = entities::drift(&mut conn, workspace_id, entity.id)
+    let drift = entities::drift(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
 
@@ -715,7 +715,7 @@ async fn drift_marks_an_optional_addition_as_not_required(pool: PgPool) {
         .await
         .unwrap();
 
-    let drift = entities::drift(&mut conn, workspace_id, entity.id)
+    let drift = entities::drift(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
 
@@ -773,7 +773,7 @@ async fn dry_run_separates_entities_that_need_values_from_ones_merely_behind(poo
         .await
         .unwrap();
 
-    let report = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+    let report = entities::migration_dry_run(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
 
@@ -791,7 +791,7 @@ async fn dry_run_separates_entities_that_need_values_from_ones_merely_behind(poo
     .await
     .unwrap();
 
-    let report = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+    let report = entities::migration_dry_run(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
 
@@ -832,7 +832,7 @@ async fn dry_run_reports_nothing_to_do_when_everything_is_current(pool: PgPool) 
     .await
     .unwrap();
 
-    let report = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+    let report = entities::migration_dry_run(&mut *conn, workspace_id, "task-management")
         .await
         .unwrap();
 
@@ -870,12 +870,12 @@ async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
     .unwrap();
 
     let job_id = uuid::Uuid::nil();
-    entities::snapshot(&mut conn, workspace_id, entity.id, job_id)
+    entities::snapshot(&mut *conn, workspace_id, entity.id, job_id)
         .await
         .unwrap();
 
     entities::update(
-        &mut conn,
+        &mut *conn,
         workspace_id,
         entity.id,
         json!({ "title": "after" }),
@@ -891,7 +891,7 @@ async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
         "after"
     );
 
-    let report = entities::undo_job(&mut conn, workspace_id, job_id)
+    let report = entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap();
     assert_eq!(report.restored, 1);
@@ -934,14 +934,14 @@ async fn a_job_cannot_be_undone_twice(pool: PgPool) {
     .unwrap();
 
     let job_id = uuid::Uuid::nil();
-    entities::snapshot(&mut conn, workspace_id, entity.id, job_id)
+    entities::snapshot(&mut *conn, workspace_id, entity.id, job_id)
         .await
         .unwrap();
-    entities::undo_job(&mut conn, workspace_id, job_id)
+    entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap();
 
-    let err = entities::undo_job(&mut conn, workspace_id, job_id)
+    let err = entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap_err();
     assert!(
@@ -979,17 +979,17 @@ async fn a_deleted_entity_is_counted_rather_than_failing_the_undo(pool: PgPool) 
         )
         .await
         .unwrap();
-        entities::snapshot(&mut conn, workspace_id, e.id, job_id)
+        entities::snapshot(&mut *conn, workspace_id, e.id, job_id)
             .await
             .unwrap();
         ids.push(e.id);
     }
 
-    entities::delete(&mut conn, workspace_id, ids[1])
+    entities::delete(&mut *conn, workspace_id, ids[1])
         .await
         .unwrap();
 
-    let report = entities::undo_job(&mut conn, workspace_id, job_id)
+    let report = entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap();
     assert_eq!(report.restored, 1);
@@ -1171,7 +1171,7 @@ async fn a_fill_can_be_undone_as_one_job(pool: PgPool) {
         .unwrap();
     assert_eq!(report.filled, 2);
 
-    let undo = entities::undo_job(&mut conn, workspace_id, job_id)
+    let undo = entities::undo_job(&mut *conn, workspace_id, job_id)
         .await
         .unwrap();
     assert_eq!(undo.restored, 2);
@@ -1216,7 +1216,7 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
     .unwrap();
 
     let old_job = uuid::Uuid::nil();
-    entities::snapshot(&mut conn, workspace_id, entity.id, old_job)
+    entities::snapshot(&mut *conn, workspace_id, entity.id, old_job)
         .await
         .unwrap();
 
@@ -1250,7 +1250,7 @@ async fn a_migration_drops_the_snapshots_that_aged_out(pool: PgPool) {
     assert_eq!(remaining, 0, "the sweep took the aged-out image");
 
     // An expired window answers the same way a job that never existed does: which is what "undoable for N days" means once the days are up.
-    let err = entities::undo_job(&mut conn, workspace_id, old_job)
+    let err = entities::undo_job(&mut *conn, workspace_id, old_job)
         .await
         .unwrap_err();
     assert!(

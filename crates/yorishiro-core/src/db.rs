@@ -17,11 +17,18 @@ pub trait Engine: sqlx::Connection {
     fn builder() -> Self::Builder {
         Self::Builder::default()
     }
+
+    /// `rows_affected` is inherent on `PgQueryResult`/`SqliteQueryResult`, not a method `sqlx::Database::QueryResult` guarantees, so a generic caller cannot reach it through a trait bound.
+    fn rows_affected(result: <Self::Db as sqlx::Database>::QueryResult) -> u64;
 }
 
 impl Engine for sqlx::PgConnection {
     type Db = sqlx::Postgres;
     type Builder = sea_query::PostgresQueryBuilder;
+
+    fn rows_affected(result: sqlx::postgres::PgQueryResult) -> u64 {
+        result.rows_affected()
+    }
 }
 
 /// Type-level only, gated behind the `sqlite` feature: proves the bounds in `models/` are satisfiable by Sqlite.
@@ -30,6 +37,10 @@ impl Engine for sqlx::PgConnection {
 impl Engine for sqlx::SqliteConnection {
     type Db = sqlx::Sqlite;
     type Builder = sea_query::SqliteQueryBuilder;
+
+    fn rows_affected(result: sqlx::sqlite::SqliteQueryResult) -> u64 {
+        result.rows_affected()
+    }
 }
 
 /// Where the deployment's data lives.
