@@ -319,3 +319,13 @@ async fn a_dropped_guard_frees_the_lock_without_release(pool: sqlx::PgPool) {
 
     regained.release().await.unwrap();
 }
+
+/// Proves the generic bounds `models/entities::get`/`count` carry are satisfiable by `SqliteConnection`, at the type level only.
+/// Naming the function items is enough: it does not run, so a mismatched bound is a compile error here rather than a monomorphization failure deep in some future SQLite-only caller.
+/// This says nothing about the SQL those functions build or how it behaves on Sqlite (`Alias::new("content")` schema-qualification, the RLS substitute): that is step 4's problem, not this one.
+#[cfg(feature = "sqlite")]
+#[test]
+fn sqlite_satisfies_the_generic_bounds() {
+    let _ = crate::models::entities::get::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::count::<sqlx::SqliteConnection>;
+}

@@ -299,12 +299,18 @@ async fn check_entity_quota(
 }
 
 /// Counts how many entities a workspace holds, for both quota enforcement (`create`, above) and workspace-detail summaries.
-pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, YorishiroError> {
+pub async fn count<C>(conn: &mut C, workspace_id: Uuid) -> Result<i64, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .expr(Func::count(Expr::col(Asterisk)))
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
     let (count,): (i64,) = sqlx::query_as_with(&sql, values)
         .fetch_one(&mut *conn)
         .await
@@ -380,17 +386,23 @@ pub async fn create(
     Ok(row)
 }
 
-pub async fn get(
-    conn: &mut PgConnection,
+pub async fn get<C>(
+    conn: &mut C,
     workspace_id: Uuid,
     id: Uuid,
-) -> Result<EntityRecord, YorishiroError> {
+) -> Result<EntityRecord, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(entity_columns())
         .from((Alias::new("content"), Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(Entities::Id).eq(id))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, EntityRecord, _>(&sql, values)
         .fetch_optional(&mut *conn)

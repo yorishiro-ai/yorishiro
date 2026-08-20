@@ -83,7 +83,7 @@ async fn creates_and_fetches_entity(pool: PgPool) {
     assert_eq!(created.entity_type, "task");
     assert_eq!(created.schema_version, 1);
 
-    let fetched = entities::get(&mut conn, workspace_id, created.id)
+    let fetched = entities::get(&mut *conn, workspace_id, created.id)
         .await
         .unwrap();
     assert_eq!(fetched.data["title"], "buy milk");
@@ -175,7 +175,7 @@ async fn enforces_tenant_isolation(pool: PgPool) {
         .acquire_for_workspace(tenant_b_tenant, tenant_b)
         .await
         .unwrap();
-    let result = entities::get(&mut conn_b, tenant_b, entity.id).await;
+    let result = entities::get(&mut *conn_b, tenant_b, entity.id).await;
     assert!(matches!(result, Err(YorishiroError::NotFound { .. })));
 }
 
@@ -260,7 +260,7 @@ async fn delete_removes_entity(pool: PgPool) {
     entities::delete(&mut conn, workspace_id, entity.id)
         .await
         .unwrap();
-    let err = entities::get(&mut conn, workspace_id, entity.id)
+    let err = entities::get(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap_err();
     assert!(matches!(err, YorishiroError::NotFound { .. }));
@@ -884,7 +884,7 @@ async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(
-        entities::get(&mut conn, workspace_id, entity.id)
+        entities::get(&mut *conn, workspace_id, entity.id)
             .await
             .unwrap()
             .data["title"],
@@ -898,7 +898,7 @@ async fn a_snapshot_restores_what_the_entity_held(pool: PgPool) {
     assert_eq!(report.missing, 0);
 
     assert_eq!(
-        entities::get(&mut conn, workspace_id, entity.id)
+        entities::get(&mut *conn, workspace_id, entity.id)
             .await
             .unwrap()
             .data["title"],
@@ -1055,7 +1055,7 @@ async fn fill_defaults_fills_predating_entities_without_moving_their_version(poo
     assert_eq!(report.filled, 1);
     assert_eq!(report.skipped_no_default, 0);
 
-    let after = entities::get(&mut conn, workspace_id, entity.id)
+    let after = entities::get(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
     assert_eq!(after.data["status"], "todo");
@@ -1119,7 +1119,7 @@ async fn fill_defaults_leaves_fields_with_no_default_alone(pool: PgPool) {
     assert_eq!(report.skipped_no_default, 1);
     assert_eq!(report.still_missing, vec!["category"]);
 
-    let after = entities::get(&mut conn, workspace_id, entity.id)
+    let after = entities::get(&mut *conn, workspace_id, entity.id)
         .await
         .unwrap();
     assert!(

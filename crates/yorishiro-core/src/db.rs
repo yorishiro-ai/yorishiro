@@ -6,6 +6,32 @@ use uuid::Uuid;
 /// The connection a request runs on, already scoped to its tenant and workspace.
 pub type ScopedConnection = sqlx::pool::PoolConnection<sqlx::Postgres>;
 
+/// What a `models/` function needs from its connection to build and run a query without naming an engine.
+///
+/// Keyed on the connection type rather than `sqlx::Database`, so a call site passing a concrete `&mut PgConnection` (or `&mut *tx` for a `Transaction`) has `C` inferred directly from the argument and never turbofishes.
+/// `DB::Connection` is not injective, so keying on `Database` instead would break that inference at every call site.
+pub trait Engine: sqlx::Connection {
+    type Db: sqlx::Database<Connection = Self>;
+    type Builder: sea_query::QueryBuilder + Default;
+
+    fn builder() -> Self::Builder {
+        Self::Builder::default()
+    }
+}
+
+impl Engine for sqlx::PgConnection {
+    type Db = sqlx::Postgres;
+    type Builder = sea_query::PostgresQueryBuilder;
+}
+
+/// Type-level only, gated behind the `sqlite` feature: proves the bounds in `models/` are satisfiable by Sqlite.
+/// Not evidence the emitted SQL or runtime behavior is correct for Sqlite; that is step 4.
+#[cfg(feature = "sqlite")]
+impl Engine for sqlx::SqliteConnection {
+    type Db = sqlx::Sqlite;
+    type Builder = sea_query::SqliteQueryBuilder;
+}
+
 /// Where the deployment's data lives.
 ///
 /// The seam between the application and its database engine sits here, at the layer that hands out connections, not around the repositories.

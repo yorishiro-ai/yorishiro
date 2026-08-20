@@ -110,6 +110,12 @@ jobs:
       - name: Test
         run: cargo test --all
 
+      # Type-level only: proves the generic bounds in yorishiro-core's models/ are satisfiable by Sqlite.
+      # Says nothing about the emitted SQL or runtime behavior, that is step 4's concern.
+      # No test behind this feature touches a database, so this needs no DATABASE_URL, just the one crate compiled with `sqlite` on.
+      - name: Sqlite bounds check
+        run: cargo test -p yorishiro-core --features sqlite sqlite_satisfies_the_generic_bounds
+
       # The community package exists so a deployment can hold no proprietary code at all. That
       # is a property of the shipped artifact, not of the dependency graph, so it is checked on
       # the built binary: `cargo tree` would still pass if a symbol leaked in through a path the

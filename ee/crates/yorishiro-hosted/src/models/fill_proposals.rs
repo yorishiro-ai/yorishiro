@@ -146,7 +146,7 @@ pub async fn confirm(
     }
 
     for (entity_id, fields) in by_entity {
-        let Ok(existing) = entities::get(&mut tx, workspace_id, entity_id).await else {
+        let Ok(existing) = entities::get(&mut *tx, workspace_id, entity_id).await else {
             // Deleted between proposal and confirmation.
             skipped += fields.len() as i64;
             continue;
