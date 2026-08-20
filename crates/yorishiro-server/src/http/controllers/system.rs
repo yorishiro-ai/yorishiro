@@ -82,7 +82,7 @@ pub async fn get_maintenance(
         .acquire()
         .await
         .map_err(|err| ApiError::from(yorishiro_core::YorishiroError::Internal(err.into())))?;
-    let current = maintenance::get(&mut conn).await?;
+    let current = maintenance::get(&mut *conn).await?;
     Ok(Json(current.into()))
 }
 

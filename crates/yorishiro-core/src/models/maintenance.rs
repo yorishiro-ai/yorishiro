@@ -6,7 +6,7 @@
 use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use utoipa::ToSchema;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -98,11 +98,17 @@ fn columns() -> [Maintenance; 3] {
 
 /// Reads the current state.
 /// Runs on the request connection, so the row is readable by the application role.
-pub async fn get(conn: &mut PgConnection) -> Result<MaintenanceState, YorishiroError> {
+pub async fn get<C>(conn: &mut C) -> Result<MaintenanceState, YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (String, i32, Option<String>): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
     let (sql, values) = Query::select()
         .columns(columns())
         .from((Alias::new("identity"), Maintenance::Table))
-        .build_sqlx(PostgresQueryBuilder);
+        .build_sqlx(C::builder());
 
     let row: Option<(String, i32, Option<String>)> = sqlx::query_as_with(&sql, values)
         .fetch_optional(&mut *conn)

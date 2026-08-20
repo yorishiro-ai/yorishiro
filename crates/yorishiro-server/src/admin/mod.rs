@@ -439,7 +439,7 @@ pub async fn run_with_pool(pool: &PgPool, command: AdminCommand) -> Result<()> {
         }
         AdminCommand::MaintenanceStatus => {
             let mut conn = pool.acquire().await?;
-            let state = maintenance::get(&mut conn).await?;
+            let state = maintenance::get(&mut *conn).await?;
             println!(
                 "mode={} retry_after={}s reason={}",
                 state.mode.as_db_str(),
