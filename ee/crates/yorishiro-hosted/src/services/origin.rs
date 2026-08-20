@@ -7,52 +7,13 @@
 //! These functions take both a connection and a pool, and the split is not incidental: the schema is workspace content, read over the RLS-scoped connection, while `identity.templates` is control-plane data the request role holds no grant on.
 //! Passing the identity pool for the schema side would bypass RLS; passing the scoped connection for the template side would fail.
 
-use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
-use yorishiro_core::ResultExt;
 use yorishiro_core::error::YorishiroError;
 use yorishiro_core::metaschema::{MetaSchemaDefinition, VersioningDiff};
-use yorishiro_core::models::schemas::{SchemaRecord, UpstreamChange, create_schema_with_base};
+use yorishiro_core::models::schemas::{SchemaRecord, create_schema_with_base};
 
 use crate::services::merge::{self, MergePlan};
-
-/// Schemas in this workspace whose origin template has changed since the copy was taken.
-///
-/// Nothing is applied.
-/// The upstream edit does not reach the copy on its own (an automatic update could make stored entities invalid against a definition nobody here chose), so this reports and the workspace decides.
-///
-/// A schema whose template was deleted is not reported: the trigger has already detached it, and there is no longer an update to take.
-/// `linked` is the whole population here.
-pub async fn list_with_upstream_changes(
-    pool: &PgPool,
-    workspace_id: Uuid,
-) -> Result<Vec<UpstreamChange>, YorishiroError> {
-    // Joins identity.templates, which the request role cannot read (the base spec §2.3), so this runs on the control-plane pool like the rest of the template-library paths.
-    let rows: Vec<(Uuid, String, i32, Uuid, String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT s.id, s.name, s.version, t.id, t.name, t.updated_at          FROM content.schemas s          JOIN identity.templates t ON t.id = s.origin_template_id          WHERE s.workspace_id = $1            AND s.status = 'active'            AND s.origin_status = 'linked'            AND t.updated_at > s.created_at          ORDER BY t.updated_at DESC",
-    )
-    .bind(workspace_id)
-    .fetch_all(pool)
-    .await
-    .internal()?;
-
-    Ok(rows
-        .into_iter()
-        .map(
-            |(schema_id, schema_name, version, template_id, template_name, changed_at)| {
-                UpstreamChange {
-                    schema_id,
-                    schema_name,
-                    version,
-                    template_id,
-                    template_name,
-                    changed_at,
-                }
-            },
-        )
-        .collect())
-}
 
 /// What following the origin template would do to this schema.
 ///

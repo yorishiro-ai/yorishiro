@@ -10,7 +10,8 @@ use yorishiro_core::models::schemas::{
     create_schema, create_schema_from, create_schema_with_base, get_active_schema, get_by_id,
 };
 
-use crate::services::origin::{list_with_upstream_changes, merge_apply, merge_preview};
+use crate::models::origin::list_with_upstream_changes;
+use crate::services::origin::{merge_apply, merge_preview};
 
 fn task_schema(with_priority: bool) -> MetaSchemaDefinition {
     let fields = if with_priority {
