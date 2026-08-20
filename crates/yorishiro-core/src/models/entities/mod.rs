@@ -414,6 +414,8 @@ where
 /// Fully replaces an existing entity's `data`.
 /// Validation is done against the schema version the entity was actually created with (i.e. the row `entities.schema_id` points to), so existing entities don't silently break compatibility even if the active version has since moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
+// `schemas::SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
+#[allow(private_bounds)]
 pub async fn update<C>(
     conn: &mut C,
     workspace_id: Uuid,
@@ -426,15 +428,8 @@ where
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
-    // The transcribed field-level bounds `schemas::get_by_id` needs: its private `SchemaRow` cannot be named here, and a trait where-clause on `Engine` does not elaborate to call sites (rust-lang/rust#20671), so this is the only way to prove `C` satisfies it.
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+    // `schemas::get_by_id`'s bound: a trait where-clause on `Engine` doesn't elaborate to call sites (rust-lang/rust#20671), so this still has to be restated, but as one line now that `SchemaRow` is `pub(crate)`.
+    schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let existing = get(conn, workspace_id, id).await?;
     let schema = schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
@@ -552,6 +547,8 @@ mod tests;
 /// This distinguishes that from a field its author left blank: the entity's own definition is compared against the active one, and the fields only the active one defines are returned.
 ///
 /// An entity already on the active version reports no missing fields, and neither does one whose newer version only altered fields it already carries.
+// `schemas::SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
+#[allow(private_bounds)]
 pub async fn drift<C>(
     conn: &mut C,
     workspace_id: Uuid,
@@ -562,15 +559,8 @@ where
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     EntityRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
-    // Transcribed from `schemas::get_by_id`/`get_active_schema`'s private `SchemaRow` bound; see `update`'s where clause for why this can't be named directly.
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+    // `schemas::get_by_id`/`get_active_schema`'s bound; see `update`'s where clause for why this still has to be restated.
+    schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let entity = get(conn, workspace_id, entity_id).await?;
     let own = schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
@@ -616,6 +606,8 @@ where
 /// Reads only.
 /// The counting is done in one query per entity type rather than one per entity:
 /// a workspace can hold far more entities than it holds versions, and the answer is the same.
+// `schemas::SchemaRow` is `pub(crate)`, not fully `pub` (see its definition for why).
+#[allow(private_bounds)]
 pub async fn migration_dry_run<C>(
     conn: &mut C,
     workspace_id: Uuid,
@@ -629,14 +621,8 @@ where
     Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
     for<'q> &'q str: sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
     for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
-    // Transcribed from `schemas::get_active_schema`/`get_by_id`'s private `SchemaRow` bound.
-    Option<Uuid>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    String: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    i32: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Value: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    Option<Value>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    chrono::DateTime<chrono::Utc>: for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'a> &'a str: sqlx::ColumnIndex<<C::Db as sqlx::Database>::Row>,
+    // `schemas::get_active_schema`/`get_by_id`'s bound; see `update`'s where clause for why this still has to be restated.
+    schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let active = schemas::get_active_schema(conn, workspace_id, schema_name).await?;
 
