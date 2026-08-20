@@ -79,6 +79,30 @@ pnpm --dir ee/web run check   # ee/web を触ったときだけ
 テストには `template1` に `vector` と `pg_trgm` が入った PostgreSQL と、**スーパーユーザではない**ロールが要ります。
 スーパーユーザは `FORCE` の有無にかかわらず RLS を迂回するので、その権限で緑になっても分離については何も証明できません。
 
+## ブラウザテスト
+
+`cargo test` では走らない。
+ライセンス済みでスキーマとエンティティが入ったサーバと chromedriver が要る。依存が無いときに黙って通るテストは、走らせないテストより悪い。
+そのため `ee/crates/yorishiro-hosted/tests/e2e/` のテストは全て `#[ignore]` で、対象の deployment を名指しで要求する。
+
+```sh
+chromedriver --port=9515 &
+YORISHIRO_E2E_URL=http://localhost:18081 \
+  YORISHIRO_E2E_EMAIL=you@example.com \
+  YORISHIRO_E2E_PASSWORD=... \
+  cargo test -p yorishiro-hosted --test e2e -- --ignored --test-threads=1
+```
+
+**driver とブラウザのメジャーバージョンは一致していること。**
+152 の driver は Chrome 151 に対してセッションを作らない。エラーが両方のバージョンを表示するので、driver が無いと決めつけずに読むこと。
+
+CI には入れていない。
+正しくやるにはライセンスキーをリポジトリの secret に置き、データを投入した deployment が要る。実際には動かないジョブは、ジョブが無いより悪い。何もせずに緑を報告するからである。
+
+このスイートは1回だけサインインし、セッションを共有する。
+認証のレート制限は IP あたり毎分10リクエストで、`/auth/login`・`/auth/signup`・**`/setup`** を合わせて数える。SPA は読み込み時に `/setup` を見るので、ページ読み込みもサインインと同じ枠を消費する。
+制限に当たったときはウィンドウが明けるまで待つ。テストのために deployment 側の制限を緩めることはしない。実行が14秒ではなく76秒になるのはそのためである。
+
 ## このリポジトリの文章
 
 1文1行で書きます。Markdown もコメントも同じです。

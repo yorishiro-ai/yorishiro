@@ -73,6 +73,29 @@ pnpm --dir ee/web run check   # only if ee/web changed
 The test suite needs PostgreSQL with `vector` and `pg_trgm` installed in `template1`, and a role that is **not** a superuser.
 A superuser bypasses RLS regardless of `FORCE`, so a green run as one proves nothing about isolation.
 
+## Browser tests
+
+`cargo test` does not run them.
+They need a licensed server with a schema and entities in it, plus a chromedriver, and a suite that silently passes when its dependencies are missing is worse than one that is not run at all.
+So every test in `ee/crates/yorishiro-hosted/tests/e2e/` is `#[ignore]` and asks for its deployment by name:
+
+```sh
+chromedriver --port=9515 &
+YORISHIRO_E2E_URL=http://localhost:18081 \
+  YORISHIRO_E2E_EMAIL=you@example.com \
+  YORISHIRO_E2E_PASSWORD=... \
+  cargo test -p yorishiro-hosted --test e2e -- --ignored --test-threads=1
+```
+
+**The driver's major version must match the browser's.** A 152 driver refuses to start a session against Chrome 151, and the error names the versions, so read it rather than assuming the driver is missing.
+
+They are not in CI.
+Doing it properly needs a licence key as a repository secret and a seeded deployment, and a job that cannot actually run is worse than no job: it reports green having done nothing.
+
+The suite signs in once and shares the session.
+The auth limit is 10 requests per minute per IP across `/auth/login`, `/auth/signup` **and** `/setup`, and the SPA checks `/setup` on load, so page loads spend the same budget as sign-ins.
+When the limit is hit the suite waits out the window rather than the deployment weakening a limit for the benefit of a test, which is why a run can take 76 seconds instead of 14.
+
 ## Prose in this repository
 
 One sentence per line, in Markdown and in comments.
