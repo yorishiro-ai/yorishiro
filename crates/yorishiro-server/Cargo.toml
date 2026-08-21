@@ -23,7 +23,7 @@ path = "src/bin/yorishiro_ce_server.rs"
 [dependencies]
 # `version` is required for `cargo publish`: a path dependency with none is rejected as unresolvable off this filesystem.
 # The release workflow's version-bump step updates this alongside the workspace version (see `.github/workflows/release.yml`), so it always matches.
-yorishiro-core = { path = "../yorishiro-core", version = "0.50.0" }
+yorishiro-core = { path = "../yorishiro-core", version = "0.50.0", features = ["sqlite"] }
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -33,10 +33,10 @@ rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
 sea-query.workspace = true
-sea-query-binder.workspace = true
+sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
-sqlx.workspace = true
+sqlx = { workspace = true, features = ["sqlite"] }
 tokio.workspace = true
 tokio-util.workspace = true
 tower.workspace = true

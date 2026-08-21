@@ -36,10 +36,10 @@ async fn rest_import_jsonl_round_trips_through_export(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
-    let write_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Write, None)
+    let write_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
     drop(conn);
@@ -123,9 +123,10 @@ async fn rest_import_jsonl_round_trips_through_export(pool: PgPool) {
         .acquire_for_workspace(other_tenant_tenant, other_tenant)
         .await
         .unwrap();
-    let other_schema_key = create_api_key(&mut other_conn, other_tenant, ApiKeyScope::Schema, None)
-        .await
-        .unwrap();
+    let other_schema_key =
+        create_api_key(&mut *other_conn, other_tenant, ApiKeyScope::Schema, None)
+            .await
+            .unwrap();
     drop(other_conn);
     let other_schema_auth = format!("Bearer {}", other_schema_key.plaintext);
 
@@ -144,11 +145,12 @@ async fn rest_import_jsonl_round_trips_through_export(pool: PgPool) {
     assert_eq!(result["errors"], serde_json::json!([]));
 
     // Importing again with only write scope (no schema scope) is rejected.
+    let mut other_write_conn = db
+        .acquire_for_workspace(other_tenant_tenant, other_tenant)
+        .await
+        .unwrap();
     let other_write_key = create_api_key(
-        &mut db
-            .acquire_for_workspace(other_tenant_tenant, other_tenant)
-            .await
-            .unwrap(),
+        &mut *other_write_conn,
         other_tenant,
         ApiKeyScope::Write,
         None,
@@ -177,7 +179,7 @@ async fn rest_import_jsonl_rejects_malformed_body(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
     drop(conn);

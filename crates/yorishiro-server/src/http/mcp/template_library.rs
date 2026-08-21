@@ -32,8 +32,8 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let ctx = verified!(&self.state, &parts, ApiKeyScope::Read);
 
-        let templates =
-            mcp_try!(tenancy::list_templates(&self.state.identity_pool, ctx.tenant_id).await);
+        let identity_pool = mcp_try!(self.state.identity_pool());
+        let templates = mcp_try!(tenancy::list_templates(identity_pool, ctx.tenant_id).await);
         ok_json(templates)
     }
 
@@ -48,9 +48,8 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let ctx = verified!(&self.state, &parts, ApiKeyScope::Read);
 
-        let template = mcp_try!(
-            tenancy::get_template(&self.state.identity_pool, ctx.tenant_id, args.id).await
-        );
+        let identity_pool = mcp_try!(self.state.identity_pool());
+        let template = mcp_try!(tenancy::get_template(identity_pool, ctx.tenant_id, args.id).await);
         ok_json(template)
     }
 }

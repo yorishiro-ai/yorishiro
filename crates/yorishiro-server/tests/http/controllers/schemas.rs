@@ -15,10 +15,10 @@ async fn rest_schema_endpoints_round_trip(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
-    let write_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Write, None)
+    let write_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
     drop(conn);
@@ -155,7 +155,7 @@ async fn rest_creates_a_schema_from_a_built_in_template(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
     drop(conn);
@@ -207,7 +207,7 @@ async fn rest_creates_a_schema_from_a_library_template(pool: PgPool) {
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
     drop(conn);
@@ -259,7 +259,7 @@ async fn rest_cannot_create_a_schema_from_another_tenants_template(pool: PgPool)
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
     drop(conn);
@@ -310,7 +310,7 @@ async fn rest_rejects_an_unknown_library_template_id(pool: PgPool) {
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
     drop(conn);

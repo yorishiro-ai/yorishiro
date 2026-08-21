@@ -126,9 +126,12 @@ pub async fn create_schema(
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => {
-            let (definition, origin) =
-                tenancy::resolve_template_definition(&state.identity_pool, tenant_id, &template_id)
-                    .await?;
+            let (definition, origin) = tenancy::resolve_template_definition(
+                state.identity_pool()?,
+                tenant_id,
+                &template_id,
+            )
+            .await?;
             origin_template_id = origin;
             origin_snapshot = origin.map(|_| definition.clone());
             definition

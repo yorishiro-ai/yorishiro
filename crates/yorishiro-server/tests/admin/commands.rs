@@ -4,8 +4,17 @@ use uuid::Uuid;
 use crate::admin::commands::{create_api_key, list_api_keys, resync_embeddings, revoke_api_key};
 use sea_query::{Alias, Expr, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
+use yorishiro_core::db::{DbHandle, TenantDb};
 use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::{self, ApiKeyScope};
+
+/// Same pool used for both halves: these tests have no separate migration-role connection, unlike production's `identity_pool`.
+fn db_handle(pool: &PgPool) -> DbHandle {
+    DbHandle::Postgres {
+        tenant: TenantDb::new(pool.clone()),
+        identity: pool.clone(),
+    }
+}
 
 #[derive(sea_query::Iden)]
 enum Entities {
@@ -36,7 +45,9 @@ async fn creates_workspace_and_issues_a_usable_key(pool: PgPool) {
     assert_eq!(created.user_id, None);
 
     // Confirm the issued key actually authenticates, not just that creation returned Ok.
-    let ctx = auth::authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = auth::authenticate(&db_handle(&pool), &created.plaintext)
+        .await
+        .unwrap();
     assert_eq!(ctx.workspace_id, workspace_id);
     assert_eq!(ctx.scope, ApiKeyScope::Write);
 }
@@ -104,7 +115,9 @@ async fn revoked_key_no_longer_authenticates(pool: PgPool) {
     let created = create_api_key(&pool, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
-    auth::authenticate(&pool, &created.plaintext).await.unwrap();
+    auth::authenticate(&db_handle(&pool), &created.plaintext)
+        .await
+        .unwrap();
 
     let listed = list_api_keys(&pool, workspace_id).await.unwrap();
     assert_eq!(listed.len(), 1);
@@ -112,7 +125,7 @@ async fn revoked_key_no_longer_authenticates(pool: PgPool) {
 
     revoke_api_key(&pool, created.id).await.unwrap();
 
-    let result = auth::authenticate(&pool, &created.plaintext).await;
+    let result = auth::authenticate(&db_handle(&pool), &created.plaintext).await;
     assert!(matches!(
         result,
         Err(yorishiro_core::YorishiroError::Unauthenticated)

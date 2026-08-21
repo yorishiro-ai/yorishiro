@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
+use yorishiro_core::db::DbHandle;
 use yorishiro_core::services::auth::{ApiKeyScope, AuthContext, Authenticator};
 use yorishiro_core::{ResultExt, YorishiroError};
 
@@ -42,10 +43,21 @@ fn requested_workspace(headers: &[(String, String)]) -> RequestedWorkspace {
 impl Authenticator for TenantScopedAuthenticator {
     async fn authenticate(
         &self,
-        pool: &PgPool,
+        db: &DbHandle,
         presented_key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
+        // `ee/` is Postgres-only (an LLM-calling, billing-integrated deployment has no
+        // single-tenant Sqlite story), so this is the one engine this authenticator ever sees in
+        // practice; the Sqlite arm only exists because `DbHandle` is a shared type, not because
+        // this crate can run on it.
+        // Runs on `tenant`'s pool, not `identity`'s, for the same reason the community edition's own `authenticate` does: `identity.authenticate_api_key` is granted to `yorishiro_app`, the role `tenant`'s pool connects as.
+        let DbHandle::Postgres { tenant, .. } = db else {
+            return Err(YorishiroError::Internal(anyhow::anyhow!(
+                "the hosted edition does not run on the Sqlite engine"
+            )));
+        };
+        let pool = tenant.pool();
         let requested = match requested_workspace(headers) {
             RequestedWorkspace::Absent => None,
             RequestedWorkspace::Present(id) => Some(id),

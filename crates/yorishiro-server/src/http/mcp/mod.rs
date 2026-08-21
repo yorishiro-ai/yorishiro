@@ -108,7 +108,7 @@ pub(super) async fn authorize(
     let headers = header_pairs(parts);
 
     match auth::authorize(
-        &state.tenant_db,
+        &state.db,
         state.authenticator.as_ref(),
         presented_key,
         required,
@@ -145,7 +145,7 @@ pub(super) async fn authorize_scope_only(
     let headers = header_pairs(parts);
 
     match auth::authorize_scope(
-        &state.tenant_db,
+        &state.db,
         state.authenticator.as_ref(),
         presented_key,
         required,

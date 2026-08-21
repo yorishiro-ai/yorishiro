@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sqlx::PgPool;
 
+use crate::db::DbHandle;
 use crate::error::YorishiroError;
 
 use super::{AuthContext, authenticate};
@@ -34,7 +34,7 @@ use super::{AuthContext, authenticate};
 pub trait Authenticator: Send + Sync {
     async fn authenticate(
         &self,
-        pool: &PgPool,
+        db: &DbHandle,
         presented_key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError>;
@@ -47,11 +47,11 @@ pub struct DefaultAuthenticator;
 impl Authenticator for DefaultAuthenticator {
     async fn authenticate(
         &self,
-        pool: &PgPool,
+        db: &DbHandle,
         presented_key: &str,
         _headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
-        authenticate(pool, presented_key).await
+        authenticate(db, presented_key).await
     }
 }
 

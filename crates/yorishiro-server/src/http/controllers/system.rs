@@ -78,7 +78,7 @@ pub async fn get_maintenance(
     _authorized: Authorized<MigrationScope>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
     let mut conn = state
-        .identity_pool
+        .identity_pool()?
         .acquire()
         .await
         .map_err(|err| ApiError::from(yorishiro_core::YorishiroError::Internal(err.into())))?;
@@ -113,7 +113,7 @@ pub async fn set_maintenance(
     // `maintenance::set` takes the pool rather than the request's connection because the request role has SELECT only on this table: entering maintenance is an operator action, and the GRANT says so.
     // Authorization has already happened above, in the extractor, and the pool is handed straight to the repository rather than used to compose anything here.
     let updated = maintenance::set(
-        &state.identity_pool,
+        state.identity_pool()?,
         mode,
         body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER),
         body.reason,

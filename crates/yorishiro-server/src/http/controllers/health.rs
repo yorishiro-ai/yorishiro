@@ -43,11 +43,17 @@ pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<He
 }
 
 async fn check_db(state: &AppState) -> Result<(), sqlx::Error> {
-    let pool = state.tenant_db.pool().clone();
     let probe = async move {
-        let mut conn = pool.acquire().await?;
-        sqlx::query("SELECT 1").execute(conn.as_mut()).await?;
-        Ok::<(), sqlx::Error>(())
+        match &state.db {
+            yorishiro_core::db::DbHandle::Postgres { tenant, .. } => sqlx::query("SELECT 1")
+                .execute(tenant.pool())
+                .await
+                .map(|_| ()),
+            yorishiro_core::db::DbHandle::Sqlite(sqlite) => sqlx::query("SELECT 1")
+                .execute(sqlite.pool())
+                .await
+                .map(|_| ()),
+        }
     };
 
     match tokio::time::timeout(DB_CHECK_TIMEOUT, probe).await {

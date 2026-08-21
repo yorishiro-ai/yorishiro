@@ -29,7 +29,7 @@ pub async fn list_templates(
     State(state): State<AppState>,
     AuthContext(ctx): AuthContext,
 ) -> Result<Json<Vec<TemplateRecord>>, ApiError> {
-    let templates = tenancy::list_templates(&state.identity_pool, ctx.tenant_id).await?;
+    let templates = tenancy::list_templates(state.identity_pool()?, ctx.tenant_id).await?;
     Ok(Json(templates))
 }
 
@@ -50,7 +50,7 @@ pub async fn get_template(
     AuthContext(ctx): AuthContext,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
-    let template = tenancy::get_template(&state.identity_pool, ctx.tenant_id, id).await?;
+    let template = tenancy::get_template(state.identity_pool()?, ctx.tenant_id, id).await?;
     Ok(Json(template))
 }
 
@@ -86,7 +86,7 @@ pub async fn create_template(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
     let template = tenancy::create_template(
-        &state.identity_pool,
+        state.identity_pool()?,
         ctx.tenant_id,
         ctx.user_id,
         CreateTemplateInput {
@@ -134,7 +134,7 @@ pub async fn update_template(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
     let template = tenancy::update_template(
-        &state.identity_pool,
+        state.identity_pool()?,
         ctx.tenant_id,
         id,
         UpdateTemplateInput {
@@ -167,7 +167,7 @@ pub async fn delete_template(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
-    tenancy::delete_template(&state.identity_pool, ctx.tenant_id, id).await?;
+    tenancy::delete_template(state.identity_pool()?, ctx.tenant_id, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -200,7 +200,7 @@ pub async fn fork_template(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
     let template = tenancy::fork_template(
-        &state.identity_pool,
+        state.identity_pool()?,
         ctx.tenant_id,
         ctx.user_id,
         id,

@@ -39,7 +39,12 @@ pub async fn maintenance_guard(
         return next.run(request).await;
     }
 
-    let mut conn = match state.identity_pool.acquire().await {
+    // No `identity_pool` on Sqlite means no maintenance mode there yet either: this middleware,
+    // like `setup`'s admin surface, is Postgres-only until this table's own writer is generalized.
+    let Ok(identity_pool) = state.identity_pool() else {
+        return next.run(request).await;
+    };
+    let mut conn = match identity_pool.acquire().await {
         Ok(conn) => conn,
         // The database being unreachable is not a reason to refuse: the handler is about to fail on its own with an error that says so, which is more useful than a maintenance notice nobody switched on.
         Err(_) => return next.run(request).await,

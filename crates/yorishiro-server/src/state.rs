@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use axum::extract::FromRef;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
-use yorishiro_core::db::TenantDb;
+use yorishiro_core::db::{DbHandle, TenantDb};
 use yorishiro_core::models::entities::EntityRecord;
 use yorishiro_core::services::auth::{Authenticator, default_authenticator};
 use yorishiro_core::services::embedding::EmbeddingProvider;
@@ -26,10 +25,7 @@ const EMBEDDING_SYNC_MAX_RETRIES: u32 = 3;
 /// Using this struct as axum's `State` (rather than `TenantDb` alone) lets search handlers also reach the `EmbeddingProvider`.
 #[derive(Clone)]
 pub struct AppState {
-    pub tenant_db: TenantDb,
-    /// A connection pool using the admin/migration role (not `yorishiro_app`), reserved for the handful of control-plane endpoints (signup, login, invite redemption) that must read/write `identity.users`/`identity.tenant_memberships`/`identity.invites` before any tenant or workspace context can be established: the same role `admin.rs`'s CLI commands already use, for the same reason (see the role-separation migration's comment on why `yorishiro_app` has no grant on those tables at all).
-    /// Every other handler must keep using `tenant_db` instead: this pool bypasses RLS entirely.
-    pub identity_pool: PgPool,
+    pub db: DbHandle,
     pub embedding_provider: Arc<dyn EmbeddingProvider>,
     /// Per-workspace token budget for search.
     /// Search is metered in tokens rather than requests because that is what it costs the embedding model, and because a query is short enough that counting it is cheap: measured at 74µs, against 165ms for a large entity body, which is why writes stay on request counts.
@@ -48,14 +44,25 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Builds state for a Postgres deployment.
+    /// Kept as the two-pool shape every existing caller already passes; [`AppState::from_handle`] is the Sqlite-capable entry point underneath.
     pub fn new(
         tenant_db: TenantDb,
         identity_pool: PgPool,
         embedding_provider: Arc<dyn EmbeddingProvider>,
     ) -> Self {
+        Self::from_handle(
+            DbHandle::Postgres {
+                tenant: tenant_db,
+                identity: identity_pool,
+            },
+            embedding_provider,
+        )
+    }
+
+    pub fn from_handle(db: DbHandle, embedding_provider: Arc<dyn EmbeddingProvider>) -> Self {
         Self {
-            tenant_db,
-            identity_pool,
+            db,
             embedding_provider,
             // Built here rather than passed in, so every existing caller of `new` keeps working and a downstream process gets the same quota without asking for it.
             search_token_limiter: Arc::new(
@@ -65,6 +72,29 @@ impl AppState {
             embedding_sync_permits: Arc::new(Semaphore::new(EMBEDDING_SYNC_MAX_CONCURRENCY)),
             embedding_tasks: TaskTracker::new(),
             queue: Arc::new(LocalQueue::new(EMBEDDING_SYNC_MAX_CONCURRENCY)),
+        }
+    }
+
+    /// The control-plane pool, for the handful of endpoints (signup, login, invite redemption, setup) that must read/write `identity.users`/`identity.tenant_memberships`/`identity.invites` before any tenant or workspace context can be established.
+    /// Postgres connects it with the migration role (not `yorishiro_app`), bypassing RLS entirely; every other handler must keep using [`AppState::tenant_db`] instead.
+    /// Sqlite has no role to separate and no RLS to bypass, so nothing here can hand back a second pool: callers on that engine need `setup`'s own match on `db` rather than this method.
+    pub fn identity_pool(&self) -> Result<&PgPool, YorishiroError> {
+        match &self.db {
+            DbHandle::Postgres { identity, .. } => Ok(identity),
+            DbHandle::Sqlite(_) => Err(YorishiroError::Internal(anyhow::anyhow!(
+                "identity_pool is not available on the Sqlite engine"
+            ))),
+        }
+    }
+
+    /// The Postgres tenant pool, for handlers not yet generalized over [`yorishiro_core::db::Storage`].
+    /// Fails loudly on Sqlite rather than silently narrowing behavior, the same posture [`yorishiro_core::services::auth::authorize`] takes.
+    pub fn tenant_db(&self) -> Result<&TenantDb, YorishiroError> {
+        match &self.db {
+            DbHandle::Postgres { tenant, .. } => Ok(tenant),
+            DbHandle::Sqlite(_) => Err(YorishiroError::Internal(anyhow::anyhow!(
+                "this operation is not available on the Sqlite engine yet"
+            ))),
         }
     }
 
@@ -123,17 +153,24 @@ impl AppState {
     /// Syncs the `embedding` column in the background after an entity create/update succeeds.
     /// The embedding API call can take up to tens of seconds, so the request isn't made to wait for it, and a fresh connection is acquired from the pool instead of reusing the request's own connection (satisfying the no-same-transaction constraint documented on `sync_embedding`).
     /// Failures are only logged: embedding is an auxiliary feature and must not affect whether the entity write itself succeeds.
+    ///
+    /// Postgres only: search embedding storage is `pgvector`, which Sqlite has no equivalent of, so a caller on that engine gets a task that logs and returns rather than one that panics reaching for a pool that isn't there.
     pub fn spawn_embedding_sync(
         &self,
         tenant_id: Uuid,
         workspace_id: Uuid,
         record: EntityRecord,
     ) -> tokio::task::JoinHandle<()> {
-        let db = self.tenant_db.clone();
+        let db = self.tenant_db().cloned();
         let provider = Arc::clone(&self.embedding_provider);
         let permits = Arc::clone(&self.embedding_sync_permits);
         // Spawning through the TaskTracker lets graceful shutdown wait for the embedding sync of an already-written entity to finish (an immediate SIGTERM exit would lose the sync, leaving that entity permanently missing from search).
         self.embedding_tasks.spawn(async move {
+            let Ok(db) = db else {
+                tracing::warn!(entity_id = %record.id, "embedding sync skipped: no pgvector storage on this engine");
+                return;
+            };
+
             // The order matters: acquire the permit before the connection.
             // Reversing it would let every waiting task hold a connection, defeating the point of the cap.
             let Ok(_permit) = permits.acquire_owned().await else {
@@ -186,12 +223,6 @@ impl AppState {
                 tracing::warn!(entity_id = %record.id, error = %err, "embedding sync failed");
             }
         })
-    }
-}
-
-impl FromRef<AppState> for TenantDb {
-    fn from_ref(state: &AppState) -> Self {
-        state.tenant_db.clone()
     }
 }
 

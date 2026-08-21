@@ -21,7 +21,7 @@ async fn get_workspace_in_tenant(
     tenant_id: Uuid,
     workspace_id: Uuid,
 ) -> Result<WorkspaceRecord, ApiError> {
-    let workspace = tenancy::get_workspace(&state.identity_pool, workspace_id).await?;
+    let workspace = tenancy::get_workspace(state.identity_pool()?, workspace_id).await?;
     if workspace.tenant_id != tenant_id {
         return Err(
             YorishiroError::not_found(format!("workspace '{workspace_id}' was not found")).into(),
@@ -43,7 +43,7 @@ pub async fn list_workspaces(
     State(state): State<AppState>,
     AuthContext(ctx): AuthContext,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    let workspaces = tenancy::list_workspaces(&state.identity_pool, ctx.tenant_id).await?;
+    let workspaces = tenancy::list_workspaces(state.identity_pool()?, ctx.tenant_id).await?;
     Ok(Json(workspaces))
 }
 
@@ -79,7 +79,7 @@ pub async fn create_workspace(
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
     let workspace = tenancy::create_workspace(
-        &state.identity_pool,
+        state.identity_pool()?,
         ctx.tenant_id,
         &body.name,
         body.max_entities,
@@ -126,7 +126,7 @@ pub async fn get_workspace(
     let workspace = get_workspace_in_tenant(&state, ctx.tenant_id, id).await?;
 
     let mut conn = state
-        .tenant_db
+        .tenant_db()?
         .acquire_for_workspace(ctx.tenant_id, workspace.id)
         .await
         .internal()?;
@@ -170,7 +170,7 @@ pub async fn delete_workspace(
 
     // Refusing a tenant's last workspace is `delete_workspace`'s own rule, enforced in the same
     // statement as the delete, so two concurrent requests cannot both see a spare one and proceed.
-    tenancy::delete_workspace(&state.identity_pool, id).await?;
+    tenancy::delete_workspace(state.identity_pool()?, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

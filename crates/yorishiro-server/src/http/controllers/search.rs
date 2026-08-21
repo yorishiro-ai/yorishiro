@@ -50,7 +50,7 @@ pub async fn search_entities(
 
     let workspace_id = verified.ctx.workspace_id;
     let mut conn = state
-        .tenant_db
+        .tenant_db()?
         .acquire_for_workspace(verified.ctx.tenant_id, workspace_id)
         .await
         .internal()?;

@@ -34,7 +34,7 @@ async fn issue_key(
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, user_id)
+    create_api_key(&mut *conn, workspace_id, ApiKeyScope::Schema, user_id)
         .await
         .unwrap()
         .plaintext

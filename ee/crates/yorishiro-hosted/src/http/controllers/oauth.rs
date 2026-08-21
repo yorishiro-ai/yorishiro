@@ -149,7 +149,7 @@ pub async fn callback(
 
     let mut conn = state.identity_pool.acquire().await.internal()?;
     let created = auth::create_api_key(
-        &mut conn,
+        &mut *conn,
         provisioned.workspace_id,
         provisioned.role.max_scope(),
         Some(provisioned.user_id),

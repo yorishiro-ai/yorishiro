@@ -72,7 +72,7 @@ pub async fn create_api_key(
     }
 
     let mut conn = pool.acquire().await?;
-    let created = auth::create_api_key(&mut conn, workspace_id, scope, user_id)
+    let created = auth::create_api_key(&mut *conn, workspace_id, scope, user_id)
         .await
         .context("failed to create api key")?;
     Ok(created)

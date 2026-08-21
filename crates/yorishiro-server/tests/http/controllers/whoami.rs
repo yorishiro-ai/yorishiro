@@ -52,7 +52,7 @@ async fn whoami_returns_tenant_and_scope_for_a_valid_key(pool: PgPool) {
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, None)
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
     drop(conn);
