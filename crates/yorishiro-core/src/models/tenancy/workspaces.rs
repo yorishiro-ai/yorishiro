@@ -1,4 +1,4 @@
-use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
+use sea_query::{Alias, Asterisk, Expr, Func, Iden, IntoIden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -89,18 +89,18 @@ where
         }
     }
 
-    let (sql, values) = Query::insert()
-        .into_table(C::schema_table("identity", Workspaces::Table))
-        .columns([
-            Workspaces::TenantId,
-            Workspaces::Name,
-            Workspaces::MaxEntities,
-            Workspaces::SchemaId,
-            Workspaces::Status,
-            Workspaces::EmbeddingModel,
-            Workspaces::EmbeddingDimensions,
-        ])
-        .values_panic([
+    let (cols, vals) = crate::db::with_generated_id::<C, _>(
+        Workspaces::Id,
+        vec![
+            Workspaces::TenantId.into_iden(),
+            Workspaces::Name.into_iden(),
+            Workspaces::MaxEntities.into_iden(),
+            Workspaces::SchemaId.into_iden(),
+            Workspaces::Status.into_iden(),
+            Workspaces::EmbeddingModel.into_iden(),
+            Workspaces::EmbeddingDimensions.into_iden(),
+        ],
+        vec![
             tenant_id.into(),
             name.into(),
             max_entities.into(),
@@ -113,7 +113,12 @@ where
             },
             embedding.map(|(model, _)| model).into(),
             embedding.map(|(_, dimensions)| dimensions).into(),
-        ])
+        ],
+    );
+    let (sql, values) = Query::insert()
+        .into_table(C::schema_table("identity", Workspaces::Table))
+        .columns(cols)
+        .values_panic(vals)
         .returning(Query::returning().columns(workspace_columns()))
         .build_sqlx(C::builder());
 

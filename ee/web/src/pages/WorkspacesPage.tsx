@@ -174,13 +174,14 @@ export function WorkspacesPage() {
                         </button>
                       </TableCell>
                       <TableCell>
-                        {schemaName(ws.schema_id) ? (
+                        {ws.schema_id == null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : schemaName(ws.schema_id) ? (
                           <Badge variant="secondary">{schemaName(ws.schema_id)}</Badge>
                         ) : (
                           // `schemas` only ever holds the signed-in workspace's schemas, so
-                          // every other row lands here however healthy it is. Showing the id
-                          // keeps the cell honest -- an em dash read as "no schema", which is
-                          // a state `schema_id` (non-null) cannot even represent.
+                          // every other row with a schema lands here however healthy it is.
+                          // Showing the id keeps the cell honest.
                           <span
                             className="text-muted-foreground font-mono text-xs"
                             title={`Schema ${ws.schema_id}: names resolve only for the workspace you are signed in to`}

@@ -83,7 +83,7 @@ pub struct SchemaSummary {
 }
 
 #[derive(Iden)]
-enum Schemas {
+pub(crate) enum Schemas {
     Table,
     Id,
     TenantId,

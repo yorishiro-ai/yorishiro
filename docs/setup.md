@@ -110,7 +110,7 @@ It replaces the one that is there:
 $ sudo dpkg -i yorishiro-ce_X.Y.Z_amd64.deb  # or: sudo rpm -U yorishiro-ce-X.Y.Z-1.x86_64.rpm
 ```
 
-Nothing else is needed. `/etc/yorishiro/` and `/var/lib/yorishiro` belong to the deployment rather than to the edition, the unit keeps its name and whatever enabled state it had, and the binary at `/usr/bin/yorishiro-server` is swapped in place.
+Nothing else is needed: `/etc/yorishiro/` and `/var/lib/yorishiro` belong to the deployment rather than to the edition, the unit keeps its name and whatever enabled state it had, and the binary at `/usr/bin/yorishiro-server` is swapped in place.
 Restart the service to pick it up.
 
 Moving to the community edition drops the web UI and the paid features; the database is untouched, so moving back restores them.
@@ -190,8 +190,8 @@ Migrations are applied automatically on startup, for all three methods above.
 | `http://localhost:8080/up` | Liveness probe (always 200 if the process is running; no dependency checks) |
 | `http://localhost:8080/health` | Readiness check (also probes DB connectivity; 503 on outage) |
 | `http://localhost:8080/` | Web UI (compiled into the binary; see `YORISHIRO_WEB_DIR` in [configuration.md](configuration.md) to serve it from disk instead): see [Web UI](#web-ui) below for what it covers |
-| `http://localhost:8080/api-docs/openapi.json` | OpenAPI document (REST API reference) |
-| `http://localhost:8080/api-docs/openapi.json` | OpenAPI specification |
+| `http://localhost:8080/docs` | Swagger UI (interactive REST API reference) |
+| `http://localhost:8080/api-docs/openapi.json` | OpenAPI specification, the document Swagger UI reads |
 | `http://localhost:8080/mcp` | MCP endpoint (Streamable HTTP) |
 | `http://localhost:8080/whoami` | Authentication check (returns workspace, tenant, and scope) |
 

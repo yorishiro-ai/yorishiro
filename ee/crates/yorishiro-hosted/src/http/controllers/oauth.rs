@@ -31,6 +31,7 @@ pub struct OAuthStatus {
 #[utoipa::path(
     get,
     path = "/auth/oauth/status",
+    operation_id = "oauth_status",
     responses(
         (status = 200, description = "Whether OAuth login is configured on this deployment. Always answers 200, and is deliberately not rate-limited: it returns no secret and the Web UI's login page calls it on every load", body = OAuthStatus),
     ),

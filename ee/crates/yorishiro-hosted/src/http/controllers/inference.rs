@@ -1,6 +1,6 @@
-//! Inferring values for fields an entity is missing (§FR-8-2 mode B), and the per-workspace credentials it runs on.
+//! Inferring values for fields an entity is missing, and the per-workspace credentials it runs on.
 //!
-//! This product does not pay for inference (requirements §1.3), so a workspace brings its own key.
+//! This product does not pay for inference, so a workspace brings its own key.
 //! A workspace with none configured gets a 422 rather than a fall back to `default` values:
 //! a caller who asked for inference and silently received defaults would have no way to tell that nothing was inferred.
 

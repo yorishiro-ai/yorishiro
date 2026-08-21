@@ -29,7 +29,7 @@ Yorishiro の有償側です。
 ## 無償側との合成
 
 `crates/yorishiro-{core,server}` は `ee/` に依存しません。
-依存は一方向で、1つのバイナリが両方を composeします。
+依存は一方向で、1つのバイナリが両方を合成します。
 
 ```mermaid
 flowchart LR
@@ -48,7 +48,7 @@ flowchart LR
     Paid -->|"path依存"| Free
 ```
 
-`ee/` が composeする継ぎ目は `build_app`・`apply_observability_layers`・`into_http_parts()`・`hex_decode`・`bearer_credential` の5つです。
+`ee/` が合成する継ぎ目は `build_app`・`apply_observability_layers`・`into_http_parts()`・`hex_decode`・`bearer_credential` の5つです。
 無償側からは誰も呼ばないため、この5つはデッドコード判定のgrepが何を言おうと維持します。
 `http::mcp::YorishiroMcpServer` は6つ目ですが、意図的にこの一覧に入れていません。
 `ee/` が呼び出す以上、ワークスペース全体のgrepが呼び出し元を見つけるためです。

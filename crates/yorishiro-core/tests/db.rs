@@ -97,8 +97,12 @@ async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: Pg
 }
 
 /// The seam is only a seam if a caller can hold it without naming the implementation.
-/// This takes `&dyn Storage`, so it compiles against the trait alone: an engine added later satisfies the same signature without touching this function.
-async fn count_through_the_seam(storage: &dyn Storage, tenant_id: Uuid, workspace_id: Uuid) -> i64 {
+/// This takes `&dyn Storage<Db = sqlx::Postgres>`, so it compiles against the trait alone: another `TenantDb`-shaped Postgres implementation satisfies the same signature without touching this function.
+async fn count_through_the_seam(
+    storage: &dyn Storage<Db = sqlx::Postgres>,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> i64 {
     let mut conn = storage
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
@@ -135,7 +139,7 @@ async fn the_storage_trait_scopes_a_connection_like_the_concrete_type(pool: PgPo
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_storage_trait_exposes_the_unscoped_pool_for_the_control_plane(pool: PgPool) {
     let db = TenantDb::new(pool);
-    let storage: &dyn Storage = &db;
+    let storage: &dyn Storage<Db = sqlx::Postgres> = &db;
 
     // The control-plane paths need a pool that is not workspace-scoped; the trait has to keep offering one or signup and setup have nowhere to run.
     let (one,): (i32,) = sqlx::query_as("SELECT 1")
@@ -332,6 +336,10 @@ fn sqlite_satisfies_the_generic_bounds() {
     let _ = crate::models::entities::get::<sqlx::SqliteConnection>;
     let _ = crate::models::entities::count::<sqlx::SqliteConnection>;
     let _ = crate::models::entities::update::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::migration_dry_run::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::snapshot::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::snapshots_for_job::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::undo_job::<sqlx::SqliteConnection>;
     let _ = crate::models::relations::create::<sqlx::SqliteConnection>;
     let _ = crate::models::export::export_all::<sqlx::SqliteConnection>;
 }
@@ -372,4 +380,596 @@ fn schema_table_stays_bare_on_sqlite() {
         sqlite_sql.contains(r#""workspaces""#),
         "the bare table name must still be present: {sqlite_sql}"
     );
+}
+
+/// Runs PR #213's four rewritten functions against a real Sqlite database, not just the type-level
+/// bounds `sqlite_satisfies_the_generic_bounds` proves or the rendered-SQL strings
+/// `migration_dry_run_rendering` checks.
+///
+/// There is no Sqlite migration set yet (that is the future Sqlite driver's own work, not this
+/// verification), so the DDL here is test-local: bare `schemas`/`entities`/`entity_snapshots`
+/// tables carrying exactly the columns these functions' SELECTs and INSERTs name, no `content.`
+/// prefix (Sqlite has no schema concept for a single-file database, matching `schema_table_stays_bare_on_sqlite`
+/// above).
+///
+/// Fixture choices worth recording as open questions rather than settled here, each discovered
+/// by actually running these functions rather than assumed up front:
+/// - IDs are seeded as explicit `Uuid`s because Sqlite has no `uuidv7()`. This doesn't reopen the
+///   rule that the app itself never mints an id, which governs production write paths; how a real
+///   Sqlite driver gets IDs is exactly the kind of thing that decision has to settle, not
+///   something this test can.
+///   `snapshot()`'s own INSERT..SELECT never names `entity_snapshots.id` either (mirroring
+///   Postgres's `DEFAULT uuidv7()`), so the fixture table needs its own default; `randomblob(16)`
+///   is not a real UUID, but PK uniqueness is all this test needs from it.
+/// - `sqlx-sqlite` encodes `Uuid` as 16 raw BLOB bytes, not the hyphenated string form, so every
+///   Uuid column here is `BLOB` and every fixture insert binds the `Uuid` value directly rather
+///   than `.to_string()`ing it: binding the string form silently produces zero query matches
+///   instead of a decode error, since Sqlite's dynamic typing accepts either into a `BLOB` column
+///   without complaint.
+/// - `created_at` uses `strftime('%Y-%m-%dT%H:%M:%fZ','now')` for millisecond precision rather than
+///   Sqlite's default `CURRENT_TIMESTAMP` (second granularity). Millisecond precision is still not
+///   enough to guarantee two `snapshot()` calls a few lines apart land in different ticks, so
+///   `snapshots_for_job`'s `ORDER BY created_at DESC` (no tiebreaker column) is asserted as a set
+///   below, not by position: which of two same-millisecond snapshots sorts first is genuinely
+///   unspecified today, an actual constraint for the future real driver, not a fixture timing bug.
+///   `undo_job`'s own `ORDER BY created_at ASC` shares the same gap (only untested here because
+///   each entity below has exactly one snapshot, so replay order can't change the outcome).
+#[cfg(feature = "sqlite")]
+mod sqlite_execution {
+    use serde_json::json;
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{Connection, Executor, SqliteConnection};
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    use crate::YorishiroError;
+    use crate::models::{entities, relations};
+
+    /// The real Sqlite migration set (`migrations_sqlite/`), not test-local DDL: a column the
+    /// code queries but the migration forgot now fails here rather than only in a hand-written
+    /// fixture that happened to include it. `foreign_keys(true)` is not Sqlite's default, and a
+    /// connection that omits it would silently accept a fixture that violates every `REFERENCES`
+    /// in the migration, the "setting present but not in effect" trap: production connects with
+    /// the same option.
+    static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations_sqlite");
+
+    async fn seeded_db() -> SqliteConnection {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let mut conn = SqliteConnection::connect_with(&options).await.unwrap();
+        SQLITE_MIGRATOR.run(&mut conn).await.unwrap();
+
+        let tenant_id = Uuid::now_v7();
+        conn.execute(
+            sqlx::query("INSERT INTO tenants (id, name) VALUES (?, 'seed-tenant')").bind(tenant_id),
+        )
+        .await
+        .unwrap();
+        conn
+    }
+
+    /// A workspace row for `workspace_id`, so `schemas`/`entities`/`entity_snapshots` rows
+    /// referencing it satisfy their `REFERENCES workspaces(id)` under `foreign_keys(true)`.
+    /// `tenant_id` is read back from the one row `seeded_db` inserted, since the tests below
+    /// only ever seed a single tenant.
+    async fn seed_workspace(conn: &mut SqliteConnection, workspace_id: Uuid) {
+        let (tenant_id,): (Uuid,) = sqlx::query_as("SELECT id FROM tenants LIMIT 1")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO workspaces (id, tenant_id, name) VALUES (?, ?, 'seed-workspace')")
+            .bind(workspace_id)
+            .bind(tenant_id)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+    }
+
+    async fn insert_schema(
+        conn: &mut SqliteConnection,
+        id: Uuid,
+        workspace_id: Uuid,
+        name: &str,
+        version: i32,
+        definition: &serde_json::Value,
+        status: &str,
+    ) {
+        // `tenant_id` and `origin_status` read/satisfy `schemas`' real constraints under the
+        // migration set: `REFERENCES tenants(id)` and `CHECK (origin_status IN ('linked', 'detached'))`.
+        let (tenant_id,): (Uuid,) = sqlx::query_as("SELECT id FROM tenants LIMIT 1")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO schemas \
+                 (id, tenant_id, workspace_id, name, version, definition, status, origin_status) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'detached')",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(workspace_id)
+        .bind(name)
+        .bind(version)
+        .bind(definition.to_string())
+        .bind(status)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_entity(
+        conn: &mut SqliteConnection,
+        id: Uuid,
+        workspace_id: Uuid,
+        schema_id: Uuid,
+        schema_version: i32,
+        entity_type: &str,
+        data: &serde_json::Value,
+    ) {
+        sqlx::query(
+            "INSERT INTO entities \
+                 (id, workspace_id, schema_id, schema_version, entity_type, data) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(workspace_id)
+        .bind(schema_id)
+        .bind(schema_version)
+        .bind(entity_type)
+        .bind(data.to_string())
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    }
+
+    fn v1_definition() -> serde_json::Value {
+        json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "title": { "type": "string", "required": true }
+                    }
+                }
+            }
+        })
+    }
+
+    /// `priority` already exists here, so an entity on this version that supplies it is
+    /// behind but valid once v3 makes the field required, unlike one still on v1.
+    fn v2_definition() -> serde_json::Value {
+        json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "title": { "type": "string", "required": true },
+                        "priority": { "type": "integer", "required": false }
+                    }
+                }
+            }
+        })
+    }
+
+    fn v3_definition() -> serde_json::Value {
+        json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "title": { "type": "string", "required": true },
+                        "priority": { "type": "integer", "required": true }
+                    }
+                }
+            }
+        })
+    }
+
+    /// The four functions PR #213 rewrote, exercised end to end against a real Sqlite database:
+    /// seed a schema at two versions plus entities under each, run `migration_dry_run`, `snapshot`,
+    /// `snapshots_for_job` and `undo_job` in sequence, and check each one's actual effect rather
+    /// than only that it returns `Ok`.
+    #[tokio::test]
+    async fn the_four_rewritten_functions_execute_and_behave_on_sqlite() {
+        let mut conn = seeded_db().await;
+
+        let workspace_id = Uuid::now_v7();
+        seed_workspace(&mut conn, workspace_id).await;
+        let schema_v1 = Uuid::now_v7();
+        let schema_v2 = Uuid::now_v7();
+        let schema_v3 = Uuid::now_v7();
+        insert_schema(
+            &mut conn,
+            schema_v1,
+            workspace_id,
+            "task-management",
+            1,
+            &v1_definition(),
+            "archived",
+        )
+        .await;
+        insert_schema(
+            &mut conn,
+            schema_v2,
+            workspace_id,
+            "task-management",
+            2,
+            &v2_definition(),
+            "archived",
+        )
+        .await;
+        insert_schema(
+            &mut conn,
+            schema_v3,
+            workspace_id,
+            "task-management",
+            3,
+            &v3_definition(),
+            "active",
+        )
+        .await;
+
+        // One entity on v1 (missing `priority`, which v1 never declared: needs a value filled in),
+        // one on v2 (already supplies `priority`, which v2 already declared as optional: behind but
+        // valid), one already on v3, the active version.
+        let old_missing = Uuid::now_v7();
+        let old_valid = Uuid::now_v7();
+        let current = Uuid::now_v7();
+        insert_entity(
+            &mut conn,
+            old_missing,
+            workspace_id,
+            schema_v1,
+            1,
+            "task",
+            &json!({ "title": "no priority yet" }),
+        )
+        .await;
+        insert_entity(
+            &mut conn,
+            old_valid,
+            workspace_id,
+            schema_v2,
+            2,
+            "task",
+            &json!({ "title": "already has one", "priority": 3 }),
+        )
+        .await;
+        insert_entity(
+            &mut conn,
+            current,
+            workspace_id,
+            schema_v3,
+            3,
+            "task",
+            &json!({ "title": "already current", "priority": 1 }),
+        )
+        .await;
+
+        // migration_dry_run: the JOIN + GROUP BY query, on Sqlite.
+        let dry_run = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+            .await
+            .unwrap();
+        assert_eq!(dry_run.total_entities, 3);
+        assert_eq!(dry_run.current, 1);
+        assert_eq!(dry_run.behind_but_valid, 1);
+        assert_eq!(dry_run.needs_values, 1);
+        assert_eq!(dry_run.by_entity_type.len(), 1);
+        assert_eq!(
+            dry_run.by_entity_type[0].missing_required,
+            vec!["priority".to_string()]
+        );
+
+        // snapshot: the atomic INSERT..SELECT, on the two old-version entities, under one job.
+        let job_id = Uuid::now_v7();
+        entities::snapshot(&mut conn, workspace_id, old_missing, job_id)
+            .await
+            .unwrap();
+        entities::snapshot(&mut conn, workspace_id, old_valid, job_id)
+            .await
+            .unwrap();
+
+        // snapshot on a nonexistent entity is NotFound, not a silent no-op insert.
+        let missing_err = entities::snapshot(&mut conn, workspace_id, Uuid::now_v7(), job_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(missing_err, YorishiroError::NotFound { .. }));
+
+        // snapshots_for_job: both rows come back, newest first. `ORDER BY created_at DESC, id
+        // DESC` now has a tiebreaker (both engines' ids are time-ordered), so this asserts
+        // position rather than only membership: `old_valid` was snapshotted after `old_missing`
+        // above, so it sorts first. Position-based on purpose: reverting to a set comparison
+        // would silently stop testing whether the tiebreaker actually orders same-tick rows.
+        let snapshots = entities::snapshots_for_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].entity_id, old_valid);
+        assert_eq!(snapshots[1].entity_id, old_missing);
+
+        // Mutate the entity, as a migration filling in defaults would, so undo_job has something
+        // to actually revert rather than restoring what was already there.
+        sqlx::query("UPDATE entities SET data = ? WHERE id = ?")
+            .bind(json!({ "title": "overwritten" }).to_string())
+            .bind(old_missing)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        // undo_job: restores both entities' original data, deletes the snapshots, and a second
+        // undo of the same job is NotFound rather than a silent zero-effect success.
+        let report = entities::undo_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap();
+        assert_eq!(report.restored, 2);
+        assert_eq!(report.missing, 0);
+
+        let restored = entities::get(&mut conn, workspace_id, old_missing)
+            .await
+            .unwrap();
+        assert_eq!(restored.data["title"], "no priority yet");
+
+        let remaining_snapshots: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM entity_snapshots WHERE job_id = ?")
+                .bind(job_id)
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(remaining_snapshots.0, 0);
+
+        let second_undo = entities::undo_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(second_undo, YorishiroError::NotFound { .. }));
+    }
+
+    /// `undo_job` counts an entity deleted since its snapshot rather than failing the whole batch.
+    #[tokio::test]
+    async fn undo_job_counts_a_deleted_entity_as_missing_on_sqlite() {
+        let mut conn = seeded_db().await;
+
+        let workspace_id = Uuid::now_v7();
+        seed_workspace(&mut conn, workspace_id).await;
+        let schema_id = Uuid::now_v7();
+        insert_schema(
+            &mut conn,
+            schema_id,
+            workspace_id,
+            "task-management",
+            1,
+            &v1_definition(),
+            "active",
+        )
+        .await;
+
+        let entity_id = Uuid::now_v7();
+        insert_entity(
+            &mut conn,
+            entity_id,
+            workspace_id,
+            schema_id,
+            1,
+            "task",
+            &json!({ "title": "will be deleted" }),
+        )
+        .await;
+
+        let job_id = Uuid::now_v7();
+        entities::snapshot(&mut conn, workspace_id, entity_id, job_id)
+            .await
+            .unwrap();
+
+        sqlx::query("DELETE FROM entities WHERE id = ?")
+            .bind(entity_id)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let report = entities::undo_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap();
+        assert_eq!(report.restored, 0);
+        assert_eq!(report.missing, 1);
+    }
+
+    /// `PRAGMA foreign_keys` is off by default on Sqlite: a connection that omits
+    /// `SqliteConnectOptions::foreign_keys(true)` would accept every `REFERENCES` in the
+    /// migration as pure syntax and never enforce it, the "setting present but not in effect"
+    /// trap. `seeded_db()` sets it, and this is what proves it actually takes: deleting an
+    /// entity must cascade-delete the relations naming it as source or target
+    /// (`content.relations`'s `ON DELETE CASCADE`, migration_sqlite `20260821000000_initial.sql`),
+    /// through `relations::create` (already `Engine`-generic) rather than a hand-written insert,
+    /// so this exercises the real write path.
+    #[tokio::test]
+    async fn entity_delete_cascades_to_relations_under_foreign_keys() {
+        let mut conn = seeded_db().await;
+
+        let workspace_id = Uuid::now_v7();
+        seed_workspace(&mut conn, workspace_id).await;
+        let schema_id = Uuid::now_v7();
+        // `v1_definition()` declares no `relation_types`, and `relations::create` validates the
+        // relation type against the schema before inserting; this definition adds the one
+        // "blocks" needs, task-to-task.
+        insert_schema(
+            &mut conn,
+            schema_id,
+            workspace_id,
+            "task-management",
+            1,
+            &json!({
+                "name": "task-management",
+                "entity_types": {
+                    "task": {
+                        "fields": {
+                            "title": { "type": "string", "required": true }
+                        }
+                    }
+                },
+                "relation_types": {
+                    "blocks": { "source": "task", "target": "task" }
+                }
+            }),
+            "active",
+        )
+        .await;
+
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        insert_entity(
+            &mut conn,
+            source_id,
+            workspace_id,
+            schema_id,
+            1,
+            "task",
+            &json!({ "title": "source" }),
+        )
+        .await;
+        insert_entity(
+            &mut conn,
+            target_id,
+            workspace_id,
+            schema_id,
+            1,
+            "task",
+            &json!({ "title": "target" }),
+        )
+        .await;
+
+        relations::create(
+            &mut conn,
+            workspace_id,
+            relations::CreateRelationInput {
+                source_id,
+                target_id,
+                relation_type: "blocks".to_string(),
+                properties: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+
+        let (before,): (i64,) = sqlx::query_as("SELECT count(*) FROM relations")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(before, 1);
+
+        sqlx::query("DELETE FROM entities WHERE id = ?")
+            .bind(source_id)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let (after,): (i64,) = sqlx::query_as("SELECT count(*) FROM relations")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            after, 0,
+            "ON DELETE CASCADE did not fire; foreign_keys(true) is not actually in effect"
+        );
+    }
+
+    /// The one-tenant Sqlite constraint: a second tenant on this engine must be refused, not
+    /// silently accepted, since the engine has no database-enforced isolation between tenants to
+    /// protect. `create_tenant_on` is
+    /// already `Engine`-generic, so this deliberately violates the cap by passing `Some(1)`
+    /// directly (production wiring for how the cap is derived on Sqlite comes later, not tested
+    /// here) and confirms the violation actually fires: a second call under the same cap must
+    /// error, not silently succeed.
+    #[tokio::test]
+    async fn a_second_tenant_is_refused_under_a_cap_of_one() {
+        use crate::models::tenancy::create_tenant_on;
+
+        let mut conn = seeded_db().await;
+
+        // `seeded_db()` already inserted one tenant directly (not through `create_tenant_on`),
+        // so the deployment already holds 1.
+        // The cap check below must see that and refuse a second, proving the guard reads the
+        // real row count rather than a call counter.
+        let (existing,): (i64,) = sqlx::query_as("SELECT count(*) FROM tenants")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(existing, 1);
+
+        let err = create_tenant_on(&mut conn, "second-tenant", None, Some(1))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, YorishiroError::Conflict { .. }));
+
+        let (after,): (i64,) = sqlx::query_as("SELECT count(*) FROM tenants")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(after, 1, "the refused insert must not have landed");
+    }
+
+    /// The data-check half of the guard: an existing `.db` file already holding more than one
+    /// tenant must be refused at startup, distinct from `create_tenant_on`'s own creation-time
+    /// cap above.
+    /// `YORISHIRO_MAX_TENANTS` has no mechanism for this case at all (it only ever gates
+    /// creation), so this is `refuse_if_multiple_tenants_exist` exercised against a database
+    /// that reached two tenants through a route the cap never saw: a direct `INSERT`, standing
+    /// in for a `.db` file copied in from elsewhere or written before this guard existed.
+    #[tokio::test]
+    async fn startup_refuses_a_database_already_holding_two_tenants() {
+        use crate::models::tenancy::refuse_if_multiple_tenants_exist;
+
+        let mut conn = seeded_db().await;
+
+        // One tenant alone (from `seeded_db()`) must pass: exactly one is the healthy state,
+        // not itself a violation.
+        refuse_if_multiple_tenants_exist(&mut conn).await.unwrap();
+
+        // A second tenant landing without going through the cap at all, the case
+        // `YORISHIRO_MAX_TENANTS` structurally cannot catch.
+        sqlx::query("INSERT INTO tenants (id, name) VALUES (?, 'smuggled-in-tenant')")
+            .bind(Uuid::now_v7())
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let err = refuse_if_multiple_tenants_exist(&mut conn)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, YorishiroError::Internal(_)));
+    }
+
+    /// `db::Engine::generated_id`'s Sqlite implementation must mint strictly increasing ids even
+    /// when many are minted within the same millisecond, or the ORDER BY tiebreaker in
+    /// `snapshots_for_job`/`undo_job`, and the same time-ordering both engines are required to
+    /// produce, both silently stop holding.
+    ///
+    /// This pins a `uuid` crate guarantee, not something this engine's own code implements:
+    /// `Uuid::now_v7()` routes through a process-wide `SharedContextV7` counter
+    /// (`uuid-1.24.1/src/v7.rs:17`, `timestamp.rs:712`), which is what makes same-millisecond
+    /// ids strictly ordered.
+    /// The workspace's `uuid = "1"` is a floating minor version, and the crate's own docs call
+    /// monotonicity "the only guarantee", so a future update could route `now_v7()` differently
+    /// without this crate's code changing at all; this test is the tripwire for that.
+    ///
+    /// A tight loop of 1000 mints is well over what one millisecond can hold on any real clock
+    /// (measured: 999 of 1000 landed in the same tick), so same-tick collisions are not a maybe
+    /// here.
+    /// The deliberate-violation check was run by hand against the genuinely context-free path
+    /// (`Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext))`, zero counter bits, random fill),
+    /// which failed this exact assertion, confirming the pass above means something.
+    #[test]
+    fn generated_id_is_strictly_increasing_even_within_one_millisecond() {
+        let ids: Vec<Uuid> = (0..1000)
+            .map(|_| <sqlx::SqliteConnection as crate::db::Engine>::generated_id().unwrap())
+            .collect();
+        for window in ids.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "generated_id() produced a non-increasing pair: {} then {}",
+                window[0],
+                window[1]
+            );
+        }
+    }
 }

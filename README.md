@@ -42,7 +42,7 @@ It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
   - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
-  - `yorishiro-core` owns the models and issues every query; `yorishiro-server` adapts them to HTTP and MCP.
+  - `yorishiro-core` owns the models and issues the queries; `yorishiro-server` adapts them to HTTP and MCP.
 - Two-tier tenancy
   - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer.
     A tenant owns one or more **workspaces**.

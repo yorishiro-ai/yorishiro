@@ -46,8 +46,7 @@ Eloquent のモデルが両方を持つのと同じです。
 - `ee/crates/yorishiro-hosted/src/services/oauth/users.rs` の `pg_try_advisory_xact_lock` 呼び出しは `db.rs` と同種の例外です。アドバイザリロックはどのテーブルにも属しません
 
 残りは意図ではなく既知の負債で、少しずつ移しています。
-`crates/yorishiro-server/src/admin/commands.rs`、`http/controllers/setup/mod.rs`、`services/embedding/sync/`、
-`ee/` 側の `http/controllers/inference.rs` です。
+`crates/yorishiro-server/src/admin/commands.rs`、`http/controllers/setup/mod.rs`、`services/embedding/sync/`、`ee/` 側の `http/controllers/inference.rs` です。
 すでにそのファイルを編集しているなら、クエリを `models/` に寄せてもらえると助かります。
 そうでないなら触らないでください。
 動作の変更と一緒に読めない移動だけの差分は、レビューできません。
@@ -85,10 +84,10 @@ pnpm --dir ee/web run check   # ee/web を触ったときだけ
 
 ## ブラウザテスト
 
-`cargo test` では走らない。
-ライセンス済みでスキーマとエンティティが入ったサーバと chromedriver が要る。
-依存が無いときに黙って通るテストは、走らせないテストより悪い。
-そのため `ee/crates/yorishiro-hosted/tests/e2e/` のテストは全て `#[ignore]` で、対象の deployment を名指しで要求する。
+`cargo test` では走りません。
+ライセンス済みでスキーマとエンティティが入ったサーバと chromedriver が要ります。
+依存が無いときに黙って通るテストは、走らせないテストより悪いものです。
+そのため `ee/crates/yorishiro-hosted/tests/e2e/` のテストは全て `#[ignore]` で、対象の deployment を名指しで要求します。
 
 ```sh
 chromedriver --port=9515 &
@@ -98,21 +97,21 @@ YORISHIRO_E2E_URL=http://localhost:18081 \
   cargo test -p yorishiro-hosted --test e2e -- --ignored --test-threads=1
 ```
 
-**driver とブラウザのメジャーバージョンは一致していること。**
-152 の driver は Chrome 151 に対してセッションを作らない。
-エラーが両方のバージョンを表示するので、driver が無いと決めつけずに読むこと。
+**driver とブラウザのメジャーバージョンは一致させてください。**
+152 の driver は Chrome 151 に対してセッションを作りません。
+エラーが両方のバージョンを表示するので、driver が無いと決めつけずに読んでください。
 
-CI には入れていない。
-正しくやるにはライセンスキーをリポジトリの secret に置き、データを投入した deployment が要る。
-実際には動かないジョブは、ジョブが無いより悪い。
-何もせずに緑を報告するからである。
+CI には入れていません。
+正しくやるにはライセンスキーをリポジトリの secret に置き、データを投入した deployment が要ります。
+実際には動かないジョブは、ジョブが無いより悪いものです。
+何もせずに緑を報告するからです。
 
-このスイートは1回だけサインインし、セッションを共有する。
-認証のレート制限は IP あたり毎分10リクエストで、`/auth/login`・`/auth/signup`・**`/setup`** を合わせて数える。
-SPA は読み込み時に `/setup` を見るので、ページ読み込みもサインインと同じ枠を消費する。
-制限に当たったときはウィンドウが明けるまで待つ。
-テストのために deployment 側の制限を緩めることはしない。
-実行が14秒ではなく76秒になるのはそのためである。
+このスイートは1回だけサインインし、セッションを共有します。
+認証のレート制限は IP あたり毎分10リクエストで、`/auth/login`・`/auth/signup`・**`/setup`** を合わせて数えます。
+SPA は読み込み時に `/setup` を見るので、ページ読み込みもサインインと同じ枠を消費します。
+制限に当たったときはウィンドウが明けるまで待ちます。
+テストのために deployment 側の制限を緩めることはしません。
+実行が14秒ではなく76秒になるのはそのためです。
 
 ## このリポジトリの文章
 

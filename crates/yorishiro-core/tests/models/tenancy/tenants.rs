@@ -1,7 +1,9 @@
 use sqlx::PgPool;
 
 use crate::YorishiroError;
-use crate::models::tenancy::{create_tenant_with_cap, max_tenants_from_env};
+use crate::models::tenancy::{
+    create_tenant_with_cap, max_tenants_for_sqlite, max_tenants_from_env,
+};
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn enforces_system_wide_tenant_cap(pool: PgPool) {
@@ -94,4 +96,29 @@ fn max_tenants_from_env_rejects_negative() {
 fn max_tenants_from_env_rejects_non_integer() {
     let _guard = MaxTenantsGuard::set(Some("abc"));
     assert!(max_tenants_from_env().is_err());
+}
+
+/// Unlike `max_tenants_from_env` above, unset resolves to `Some(1)` on Sqlite, not unlimited: a
+/// zero-config Sqlite deployment must be able to create its own first tenant.
+#[test]
+fn max_tenants_for_sqlite_unset_is_one() {
+    assert_eq!(max_tenants_for_sqlite(None).unwrap(), 1);
+}
+
+#[test]
+fn max_tenants_for_sqlite_explicit_one_is_accepted() {
+    assert_eq!(max_tenants_for_sqlite(Some("1")).unwrap(), 1);
+}
+
+/// `0` means unlimited on `max_tenants_from_env`, but this engine has no mechanism to raise the
+/// cap against, so the same value is a configuration error here rather than "no cap".
+#[test]
+fn max_tenants_for_sqlite_rejects_zero() {
+    assert!(max_tenants_for_sqlite(Some("0")).is_err());
+}
+
+#[test]
+fn max_tenants_for_sqlite_rejects_any_value_above_one() {
+    assert!(max_tenants_for_sqlite(Some("2")).is_err());
+    assert!(max_tenants_for_sqlite(Some("100")).is_err());
 }

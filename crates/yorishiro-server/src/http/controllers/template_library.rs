@@ -18,6 +18,7 @@ use crate::state::AppState;
 #[utoipa::path(
     get,
     path = "/api/template-library",
+    operation_id = "list_template_library",
     responses(
         (status = 200, description = "Templates visible to the caller's tenant (own plus any community-visible ones)", body = Vec<TemplateRecord>),
         (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
@@ -35,6 +36,7 @@ pub async fn list_templates(
 #[utoipa::path(
     get,
     path = "/api/template-library/{id}",
+    operation_id = "get_template_library_item",
     params(("id" = Uuid, Path, description = "Template ID")),
     responses(
         (status = 200, description = "Template detail", body = TemplateRecord),
@@ -177,6 +179,7 @@ pub struct ForkTemplateRequest {
 #[utoipa::path(
     post,
     path = "/api/template-library/{id}/fork",
+    operation_id = "fork_template_library_item",
     params(("id" = Uuid, Path, description = "Template ID to fork")),
     request_body = ForkTemplateRequest,
     responses(

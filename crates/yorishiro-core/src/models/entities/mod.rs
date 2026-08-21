@@ -185,6 +185,19 @@ enum Workspaces {
     MaxEntities,
 }
 
+#[derive(Iden)]
+enum EntitySnapshots {
+    Table,
+    Id,
+    JobId,
+    WorkspaceId,
+    EntityId,
+    SchemaId,
+    SchemaVersion,
+    Data,
+    CreatedAt,
+}
+
 fn entity_columns() -> [Entities; 10] {
     [
         Entities::Id,
@@ -197,6 +210,18 @@ fn entity_columns() -> [Entities; 10] {
         Entities::UpdatedAt,
         Entities::CreatedBy,
         Entities::UpdatedBy,
+    ]
+}
+
+fn entity_snapshot_columns() -> [EntitySnapshots; 7] {
+    [
+        EntitySnapshots::Id,
+        EntitySnapshots::JobId,
+        EntitySnapshots::EntityId,
+        EntitySnapshots::SchemaId,
+        EntitySnapshots::SchemaVersion,
+        EntitySnapshots::Data,
+        EntitySnapshots::CreatedAt,
     ]
 }
 
@@ -601,6 +626,36 @@ where
     })
 }
 
+/// The count-by-(entity_type, schema_id) query `migration_dry_run` runs.
+/// Split out so the dialect-rendering test in `tests/models/entities/mod.rs` exercises this exact statement rather than a hand-copied stand-in that could drift from it.
+fn migration_dry_run_count_query<C: crate::db::Engine>(
+    workspace_id: Uuid,
+    schema_name: &str,
+) -> sea_query::SelectStatement {
+    let entities = Alias::new("e");
+    let schemas_alias = Alias::new("s");
+    Query::select()
+        .expr(Expr::col((entities.clone(), Entities::EntityType)))
+        .expr(Expr::col((entities.clone(), Entities::SchemaId)))
+        .expr(Func::count(Expr::col(Asterisk)))
+        .from_as(
+            C::schema_table("content", Entities::Table),
+            entities.clone(),
+        )
+        .join_as(
+            sea_query::JoinType::InnerJoin,
+            C::schema_table("content", schemas::Schemas::Table),
+            schemas_alias.clone(),
+            Expr::col((schemas_alias.clone(), schemas::Schemas::Id))
+                .equals((entities.clone(), Entities::SchemaId)),
+        )
+        .and_where(Expr::col((entities.clone(), Entities::WorkspaceId)).eq(workspace_id))
+        .and_where(Expr::col((schemas_alias.clone(), schemas::Schemas::Name)).eq(schema_name))
+        .group_by_col((entities.clone(), Entities::EntityType))
+        .group_by_col((entities, Entities::SchemaId))
+        .to_owned()
+}
+
 /// Counts what a batch migration to `schema_name`'s active version would face.
 ///
 /// Reads only.
@@ -618,9 +673,6 @@ where
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     (String, Uuid, i64): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + for<'r> sqlx::Decode<'r, C::Db> + sqlx::Type<C::Db>,
-    for<'q> &'q str: sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
     // `schemas::get_active_schema`/`get_by_id`'s bound; see `update`'s where clause for why this still has to be restated.
     schemas::SchemaRow: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
@@ -628,18 +680,14 @@ where
 
     // (entity_type, schema_id, count) for everything under this schema name, whatever version.
     // Grouping by schema_id is what keeps this proportional to the number of versions in use rather than to the number of entities.
-    let rows: Vec<(String, Uuid, i64)> = sqlx::query_as::<C::Db, (String, Uuid, i64)>(
-        "SELECT e.entity_type, e.schema_id, count(*) \
-         FROM content.entities e \
-         JOIN content.schemas s ON s.id = e.schema_id \
-         WHERE e.workspace_id = $1 AND s.name = $2 \
-         GROUP BY e.entity_type, e.schema_id",
-    )
-    .bind(workspace_id)
-    .bind(schema_name)
-    .fetch_all(&mut *conn)
-    .await
-    .internal()?;
+    let (sql, values) =
+        migration_dry_run_count_query::<C>(workspace_id, schema_name).build_sqlx(C::builder());
+
+    let rows: Vec<(String, Uuid, i64)> =
+        sqlx::query_as_with::<_, (String, Uuid, i64), _>(&sql, values)
+            .fetch_all(&mut *conn)
+            .await
+            .internal()?;
 
     let mut total = 0i64;
     let mut current = 0i64;
@@ -733,23 +781,53 @@ pub async fn snapshot<C>(
 where
     C: crate::db::Engine,
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
 {
     // One statement: reading then writing would leave a window in which a concurrent update slips between, and the image would be of a state that no longer existed when it was taken.
-    let result = sqlx::query::<C::Db>(
-        "INSERT INTO content.entity_snapshots \
-             (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
-         SELECT $3, workspace_id, id, schema_id, schema_version, data \
-         FROM content.entities \
-         WHERE workspace_id = $1 AND id = $2",
-    )
-    .bind(workspace_id)
-    .bind(entity_id)
-    .bind(job_id)
-    .execute(&mut *conn)
-    .await
-    .internal()?;
+    // Read once: `C::generated_id()` calls `Uuid::now_v7()` on Sqlite, so calling it twice would mint two different ids for what must be one row.
+    let generated_id = C::generated_id();
+
+    // No `.columns(...)` before `.select_from(...)`'s own select: an `INSERT ... SELECT`'s columns come from the select's projection order, not a separate `.columns()` call, so the generated id (when the engine has one) has to be an extra leading expression in that projection, mirroring how `job_id` is already prepended above.
+    let mut select = Query::select().to_owned();
+    if let Some(id) = generated_id {
+        select.expr(Expr::val(id));
+    }
+    select
+        .expr(Expr::val(job_id))
+        .columns([
+            Entities::WorkspaceId,
+            Entities::Id,
+            Entities::SchemaId,
+            Entities::SchemaVersion,
+            Entities::Data,
+        ])
+        .from(C::schema_table("content", Entities::Table))
+        .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(Entities::Id).eq(entity_id));
+
+    let mut insert_cols = vec![
+        EntitySnapshots::JobId,
+        EntitySnapshots::WorkspaceId,
+        EntitySnapshots::EntityId,
+        EntitySnapshots::SchemaId,
+        EntitySnapshots::SchemaVersion,
+        EntitySnapshots::Data,
+    ];
+    if generated_id.is_some() {
+        insert_cols.insert(0, EntitySnapshots::Id);
+    }
+
+    let (sql, values) = Query::insert()
+        .into_table(C::schema_table("content", EntitySnapshots::Table))
+        .columns(insert_cols)
+        .select_from(select)
+        .internal()?
+        .build_sqlx(C::builder());
+
+    let result = sqlx::query_with::<C::Db, _>(&sql, values)
+        .execute(&mut *conn)
+        .await
+        .internal()?;
     let affected = C::rows_affected(result);
 
     if affected == 0 {
@@ -769,21 +847,28 @@ pub async fn snapshots_for_job<C>(
 where
     C: crate::db::Engine,
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     EntitySnapshot: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
-    sqlx::query_as::<C::Db, EntitySnapshot>(
-        "SELECT id, job_id, entity_id, schema_id, schema_version, data, created_at \
-         FROM content.entity_snapshots \
-         WHERE workspace_id = $1 AND job_id = $2 \
-         ORDER BY created_at DESC",
-    )
-    .bind(workspace_id)
-    .bind(job_id)
-    .fetch_all(&mut *conn)
-    .await
-    .internal()
+    let (sql, values) = Query::select()
+        .columns(entity_snapshot_columns())
+        .from(C::schema_table("content", EntitySnapshots::Table))
+        .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
+        // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the
+        // same tick (Sqlite's `strftime('%f')` is millisecond-precision, and a batch job can
+        // snapshot two entities within one millisecond). Both engines' ids are time-ordered
+        // (`uuidv7()` on Postgres, `Uuid::now_v7()` on Sqlite), so this is a second sort key
+        // rather than a different one, and doesn't change ordering when `created_at` alone was
+        // already unambiguous.
+        .order_by(EntitySnapshots::CreatedAt, Order::Desc)
+        .order_by(EntitySnapshots::Id, Order::Desc)
+        .build_sqlx(C::builder());
+
+    sqlx::query_as_with::<_, EntitySnapshot, _>(&sql, values)
+        .fetch_all(&mut *conn)
+        .await
+        .internal()
 }
 
 /// Puts every entity in `job_id` back to what it held before.
@@ -799,26 +884,25 @@ pub async fn undo_job<C>(
 where
     C: crate::db::Engine,
     for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
-    Uuid: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    for<'q> &'q Value: sqlx::Encode<'q, C::Db>,
-    Value: sqlx::Type<C::Db>,
-    i32: for<'q> sqlx::Encode<'q, C::Db> + sqlx::Type<C::Db>,
-    for<'a> <C::Db as sqlx::Database>::Arguments<'a>: sqlx::IntoArguments<'a, C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
     EntitySnapshot: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let mut tx = conn.begin().await.internal()?;
 
-    let snapshots = sqlx::query_as::<C::Db, EntitySnapshot>(
-        "SELECT id, job_id, entity_id, schema_id, schema_version, data, created_at \
-         FROM content.entity_snapshots \
-         WHERE workspace_id = $1 AND job_id = $2 \
-         ORDER BY created_at ASC",
-    )
-    .bind(workspace_id)
-    .bind(job_id)
-    .fetch_all(&mut *tx)
-    .await
-    .internal()?;
+    let (sql, values) = Query::select()
+        .columns(entity_snapshot_columns())
+        .from(C::schema_table("content", EntitySnapshots::Table))
+        .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
+        // See `snapshots_for_job`'s matching comment: same tiebreaker, same reason.
+        .order_by(EntitySnapshots::CreatedAt, Order::Asc)
+        .order_by(EntitySnapshots::Id, Order::Asc)
+        .build_sqlx(C::builder());
+
+    let snapshots = sqlx::query_as_with::<_, EntitySnapshot, _>(&sql, values)
+        .fetch_all(&mut *tx)
+        .await
+        .internal()?;
 
     if snapshots.is_empty() {
         return Err(YorishiroError::not_found(format!(
@@ -831,19 +915,22 @@ where
 
     for snapshot in &snapshots {
         // schema_id and schema_version go back too: an undo that restored the data but left the entity claiming a newer version would leave it validating against a definition its data no longer matches.
-        let result = sqlx::query::<C::Db>(
-            "UPDATE content.entities \
-             SET data = $3, schema_id = $4, schema_version = $5, updated_at = now() \
-             WHERE workspace_id = $1 AND id = $2",
-        )
-        .bind(workspace_id)
-        .bind(snapshot.entity_id)
-        .bind(&snapshot.data)
-        .bind(snapshot.schema_id)
-        .bind(snapshot.schema_version)
-        .execute(&mut *tx)
-        .await
-        .internal()?;
+        let (sql, values) = Query::update()
+            .table(C::schema_table("content", Entities::Table))
+            .values([
+                (Entities::Data, snapshot.data.clone().into()),
+                (Entities::SchemaId, snapshot.schema_id.into()),
+                (Entities::SchemaVersion, snapshot.schema_version.into()),
+                (Entities::UpdatedAt, Expr::current_timestamp().into()),
+            ])
+            .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
+            .and_where(Expr::col(Entities::Id).eq(snapshot.entity_id))
+            .build_sqlx(C::builder());
+
+        let result = sqlx::query_with::<C::Db, _>(&sql, values)
+            .execute(&mut *tx)
+            .await
+            .internal()?;
         let affected = C::rows_affected(result);
 
         if affected == 0 {
@@ -855,14 +942,16 @@ where
 
     // The snapshots go with the undo.
     // Keeping them would let the same job be undone twice, the second time restoring what the first already put back over whatever came after.
-    sqlx::query::<C::Db>(
-        "DELETE FROM content.entity_snapshots WHERE workspace_id = $1 AND job_id = $2",
-    )
-    .bind(workspace_id)
-    .bind(job_id)
-    .execute(&mut *tx)
-    .await
-    .internal()?;
+    let (sql, values) = Query::delete()
+        .from_table(C::schema_table("content", EntitySnapshots::Table))
+        .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
+        .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
+        .build_sqlx(C::builder());
+
+    sqlx::query_with::<C::Db, _>(&sql, values)
+        .execute(&mut *tx)
+        .await
+        .internal()?;
 
     tx.commit().await.internal()?;
 

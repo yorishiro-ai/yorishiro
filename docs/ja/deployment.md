@@ -112,5 +112,6 @@ GitHub Releaseは全成果物のpushとスモークテスト通過の**後**に�
 ## シングルテナント構成
 
 `YORISHIRO_MAX_TENANTS=1`・`YORISHIRO_EMBEDDING_PROVIDER=local`(いずれも[configuration.md](configuration.md)参照)は共に既定値です。
-これらを未設定のままにしたデプロイはそのまま[SPA](../../ee/web)(バイナリに組み込み済み)を配信し、そのセットアップウィザード([setup.md](setup.md#初回セットアップ)参照)だけでデプロイの唯一のテナントをオンボードでき、埋め込みにはローカルONNXモデルを使います。
+これらを未設定のままにしたデプロイはそのまま[SPA](../../ee/web)(バイナリに組み込み済み)を配信し、埋め込みにはローカルONNXモデルを使います。
+そのセットアップウィザード([setup.md](setup.md#初回セットアップ)参照)だけで、デプロイの唯一のテナントをオンボードできます。
 テナント上限を外すには`YORISHIRO_MAX_TENANTS=0`を設定してください。

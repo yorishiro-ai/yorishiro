@@ -1,4 +1,4 @@
-//! Splitting long work into acknowledgeable pieces (FR-10, §7.5).
+//! Splitting long work into acknowledgeable pieces.
 //!
 //! A worker that processes a whole job and then acknowledges loses everything if it dies at 99%.
 //! Splitting the job first bounds that loss to one chunk, and lets whatever runs the chunks be stateless: a node leaving is not a failed job, it is a handful of chunks nobody acknowledged.
@@ -12,7 +12,7 @@
 
 use crate::error::YorishiroError;
 
-/// The window §7.5 asks for.
+/// The chunk size window.
 /// Small enough that losing one is cheap, large enough that the per-chunk overhead is not the cost.
 pub const MIN_CHUNK_TOKENS: usize = 1_000;
 pub const MAX_CHUNK_TOKENS: usize = 2_000;

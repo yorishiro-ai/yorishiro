@@ -154,6 +154,7 @@ pub async fn create_schema(
 #[utoipa::path(
     get,
     path = "/api/templates",
+    operation_id = "list_templates",
     responses(
         (status = 200, description = "Built-in schema templates available for schema creation", body = Vec<TemplateSummary>),
         (status = 401, description = "Invalid or missing credentials", body = crate::error::ApiErrorBody),
@@ -170,6 +171,7 @@ pub async fn list_templates(
 #[utoipa::path(
     get,
     path = "/api/templates/{id}",
+    operation_id = "get_template",
     params(
         ("id" = String, Path, description = "Template ID (e.g. task-management)"),
     ),

@@ -41,7 +41,7 @@ OIDCディスカバリドキュメント(`{issuer_url}/.well-known/openid-config
 これを個別に制御する変数はありません: 公開の`https://`リダイレクトURIを設定することは、プロバイダがコールバックに到達するために必須である一方、それだけでより厳格なCookie属性も自動的に得られます。
 
 初回のOAuthログイン(このインストールで未見のIDプロバイダ`sub`かつ既存のYorishiroアカウントに一致しない場合)は、新規テナント・ワークスペース・`member`ロールのメンバーシップを自動プロビジョニングします([api.md](api.md#get-authoauthcallback)参照)。
-他のテナント作成経路と同様に`YORISHIRO_MAX_TENANTS`の制約を受けますが、前述の通り`yorishiro-server`は常にこれを無制限に強制設定しています。
+他のテナント作成経路と同様に`YORISHIRO_MAX_TENANTS`の制約を受けるので、デフォルトの上限`1`のセルフホスト運用では、2つ目のテナントはプロビジョニングされず拒否されます。
 
 `GET /auth/oauth/authorize`/`GET /auth/oauth/callback`は`YORISHIRO_AUTH_RATE_LIMIT_MAX`/`YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS`(デフォルト: クライアントIPごとに60秒あたり10リクエスト。詳細は[設定リファレンス本体](../../../docs/ja/configuration.md)参照)によってレート制限され、`/auth/login`/`/auth/signup`/`/setup*`と同一のクォータを共有します。
 理由は[api.md](api.md#oauth2oidcログイン)参照。
@@ -98,6 +98,6 @@ StripeとOAuthのgateは仕組みが異なります。
 ## メール
 
 トランザクションメール(招待通知・課金アラート)は現時点で存在しません。
-どちらのStripeイベントハンドラからも送信は行われず、実際のプロバイダ(SES/Postmark等)を設定する環境変数もありません。
+Stripe Webhookの処理経路からも送信は行われず、実際のプロバイダ(SES/Postmark等)を設定する環境変数もありません。
 以前存在した`EmailProvider`トレイトは実装も呼び出し元も無かったため削除済みです。
 トランザクションメールを再度追加するには、プロバイダの実装とハンドラへの配線の両方が必要です。

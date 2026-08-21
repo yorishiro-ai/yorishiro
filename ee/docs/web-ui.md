@@ -11,11 +11,18 @@ A checkout that skips it fails the `embeds_a_built_spa` test rather than produci
 
 `YORISHIRO_WEB_DIR` overrides the compiled-in copy with a directory on disk, read fresh on every request, for iterating on the UI without rebuilding the binary.
 
+`pnpm run dev` (`rsbuild dev`) proxies every server route to `http://localhost:8080` by default; `YORISHIRO_DEV_API_TARGET` points it at a server running elsewhere.
+
 Pages that need a licence key show the API's own error when it is absent; the UI itself is not gated, since setup, login, member and workspace management are part of the free floor.
 
 **`ee/web` is a pnpm project.** The lockfile is `pnpm-lock.yaml`, and the pnpm version is pinned in `package.json`'s `packageManager` field, which CI and the Docker image both read (via `pnpm/action-setup` and `corepack enable` respectively).
 Running `npm install` there instead ignores `pnpm-lock.yaml` entirely and resolves a different dependency tree than the one that was built and tested; use `pnpm install`.
 `pnpm run check` runs the same lint/format/typecheck/build sequence CI does.
+
+The build runs every component through React Compiler (`reactCompiler: true` in `rsbuild.config.ts`), which memoizes automatically; manual `useMemo`/`useCallback` in new code is no longer needed for that purpose alone.
+
+`src/types/generated-api.ts` is generated from the server's own OpenAPI document with `pnpm run gen:api-types` (`API_SPEC_URL` overrides the default, which points at a server on `YORISHIRO_BIND`'s default port), and hand-written types in `src/types/api.ts` re-export from it where a shape already exists there rather than transcribing it a second time.
+The generator itself needs a TypeScript 5.x compiler API it walks at runtime, which this project's own TypeScript 7 doesn't provide, so the script runs it through `pnpm dlx` rather than as a project devDependency: an isolated install resolves its own peer instead of the workspace's.
 
 Authenticated data requests go through the same bearer-key REST API documented in [`docs/api.md`](../../docs/api.md) and [this edition's api.md](api.md); the SPA carries no privileged access the API itself doesn't already enforce.
 Login, signup, and the OAuth flow are the exceptions: those are exactly how a bearer key is obtained in the first place, so they're necessarily reachable without one.
@@ -35,7 +42,7 @@ Tenant-scoped pages (no workspace in the URL):
 | `/schemas/templates/:id` | Preview of a built-in schema template before creating a schema from it |
 | `/marketplace/:templateId` | One template: its schema structure graph, entity/relation type tables, every published version, and reviews. Forking happens here |
 | `/marketplace` | Templates other tenants have published: a card grid with star ratings and the latest stable version, and a dialog listing versions and reviews with fork and review controls. See [api.md](api.md#template-marketplace) |
-| `/workspaces` | Workspace list, creation. Schema names resolve only for the workspace you are signed in to, since schemas are workspace-scoped; every other row shows the first octet of its schema id, with the full id on hover |
+| `/workspaces` | Workspace list, creation. Schema names resolve only for the workspace you are signed in to, since schemas are workspace-scoped; every other row shows the first 8 characters of its schema id, with the full id on hover |
 | `/api-keys` | Shows the current session's identity (workspace/tenant/user ID/scope) and admin-CLI reference commands (`create-api-key`, `list-api-keys`, `revoke-api-key`); actual key issuance/revocation/listing has no REST endpoint and is done via those `yorishiro-server admin` subcommands, not this page |
 
 Workspace-scoped pages (`/ws/:wsId/...`; every route in this group has a `:wsId` URL segment, which `RequireWorkspace` requires be present before rendering the page):

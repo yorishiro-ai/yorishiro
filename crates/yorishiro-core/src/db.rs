@@ -3,9 +3,6 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-/// The connection a request runs on, already scoped to its tenant and workspace.
-pub type ScopedConnection = sqlx::pool::PoolConnection<sqlx::Postgres>;
-
 /// What a `models/` function needs from its connection to build and run a query without naming an engine.
 ///
 /// Keyed on the connection type rather than `sqlx::Database`, so a call site passing a concrete `&mut PgConnection` (or `&mut *tx` for a `Transaction`) has `C` inferred directly from the argument and never turbofishes.
@@ -29,6 +26,14 @@ pub trait Engine: sqlx::Connection {
         schema: &'static str,
         table: T,
     ) -> sea_query::TableRef;
+
+    /// A primary key value to insert explicitly, or `None` to rely on the database's own default.
+    ///
+    /// Postgres tables default every PK to `uuidv7()`, so every `INSERT` in `models/` omits the `Id` column; this must stay `None` there, since the app never generates ids on that engine (a recorded rule, not a stylistic choice).
+    /// Sqlite has no `uuidv7()` to assign, so it needs one generated here instead, and both engines are required to produce the same id shape and time ordering.
+    fn generated_id() -> Option<Uuid> {
+        None
+    }
 }
 
 impl Engine for sqlx::PgConnection {
@@ -66,6 +71,30 @@ impl Engine for sqlx::SqliteConnection {
         use sea_query::IntoTableRef;
         table.into_table_ref()
     }
+
+    fn generated_id() -> Option<Uuid> {
+        // Shares one process-wide `SharedContextV7` counter (uuid crate internals, not this
+        // engine's own), which is what makes same-millisecond ids strictly ordered rather than
+        // merely random: see `generated_id_is_strictly_increasing_even_within_one_millisecond`,
+        // which pins this as a dependency guarantee rather than trusting it silently.
+        Some(Uuid::now_v7())
+    }
+}
+
+/// Prepends the engine's generated id column/value to an `INSERT`'s columns and values, or passes both through unchanged when the engine relies on the database's own default.
+///
+/// `sea-query`'s `columns`/`values_panic` each overwrite rather than accumulate, so a call site cannot add the id column with a second call; the full column and value lists have to be assembled once, before either is called.
+/// `id_col` is a per-site argument because every `models/` module defines its own local `Id` variant on its own `Iden` enum; there is no crate-wide id column type to name here.
+pub fn with_generated_id<C: Engine, T: sea_query::Iden + 'static>(
+    id_col: T,
+    mut cols: Vec<sea_query::DynIden>,
+    mut vals: Vec<sea_query::SimpleExpr>,
+) -> (Vec<sea_query::DynIden>, Vec<sea_query::SimpleExpr>) {
+    if let Some(id) = C::generated_id() {
+        cols.insert(0, sea_query::IntoIden::into_iden(id_col));
+        vals.insert(0, id.into());
+    }
+    (cols, vals)
 }
 
 /// Where the deployment's data lives.
@@ -77,28 +106,33 @@ impl Engine for sqlx::SqliteConnection {
 /// Such an engine is limited to one tenant per deployment rather than pretending, because a filter written in application code is one a single missed query silently defeats.
 #[async_trait]
 pub trait Storage: Send + Sync {
+    /// The engine this storage runs on, and the connection type `models/` functions bound on `Engine` need.
+    type Db: sqlx::Database<Connection: Engine>;
+
     /// A connection scoped to `tenant_id`/`workspace_id`, such that row-level security (or whatever the engine offers in its place) confines it to that workspace's rows.
     async fn acquire_for_workspace(
         &self,
         tenant_id: Uuid,
         workspace_id: Uuid,
-    ) -> Result<ScopedConnection, sqlx::Error>;
+    ) -> Result<sqlx::pool::PoolConnection<Self::Db>, sqlx::Error>;
 
     /// The underlying pool, for the control-plane paths that connect as the migration role and so must not be scoped: signup, setup, the admin CLI.
-    fn pool(&self) -> &PgPool;
+    fn pool(&self) -> &sqlx::Pool<Self::Db>;
 }
 
 #[async_trait]
 impl Storage for TenantDb {
+    type Db = sqlx::Postgres;
+
     async fn acquire_for_workspace(
         &self,
         tenant_id: Uuid,
         workspace_id: Uuid,
-    ) -> Result<ScopedConnection, sqlx::Error> {
+    ) -> Result<sqlx::pool::PoolConnection<Self::Db>, sqlx::Error> {
         TenantDb::acquire_for_workspace(self, tenant_id, workspace_id).await
     }
 
-    fn pool(&self) -> &PgPool {
+    fn pool(&self) -> &sqlx::Pool<Self::Db> {
         TenantDb::pool(self)
     }
 }
