@@ -35,7 +35,7 @@ Tenant-scoped pages (no workspace in the URL):
 | `/schemas/templates/:id` | Preview of a built-in schema template before creating a schema from it |
 | `/marketplace/:templateId` | One template: its schema structure graph, entity/relation type tables, every published version, and reviews. Forking happens here |
 | `/marketplace` | Templates other tenants have published: a card grid with star ratings and the latest stable version, and a dialog listing versions and reviews with fork and review controls. See [api.md](api.md#template-marketplace) |
-| `/workspaces` | Workspace list, creation. Schema names resolve only for the workspace you are signed in to, since schemas are workspace-scoped; every other row shows the first octet of its schema id, with the full id on hover |
+| `/workspaces` | Workspace list, creation. Schema names resolve only for the workspace you are signed in to, since schemas are workspace-scoped; every other row shows the first 8 characters of its schema id, with the full id on hover |
 | `/api-keys` | Shows the current session's identity (workspace/tenant/user ID/scope) and admin-CLI reference commands (`create-api-key`, `list-api-keys`, `revoke-api-key`); actual key issuance/revocation/listing has no REST endpoint and is done via those `yorishiro-server admin` subcommands, not this page |
 
 Workspace-scoped pages (`/ws/:wsId/...`; every route in this group has a `:wsId` URL segment, which `RequireWorkspace` requires be present before rendering the page):

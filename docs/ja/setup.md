@@ -26,7 +26,7 @@ OpenAI互換エンドポイントを代わりに使う場合は[embedding-provid
    それより古いサーバでは機能が縮退するのではなく、マイグレーション自体が失敗します。
 
 3. `DATABASE_URL`のロールに、マイグレーションが必要とする権限を与えます。
-   マイグレーションは拡張・アプリケーションロール`yorishiro_app`・全テーブルを作成するため、次の2点が必要です。
+   マイグレーションは拡張・アプリケーションロール`yorishiro_app`・全テーブルを作成するため、次が必要です。
 
    - `vector`(pgvector)がサーバに導入済みであること。
      `pg_trgm`はPostgreSQLのcontribに同梱されるため非superuserでも作成できますが、pgvectorは同梱されておらず、その導入自体がsuperuser(あるいはパッケージ)側の作業になります。
@@ -208,8 +208,8 @@ Docker、Docker Compose、makeが必要です。
 | `http://localhost:8080/up` | Liveness probe。プロセスが起動していれば依存関係を見ず常に200 |
 | `http://localhost:8080/health` | Readiness check。DB接続も確認し、障害時は503 |
 | `http://localhost:8080/` | Web UI。バイナリに組み込み済み。実ディレクトリから配信させる場合は[configuration.md](configuration.md)の`YORISHIRO_WEB_DIR`を参照。何をカバーするかは下記[Web UI](#web-ui)を参照 |
-| `http://localhost:8080/api-docs/openapi.json` | OpenAPI文書(REST APIリファレンス) |
-| `http://localhost:8080/api-docs/openapi.json` | OpenAPI仕様 |
+| `http://localhost:8080/docs` | Swagger UI(対話的なREST APIリファレンス) |
+| `http://localhost:8080/api-docs/openapi.json` | OpenAPI仕様。Swagger UIが読み込む文書そのもの |
 | `http://localhost:8080/mcp` | MCPエンドポイント(Streamable HTTP) |
 | `http://localhost:8080/whoami` | 認証確認。ワークスペース・テナント・scopeを返す |
 
@@ -315,7 +315,7 @@ $ make admin ARGS="list-tenants"
 |---|---|
 | `admin create-tenant <name> [--max-workspaces <n>] [--template <id>]` | テナントを作成。ワークスペース数の上限設定や、テンプレートからのスキーマ/ワークスペース自動作成も可能 |
 | `admin list-tenants` | 全テナントの一覧 |
-| `admin create-workspace <tenant-id> <name> [--schema-id <id>] [--max-entities <n>]` | テナント配下に追加のワークスペースを作成（スキーマとの紐づけも可能） |
+| `admin create-workspace <tenant-id> <name> [--schema-id <id>] [--max-entities <n>]` | テナント配下に追加のワークスペースを作成(スキーマとの紐づけも可能) |
 | `admin list-workspaces <tenant-id>` | テナントのワークスペース一覧 |
 | `admin create-user <email> <password> [--display-name <name>]` | 人間のユーザーアカウントを作成 |
 | `admin add-member <tenant-id> <user-id> <role>` | ユーザーのテナントへのメンバーシップを追加、または既存のroleを変更(`owner`/`admin`/`member`/`viewer`) |

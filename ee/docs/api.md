@@ -33,7 +33,8 @@ Fetch the JSON directly rather than relying on the UI.
 hosted_router.merge(oauth_login_router).fallback_service(base_app)
 ```
 
-rather than merged alongside it. `axum::Router::merge` panics on a duplicate path, so a merged layout can only ever *add* paths the core router does not already serve.
+rather than merged alongside it.
+`axum::Router::merge` panics on a duplicate path, so a merged layout can only ever *add* paths the core router does not already serve.
 This one can also *replace* them: a paid behaviour can take over an endpoint the core defines, without the core needing to know.
 
 Resolution order is: `ee/`'s routes, then the core's, then the static-asset fallback.
@@ -110,7 +111,8 @@ Response shape:
 
 ## Template marketplace
 
-Tenants share templates with each other. `identity.templates` already carries `visibility` (`tenant` | `community`) and `fork_of`; the marketplace adds what makes a shared template safe to consume: published versions, and what other tenants thought of them.
+Tenants share templates with each other.
+`identity.templates` already carries `visibility` (`tenant` | `community`) and `fork_of`; the marketplace adds what makes a shared template safe to consume: published versions, and what other tenants thought of them.
 
 Served by **this** edition: distributing templates between tenants is an enterprise capability whatever table stores them.
 

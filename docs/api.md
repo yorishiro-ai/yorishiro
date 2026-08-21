@@ -91,7 +91,7 @@ As with member/workspace management, the write endpoints are additionally gated 
 
 A fork is an independent copy that only records which template it came from, so deleting a template that others were forked from succeeds: the forks themselves stay intact and usable, and just lose the pointer back to the deleted original.
 
-### Auth & member management
+### Auth, member and workspace management
 
 `/auth/signup` and `/auth/login` take no bearer token: their entire purpose is to hand one out.
 `/setup`/`/setup/status` (see [setup.md](setup.md#first-run-setup)) and the liveness/readiness checks `/up`/`/health` are also unauthenticated.
