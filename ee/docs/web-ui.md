@@ -17,6 +17,8 @@ Pages that need a licence key show the API's own error when it is absent; the UI
 Running `npm install` there instead ignores `pnpm-lock.yaml` entirely and resolves a different dependency tree than the one that was built and tested; use `pnpm install`.
 `pnpm run check` runs the same lint/format/typecheck/build sequence CI does.
 
+The build runs every component through React Compiler (`reactCompiler: true` in `rsbuild.config.ts`), which memoizes automatically; manual `useMemo`/`useCallback` in new code is no longer needed for that purpose alone.
+
 `src/types/generated-api.ts` is generated from the server's own OpenAPI document with `pnpm run gen:api-types` (`API_SPEC_URL` overrides the default, which points at a server on `YORISHIRO_BIND`'s default port), and hand-written types in `src/types/api.ts` re-export from it where a shape already exists there rather than transcribing it a second time.
 The generator itself needs a TypeScript 5.x compiler API it walks at runtime, which this project's own TypeScript 7 doesn't provide, so the script runs it through `pnpm dlx` rather than as a project devDependency: an isolated install resolves its own peer instead of the workspace's.
 

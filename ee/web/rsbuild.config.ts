@@ -10,7 +10,7 @@ const DEV_API_TARGET = "http://10.0.0.50:18081";
 const PROXIED_PREFIXES = ["/api", "/auth", "/hosted", "/setup", "/up"];
 
 export default defineConfig({
-  plugins: [pluginReact()],
+  plugins: [pluginReact({ reactCompiler: true })],
   server: {
     host: "0.0.0.0",
     port: 3000,
