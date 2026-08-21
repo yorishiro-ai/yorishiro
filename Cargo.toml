@@ -62,8 +62,7 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 tracing-test = "0.2"
 url = "2.5"
 # `v7`: Sqlite has no `uuidv7()` (Postgres 18 native), so the application generates it there
-# instead (requirements §8.5). Postgres keeps its DB-side default; this feature is unused on
-# that path.
+# instead. Postgres keeps its DB-side default; this feature is unused on that path.
 uuid = { version = "1", features = ["serde", "v7"] }
 # Pinned exactly: even a minor bump of this rc can break the API. Upgrade explicitly via
 # `cargo update -p ort` when needed.

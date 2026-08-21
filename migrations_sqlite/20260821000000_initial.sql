@@ -5,14 +5,14 @@
 -- What does not carry over, and why:
 --
 --   * Extensions, `CREATE SCHEMA`, roles, GRANTs, RLS `ENABLE`/policies: Sqlite has none of
---     these. Tenant isolation on this engine is the process boundary itself (requirements
---     §8.5, §2.2a of the design memo), not a database-enforced policy.
+--     these. Tenant isolation on this engine is the process boundary itself, not a
+--     database-enforced policy.
 --   * `identity.authenticate_api_key`: Sqlite cannot hold a SECURITY DEFINER function; its
---     replacement is an ordinary query (design memo §8 項目5 段階3).
+--     replacement is an ordinary query.
 --   * `uuidv7()` column defaults: the application generates every id on this engine instead
 --     (`db::Engine::generated_id`), so no table here has a default on `id`.
 --   * GIN/HNSW/trgm indexes, `ALTER ... TYPE vector`: vector/trigram search's Sqlite
---     replacement (sqlite-vec, FTS5) is design memo §8 項目5 段階4, not yet decided.
+--     replacement (sqlite-vec, FTS5) is not yet decided.
 --
 -- Schema-qualified names do not exist for a single-file database, so every table below is bare
 -- (`tenants`, not `identity.tenants`), matching `Engine::schema_table`'s Sqlite rendering.
@@ -108,8 +108,8 @@ CREATE TABLE invites (
 CREATE INDEX invites_tenant_id_idx ON invites (tenant_id);
 
 -- `tags TEXT[]` has no Sqlite equivalent: stored as a JSON array instead. The code that reads
--- and writes it (`models/tenancy/template_library`) still binds a Postgres array today (design
--- memo §8 項目5 段階5), so this column is unused until that genericization lands.
+-- and writes it (`models/tenancy/template_library`) still binds a Postgres array today, so this
+-- column is unused until that genericization lands.
 CREATE TABLE templates (
   id          BLOB PRIMARY KEY,
   tenant_id   BLOB NOT NULL REFERENCES tenants(id),
@@ -185,8 +185,8 @@ CREATE INDEX schemas_origin_template_idx
   ON schemas (origin_template_id)
   WHERE origin_template_id IS NOT NULL;
 
--- `embedding vector(768)` has no Sqlite equivalent yet: plain nullable BLOB until design memo §8
--- 項目5 段階4 (sqlite-vec) decides the real representation.
+-- `embedding vector(768)` has no Sqlite equivalent yet: plain nullable BLOB until a vector
+-- extension (sqlite-vec) decides the real representation.
 CREATE TABLE entities (
   id             BLOB PRIMARY KEY,
   workspace_id   BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

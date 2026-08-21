@@ -29,8 +29,8 @@ pub trait Engine: sqlx::Connection {
 
     /// A primary key value to insert explicitly, or `None` to rely on the database's own default.
     ///
-    /// Postgres tables default every PK to `uuidv7()` (requirements §8.5), so every `INSERT` in `models/` omits the `Id` column; this must stay `None` there, since the app never generates ids on that engine (a recorded rule, not a stylistic choice).
-    /// Sqlite has no `uuidv7()` to assign, so it needs one generated here instead, and both engines produce the same id shape and time ordering (requirements §8.5).
+    /// Postgres tables default every PK to `uuidv7()`, so every `INSERT` in `models/` omits the `Id` column; this must stay `None` there, since the app never generates ids on that engine (a recorded rule, not a stylistic choice).
+    /// Sqlite has no `uuidv7()` to assign, so it needs one generated here instead, and both engines are required to produce the same id shape and time ordering.
     fn generated_id() -> Option<Uuid> {
         None
     }

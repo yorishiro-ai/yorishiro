@@ -1,4 +1,4 @@
-//! Proposed values waiting to be confirmed (§FR-8-2 mode B).
+//! Proposed values waiting to be confirmed.
 //!
 //! Mode A reads a value out of the schema; this one asks a model to guess it.
 //! A guess written straight into `content.entities` is indistinguishable afterwards from a value a person entered, so it is held here until a caller confirms the job.

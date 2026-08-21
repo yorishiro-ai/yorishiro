@@ -386,17 +386,18 @@ fn schema_table_stays_bare_on_sqlite() {
 /// bounds `sqlite_satisfies_the_generic_bounds` proves or the rendered-SQL strings
 /// `migration_dry_run_rendering` checks.
 ///
-/// There is no Sqlite migration set yet (that is item 4's actual driver work, not this
+/// There is no Sqlite migration set yet (that is the future Sqlite driver's own work, not this
 /// verification), so the DDL here is test-local: bare `schemas`/`entities`/`entity_snapshots`
 /// tables carrying exactly the columns these functions' SELECTs and INSERTs name, no `content.`
 /// prefix (Sqlite has no schema concept for a single-file database, matching `schema_table_stays_bare_on_sqlite`
 /// above).
 ///
-/// Fixture choices worth recording as open item-4 questions rather than settled here, each
-/// discovered by actually running these functions rather than assumed up front:
-/// - IDs are seeded as explicit `Uuid`s because Sqlite has no `uuidv7()`. This doesn't reopen
-///   「アプリ側でIDを採番しない」, which governs production write paths; how a real Sqlite driver
-///   gets IDs is exactly the kind of thing item 4 has to decide, not something this test can settle.
+/// Fixture choices worth recording as open questions rather than settled here, each discovered
+/// by actually running these functions rather than assumed up front:
+/// - IDs are seeded as explicit `Uuid`s because Sqlite has no `uuidv7()`. This doesn't reopen the
+///   rule that the app itself never mints an id, which governs production write paths; how a real
+///   Sqlite driver gets IDs is exactly the kind of thing that decision has to settle, not
+///   something this test can.
 ///   `snapshot()`'s own INSERT..SELECT never names `entity_snapshots.id` either (mirroring
 ///   Postgres's `DEFAULT uuidv7()`), so the fixture table needs its own default; `randomblob(16)`
 ///   is not a real UUID, but PK uniqueness is all this test needs from it.
@@ -410,7 +411,7 @@ fn schema_table_stays_bare_on_sqlite() {
 ///   enough to guarantee two `snapshot()` calls a few lines apart land in different ticks, so
 ///   `snapshots_for_job`'s `ORDER BY created_at DESC` (no tiebreaker column) is asserted as a set
 ///   below, not by position: which of two same-millisecond snapshots sorts first is genuinely
-///   unspecified today, an actual constraint for item 4's real driver, not a fixture timing bug.
+///   unspecified today, an actual constraint for the future real driver, not a fixture timing bug.
 ///   `undo_job`'s own `ORDER BY created_at ASC` shares the same gap (only untested here because
 ///   each entity below has exactly one snapshot, so replay order can't change the outcome).
 #[cfg(feature = "sqlite")]
@@ -429,7 +430,7 @@ mod sqlite_execution {
     /// fixture that happened to include it. `foreign_keys(true)` is not Sqlite's default, and a
     /// connection that omits it would silently accept a fixture that violates every `REFERENCES`
     /// in the migration, the "setting present but not in effect" trap: production connects with
-    /// the same option (design memo §8 項目5 段階2/3).
+    /// the same option.
     static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations_sqlite");
 
     async fn seeded_db() -> SqliteConnection {
@@ -872,10 +873,11 @@ mod sqlite_execution {
         );
     }
 
-    /// The one-tenant Sqlite constraint (§2.2a in the design memo, requirements §8.5): a second
-    /// tenant on this engine must be refused, not silently accepted. `create_tenant_on` is
+    /// The one-tenant Sqlite constraint: a second tenant on this engine must be refused, not
+    /// silently accepted, since the engine has no database-enforced isolation between tenants to
+    /// protect. `create_tenant_on` is
     /// already `Engine`-generic, so this deliberately violates the cap by passing `Some(1)`
-    /// directly (production wiring for how the cap is derived on Sqlite is stage 3, not tested
+    /// directly (production wiring for how the cap is derived on Sqlite comes later, not tested
     /// here) and confirms the violation actually fires: a second call under the same cap must
     /// error, not silently succeed.
     #[tokio::test]
@@ -906,9 +908,9 @@ mod sqlite_execution {
         assert_eq!(after, 1, "the refused insert must not have landed");
     }
 
-    /// The data-check half of §2.2a's two guard edges: an existing `.db` file already holding
-    /// more than one tenant must be refused at startup, distinct from `create_tenant_on`'s own
-    /// creation-time cap above.
+    /// The data-check half of the guard: an existing `.db` file already holding more than one
+    /// tenant must be refused at startup, distinct from `create_tenant_on`'s own creation-time
+    /// cap above.
     /// `YORISHIRO_MAX_TENANTS` has no mechanism for this case at all (it only ever gates
     /// creation), so this is `refuse_if_multiple_tenants_exist` exercised against a database
     /// that reached two tenants through a route the cap never saw: a direct `INSERT`, standing
@@ -939,8 +941,8 @@ mod sqlite_execution {
 
     /// `db::Engine::generated_id`'s Sqlite implementation must mint strictly increasing ids even
     /// when many are minted within the same millisecond, or the ORDER BY tiebreaker in
-    /// `snapshots_for_job`/`undo_job` (and requirements §8.5's "same time-ordering on both
-    /// engines" rule) both silently stop holding.
+    /// `snapshots_for_job`/`undo_job`, and the same time-ordering both engines are required to
+    /// produce, both silently stop holding.
     ///
     /// This pins a `uuid` crate guarantee, not something this engine's own code implements:
     /// `Uuid::now_v7()` routes through a process-wide `SharedContextV7` counter

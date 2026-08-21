@@ -49,7 +49,8 @@ pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
 }
 
 /// Resolves `YORISHIRO_MAX_TENANTS` for the Sqlite engine, where the cap is pinned to `1` rather
-/// than read as `max_tenants_from_env` reads it (design memo §8 項目5 段階2, §2.2a).
+/// than read as `max_tenants_from_env` reads it: the engine has no database-enforced isolation
+/// between tenants, so there is nothing for a raised cap to protect.
 ///
 /// Unset resolves to `Some(1)`: `max_tenants_from_env`'s own unset-means-unlimited would make a
 /// zero-config Sqlite deployment refuse its own first tenant, which contradicts the point of
@@ -67,8 +68,8 @@ pub fn max_tenants_for_sqlite(raw: Option<&str>) -> Result<i32, YorishiroError> 
         Some("1") => Ok(1),
         Some(v) => Err(YorishiroError::Internal(anyhow::anyhow!(
             "YORISHIRO_MAX_TENANTS is '{v}', but the Sqlite engine only ever allows a single \
-             tenant (design memo §8 項目5 段階2); unset the variable, set it to 1, or switch \
-             YORISHIRO_DATABASE_DRIVER to postgres for multi-tenant operation"
+             tenant; unset the variable, set it to 1, or switch YORISHIRO_DATABASE_DRIVER to \
+             postgres for multi-tenant operation"
         ))),
     }
 }
@@ -149,9 +150,8 @@ where
 /// `create_tenant_on`'s own cap check (above) guards the creation path, but does nothing for a
 /// `.db` file that already carries more than one tenant when the process starts: copied in from
 /// elsewhere, or written before this guard existed.
-/// This is that second check (design memo §8 項目5 段階2, §2.2a データ検証): a startup-time data
-/// check with no `YORISHIRO_MAX_TENANTS` counterpart, since that variable only ever gated
-/// creation.
+/// This is that second check: a startup-time data check with no `YORISHIRO_MAX_TENANTS`
+/// counterpart, since that variable only ever gated creation.
 ///
 /// `> 1`, not `>= 1`: exactly one tenant is the healthy single-tenant state this engine exists
 /// to run, not itself a violation.
@@ -173,8 +173,8 @@ where
     if count > 1 {
         return Err(YorishiroError::Internal(anyhow::anyhow!(
             "this database holds {count} tenants, but the Sqlite engine only ever allows a \
-             single tenant (design memo §8 項目5 段階2); switch YORISHIRO_DATABASE_DRIVER to \
-             postgres for multi-tenant operation"
+             single tenant; switch YORISHIRO_DATABASE_DRIVER to postgres for multi-tenant \
+             operation"
         )));
     }
     Ok(())

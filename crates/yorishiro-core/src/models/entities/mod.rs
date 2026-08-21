@@ -857,10 +857,10 @@ where
         .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
         // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the
         // same tick (Sqlite's `strftime('%f')` is millisecond-precision, and a batch job can
-        // snapshot two entities within one millisecond). Both engines' ids are now time-ordered
-        // (`uuidv7()` on Postgres, `Uuid::now_v7()` on Sqlite; requirements §8.5), so this is a
-        // second sort key rather than a different one, and doesn't change ordering when
-        // `created_at` alone was already unambiguous.
+        // snapshot two entities within one millisecond). Both engines' ids are time-ordered
+        // (`uuidv7()` on Postgres, `Uuid::now_v7()` on Sqlite), so this is a second sort key
+        // rather than a different one, and doesn't change ordering when `created_at` alone was
+        // already unambiguous.
         .order_by(EntitySnapshots::CreatedAt, Order::Desc)
         .order_by(EntitySnapshots::Id, Order::Desc)
         .build_sqlx(C::builder());

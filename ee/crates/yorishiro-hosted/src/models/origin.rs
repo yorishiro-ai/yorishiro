@@ -22,7 +22,7 @@ pub async fn list_with_upstream_changes(
     pool: &PgPool,
     workspace_id: Uuid,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
-    // Joins identity.templates, which the request role cannot read (the base spec §2.3), so this runs on the control-plane pool like the rest of the template-library paths.
+    // Joins identity.templates, which the request role cannot read, so this runs on the control-plane pool like the rest of the template-library paths.
     let rows: Vec<(Uuid, String, i32, Uuid, String, DateTime<Utc>)> = sqlx::query_as(
         "SELECT s.id, s.name, s.version, t.id, t.name, t.updated_at          FROM content.schemas s          JOIN identity.templates t ON t.id = s.origin_template_id          WHERE s.workspace_id = $1            AND s.status = 'active'            AND s.origin_status = 'linked'            AND t.updated_at > s.created_at          ORDER BY t.updated_at DESC",
     )

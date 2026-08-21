@@ -1,4 +1,4 @@
-//! A workspace's own LLM credentials, for the one feature that infers values (§FR-8-2).
+//! A workspace's own LLM credentials, for the one feature that infers values.
 //!
 //! Reads and writes go through the migration-role pool, not the request role: `yorishiro_app` has no GRANT on this table, so a query issued on a request connection fails at the permission check rather than relying on an RLS policy being right.
 //! See the migration.
