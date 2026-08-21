@@ -1,0 +1,30 @@
+name: Security
+
+# Split out of ci.yml: this only needs to re-run when the dependency graph or the audit's own
+# ignore list changes, and folding it into ci.yml's union of paths would mean either it never
+# gets its own filter or every other ci.yml job inherits its narrower one.
+# dep-audit.yml's weekly schedule covers the case this can't: an advisory published against a
+# dependency this repo already carries, with no local change to trigger a re-check.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [master]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - ".cargo/audit.toml"
+
+permissions:
+  checks: write
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

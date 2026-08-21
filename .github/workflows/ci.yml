@@ -3,9 +3,19 @@ name: CI
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "ee/docs/**"
+      - "**.md"
+      - ".github/dependabot.yml"
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "ee/docs/**"
+      - "**.md"
+      - ".github/dependabot.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -78,9 +88,8 @@ jobs:
           # default cache targets (~/.cargo, ./target), so without caching this the linker
           # fails to find the library on the second and later warm-cache CI runs.
           cache-directories: ~/.cache/ort.pyke.io
-          # Shared with clippy-suggestions.yml (same shared-key): that workflow never
-          # runs on master and so can never save under its own job-scoped key, but can still
-          # restore the cache master writes here.
+          # Shared with `package-smoke` below (same shared-key), which sets `save-if: false`
+          # and so never writes its own, but can still restore the cache master writes here.
           shared-key: rust
           # PRs can only ever restore from master's cache and their own, never write back to
           # master's key, so only master needs to save.
@@ -269,14 +278,6 @@ jobs:
       # needs a privileged container, and `test-install.sh` stays runnable without one.
       - name: Start the service under systemd
         run: ./packaging/test-systemd.sh dist
-
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
   # Verifies the built binary actually boots and serves traffic, not just that it compiles
   # and its unit/integration tests pass: `check` above never starts the real `main()`, so a
