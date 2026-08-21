@@ -213,6 +213,18 @@ fn entity_columns() -> [Entities; 10] {
     ]
 }
 
+fn entity_snapshot_columns() -> [EntitySnapshots; 7] {
+    [
+        EntitySnapshots::Id,
+        EntitySnapshots::JobId,
+        EntitySnapshots::EntityId,
+        EntitySnapshots::SchemaId,
+        EntitySnapshots::SchemaVersion,
+        EntitySnapshots::Data,
+        EntitySnapshots::CreatedAt,
+    ]
+}
+
 /// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
 fn escape_pointer_segment(segment: &str) -> String {
     segment.replace('~', "~0").replace('/', "~1")
@@ -827,15 +839,7 @@ where
     EntitySnapshot: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let (sql, values) = Query::select()
-        .columns([
-            EntitySnapshots::Id,
-            EntitySnapshots::JobId,
-            EntitySnapshots::EntityId,
-            EntitySnapshots::SchemaId,
-            EntitySnapshots::SchemaVersion,
-            EntitySnapshots::Data,
-            EntitySnapshots::CreatedAt,
-        ])
+        .columns(entity_snapshot_columns())
         .from(C::schema_table("content", EntitySnapshots::Table))
         .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
@@ -867,15 +871,7 @@ where
     let mut tx = conn.begin().await.internal()?;
 
     let (sql, values) = Query::select()
-        .columns([
-            EntitySnapshots::Id,
-            EntitySnapshots::JobId,
-            EntitySnapshots::EntityId,
-            EntitySnapshots::SchemaId,
-            EntitySnapshots::SchemaVersion,
-            EntitySnapshots::Data,
-            EntitySnapshots::CreatedAt,
-        ])
+        .columns(entity_snapshot_columns())
         .from(C::schema_table("content", EntitySnapshots::Table))
         .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))

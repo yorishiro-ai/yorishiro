@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 
 // Every server-side route the SPA calls in dev is proxied to one running
 // yorishiro-hosted-server; the SPA itself is served by rsbuild on :3000.
-const DEV_API_TARGET = process.env.YORISHIRO_DEV_API_TARGET ?? "http://localhost:8080";
+const DEV_API_TARGET = process.env.YORISHIRO_DEV_API_TARGET || "http://localhost:8080";
 const PROXIED_PREFIXES = ["/api", "/auth", "/hosted", "/setup", "/up"];
 
 export default defineConfig({
