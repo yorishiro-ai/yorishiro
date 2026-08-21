@@ -21,15 +21,24 @@
 
 ### Database ###############################################################################
 
-# The one setting with no working default. PostgreSQL 18 or newer, with the `vector` and
-# `pg_trgm` extensions available; the server creates its own schemas and roles on first start
-# and applies migrations on every start.
+# Which engine database_url below names. postgres (the default) needs PostgreSQL 18 or newer,
+# with the `vector` and `pg_trgm` extensions available. sqlite is single-tenant only (max_tenants
+# below must stay unset or 1) and is refused outright by the enterprise binary; run the community
+# one (yorishiro-ce-server) for a Sqlite deployment.
+# An unrecognised value refuses to start rather than falling back to postgres silently.
+#
+#   YORISHIRO_DATABASE_DRIVER
+# database_driver: postgres
+
+# The one setting with no working default. The server creates its own schemas and roles on first
+# start (postgres) or the database file itself (sqlite) and applies migrations on every start.
 #
 # Starting the server without this is not a degraded mode: it prints the path to this file and
 # exits 78 (EX_CONFIG), which the packaged systemd unit treats as "do not retry".
 #
 #   DATABASE_URL
 # database_url: postgres://yorishiro:PASSWORD@localhost:5432/yorishiro
+# database_url: sqlite:///var/lib/yorishiro/yorishiro.db
 
 # Running only the database in Docker is a common shape: the server from a package,
 # PostgreSQL from an image, nothing else containerised.

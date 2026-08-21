@@ -22,6 +22,8 @@ To use an OpenAI-compatible endpoint instead, see [embedding-providers.md](embed
 
 2. Provide **PostgreSQL 18 or newer**.
    The schema uses the built-in `uuidv7()` for primary keys, which arrived in 18; on an older server the migration fails outright rather than degrading.
+   This step, and the role setup in the next one, are specific to the `postgres` engine (the default): the community binary (`yorishiro-ce-server`) also runs against `sqlite`, which needs nothing here beyond a writable path.
+   See [configuration.md](configuration.md#core) for `YORISHIRO_DATABASE_DRIVER`.
 3. Give the role in `DATABASE_URL` what the migration needs.
    It creates the extensions, the `yorishiro_app` application role, and every table, so:
 

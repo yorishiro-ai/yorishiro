@@ -15,6 +15,7 @@ use serde::Deserialize;
 #[serde(default, deny_unknown_fields)]
 struct FileConfig {
     database_url: Option<String>,
+    database_driver: Option<String>,
     bind: Option<String>,
     web_dir: Option<String>,
     cors_origins: Option<String>,
@@ -146,6 +147,7 @@ pub unsafe fn load_and_apply_env_overrides() -> Result<()> {
     // SAFETY: forwarded from this function's own contract.
     unsafe {
         apply_if_unset("DATABASE_URL", config.database_url);
+        apply_if_unset("YORISHIRO_DATABASE_DRIVER", config.database_driver);
         apply_if_unset("YORISHIRO_BIND", config.bind);
         apply_if_unset("YORISHIRO_WEB_DIR", config.web_dir);
         apply_if_unset("YORISHIRO_CORS_ORIGINS", config.cors_origins);

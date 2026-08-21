@@ -41,7 +41,8 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 
 | 変数 | 内容 |
 |---|---|
-| `DATABASE_URL` | PostgreSQL接続文字列(必須) |
+| `DATABASE_URL` | `YORISHIRO_DATABASE_DRIVER`が指すエンジンへの接続文字列(必須)。PostgreSQLのURL、またはコミュニティ版バイナリでは`sqlite://`パス |
+| `YORISHIRO_DATABASE_DRIVER` | `DATABASE_URL`が接続するエンジン。`postgres`(既定)または`sqlite`。認識できない値は`postgres`へ黙ってフォールバックせず起動を拒否する。`sqlite`はシングルテナント専用(`YORISHIRO_MAX_TENANTS`は未設定または`1`のみ)で、エンタープライズ版バイナリでは明確に拒否される。SQLiteデプロイメントにはコミュニティ版バイナリ(`yorishiro-ce-server`)を使う |
 | `YORISHIRO_CONFIG_PATH` | 後述の`config.yml`ファイルのパス。未設定時は作業ディレクトリの`config.yml`、次に`/etc/yorishiro/config.yml`を探す |
 | `YORISHIRO_BIND` | リッスンアドレス(既定: `0.0.0.0:8080`) |
 | `YORISHIRO_CORS_ORIGINS` | ブラウザからアクセスする場合の許可オリジン(カンマ区切り。例: 別オリジンで動くダッシュボードが`/auth/login`/`/api/members`を呼べるようにする)。未設定時はクロスオリジン読み取り不可。デバッグビルド限定で、未設定のまま`http://localhost:*`/`http://127.0.0.1:*`(任意ポート)からのアクセスを自動許可する(MCP Inspector等の開発ツール向け)。リリースビルドではこの自動許可は無効 |

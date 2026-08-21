@@ -33,7 +33,8 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string (required) |
+| `DATABASE_URL` | Connection string for whichever engine `YORISHIRO_DATABASE_DRIVER` names (required): a PostgreSQL URL, or a `sqlite://` path for the community binary |
+| `YORISHIRO_DATABASE_DRIVER` | Which engine `DATABASE_URL` above connects to: `postgres` (default) or `sqlite`. An unrecognised value refuses to start rather than falling back to `postgres` silently. `sqlite` is single-tenant only (`YORISHIRO_MAX_TENANTS` must stay unset or `1`) and is refused outright by the enterprise binary; run the community one (`yorishiro-ce-server`) for a Sqlite deployment |
 | `YORISHIRO_CONFIG_PATH` | Path to the `config.yml` file described below. Unset, the working directory's `config.yml` is tried first and `/etc/yorishiro/config.yml` second |
 | `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8080`) |
 | `YORISHIRO_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector): release builds never do this |

@@ -24,6 +24,9 @@ OpenAI互換エンドポイントを代わりに使う場合は[embedding-provid
 2. **PostgreSQL 18以降**を用意します。
    主キーに組み込みの`uuidv7()`を使っており、これはPostgreSQL 18で追加されたものです。
    それより古いサーバでは機能が縮退するのではなく、マイグレーション自体が失敗します。
+   このステップと次のロール設定は`postgres`エンジン(既定)専用です。
+   コミュニティ版バイナリ(`yorishiro-ce-server`)は`sqlite`エンジンでも動作し、その場合は書き込み可能なパス以外に何も用意する必要がありません。
+   `YORISHIRO_DATABASE_DRIVER`については[configuration.md](configuration.md#基本)を参照してください。
 
 3. `DATABASE_URL`のロールに、マイグレーションが必要とする権限を与えます。
    マイグレーションは拡張・アプリケーションロール`yorishiro_app`・全テーブルを作成するため、次が必要です。
