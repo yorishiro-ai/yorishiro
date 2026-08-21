@@ -110,8 +110,7 @@ It replaces the one that is there:
 $ sudo dpkg -i yorishiro-ce_X.Y.Z_amd64.deb  # or: sudo rpm -U yorishiro-ce-X.Y.Z-1.x86_64.rpm
 ```
 
-Nothing else is needed.
-`/etc/yorishiro/` and `/var/lib/yorishiro` belong to the deployment rather than to the edition, the unit keeps its name and whatever enabled state it had, and the binary at `/usr/bin/yorishiro-server` is swapped in place.
+Nothing else is needed: `/etc/yorishiro/` and `/var/lib/yorishiro` belong to the deployment rather than to the edition, the unit keeps its name and whatever enabled state it had, and the binary at `/usr/bin/yorishiro-server` is swapped in place.
 Restart the service to pick it up.
 
 Moving to the community edition drops the web UI and the paid features; the database is untouched, so moving back restores them.
