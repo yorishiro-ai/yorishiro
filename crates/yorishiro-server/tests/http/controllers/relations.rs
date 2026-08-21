@@ -15,10 +15,10 @@ async fn rest_relation_crud_round_trip(pool: PgPool) {
         .acquire_for_workspace(tenant_id_tenant, tenant_id)
         .await
         .unwrap();
-    let schema_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Schema, None)
+    let schema_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Schema, None)
         .await
         .unwrap();
-    let write_key = create_api_key(&mut conn, tenant_id, ApiKeyScope::Write, None)
+    let write_key = create_api_key(&mut *conn, tenant_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
     drop(conn);

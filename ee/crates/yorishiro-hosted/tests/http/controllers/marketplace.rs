@@ -28,7 +28,7 @@ async fn issue_key(pool: &PgPool, tenant_id: Uuid, workspace_id: Uuid) -> String
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    create_api_key(&mut conn, workspace_id, ApiKeyScope::Schema, None)
+    create_api_key(&mut *conn, workspace_id, ApiKeyScope::Schema, None)
         .await
         .unwrap()
         .plaintext

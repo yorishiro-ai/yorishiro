@@ -141,9 +141,10 @@ impl YorishiroMcpServer {
                 }
             },
             (None, Some(template_id)) => {
+                let identity_pool = mcp_try!(self.state.identity_pool());
                 let (definition, origin) = mcp_try!(
                     tenancy::resolve_template_definition(
-                        &self.state.identity_pool,
+                        identity_pool,
                         authorized.ctx.tenant_id,
                         &template_id,
                     )

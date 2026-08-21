@@ -72,27 +72,20 @@ where
         let headers = header_pairs(parts);
 
         let app_state = AppState::from_ref(state);
-        let db = app_state.tenant_db.clone();
         let ctx = app_state
             .authenticator
-            .authenticate(db.pool(), presented_key, &headers)
+            .authenticate(&app_state.db, presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         // Updating last_used_at is best-effort and doesn't affect the auth result; the request proceeds even if it fails.
-        match db
-            .acquire_for_workspace(ctx.tenant_id, ctx.workspace_id)
-            .await
-        {
-            Ok(mut conn) => {
-                if let Err(err) = auth::touch_last_used(&mut conn, ctx.api_key_id).await {
-                    tracing::warn!(error = %err, "failed to update api key last_used_at");
-                }
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to acquire connection to touch last_used_at");
-            }
-        }
+        auth::touch_last_used_on(
+            &app_state.db,
+            ctx.tenant_id,
+            ctx.workspace_id,
+            ctx.api_key_id,
+        )
+        .await;
 
         Ok(AuthContext(ctx))
     }
@@ -153,7 +146,7 @@ where
 
         let app_state = AppState::from_ref(state);
         let (ctx, conn) = auth::authorize(
-            &app_state.tenant_db,
+            &app_state.db,
             app_state.authenticator.as_ref(),
             presented_key,
             R::SCOPE,
@@ -191,7 +184,7 @@ where
 
         let app_state = AppState::from_ref(state);
         let ctx = auth::authorize_scope(
-            &app_state.tenant_db,
+            &app_state.db,
             app_state.authenticator.as_ref(),
             presented_key,
             R::SCOPE,

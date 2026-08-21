@@ -9,9 +9,11 @@ readme = "README.md"
 autotests = false
 
 [features]
-# Type-level only: proves the generic bounds in models/ are satisfiable by Sqlite.
-# Says nothing about the emitted SQL or runtime behavior (step 4's concern).
-# Off by default so no shipped binary links libsqlite3-sys from this crate.
+# Off by default: a caller of this crate alone (a downstream consumer that never touches
+# yorishiro-server) does not get libsqlite3-sys linked in unless it asks.
+# yorishiro-server enables this unconditionally, since the database driver is a runtime choice
+# (YORISHIRO_DATABASE_DRIVER) rather than a compile-time one: the shipped binary always carries
+# both engines.
 sqlite = ["sqlx/sqlite", "sea-query-binder/sqlx-sqlite"]
 
 [dependencies]

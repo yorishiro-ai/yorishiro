@@ -1,11 +1,20 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
+use yorishiro_core::db::{DbHandle, TenantDb};
 use yorishiro_core::services::auth::{ApiKeyScope, Authenticator};
 
 use super::*;
 
 use crate::tests::test_helpers;
+
+/// `authenticate` takes the whole [`DbHandle`] now; every test here builds one on the fly from the single pool `#[sqlx::test]` hands out.
+fn db_handle(pool: &PgPool) -> DbHandle {
+    DbHandle::Postgres {
+        tenant: TenantDb::new(pool.clone()),
+        identity: pool.clone(),
+    }
+}
 
 /// Issues a key directly.
 /// The community edition's `create_api_key` always records a workspace, so a tenant-scoped key (the whole point here) cannot be made through it.
@@ -44,7 +53,7 @@ async fn a_tenant_key_resolves_the_requested_workspace(pool: PgPool) {
 
     for workspace_id in [workspace_a, workspace_b] {
         let ctx = TenantScopedAuthenticator
-            .authenticate(&pool, &key, &workspace_header(workspace_id))
+            .authenticate(&db_handle(&pool), &key, &workspace_header(workspace_id))
             .await
             .unwrap();
         assert_eq!(ctx.workspace_id, workspace_id);
@@ -60,7 +69,7 @@ async fn a_tenant_key_cannot_reach_another_tenants_workspace(pool: PgPool) {
     let key = issue_key(&pool, tenant_a, None, ApiKeyScope::Write).await;
 
     let err = TenantScopedAuthenticator
-        .authenticate(&pool, &key, &workspace_header(workspace_b))
+        .authenticate(&db_handle(&pool), &key, &workspace_header(workspace_b))
         .await
         .unwrap_err();
 
@@ -74,7 +83,7 @@ async fn a_tenant_key_without_a_requested_workspace_is_rejected(pool: PgPool) {
     let key = issue_key(&pool, tenant_id, None, ApiKeyScope::Write).await;
 
     let err = TenantScopedAuthenticator
-        .authenticate(&pool, &key, &[])
+        .authenticate(&db_handle(&pool), &key, &[])
         .await
         .unwrap_err();
 
@@ -88,7 +97,7 @@ async fn a_workspace_key_still_authenticates_without_a_header(pool: PgPool) {
     let key = issue_key(&pool, tenant_id, Some(workspace_id), ApiKeyScope::Read).await;
 
     let ctx = TenantScopedAuthenticator
-        .authenticate(&pool, &key, &[])
+        .authenticate(&db_handle(&pool), &key, &[])
         .await
         .unwrap();
 
@@ -105,7 +114,7 @@ async fn a_workspace_key_naming_another_workspace_is_rejected(pool: PgPool) {
     let key = issue_key(&pool, tenant_id, Some(workspace_id), ApiKeyScope::Read).await;
 
     let err = TenantScopedAuthenticator
-        .authenticate(&pool, &key, &workspace_header(other))
+        .authenticate(&db_handle(&pool), &key, &workspace_header(other))
         .await
         .unwrap_err();
 
@@ -120,7 +129,7 @@ async fn a_malformed_header_is_rejected(pool: PgPool) {
 
     let err = TenantScopedAuthenticator
         .authenticate(
-            &pool,
+            &db_handle(&pool),
             &key,
             &[(WORKSPACE_HEADER.to_string(), "not-a-uuid".to_string())],
         )
@@ -136,7 +145,11 @@ async fn an_unknown_key_is_rejected(pool: PgPool) {
     let (_, workspace_id) = test_helpers::seed_tenant_and_workspace(&pool).await;
 
     let err = TenantScopedAuthenticator
-        .authenticate(&pool, "ysr_nope_nope", &workspace_header(workspace_id))
+        .authenticate(
+            &db_handle(&pool),
+            "ysr_nope_nope",
+            &workspace_header(workspace_id),
+        )
         .await
         .unwrap_err();
 

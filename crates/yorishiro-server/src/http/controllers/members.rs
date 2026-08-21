@@ -27,7 +27,7 @@ pub async fn list_members(
     AuthContext(ctx): AuthContext,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
-    let members = tenancy::list_members(&state.identity_pool, ctx.tenant_id).await?;
+    let members = tenancy::list_members(state.identity_pool()?, ctx.tenant_id).await?;
     Ok(Json(members))
 }
 
@@ -58,7 +58,7 @@ pub async fn add_member(
 ) -> Result<impl IntoResponse, ApiError> {
     require_tenant_admin(&state, ctx.tenant_id, ctx.user_id).await?;
 
-    let mut conn = state.identity_pool.acquire().await.internal()?;
+    let mut conn = state.identity_pool()?.acquire().await.internal()?;
     let user = tenancy::get_user_by_email(&mut *conn, &body.email)
         .await?
         .ok_or_else(|| {

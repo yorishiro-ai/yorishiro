@@ -33,7 +33,8 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string (required) |
+| `YORISHIRO_DATABASE_DRIVER` | Which engine `DATABASE_URL` below connects to: `postgres` (default) or `sqlite`. An unrecognised value refuses to start rather than falling back to `postgres` silently. `sqlite` is single-tenant only: `YORISHIRO_MAX_TENANTS` must stay unset or `1`, and an existing `.db` file already holding more than one tenant refuses to start. It currently covers first-run setup and authentication only; the rest of the REST API, MCP, and the admin CLI fail loudly rather than run against it, and PostgreSQL remains the engine to deploy on beyond that. The enterprise binary (`yorishiro-server`) accepts `postgres` only; see [the enterprise configuration reference](../ee/docs/configuration.md) for what is enterprise-specific |
+| `DATABASE_URL` | Connection string (required): a PostgreSQL URL when the driver is `postgres`, or a `sqlite://` path when it is `sqlite` |
 | `YORISHIRO_CONFIG_PATH` | Path to the `config.yml` file described below. Unset, the working directory's `config.yml` is tried first and `/etc/yorishiro/config.yml` second |
 | `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8080`) |
 | `YORISHIRO_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector): release builds never do this |
@@ -48,6 +49,8 @@ This makes `config.yml` convenient as the base configuration for a deployment, w
 
 Drops the deployment to read-only while the database is under sustained load, and restores it when the load falls away.
 Off unless a threshold is set: dropping a deployment to read-only uninvited is a large thing to do on a default, and the right number depends on `max_connections`, which the server does not choose.
+
+PostgreSQL only: it queries `pg_stat_activity`, which has no Sqlite equivalent, and the community binary never starts it on the `sqlite` engine even when a threshold is set.
 
 | Variable | Description |
 |---|---|

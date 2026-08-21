@@ -20,8 +20,15 @@ But skipping this step isn't a degraded-mode startup: the process fails to start
 
 To use an OpenAI-compatible endpoint instead, see [embedding-providers.md](embedding-providers.md).
 
-2. Provide **PostgreSQL 18 or newer**.
-   The schema uses the built-in `uuidv7()` for primary keys, which arrived in 18; on an older server the migration fails outright rather than degrading.
+2. Provide a database, engine and edition depending on your deployment:
+
+   - **Enterprise edition** (`yorishiro-server`, the default package): **PostgreSQL 18 or newer**, always.
+   - **Community edition** (`yorishiro-ce-server`): **PostgreSQL 18 or newer** (this step and the role setup in the next one apply, identically to the enterprise edition), or **`sqlite`** instead, needing nothing here beyond a writable path to boot.
+
+   The schema uses the built-in `uuidv7()` for primary keys, which arrived in PostgreSQL 18; on an older server the migration fails outright rather than degrading.
+   See [configuration.md](configuration.md#core) for `YORISHIRO_DATABASE_DRIVER`, which selects the engine on the community binary.
+   `sqlite` currently covers first-run setup and authentication only; the rest of the REST API, MCP, and the admin CLI below are not yet wired to it and fail loudly rather than run against it.
+   PostgreSQL remains the engine to deploy on beyond that.
 3. Give the role in `DATABASE_URL` what the migration needs.
    It creates the extensions, the `yorishiro_app` application role, and every table, so:
 
@@ -253,6 +260,8 @@ Set `YORISHIRO_MAX_TENANTS=0` (see [configuration.md](configuration.md)) to allo
 Deployments that used the setup wizard above can skip this section for their first (and, under the default `YORISHIRO_MAX_TENANTS=1`, only) tenant.
 It remains the only way to provision *additional* tenants/workspaces.
 On deployments where `YORISHIRO_MAX_TENANTS` resolves to unlimited, the wizard is disabled, so this is the only way to provision anything at all.
+
+The admin CLI below is not available on the community binary's `sqlite` engine: it refuses outright, naming the error, rather than running against it.
 
 API keys are stored in the database only as SHA-256 hashes and user passwords only as argon2 hashes, so neither can be provisioned by hand in SQL: both go through the admin CLI:
 

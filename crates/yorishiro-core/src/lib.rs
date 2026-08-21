@@ -76,4 +76,12 @@ pub(crate) mod test_support {
         let workspace_id = seed_workspace(pool, tenant_id, "test-workspace").await;
         (tenant_id, workspace_id)
     }
+
+    /// Wraps a `#[sqlx::test]` pool as the [`crate::db::DbHandle`] `authenticate`/`Authenticator` now take, so a test doesn't build the two-pool shape by hand.
+    pub fn db_handle(pool: &PgPool) -> crate::db::DbHandle {
+        crate::db::DbHandle::Postgres {
+            tenant: crate::db::TenantDb::new(pool.clone()),
+            identity: pool.clone(),
+        }
+    }
 }

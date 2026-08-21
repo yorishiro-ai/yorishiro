@@ -41,7 +41,8 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 
 | 変数 | 内容 |
 |---|---|
-| `DATABASE_URL` | PostgreSQL接続文字列(必須) |
+| `YORISHIRO_DATABASE_DRIVER` | `DATABASE_URL`が接続するエンジン。`postgres`(既定)または`sqlite`。認識できない値は`postgres`へ黙ってフォールバックせず起動を拒否する。`sqlite`はシングルテナント専用で、`YORISHIRO_MAX_TENANTS`は未設定または`1`のみを受け付け、既に複数テナントを持つ`.db`ファイルは起動を拒否する。現時点で対応するのは初回セットアップと認証のみで、REST APIの残り・MCP・管理CLIは動くふりをせず明確に失敗し、それ以外の用途では引き続きPostgreSQLをデプロイする。エンタープライズ版バイナリ(`yorishiro-server`)は`postgres`のみを受け付ける。エンタープライズ版固有の内容は[エンタープライズ版の設定リファレンス](../../ee/docs/ja/configuration.md)を参照 |
+| `DATABASE_URL` | 接続文字列(必須)。ドライバが`postgres`ならPostgreSQL接続文字列、`sqlite`なら`sqlite://`パス |
 | `YORISHIRO_CONFIG_PATH` | 後述の`config.yml`ファイルのパス。未設定時は作業ディレクトリの`config.yml`、次に`/etc/yorishiro/config.yml`を探す |
 | `YORISHIRO_BIND` | リッスンアドレス(既定: `0.0.0.0:8080`) |
 | `YORISHIRO_CORS_ORIGINS` | ブラウザからアクセスする場合の許可オリジン(カンマ区切り。例: 別オリジンで動くダッシュボードが`/auth/login`/`/api/members`を呼べるようにする)。未設定時はクロスオリジン読み取り不可。デバッグビルド限定で、未設定のまま`http://localhost:*`/`http://127.0.0.1:*`(任意ポート)からのアクセスを自動許可する(MCP Inspector等の開発ツール向け)。リリースビルドではこの自動許可は無効 |
@@ -57,6 +58,9 @@ docker composeの`environment:`や`docker compose exec -e`、systemdの`Environm
 データベースの負荷が続いている間だけデプロイを読み取り専用に落とし、負荷が引いたら戻します。
 閾値を設定しない限り無効です。
 求められてもいないのに読み取り専用へ落とすのは既定の挙動として重すぎ、また適切な値は`max_connections`に依存しますが、それはサーバが決める値ではないためです。
+
+PostgreSQL専用です。
+`pg_stat_activity`を問い合わせており、Sqliteには相当するものがなく、コミュニティ版バイナリは閾値を設定していても`sqlite`エンジンではこのガードを起動しません。
 
 | 変数 | 説明 |
 |---|---|

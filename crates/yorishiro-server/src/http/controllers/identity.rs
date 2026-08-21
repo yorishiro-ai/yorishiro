@@ -57,7 +57,7 @@ pub async fn signup(
     State(state): State<AppState>,
     Json(body): Json<SignupRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let invite = tenancy::redeem_invite(&state.identity_pool, &body.invite_token)
+    let invite = tenancy::redeem_invite(state.identity_pool()?, &body.invite_token)
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: "invite token is invalid, expired, or already used".into(),
@@ -67,7 +67,7 @@ pub async fn signup(
 
     // create_user + add_member run in one transaction: if a request dies between the two (e.g. the connection drops), an isolated user row with no tenant membership would otherwise be unrecoverable (it can never be added to a tenant via a normal signup or `admin add-member`, both of which expect a user that doesn't already exist / already does, respectively).
     // See `create_user`'s doc comment.
-    let mut tx = state.identity_pool.begin().await.internal()?;
+    let mut tx = state.identity_pool()?.begin().await.internal()?;
     let user = tenancy::create_user(
         &mut *tx,
         &invite.email,
@@ -78,7 +78,7 @@ pub async fn signup(
     tenancy::add_member(&mut *tx, invite.tenant_id, user.id, invite.role).await?;
     tx.commit().await.internal()?;
 
-    let workspaces = tenancy::list_workspaces(&state.identity_pool, invite.tenant_id)
+    let workspaces = tenancy::list_workspaces(state.identity_pool()?, invite.tenant_id)
         .await?
         .into_iter()
         .map(|workspace| WorkspaceSummary {
@@ -140,16 +140,16 @@ pub async fn login(
     Json(body): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether `workspace_id` exists.
-    let user = tenancy::verify_login(&state.identity_pool, &body.email, &body.password)
+    let user = tenancy::verify_login(state.identity_pool()?, &body.email, &body.password)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
 
     let workspace = match body.workspace_id {
-        Some(workspace_id) => tenancy::get_workspace(&state.identity_pool, workspace_id).await?,
+        Some(workspace_id) => tenancy::get_workspace(state.identity_pool()?, workspace_id).await?,
         // A deployment has exactly one workspace by default (see YORISHIRO_MAX_TENANTS), so resolving it automatically here means the login form never needs to ask for a workspace id in the common case.
         None => {
             let mut workspaces =
-                tenancy::list_workspaces_for_user(&state.identity_pool, user.id).await?;
+                tenancy::list_workspaces_for_user(state.identity_pool()?, user.id).await?;
             match workspaces.len() {
                 1 => workspaces.pop().expect("len() == 1 checked above"),
                 0 => {
@@ -181,16 +181,16 @@ pub async fn login(
         }
     };
 
-    let role = tenancy::get_membership_role(&state.identity_pool, workspace.tenant_id, user.id)
+    let role = tenancy::get_membership_role(state.identity_pool()?, workspace.tenant_id, user.id)
         .await?
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
             message: "this account is not a member of the tenant that owns this workspace".into(),
             hint: "ask a tenant admin to add you as a member first".into(),
         })?;
 
-    let mut conn = state.identity_pool.acquire().await.internal()?;
+    let mut conn = state.identity_pool()?.acquire().await.internal()?;
     let created =
-        auth::create_api_key(&mut conn, workspace.id, role.max_scope(), Some(user.id)).await?;
+        auth::create_api_key(&mut *conn, workspace.id, role.max_scope(), Some(user.id)).await?;
 
     Ok(Json(LoginResponse {
         api_key: created.plaintext,

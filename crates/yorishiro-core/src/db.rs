@@ -53,8 +53,6 @@ impl Engine for sqlx::PgConnection {
     }
 }
 
-/// Type-level only, gated behind the `sqlite` feature: proves the bounds in `models/` are satisfiable by Sqlite.
-/// Not evidence the emitted SQL or runtime behavior is correct for Sqlite; that is step 4.
 #[cfg(feature = "sqlite")]
 impl Engine for sqlx::SqliteConnection {
     type Db = sqlx::Sqlite;
@@ -216,6 +214,87 @@ impl TenantDb {
             .await?;
         Ok(conn)
     }
+}
+
+/// Where a single-tenant deployment's data lives.
+///
+/// There is no session state to set: no role to switch into and no RLS variable to scope by, since Sqlite has neither.
+/// [`acquire_for_workspace`](Storage::acquire_for_workspace) hands out a plain connection instead, and the isolation `TenantDb` gets from Postgres this engine gets from `tenants::refuse_if_multiple_tenants_exist` at boot: one tenant per deployment, checked once, rather than a filter every query has to remember.
+#[cfg(feature = "sqlite")]
+#[derive(Clone)]
+pub struct SqliteDb {
+    pool: sqlx::SqlitePool,
+}
+
+#[cfg(feature = "sqlite")]
+impl SqliteDb {
+    /// Wraps a raw pool as-is.
+    pub fn new(pool: sqlx::SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    /// Builds the production pool.
+    /// Foreign keys are off by default per connection in Sqlite, unlike Postgres where they cannot be, so this crate's migrations and every write depend on this hook running before any query does.
+    /// `create_if_missing(true)`: a first boot names a `.db` file that does not exist yet, the same way a first boot against Postgres names a database the migration role can already reach, and refusing to create the file would make every Sqlite deployment's first run a manual step this crate never asks of a Postgres one.
+    pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, sqlx::Error> {
+        use std::str::FromStr;
+
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(max_connections)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::query("PRAGMA foreign_keys = ON")
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect_with(options)
+            .await?;
+        Ok(Self { pool })
+    }
+
+    pub fn pool(&self) -> &sqlx::SqlitePool {
+        &self.pool
+    }
+}
+
+#[cfg(feature = "sqlite")]
+#[async_trait]
+impl Storage for SqliteDb {
+    type Db = sqlx::Sqlite;
+
+    /// No session variables to set: the single-tenant guard at boot is what stands in for row-level isolation here.
+    async fn acquire_for_workspace(
+        &self,
+        _tenant_id: Uuid,
+        _workspace_id: Uuid,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::Sqlite>, sqlx::Error> {
+        self.pool.acquire().await
+    }
+
+    fn pool(&self) -> &sqlx::SqlitePool {
+        SqliteDb::pool(self)
+    }
+}
+
+/// Which engine a deployment is running, holding whichever connections that engine needs.
+///
+/// [`super::services::auth::Authenticator`] and every other seam that must work before a workspace is known (so before `Storage::acquire_for_workspace` can scope anything) takes this instead of a bare pool, so the seam itself carries the engine choice rather than assuming Postgres.
+///
+/// The Postgres variant carries two pools for the same reason [`crate::AppState`] on the server side does: `identity` connects with the migration role, bypassing RLS for the control-plane tables (`identity.users`/`identity.tenant_memberships`/`identity.invites`) that have no tenant/workspace context yet to scope by.
+/// Sqlite has no role to separate, so its variant carries the one pool `Storage` also uses; there is no second one to name.
+#[derive(Clone)]
+pub enum DbHandle {
+    Postgres {
+        tenant: TenantDb,
+        identity: PgPool,
+    },
+    #[cfg(feature = "sqlite")]
+    Sqlite(SqliteDb),
 }
 
 /// Serializes a transaction against others naming the same `key`, until it commits.

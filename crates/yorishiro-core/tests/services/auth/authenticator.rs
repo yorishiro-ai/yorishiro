@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 
 use crate::YorishiroError;
-use crate::db::TenantDb;
+use crate::db::{DbHandle, TenantDb};
 use crate::services::auth::{
     ApiKeyScope, AuthContext, Authenticator, authenticate, authorize, create_api_key,
 };
@@ -18,7 +18,7 @@ struct HeaderAuthenticator {
 impl Authenticator for HeaderAuthenticator {
     async fn authenticate(
         &self,
-        _pool: &PgPool,
+        _db: &DbHandle,
         _presented_key: &str,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
@@ -38,17 +38,18 @@ impl Authenticator for HeaderAuthenticator {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_replaced_authenticator_decides_instead_of_the_default(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let issued = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, None)
+    let issued = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
     drop(conn);
 
-    let ctx = authenticate(&pool, &issued.plaintext).await.unwrap();
+    let db = test_support::db_handle(&pool);
+    let ctx = authenticate(&db, &issued.plaintext).await.unwrap();
     let authenticator = HeaderAuthenticator { ctx };
 
     // A key the default rule accepts is rejected, because the replacement was not satisfied.
@@ -82,17 +83,18 @@ async fn a_replaced_authenticator_decides_instead_of_the_default(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_replaced_authenticator_does_not_bypass_scope(pool: PgPool) {
     let (tenant_id, workspace_id) = test_support::seed_tenant_and_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let issued = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
+    let issued = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
     drop(conn);
 
-    let ctx = authenticate(&pool, &issued.plaintext).await.unwrap();
+    let db = test_support::db_handle(&pool);
+    let ctx = authenticate(&db, &issued.plaintext).await.unwrap();
     let authenticator = HeaderAuthenticator { ctx };
 
     let err = authorize(

@@ -46,7 +46,7 @@ pub(crate) async fn require_tenant_admin(
     user_id: Option<Uuid>,
 ) -> Result<(), YorishiroError> {
     let user_id = user_id.ok_or(YorishiroError::Unauthenticated)?;
-    tenancy::get_membership_role(&state.identity_pool, tenant_id, user_id)
+    tenancy::get_membership_role(state.identity_pool()?, tenant_id, user_id)
         .await?
         .filter(|role| role.administers_tenant())
         .ok_or_else(|| YorishiroError::ScopeInsufficient {

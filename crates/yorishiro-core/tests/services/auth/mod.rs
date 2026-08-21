@@ -5,7 +5,7 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use crate::YorishiroError;
-use crate::db::TenantDb;
+use crate::db::{DbHandle, TenantDb};
 use crate::services::auth::{
     ApiKeyScope, ApiKeys, DefaultAuthenticator, authenticate, authorize, bearer_credential,
     create_api_key, hex_decode, hex_encode, require_scope,
@@ -28,17 +28,19 @@ async fn seed_workspace(pool: &PgPool) -> (Uuid, Uuid) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn authenticates_a_freshly_created_key(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
 
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, None)
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
 
-    let ctx = authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = authenticate(&test_support::db_handle(&pool), &created.plaintext)
+        .await
+        .unwrap();
 
     assert_eq!(ctx.tenant_id, tenant_id);
     assert_eq!(ctx.workspace_id, workspace_id);
@@ -61,22 +63,24 @@ async fn resolves_the_attributed_user(pool: PgPool) {
         .await
         .unwrap();
 
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, Some(user_id))
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Write, Some(user_id))
         .await
         .unwrap();
 
-    let ctx = authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = authenticate(&test_support::db_handle(&pool), &created.plaintext)
+        .await
+        .unwrap();
     assert_eq!(ctx.user_id, Some(user_id));
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn rejects_an_unknown_key(pool: PgPool) {
-    let err = authenticate(&pool, "ysr_does_not_exist_at_all")
+    let err = authenticate(&test_support::db_handle(&pool), "ysr_does_not_exist_at_all")
         .await
         .unwrap_err();
 
@@ -87,26 +91,27 @@ async fn rejects_an_unknown_key(pool: PgPool) {
 async fn resolves_the_correct_workspace_among_several(pool: PgPool) {
     let (tenant_a, workspace_a) = seed_workspace(&pool).await;
     let (tenant_b, workspace_b) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
+    let tenant_db = TenantDb::new(pool.clone());
 
-    let mut conn_a = db
+    let mut conn_a = tenant_db
         .acquire_for_workspace(tenant_a, workspace_a)
         .await
         .unwrap();
-    let key_a = create_api_key(&mut conn_a, workspace_a, ApiKeyScope::Read, None)
+    let key_a = create_api_key(&mut *conn_a, workspace_a, ApiKeyScope::Read, None)
         .await
         .unwrap();
 
-    let mut conn_b = db
+    let mut conn_b = tenant_db
         .acquire_for_workspace(tenant_b, workspace_b)
         .await
         .unwrap();
-    let key_b = create_api_key(&mut conn_b, workspace_b, ApiKeyScope::Read, None)
+    let key_b = create_api_key(&mut *conn_b, workspace_b, ApiKeyScope::Read, None)
         .await
         .unwrap();
 
-    let ctx_a = authenticate(&pool, &key_a.plaintext).await.unwrap();
-    let ctx_b = authenticate(&pool, &key_b.plaintext).await.unwrap();
+    let db = test_support::db_handle(&pool);
+    let ctx_a = authenticate(&db, &key_a.plaintext).await.unwrap();
+    let ctx_b = authenticate(&db, &key_b.plaintext).await.unwrap();
 
     assert_eq!(ctx_a.workspace_id, workspace_a);
     assert_eq!(ctx_b.workspace_id, workspace_b);
@@ -123,16 +128,18 @@ fn scope_hierarchy_allows_higher_scopes_to_satisfy_lower_requirements() {
 #[sqlx::test(migrations = "../../migrations")]
 async fn require_scope_rejects_insufficient_scope(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
 
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
-    let ctx = authenticate(&pool, &created.plaintext).await.unwrap();
+    let ctx = authenticate(&test_support::db_handle(&pool), &created.plaintext)
+        .await
+        .unwrap();
 
     let err = require_scope(&ctx, ApiKeyScope::Write).unwrap_err();
     assert!(matches!(err, YorishiroError::ScopeInsufficient { .. }));
@@ -142,12 +149,12 @@ async fn require_scope_rejects_insufficient_scope(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
 
@@ -167,7 +174,12 @@ async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
         .await
         .unwrap();
 
-    let ctx = authenticate(&restricted_pool, &created.plaintext)
+    // The restricted pool plays both roles here: this test's whole point is that `authenticate`'s Postgres arm runs on `yorishiro_app` (via `tenant`), not the migration role, so `identity` is set to the same pool rather than to a genuinely separate one.
+    let restricted_db = DbHandle::Postgres {
+        tenant: TenantDb::new(restricted_pool.clone()),
+        identity: restricted_pool,
+    };
+    let ctx = authenticate(&restricted_db, &created.plaintext)
         .await
         .unwrap();
 
@@ -178,16 +190,17 @@ async fn authenticates_over_a_connection_that_cannot_bypass_rls(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn authorize_returns_a_usable_connection_for_a_sufficient_scope(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Write, None)
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Write, None)
         .await
         .unwrap();
     drop(conn);
 
+    let db = test_support::db_handle(&pool);
     let (ctx, mut conn) = authorize(
         &db,
         &DefaultAuthenticator,
@@ -215,16 +228,17 @@ async fn authorize_returns_a_usable_connection_for_a_sufficient_scope(pool: PgPo
 #[sqlx::test(migrations = "../../migrations")]
 async fn authorize_rejects_insufficient_scope_without_acquiring_a_connection(pool: PgPool) {
     let (tenant_id, workspace_id) = seed_workspace(&pool).await;
-    let db = TenantDb::new(pool.clone());
-    let mut conn = db
+    let tenant_db = TenantDb::new(pool.clone());
+    let mut conn = tenant_db
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
         .unwrap();
-    let created = create_api_key(&mut conn, workspace_id, ApiKeyScope::Read, None)
+    let created = create_api_key(&mut *conn, workspace_id, ApiKeyScope::Read, None)
         .await
         .unwrap();
     drop(conn);
 
+    let db = test_support::db_handle(&pool);
     let err = authorize(
         &db,
         &DefaultAuthenticator,
@@ -240,7 +254,7 @@ async fn authorize_rejects_insufficient_scope_without_acquiring_a_connection(poo
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn authorize_rejects_an_unknown_key(pool: PgPool) {
-    let db = TenantDb::new(pool);
+    let db = test_support::db_handle(&pool);
 
     let err = authorize(
         &db,

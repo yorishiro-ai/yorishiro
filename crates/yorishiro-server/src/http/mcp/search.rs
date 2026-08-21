@@ -58,9 +58,9 @@ impl YorishiroMcpServer {
         );
 
         let workspace_id = ctx.workspace_id;
+        let tenant_db = mcp_try!(self.state.tenant_db());
         let mut conn = mcp_try!(
-            self.state
-                .tenant_db
+            tenant_db
                 .acquire_for_workspace(ctx.tenant_id, workspace_id)
                 .await
                 .map_err(|err| YorishiroError::Internal(err.into()))

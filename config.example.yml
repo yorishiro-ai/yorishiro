@@ -21,12 +21,27 @@
 
 ### Database ###############################################################################
 
-# The one setting with no working default. PostgreSQL 18 or newer, with the `vector` and
-# `pg_trgm` extensions available; the server creates its own schemas and roles on first start
-# and applies migrations on every start.
+# Which engine database_url below names. postgres (the default) needs PostgreSQL 18 or newer,
+# with the `vector` and `pg_trgm` extensions available: both editions run against it identically.
+# sqlite is community-edition only (yorishiro-ce-server); the enterprise binary (yorishiro-server)
+# refuses this setting outright. sqlite is also single-tenant only (max_tenants below must stay
+# unset or 1).
+# sqlite currently covers first-run setup and authentication only; the rest of the REST API, MCP,
+# and the admin CLI are not yet wired to it and fail loudly rather than run against it.
+# postgres remains the engine to deploy on beyond that.
+# An unrecognised value refuses to start rather than falling back to postgres silently.
+#
+#   YORISHIRO_DATABASE_DRIVER
+# database_driver: postgres
+
+# The one setting with no working default. The server creates its own schemas and roles on first
+# start (postgres) or the database file itself (sqlite) and applies migrations on every start.
 #
 # Starting the server without this is not a degraded mode: it prints the path to this file and
 # exits 78 (EX_CONFIG), which the packaged systemd unit treats as "do not retry".
+#
+# On the sqlite engine this is a `sqlite://` path instead, e.g.
+# `database_url: sqlite:///var/lib/yorishiro/yorishiro.db`.
 #
 #   DATABASE_URL
 # database_url: postgres://yorishiro:PASSWORD@localhost:5432/yorishiro
