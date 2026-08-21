@@ -11,6 +11,8 @@ A checkout that skips it fails the `embeds_a_built_spa` test rather than produci
 
 `YORISHIRO_WEB_DIR` overrides the compiled-in copy with a directory on disk, read fresh on every request, for iterating on the UI without rebuilding the binary.
 
+`pnpm run dev` (`rsbuild dev`) proxies every server route to `http://localhost:8080` by default; `YORISHIRO_DEV_API_TARGET` points it at a server running elsewhere.
+
 Pages that need a licence key show the API's own error when it is absent; the UI itself is not gated, since setup, login, member and workspace management are part of the free floor.
 
 **`ee/web` is a pnpm project.** The lockfile is `pnpm-lock.yaml`, and the pnpm version is pinned in `package.json`'s `packageManager` field, which CI and the Docker image both read (via `pnpm/action-setup` and `corepack enable` respectively).

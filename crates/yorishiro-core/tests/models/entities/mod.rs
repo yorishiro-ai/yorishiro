@@ -1354,3 +1354,40 @@ fn unattributed_entities_keep_explicit_nulls_for_their_actor_columns() {
     assert!(json["created_by"].is_null());
     assert!(json["updated_by"].is_null());
 }
+
+/// `migration_dry_run`'s JOIN + GROUP BY is the most complex query this crate builds through sea-query.
+/// This renders the crate's own `migration_dry_run_count_query` (not a hand-copied stand-in, which would keep passing after the production query drifted) on both dialects, to confirm the qualifier and the join itself hold up on Sqlite, not just at the type level (`sqlite_satisfies_the_generic_bounds` proves the bounds compile, not that the SQL is valid).
+mod migration_dry_run_rendering {
+    use crate::models::entities::migration_dry_run_count_query;
+
+    #[test]
+    fn qualifies_on_postgres() {
+        let sql = migration_dry_run_count_query::<sqlx::PgConnection>(
+            uuid::Uuid::nil(),
+            "task-management",
+        )
+        .to_string(sea_query::PostgresQueryBuilder);
+        assert!(
+            sql.contains(r#""content"."entities""#) && sql.contains(r#""content"."schemas""#),
+            "Postgres output must carry the schema qualification: {sql}"
+        );
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn stays_bare_on_sqlite() {
+        let sql = migration_dry_run_count_query::<sqlx::SqliteConnection>(
+            uuid::Uuid::nil(),
+            "task-management",
+        )
+        .to_string(sea_query::SqliteQueryBuilder);
+        assert!(
+            !sql.contains("content"),
+            "the qualifier must be absent: {sql}"
+        );
+        assert!(
+            sql.contains(r#""entities""#) && sql.contains(r#""schemas""#),
+            "the bare table names must still be present: {sql}"
+        );
+    }
+}
