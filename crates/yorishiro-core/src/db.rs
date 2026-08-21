@@ -3,9 +3,6 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-/// The connection a request runs on, already scoped to its tenant and workspace.
-pub type ScopedConnection = sqlx::pool::PoolConnection<sqlx::Postgres>;
-
 /// What a `models/` function needs from its connection to build and run a query without naming an engine.
 ///
 /// Keyed on the connection type rather than `sqlx::Database`, so a call site passing a concrete `&mut PgConnection` (or `&mut *tx` for a `Transaction`) has `C` inferred directly from the argument and never turbofishes.
@@ -77,28 +74,33 @@ impl Engine for sqlx::SqliteConnection {
 /// Such an engine is limited to one tenant per deployment rather than pretending, because a filter written in application code is one a single missed query silently defeats.
 #[async_trait]
 pub trait Storage: Send + Sync {
+    /// The engine this storage runs on, and the connection type `models/` functions bound on `Engine` need.
+    type Db: sqlx::Database<Connection: Engine>;
+
     /// A connection scoped to `tenant_id`/`workspace_id`, such that row-level security (or whatever the engine offers in its place) confines it to that workspace's rows.
     async fn acquire_for_workspace(
         &self,
         tenant_id: Uuid,
         workspace_id: Uuid,
-    ) -> Result<ScopedConnection, sqlx::Error>;
+    ) -> Result<sqlx::pool::PoolConnection<Self::Db>, sqlx::Error>;
 
     /// The underlying pool, for the control-plane paths that connect as the migration role and so must not be scoped: signup, setup, the admin CLI.
-    fn pool(&self) -> &PgPool;
+    fn pool(&self) -> &sqlx::Pool<Self::Db>;
 }
 
 #[async_trait]
 impl Storage for TenantDb {
+    type Db = sqlx::Postgres;
+
     async fn acquire_for_workspace(
         &self,
         tenant_id: Uuid,
         workspace_id: Uuid,
-    ) -> Result<ScopedConnection, sqlx::Error> {
+    ) -> Result<sqlx::pool::PoolConnection<Self::Db>, sqlx::Error> {
         TenantDb::acquire_for_workspace(self, tenant_id, workspace_id).await
     }
 
-    fn pool(&self) -> &PgPool {
+    fn pool(&self) -> &sqlx::Pool<Self::Db> {
         TenantDb::pool(self)
     }
 }

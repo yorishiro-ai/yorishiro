@@ -97,8 +97,12 @@ async fn rls_blocks_cross_workspace_schema_access_under_restricted_role(pool: Pg
 }
 
 /// The seam is only a seam if a caller can hold it without naming the implementation.
-/// This takes `&dyn Storage`, so it compiles against the trait alone: an engine added later satisfies the same signature without touching this function.
-async fn count_through_the_seam(storage: &dyn Storage, tenant_id: Uuid, workspace_id: Uuid) -> i64 {
+/// This takes `&dyn Storage<Db = sqlx::Postgres>`, so it compiles against the trait alone: another `TenantDb`-shaped Postgres implementation satisfies the same signature without touching this function.
+async fn count_through_the_seam(
+    storage: &dyn Storage<Db = sqlx::Postgres>,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> i64 {
     let mut conn = storage
         .acquire_for_workspace(tenant_id, workspace_id)
         .await
@@ -135,7 +139,7 @@ async fn the_storage_trait_scopes_a_connection_like_the_concrete_type(pool: PgPo
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_storage_trait_exposes_the_unscoped_pool_for_the_control_plane(pool: PgPool) {
     let db = TenantDb::new(pool);
-    let storage: &dyn Storage = &db;
+    let storage: &dyn Storage<Db = sqlx::Postgres> = &db;
 
     // The control-plane paths need a pool that is not workspace-scoped; the trait has to keep offering one or signup and setup have nowhere to run.
     let (one,): (i32,) = sqlx::query_as("SELECT 1")
