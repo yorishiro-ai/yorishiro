@@ -46,6 +46,7 @@ pub struct SetupStatusResponse {
 #[utoipa::path(
     get,
     path = "/setup/status",
+    operation_id = "setup_status",
     responses(
         (status = 200, description = "Whether first-run setup should be shown", body = SetupStatusResponse),
     ),
