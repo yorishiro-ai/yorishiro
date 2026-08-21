@@ -25,6 +25,9 @@ lockfileは`pnpm-lock.yaml`で、pnpmのバージョンは`package.json`の`pack
 `pnpm install`を使ってください。
 `pnpm run check`はCIと同じlint/format/typecheck/buildの一連を実行します。
 
+ビルドは全てのコンポーネントをReact Compiler(`rsbuild.config.ts`の`reactCompiler: true`)に通しており、メモ化は自動で行われます。
+これだけを目的にした`useMemo`/`useCallback`は新規コードで不要です。
+
 `src/types/generated-api.ts`は`pnpm run gen:api-types`でサーバ自身のOpenAPIドキュメントから生成されます(`API_SPEC_URL`でデフォルトを上書きできます、デフォルトは`YORISHIRO_BIND`の既定ポートで動くサーバを指します)。
 `src/types/api.ts`の手書き型は、既に生成済みの型がある場合そこから再エクスポートし、二重に書き写しません。
 生成ツール自体は実行時にTypeScript 5系のコンパイラAPIを歩くため、このプロジェクト自身のTypeScript 7では動きません。
