@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sea_query::{Asterisk, Expr, Func, Iden, Order, Query};
+use sea_query::{Asterisk, Expr, Func, Iden, IntoIden, Order, Query};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -181,22 +181,27 @@ where
         input.properties
     };
 
-    let (sql, values) = Query::insert()
-        .into_table(C::schema_table("content", Relations::Table))
-        .columns([
-            Relations::WorkspaceId,
-            Relations::SourceId,
-            Relations::TargetId,
-            Relations::RelationType,
-            Relations::Properties,
-        ])
-        .values_panic([
+    let (cols, vals) = crate::db::with_generated_id::<C, _>(
+        Relations::Id,
+        vec![
+            Relations::WorkspaceId.into_iden(),
+            Relations::SourceId.into_iden(),
+            Relations::TargetId.into_iden(),
+            Relations::RelationType.into_iden(),
+            Relations::Properties.into_iden(),
+        ],
+        vec![
             workspace_id.into(),
             input.source_id.into(),
             input.target_id.into(),
             input.relation_type.clone().into(),
             properties.into(),
-        ])
+        ],
+    );
+    let (sql, values) = Query::insert()
+        .into_table(C::schema_table("content", Relations::Table))
+        .columns(cols)
+        .values_panic(vals)
         .returning(Query::returning().columns(relation_columns()))
         .build_sqlx(C::builder());
 

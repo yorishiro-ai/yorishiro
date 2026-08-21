@@ -1,4 +1,4 @@
-use sea_query::{Alias, Expr, Iden, OnConflict, Order, PostgresQueryBuilder, Query};
+use sea_query::{Alias, Expr, Iden, IntoIden, OnConflict, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -11,6 +11,7 @@ use crate::models::tenancy::{MembershipRecord, MembershipRole};
 #[derive(Iden)]
 pub(super) enum TenantMemberships {
     Table,
+    Id,
     TenantId,
     UserId,
     Role,
@@ -35,14 +36,19 @@ where
 {
     get_tenant(&mut *conn, tenant_id).await?;
 
+    let (cols, vals) = crate::db::with_generated_id::<C, _>(
+        TenantMemberships::Id,
+        vec![
+            TenantMemberships::TenantId.into_iden(),
+            TenantMemberships::UserId.into_iden(),
+            TenantMemberships::Role.into_iden(),
+        ],
+        vec![tenant_id.into(), user_id.into(), role.as_db_str().into()],
+    );
     let (sql, values) = Query::insert()
         .into_table(C::schema_table("identity", TenantMemberships::Table))
-        .columns([
-            TenantMemberships::TenantId,
-            TenantMemberships::UserId,
-            TenantMemberships::Role,
-        ])
-        .values_panic([tenant_id.into(), user_id.into(), role.as_db_str().into()])
+        .columns(cols)
+        .values_panic(vals)
         .on_conflict(
             OnConflict::columns([TenantMemberships::TenantId, TenantMemberships::UserId])
                 .update_column(TenantMemberships::Role)

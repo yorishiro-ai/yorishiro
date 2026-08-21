@@ -3,7 +3,7 @@
 //! The one place this crate makes an outbound LLM call.
 //! Everything else that reaches a model goes through [`crate::services::embedding`], which produces vectors rather than text.
 //!
-//! The credentials belong to a workspace, not to the deployment: this product does not pay for inference (requirements §1.3), so a workspace that wants inferred values brings its own key.
+//! The credentials belong to a workspace, not to the deployment: this product does not pay for inference, so a workspace that wants inferred values brings its own key.
 //! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back to `default` values: a caller who asked for inference and received defaults would have no way to tell that nothing was inferred.
 
 use std::time::Duration;

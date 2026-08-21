@@ -223,8 +223,8 @@ async fn search_tokens_are_charged_per_workspace_and_run_out(pool: PgPool) {
     use yorishiro_core::models::tenancy;
 
     // Real workspaces, so the ids are the `DEFAULT uuidv7()` ones the database issues.
-    // Nothing in this process mints an id (see the technical spec: "アプリ側でのID生成はしない"),
-    // so a test that minted its own would be keying the limiter on a shape production never sees.
+    // Nothing in this process mints an id, so a test that minted its own would be keying the
+    // limiter on a shape production never sees.
     let tenant = tenancy::create_tenant(&pool, "budget", None).await.unwrap();
     let workspace = tenancy::create_workspace(&pool, tenant.id, "main", None, None, None)
         .await
