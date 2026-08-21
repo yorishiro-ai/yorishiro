@@ -119,12 +119,14 @@ jobs:
       - name: Test
         run: cargo test --all
 
-      # Proves the generic bounds in yorishiro-core's models/ are satisfiable by Sqlite, and that the
-      # rendered SQL itself is dialect-correct (no `content`/`identity` qualifier, valid Sqlite syntax).
-      # No test behind this feature touches a database, so this needs no DATABASE_URL, just the crate
-      # compiled with `sqlite` on; `stays_bare` matches every dialect-rendering test's Sqlite half.
+      # Proves the generic bounds in yorishiro-core's models/ are satisfiable by Sqlite, that the
+      # rendered SQL is dialect-correct (no `content`/`identity` qualifier, valid Sqlite syntax),
+      # and (sqlite_execution) that PR #213's four rewritten entities:: functions actually execute
+      # and behave correctly against a real in-memory Sqlite database. That last group opens its
+      # own `sqlite::memory:` connection per test, so this still needs no DATABASE_URL; `stays_bare`
+      # matches every dialect-rendering test's Sqlite half.
       - name: Sqlite bounds check
-        run: cargo test -p yorishiro-core --features sqlite -- sqlite_satisfies_the_generic_bounds stays_bare
+        run: cargo test -p yorishiro-core --features sqlite -- sqlite_satisfies_the_generic_bounds stays_bare sqlite_execution
 
       # The community package exists so a deployment can hold no proprietary code at all. That
       # is a property of the shipped artifact, not of the dependency graph, so it is checked on

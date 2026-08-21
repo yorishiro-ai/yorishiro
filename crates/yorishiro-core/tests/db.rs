@@ -377,3 +377,417 @@ fn schema_table_stays_bare_on_sqlite() {
         "the bare table name must still be present: {sqlite_sql}"
     );
 }
+
+/// Runs PR #213's four rewritten functions against a real Sqlite database, not just the type-level
+/// bounds `sqlite_satisfies_the_generic_bounds` proves or the rendered-SQL strings
+/// `migration_dry_run_rendering` checks.
+///
+/// There is no Sqlite migration set yet (that is item 4's actual driver work, not this
+/// verification), so the DDL here is test-local: bare `schemas`/`entities`/`entity_snapshots`
+/// tables carrying exactly the columns these functions' SELECTs and INSERTs name, no `content.`
+/// prefix (Sqlite has no schema concept for a single-file database, matching `schema_table_stays_bare_on_sqlite`
+/// above).
+///
+/// Fixture choices worth recording as open item-4 questions rather than settled here, each
+/// discovered by actually running these functions rather than assumed up front:
+/// - IDs are seeded as explicit `Uuid`s because Sqlite has no `uuidv7()`. This doesn't reopen
+///   「アプリ側でIDを採番しない」, which governs production write paths; how a real Sqlite driver
+///   gets IDs is exactly the kind of thing item 4 has to decide, not something this test can settle.
+///   `snapshot()`'s own INSERT..SELECT never names `entity_snapshots.id` either (mirroring
+///   Postgres's `DEFAULT uuidv7()`), so the fixture table needs its own default; `randomblob(16)`
+///   is not a real UUID, but PK uniqueness is all this test needs from it.
+/// - `sqlx-sqlite` encodes `Uuid` as 16 raw BLOB bytes, not the hyphenated string form, so every
+///   Uuid column here is `BLOB` and every fixture insert binds the `Uuid` value directly rather
+///   than `.to_string()`ing it: binding the string form silently produces zero query matches
+///   instead of a decode error, since Sqlite's dynamic typing accepts either into a `BLOB` column
+///   without complaint.
+/// - `created_at` uses `strftime('%Y-%m-%dT%H:%M:%fZ','now')` for millisecond precision rather than
+///   Sqlite's default `CURRENT_TIMESTAMP` (second granularity). Millisecond precision is still not
+///   enough to guarantee two `snapshot()` calls a few lines apart land in different ticks, so
+///   `snapshots_for_job`'s `ORDER BY created_at DESC` (no tiebreaker column) is asserted as a set
+///   below, not by position: which of two same-millisecond snapshots sorts first is genuinely
+///   unspecified today, an actual constraint for item 4's real driver, not a fixture timing bug.
+///   `undo_job`'s own `ORDER BY created_at ASC` shares the same gap (only untested here because
+///   each entity below has exactly one snapshot, so replay order can't change the outcome).
+#[cfg(feature = "sqlite")]
+mod sqlite_execution {
+    use serde_json::json;
+    use sqlx::{Connection, SqliteConnection};
+    use uuid::Uuid;
+
+    use crate::YorishiroError;
+    use crate::models::entities;
+
+    async fn seeded_db() -> SqliteConnection {
+        let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+
+        // Uuid columns are BLOB, matching sqlx-sqlite's own Encode<Sqlite> for Uuid (16 raw bytes,
+        // not the hyphenated string form): the discovery this test exists to make is exactly that
+        // mismatch, so the fixture has to bind the same way the product code's queries do.
+        sqlx::query(
+            "CREATE TABLE schemas ( \
+                 id BLOB PRIMARY KEY, \
+                 tenant_id BLOB NOT NULL, \
+                 workspace_id BLOB NOT NULL, \
+                 name TEXT NOT NULL, \
+                 version INTEGER NOT NULL, \
+                 definition TEXT NOT NULL, \
+                 status TEXT NOT NULL, \
+                 origin_template_id BLOB, \
+                 origin_status TEXT NOT NULL, \
+                 origin_snapshot TEXT, \
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
+             )",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE entities ( \
+                 id BLOB PRIMARY KEY, \
+                 workspace_id BLOB NOT NULL, \
+                 schema_id BLOB NOT NULL, \
+                 schema_version INTEGER NOT NULL, \
+                 entity_type TEXT NOT NULL, \
+                 data TEXT NOT NULL, \
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), \
+                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), \
+                 created_by BLOB, \
+                 updated_by BLOB \
+             )",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        // `snapshot()` never names `id` in its INSERT..SELECT (matching Postgres's own
+        // `DEFAULT uuidv7()`, which this crate's app code never assigns around, see
+        // 「アプリ側でIDを採番しない」), so the fixture needs its own default here. `randomblob(16)`
+        // is not a real UUID, but PK uniqueness is all this test needs from it; a real Sqlite
+        // driver's actual ID strategy is an open item-4 question, not something this test settles.
+        sqlx::query(
+            "CREATE TABLE entity_snapshots ( \
+                 id BLOB PRIMARY KEY DEFAULT (randomblob(16)), \
+                 job_id BLOB NOT NULL, \
+                 workspace_id BLOB NOT NULL, \
+                 entity_id BLOB NOT NULL, \
+                 schema_id BLOB NOT NULL, \
+                 schema_version INTEGER NOT NULL, \
+                 data TEXT NOT NULL, \
+                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
+             )",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        conn
+    }
+
+    async fn insert_schema(
+        conn: &mut SqliteConnection,
+        id: Uuid,
+        workspace_id: Uuid,
+        name: &str,
+        version: i32,
+        definition: &serde_json::Value,
+        status: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO schemas \
+                 (id, tenant_id, workspace_id, name, version, definition, status, origin_status) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'none')",
+        )
+        .bind(id)
+        .bind(Uuid::nil())
+        .bind(workspace_id)
+        .bind(name)
+        .bind(version)
+        .bind(definition.to_string())
+        .bind(status)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_entity(
+        conn: &mut SqliteConnection,
+        id: Uuid,
+        workspace_id: Uuid,
+        schema_id: Uuid,
+        schema_version: i32,
+        entity_type: &str,
+        data: &serde_json::Value,
+    ) {
+        sqlx::query(
+            "INSERT INTO entities \
+                 (id, workspace_id, schema_id, schema_version, entity_type, data) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(workspace_id)
+        .bind(schema_id)
+        .bind(schema_version)
+        .bind(entity_type)
+        .bind(data.to_string())
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    }
+
+    fn v1_definition() -> serde_json::Value {
+        json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "title": { "type": "string", "required": true }
+                    }
+                }
+            }
+        })
+    }
+
+    /// `priority` already exists here, so an entity on this version that supplies it is
+    /// behind but valid once v3 makes the field required, unlike one still on v1.
+    fn v2_definition() -> serde_json::Value {
+        json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "title": { "type": "string", "required": true },
+                        "priority": { "type": "integer", "required": false }
+                    }
+                }
+            }
+        })
+    }
+
+    fn v3_definition() -> serde_json::Value {
+        json!({
+            "name": "task-management",
+            "entity_types": {
+                "task": {
+                    "fields": {
+                        "title": { "type": "string", "required": true },
+                        "priority": { "type": "integer", "required": true }
+                    }
+                }
+            }
+        })
+    }
+
+    /// The four functions PR #213 rewrote, exercised end to end against a real Sqlite database:
+    /// seed a schema at two versions plus entities under each, run `migration_dry_run`, `snapshot`,
+    /// `snapshots_for_job` and `undo_job` in sequence, and check each one's actual effect rather
+    /// than only that it returns `Ok`.
+    #[tokio::test]
+    async fn the_four_rewritten_functions_execute_and_behave_on_sqlite() {
+        let mut conn = seeded_db().await;
+
+        let workspace_id = Uuid::new_v4();
+        let schema_v1 = Uuid::new_v4();
+        let schema_v2 = Uuid::new_v4();
+        let schema_v3 = Uuid::new_v4();
+        insert_schema(
+            &mut conn,
+            schema_v1,
+            workspace_id,
+            "task-management",
+            1,
+            &v1_definition(),
+            "archived",
+        )
+        .await;
+        insert_schema(
+            &mut conn,
+            schema_v2,
+            workspace_id,
+            "task-management",
+            2,
+            &v2_definition(),
+            "archived",
+        )
+        .await;
+        insert_schema(
+            &mut conn,
+            schema_v3,
+            workspace_id,
+            "task-management",
+            3,
+            &v3_definition(),
+            "active",
+        )
+        .await;
+
+        // One entity on v1 (missing `priority`, which v1 never declared: needs a value filled in),
+        // one on v2 (already supplies `priority`, which v2 already declared as optional: behind but
+        // valid), one already on v3, the active version.
+        let old_missing = Uuid::new_v4();
+        let old_valid = Uuid::new_v4();
+        let current = Uuid::new_v4();
+        insert_entity(
+            &mut conn,
+            old_missing,
+            workspace_id,
+            schema_v1,
+            1,
+            "task",
+            &json!({ "title": "no priority yet" }),
+        )
+        .await;
+        insert_entity(
+            &mut conn,
+            old_valid,
+            workspace_id,
+            schema_v2,
+            2,
+            "task",
+            &json!({ "title": "already has one", "priority": 3 }),
+        )
+        .await;
+        insert_entity(
+            &mut conn,
+            current,
+            workspace_id,
+            schema_v3,
+            3,
+            "task",
+            &json!({ "title": "already current", "priority": 1 }),
+        )
+        .await;
+
+        // migration_dry_run: the JOIN + GROUP BY query, on Sqlite.
+        let dry_run = entities::migration_dry_run(&mut conn, workspace_id, "task-management")
+            .await
+            .unwrap();
+        assert_eq!(dry_run.total_entities, 3);
+        assert_eq!(dry_run.current, 1);
+        assert_eq!(dry_run.behind_but_valid, 1);
+        assert_eq!(dry_run.needs_values, 1);
+        assert_eq!(dry_run.by_entity_type.len(), 1);
+        assert_eq!(
+            dry_run.by_entity_type[0].missing_required,
+            vec!["priority".to_string()]
+        );
+
+        // snapshot: the atomic INSERT..SELECT, on the two old-version entities, under one job.
+        let job_id = Uuid::new_v4();
+        entities::snapshot(&mut conn, workspace_id, old_missing, job_id)
+            .await
+            .unwrap();
+        entities::snapshot(&mut conn, workspace_id, old_valid, job_id)
+            .await
+            .unwrap();
+
+        // snapshot on a nonexistent entity is NotFound, not a silent no-op insert.
+        let missing_err = entities::snapshot(&mut conn, workspace_id, Uuid::new_v4(), job_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(missing_err, YorishiroError::NotFound { .. }));
+
+        // snapshots_for_job: both rows come back. Order is asserted as a set, not by position:
+        // `ORDER BY created_at DESC` has no tiebreaker, and Sqlite's `strftime('%f')` is
+        // millisecond-precision, which two `snapshot()` calls from the same test can land in
+        // within, making DESC ordering between them genuinely unspecified rather than a fixture
+        // timing problem to paper over. This is an actual constraint for item 4's real driver to
+        // decide (a tiebreaker column, or accepting the ambiguity), recorded in the migration
+        // spec rather than solved here.
+        let snapshots = entities::snapshots_for_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        let snapshot_entity_ids: std::collections::HashSet<_> =
+            snapshots.iter().map(|s| s.entity_id).collect();
+        assert_eq!(
+            snapshot_entity_ids,
+            [old_missing, old_valid].into_iter().collect()
+        );
+
+        // Mutate the entity, as a migration filling in defaults would, so undo_job has something
+        // to actually revert rather than restoring what was already there.
+        sqlx::query("UPDATE entities SET data = ? WHERE id = ?")
+            .bind(json!({ "title": "overwritten" }).to_string())
+            .bind(old_missing)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        // undo_job: restores both entities' original data, deletes the snapshots, and a second
+        // undo of the same job is NotFound rather than a silent zero-effect success.
+        let report = entities::undo_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap();
+        assert_eq!(report.restored, 2);
+        assert_eq!(report.missing, 0);
+
+        let restored = entities::get(&mut conn, workspace_id, old_missing)
+            .await
+            .unwrap();
+        assert_eq!(restored.data["title"], "no priority yet");
+
+        let remaining_snapshots: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM entity_snapshots WHERE job_id = ?")
+                .bind(job_id)
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(remaining_snapshots.0, 0);
+
+        let second_undo = entities::undo_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(second_undo, YorishiroError::NotFound { .. }));
+    }
+
+    /// `undo_job` counts an entity deleted since its snapshot rather than failing the whole batch.
+    #[tokio::test]
+    async fn undo_job_counts_a_deleted_entity_as_missing_on_sqlite() {
+        let mut conn = seeded_db().await;
+
+        let workspace_id = Uuid::new_v4();
+        let schema_id = Uuid::new_v4();
+        insert_schema(
+            &mut conn,
+            schema_id,
+            workspace_id,
+            "task-management",
+            1,
+            &v1_definition(),
+            "active",
+        )
+        .await;
+
+        let entity_id = Uuid::new_v4();
+        insert_entity(
+            &mut conn,
+            entity_id,
+            workspace_id,
+            schema_id,
+            1,
+            "task",
+            &json!({ "title": "will be deleted" }),
+        )
+        .await;
+
+        let job_id = Uuid::new_v4();
+        entities::snapshot(&mut conn, workspace_id, entity_id, job_id)
+            .await
+            .unwrap();
+
+        sqlx::query("DELETE FROM entities WHERE id = ?")
+            .bind(entity_id)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let report = entities::undo_job(&mut conn, workspace_id, job_id)
+            .await
+            .unwrap();
+        assert_eq!(report.restored, 0);
+        assert_eq!(report.missing, 1);
+    }
+}
