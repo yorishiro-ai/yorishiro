@@ -455,6 +455,73 @@ pub fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|s| !s.is_empty())
 }
 
+/// Which engine `YORISHIRO_DATABASE_DRIVER` selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseDriver {
+    Postgres,
+    Sqlite,
+}
+
+/// `YORISHIRO_DATABASE_DRIVER`, defaulting to [`DatabaseDriver::Postgres`] when unset.
+///
+/// Unlike [`database_url_from_env`], an explicitly-set-but-unrecognized value is a config error rather than falling back silently: a typo'd driver name (`sqllite`, `postgresql`) must not quietly boot against Postgres and mask the mistake.
+pub fn database_driver_from_env() -> Result<DatabaseDriver> {
+    match non_empty_env("YORISHIRO_DATABASE_DRIVER").as_deref() {
+        None => Ok(DatabaseDriver::Postgres),
+        Some("postgres") => Ok(DatabaseDriver::Postgres),
+        Some("sqlite") => Ok(DatabaseDriver::Sqlite),
+        Some(other) => Err(anyhow::anyhow!(
+            "YORISHIRO_DATABASE_DRIVER is '{other}', but only 'postgres' and 'sqlite' are \
+             recognized; unset the variable for the default (postgres), or correct the value"
+        )),
+    }
+}
+
+/// Connects, migrates, and enforces the engine's own guards, producing the [`yorishiro_core::db::DbHandle`] every other startup step builds on.
+///
+/// Postgres: `identity_pool` connects with the migration role (the same one `admin` and the control-plane endpoints need), `tenant_db` is the RLS-scoped pool `AppState` hands out to request handlers, and both wrap the one `database_url`.
+/// Sqlite: single-tenant only, since there is no RLS to isolate a second one by.
+/// [`yorishiro_core::models::tenancy::max_tenants_for_sqlite`] validates `YORISHIRO_MAX_TENANTS` itself (unset or `1`, anything else is a config error caught before a connection is even opened), and [`yorishiro_core::models::tenancy::refuse_if_multiple_tenants_exist`] catches the case a config check cannot: a `.db` file carrying more than one tenant already, from an import or a driver switch after data existed.
+/// Both refusals are config errors ([`EXIT_CONFIG`]/`sysexits.h`'s `EX_CONFIG`), not merely failures a restart would retry past: the deployment shape itself is wrong, not the moment it was checked.
+pub async fn connect_database(
+    driver: DatabaseDriver,
+    database_url: &str,
+    max_connections: u32,
+) -> Result<yorishiro_core::db::DbHandle> {
+    use yorishiro_core::db::{DbHandle, SqliteDb, TenantDb};
+    use yorishiro_core::models::tenancy::{
+        max_tenants_for_sqlite, refuse_if_multiple_tenants_exist,
+    };
+
+    match driver {
+        DatabaseDriver::Postgres => {
+            let identity_pool = sqlx::PgPool::connect(database_url).await?;
+            sqlx::migrate!("./migrations").run(&identity_pool).await?;
+            let tenant_db = TenantDb::connect(database_url, max_connections).await?;
+            Ok(DbHandle::Postgres {
+                tenant: tenant_db,
+                identity: identity_pool,
+            })
+        }
+        DatabaseDriver::Sqlite => {
+            // Validated before a connection is opened at all: a misconfigured cap is a config
+            // error regardless of what the file on disk already holds.
+            max_tenants_for_sqlite(non_empty_env("YORISHIRO_MAX_TENANTS").as_deref())?;
+
+            let sqlite_db = SqliteDb::connect(database_url, max_connections).await?;
+            sqlx::migrate!("../../migrations_sqlite")
+                .run(sqlite_db.pool())
+                .await?;
+
+            let mut conn = sqlite_db.pool().acquire().await?;
+            refuse_if_multiple_tenants_exist(&mut *conn).await?;
+            drop(conn);
+
+            Ok(DbHandle::Sqlite(sqlite_db))
+        }
+    }
+}
+
 /// The default bind address when `YORISHIRO_BIND` is unset or empty.
 pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
 

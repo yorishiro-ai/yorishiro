@@ -13,11 +13,11 @@
 use anyhow::Result;
 use axum::http::StatusCode;
 use clap::Parser;
-use yorishiro_core::db::TenantDb;
+use yorishiro_core::db::DbHandle;
 use yorishiro_server::admin::{self, AdminCommand};
 use yorishiro_server::{
-    AppState, bind_addr_from_env, build_app, build_embedding_provider, database_url_from_env,
-    shutdown_signal,
+    AppState, bind_addr_from_env, build_app, build_embedding_provider, connect_database,
+    database_driver_from_env, database_url_from_env, shutdown_signal,
 };
 
 /// The Yorishiro server, community edition.
@@ -69,31 +69,49 @@ fn main() -> Result<()> {
 
 async fn run(cli: Cli) -> Result<()> {
     // Not `?`: see the paid binary.
-    // An absent DATABASE_URL exits 78 so the unit stops instead of retrying forever; a database that is merely not up yet still exits 1 and is retried.
+    // An absent DATABASE_URL, or an unrecognized YORISHIRO_DATABASE_DRIVER, exits 78 so the unit
+    // stops instead of retrying forever; a database that is merely not up yet still exits 1 and
+    // is retried.
+    let driver = database_driver_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
     let database_url =
         database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
-    let identity_pool = sqlx::PgPool::connect(&database_url).await?;
-    sqlx::migrate!("./migrations").run(&identity_pool).await?;
+    let db = connect_database(driver, &database_url, 20)
+        .await
+        .unwrap_or_else(yorishiro_server::exit_with_config_code);
 
     if let Some(Command::Admin { command }) = cli.command {
-        return admin::run_with_pool(&identity_pool, command).await;
+        let DbHandle::Postgres { identity, .. } = &db else {
+            anyhow::bail!(
+                "admin commands are not available on the Sqlite engine yet; switch \
+                 YORISHIRO_DATABASE_DRIVER to postgres to run them"
+            );
+        };
+        return admin::run_with_pool(identity, command).await;
     }
 
     let _log_guard = yorishiro_server::logging::init()?;
-    tracing::info!("database connected and migrations applied");
+    tracing::info!(?driver, "database connected and migrations applied");
 
     let bind_addr = bind_addr_from_env();
-    let tenant_db = TenantDb::connect(&database_url, 20).await?;
     let embedding_provider = build_embedding_provider()?;
-    let guard_pool = identity_pool.clone();
-    let state = AppState::new(tenant_db, identity_pool, embedding_provider);
+    // A load guard needs its own pool independent of the state it will later throttle: on
+    // Postgres this is `identity`'s pool, on Sqlite there is only ever the one pool.
+    let guard_pool = match &db {
+        DbHandle::Postgres { identity, .. } => Some(identity.clone()),
+        DbHandle::Sqlite(_) => None,
+    };
+    let state = AppState::from_handle(db, embedding_provider);
     let embedding_tasks = state.embedding_tasks().clone();
 
     let app = build_app(state, no_web_ui());
 
-    // Off unless `YORISHIRO_DB_LOAD_THRESHOLD` is set.
-    // A spawned task rather than a router layer, so `build_app` does not bring it along and the binary has to start it.
-    if let Some(guard) = yorishiro_core::services::db_load_guard::LoadGuardConfig::from_env() {
+    // Off unless `YORISHIRO_DB_LOAD_THRESHOLD` is set, and Postgres-only: the guard's own
+    // queries (`pg_stat_activity`) have no Sqlite equivalent, and a single-tenant embedded
+    // deployment has no concurrent-connection load to shed in the first place.
+    if let (Some(guard_pool), Some(guard)) = (
+        guard_pool,
+        yorishiro_core::services::db_load_guard::LoadGuardConfig::from_env(),
+    ) {
         tracing::info!(
             threshold = guard.threshold,
             "db load guard enabled: read-only above this many active connections"

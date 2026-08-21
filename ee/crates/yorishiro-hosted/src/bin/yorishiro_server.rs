@@ -12,7 +12,7 @@ use yorishiro_server::admin::{self, AdminCommand};
 use yorishiro_server::http::middleware::rate_limit::{RateLimiter, apply_rate_limit_layer};
 use yorishiro_server::{
     AppState, apply_body_limit_layer, apply_observability_layers, build_app_with_rate_limiter,
-    build_embedding_provider, database_url_from_env, shutdown_signal,
+    build_embedding_provider, database_driver_from_env, database_url_from_env, shutdown_signal,
 };
 
 /// The Yorishiro server, enterprise edition.
@@ -86,8 +86,24 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    // Not `?`: an absent DATABASE_URL exits 78 so the unit's `RestartPreventExitStatus=78` stops rather than retrying every five seconds forever.
-    // Everything below keeps exiting 1, which is what `Restart=on-failure` is for: a database still starting is worth waiting for, and missing configuration is not.
+    // Not `?`: an absent DATABASE_URL, or a driver this edition cannot run on, exits 78 so the
+    // unit's `RestartPreventExitStatus=78` stops rather than retrying every five seconds forever.
+    // Everything below keeps exiting 1, which is what `Restart=on-failure` is for: a database
+    // still starting is worth waiting for, and missing configuration is not.
+    //
+    // This edition is Postgres-only: billing, OAuth and tenant-scoped keys are all
+    // Postgres-concrete, and a self-hosted single-tenant Sqlite deployment has no LLM-key,
+    // billing, or marketplace story to begin with.
+    // A deployment wanting Sqlite runs the community binary instead.
+    if database_driver_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code)
+        != yorishiro_server::DatabaseDriver::Postgres
+    {
+        yorishiro_server::exit_with_config_code::<()>(anyhow::anyhow!(
+            "YORISHIRO_DATABASE_DRIVER=sqlite is not supported by this edition; run the \
+             community binary (yorishiro-ce-server) for a Sqlite deployment, or unset the \
+             variable for Postgres"
+        ));
+    }
     let database_url =
         database_url_from_env().unwrap_or_else(yorishiro_server::exit_with_config_code);
     let identity_pool = sqlx::PgPool::connect(&database_url).await?;

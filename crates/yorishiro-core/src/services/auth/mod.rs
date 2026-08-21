@@ -20,6 +20,7 @@ pub enum ApiKeys {
     Table,
     Id,
     WorkspaceId,
+    TenantId,
     KeyHash,
     KeyPrefix,
     Scope,

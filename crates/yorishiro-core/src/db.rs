@@ -235,9 +235,13 @@ impl SqliteDb {
 
     /// Builds the production pool.
     /// Foreign keys are off by default per connection in Sqlite, unlike Postgres where they cannot be, so this crate's migrations and every write depend on this hook running before any query does.
+    /// `create_if_missing(true)`: a first boot names a `.db` file that does not exist yet, the same way a first boot against Postgres names a database the migration role can already reach, and refusing to create the file would make every Sqlite deployment's first run a manual step this crate never asks of a Postgres one.
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, sqlx::Error> {
-        use sqlx::sqlite::SqlitePoolOptions;
+        use std::str::FromStr;
 
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(max_connections)
             .after_connect(|conn, _meta| {
@@ -248,7 +252,7 @@ impl SqliteDb {
                     Ok(())
                 })
             })
-            .connect(database_url)
+            .connect_with(options)
             .await?;
         Ok(Self { pool })
     }
