@@ -14,6 +14,17 @@
   Any sentence of the form "it does not depend on X" is the wrong test.
 - Unclear cases are a question for the user, asked as the classification itself rather than buried in the options of an implementation question.
 
+## No internal-planning references in this repository
+
+- This repository's source, comments, error messages, PR bodies and commit messages describe only what is true of this repository.
+  They never name, quote or point at an internal planning document, its section or step numbers, or its version, whatever form that takes: a design memo, a requirements document, an issue tracker in another repository, or a phrase like "the command post" or "the spec" used to mean one of those.
+  A reader of this repository has no way to open that document, so a reference to it explains nothing and leaks a detail about how the work is managed rather than about the code.
+- State the constraint itself, in this repository's own words, instead of pointing at where it came from.
+  "The Sqlite engine allows only one tenant, since it has no database-enforced isolation to protect" is correct; "see design memo §8" is not, even if both sentences sit next to the same code.
+- This also covers Japanese prose outside `docs/ja`, `ee/docs/ja` and a docs-focused PR quoting from one of those files by name.
+  Everything else in this repository, including PR bodies and commit messages, is English.
+- A public standard is not an internal document: a section reference into an RFC or a similarly public specification (`RFC 6749 §4.1.3`, `OpenID Connect Core §3.1.3.7`) is fine, since any reader can open it.
+
 ## Error handling
 
 - Use `yorishiro_core::ResultExt` (`.internal()`) for any fallible call that produces a non-`YorishiroError` error.
