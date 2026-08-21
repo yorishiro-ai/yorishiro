@@ -22,9 +22,13 @@
 ### Database ###############################################################################
 
 # Which engine database_url below names. postgres (the default) needs PostgreSQL 18 or newer,
-# with the `vector` and `pg_trgm` extensions available. sqlite is single-tenant only (max_tenants
-# below must stay unset or 1) and is refused outright by the enterprise binary; run the community
-# one (yorishiro-ce-server) for a Sqlite deployment.
+# with the `vector` and `pg_trgm` extensions available: both editions run against it identically.
+# sqlite is community-edition only (yorishiro-ce-server); the enterprise binary (yorishiro-server)
+# refuses this setting outright. sqlite is also single-tenant only (max_tenants below must stay
+# unset or 1).
+# sqlite currently covers first-run setup and authentication only; the rest of the REST API, MCP,
+# and the admin CLI are not yet wired to it and fail loudly rather than run against it.
+# postgres remains the engine to deploy on beyond that.
 # An unrecognised value refuses to start rather than falling back to postgres silently.
 #
 #   YORISHIRO_DATABASE_DRIVER
