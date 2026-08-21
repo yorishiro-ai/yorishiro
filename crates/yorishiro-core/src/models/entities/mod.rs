@@ -784,7 +784,15 @@ where
     for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
 {
     // One statement: reading then writing would leave a window in which a concurrent update slips between, and the image would be of a state that no longer existed when it was taken.
-    let select = Query::select()
+    // Read once: `C::generated_id()` calls `Uuid::now_v7()` on Sqlite, so calling it twice would mint two different ids for what must be one row.
+    let generated_id = C::generated_id();
+
+    // No `.columns(...)` before `.select_from(...)`'s own select: an `INSERT ... SELECT`'s columns come from the select's projection order, not a separate `.columns()` call, so the generated id (when the engine has one) has to be an extra leading expression in that projection, mirroring how `job_id` is already prepended above.
+    let mut select = Query::select().to_owned();
+    if let Some(id) = generated_id {
+        select.expr(Expr::val(id));
+    }
+    select
         .expr(Expr::val(job_id))
         .columns([
             Entities::WorkspaceId,
@@ -795,19 +803,23 @@ where
         ])
         .from(C::schema_table("content", Entities::Table))
         .and_where(Expr::col(Entities::WorkspaceId).eq(workspace_id))
-        .and_where(Expr::col(Entities::Id).eq(entity_id))
-        .to_owned();
+        .and_where(Expr::col(Entities::Id).eq(entity_id));
+
+    let mut insert_cols = vec![
+        EntitySnapshots::JobId,
+        EntitySnapshots::WorkspaceId,
+        EntitySnapshots::EntityId,
+        EntitySnapshots::SchemaId,
+        EntitySnapshots::SchemaVersion,
+        EntitySnapshots::Data,
+    ];
+    if generated_id.is_some() {
+        insert_cols.insert(0, EntitySnapshots::Id);
+    }
 
     let (sql, values) = Query::insert()
         .into_table(C::schema_table("content", EntitySnapshots::Table))
-        .columns([
-            EntitySnapshots::JobId,
-            EntitySnapshots::WorkspaceId,
-            EntitySnapshots::EntityId,
-            EntitySnapshots::SchemaId,
-            EntitySnapshots::SchemaVersion,
-            EntitySnapshots::Data,
-        ])
+        .columns(insert_cols)
         .select_from(select)
         .internal()?
         .build_sqlx(C::builder());
@@ -843,7 +855,14 @@ where
         .from(C::schema_table("content", EntitySnapshots::Table))
         .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
+        // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the
+        // same tick (Sqlite's `strftime('%f')` is millisecond-precision, and a batch job can
+        // snapshot two entities within one millisecond). Both engines' ids are now time-ordered
+        // (`uuidv7()` on Postgres, `Uuid::now_v7()` on Sqlite; requirements §8.5), so this is a
+        // second sort key rather than a different one, and doesn't change ordering when
+        // `created_at` alone was already unambiguous.
         .order_by(EntitySnapshots::CreatedAt, Order::Desc)
+        .order_by(EntitySnapshots::Id, Order::Desc)
         .build_sqlx(C::builder());
 
     sqlx::query_as_with::<_, EntitySnapshot, _>(&sql, values)
@@ -875,7 +894,9 @@ where
         .from(C::schema_table("content", EntitySnapshots::Table))
         .and_where(Expr::col(EntitySnapshots::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(EntitySnapshots::JobId).eq(job_id))
+        // See `snapshots_for_job`'s matching comment: same tiebreaker, same reason.
         .order_by(EntitySnapshots::CreatedAt, Order::Asc)
+        .order_by(EntitySnapshots::Id, Order::Asc)
         .build_sqlx(C::builder());
 
     let snapshots = sqlx::query_as_with::<_, EntitySnapshot, _>(&sql, values)

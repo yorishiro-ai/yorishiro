@@ -26,6 +26,14 @@ pub trait Engine: sqlx::Connection {
         schema: &'static str,
         table: T,
     ) -> sea_query::TableRef;
+
+    /// A primary key value to insert explicitly, or `None` to rely on the database's own default.
+    ///
+    /// Postgres tables default every PK to `uuidv7()` (requirements §8.5), so every `INSERT` in `models/` omits the `Id` column; this must stay `None` there, since the app never generates ids on that engine (a recorded rule, not a stylistic choice).
+    /// Sqlite has no `uuidv7()` to assign, so it needs one generated here instead, and both engines produce the same id shape and time ordering (requirements §8.5).
+    fn generated_id() -> Option<Uuid> {
+        None
+    }
 }
 
 impl Engine for sqlx::PgConnection {
@@ -63,6 +71,30 @@ impl Engine for sqlx::SqliteConnection {
         use sea_query::IntoTableRef;
         table.into_table_ref()
     }
+
+    fn generated_id() -> Option<Uuid> {
+        // Shares one process-wide `SharedContextV7` counter (uuid crate internals, not this
+        // engine's own), which is what makes same-millisecond ids strictly ordered rather than
+        // merely random: see `generated_id_is_strictly_increasing_even_within_one_millisecond`,
+        // which pins this as a dependency guarantee rather than trusting it silently.
+        Some(Uuid::now_v7())
+    }
+}
+
+/// Prepends the engine's generated id column/value to an `INSERT`'s columns and values, or passes both through unchanged when the engine relies on the database's own default.
+///
+/// `sea-query`'s `columns`/`values_panic` each overwrite rather than accumulate, so a call site cannot add the id column with a second call; the full column and value lists have to be assembled once, before either is called.
+/// `id_col` is a per-site argument because every `models/` module defines its own local `Id` variant on its own `Iden` enum; there is no crate-wide id column type to name here.
+pub fn with_generated_id<C: Engine, T: sea_query::Iden + 'static>(
+    id_col: T,
+    mut cols: Vec<sea_query::DynIden>,
+    mut vals: Vec<sea_query::SimpleExpr>,
+) -> (Vec<sea_query::DynIden>, Vec<sea_query::SimpleExpr>) {
+    if let Some(id) = C::generated_id() {
+        cols.insert(0, sea_query::IntoIden::into_iden(id_col));
+        vals.insert(0, id.into());
+    }
+    (cols, vals)
 }
 
 /// Where the deployment's data lives.

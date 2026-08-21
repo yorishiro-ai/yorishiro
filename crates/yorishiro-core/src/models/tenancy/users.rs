@@ -2,7 +2,7 @@ use argon2::Argon2;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use chrono::{DateTime, Utc};
-use sea_query::{Alias, Expr, Iden, PostgresQueryBuilder, Query};
+use sea_query::{Alias, Expr, Iden, IntoIden, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -55,10 +55,19 @@ where
     UserRecord: for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
 {
     let password_hash = hash_password(password)?;
+    let (cols, vals) = crate::db::with_generated_id::<C, _>(
+        Users::Id,
+        vec![
+            Users::Email.into_iden(),
+            Users::PasswordHash.into_iden(),
+            Users::DisplayName.into_iden(),
+        ],
+        vec![email.into(), password_hash.into(), display_name.into()],
+    );
     let (sql, values) = Query::insert()
         .into_table(C::schema_table("identity", Users::Table))
-        .columns([Users::Email, Users::PasswordHash, Users::DisplayName])
-        .values_panic([email.into(), password_hash.into(), display_name.into()])
+        .columns(cols)
+        .values_panic(vals)
         .returning(Query::returning().columns([
             Users::Id,
             Users::Email,

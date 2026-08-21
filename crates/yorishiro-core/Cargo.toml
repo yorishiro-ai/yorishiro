@@ -42,7 +42,3 @@ uuid.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 wiremock.workspace = true
-# Only the workspace's `uuid = { features = ["serde"] }` ships in the built crate; `v4` here is
-# test-only, for seeding several distinct IDs in the Sqlite execution test, where there is no
-# `uuidv7()` for the database to assign them.
-uuid = { workspace = true, features = ["v4"] }

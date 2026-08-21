@@ -1,4 +1,4 @@
-use sea_query::{Alias, Asterisk, Expr, Func, Iden, Order, PostgresQueryBuilder, Query};
+use sea_query::{Alias, Asterisk, Expr, Func, Iden, IntoIden, Order, PostgresQueryBuilder, Query};
 use sea_query_binder::SqlxBinder;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -45,6 +45,31 @@ pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
             }
         }
         Err(_) => Ok(None),
+    }
+}
+
+/// Resolves `YORISHIRO_MAX_TENANTS` for the Sqlite engine, where the cap is pinned to `1` rather
+/// than read as `max_tenants_from_env` reads it (design memo §8 項目5 段階2, §2.2a).
+///
+/// Unset resolves to `Some(1)`: `max_tenants_from_env`'s own unset-means-unlimited would make a
+/// zero-config Sqlite deployment refuse its own first tenant, which contradicts the point of
+/// making Sqlite the zero-setup trial engine.
+/// Any explicit value other than `"1"` (including `"0"`, unlimited) is a startup configuration
+/// error: the cap cannot be raised on this engine by setting the variable, since there is no
+/// database-enforced isolation under it to raise the cap against (`db::Storage`'s doc comment).
+///
+/// Pure and synchronous so it can be tested without the process-wide env var lock every other
+/// test touching `YORISHIRO_MAX_TENANTS` in this crate has to take; it takes the raw value as an
+/// argument rather than reading the environment itself for the same reason.
+pub fn max_tenants_for_sqlite(raw: Option<&str>) -> Result<i32, YorishiroError> {
+    match raw {
+        None => Ok(1),
+        Some("1") => Ok(1),
+        Some(v) => Err(YorishiroError::Internal(anyhow::anyhow!(
+            "YORISHIRO_MAX_TENANTS is '{v}', but the Sqlite engine only ever allows a single \
+             tenant (design memo §8 項目5 段階2); unset the variable, set it to 1, or switch \
+             YORISHIRO_DATABASE_DRIVER to postgres for multi-tenant operation"
+        ))),
     }
 }
 
@@ -98,10 +123,18 @@ where
         }
     }
 
+    let (cols, vals) = crate::db::with_generated_id::<C, _>(
+        Tenants::Id,
+        vec![
+            Tenants::Name.into_iden(),
+            Tenants::MaxWorkspaces.into_iden(),
+        ],
+        vec![name.into(), max_workspaces.into()],
+    );
     let (sql, values) = Query::insert()
         .into_table(C::schema_table("identity", Tenants::Table))
-        .columns([Tenants::Name, Tenants::MaxWorkspaces])
-        .values_panic([name.into(), max_workspaces.into()])
+        .columns(cols)
+        .values_panic(vals)
         .returning(Query::returning().columns(tenant_columns()))
         .build_sqlx(C::builder());
 
@@ -109,6 +142,42 @@ where
         .fetch_one(conn)
         .await
         .internal()
+}
+
+/// Refuses to proceed if the database already holds more than one tenant.
+///
+/// `create_tenant_on`'s own cap check (above) guards the creation path, but does nothing for a
+/// `.db` file that already carries more than one tenant when the process starts: copied in from
+/// elsewhere, or written before this guard existed.
+/// This is that second check (design memo §8 項目5 段階2, §2.2a データ検証): a startup-time data
+/// check with no `YORISHIRO_MAX_TENANTS` counterpart, since that variable only ever gated
+/// creation.
+///
+/// `> 1`, not `>= 1`: exactly one tenant is the healthy single-tenant state this engine exists
+/// to run, not itself a violation.
+pub async fn refuse_if_multiple_tenants_exist<C>(conn: &mut C) -> Result<(), YorishiroError>
+where
+    C: crate::db::Engine,
+    for<'e> &'e mut C: sqlx::Executor<'e, Database = C::Db>,
+    for<'q> sea_query_binder::SqlxValues: sqlx::IntoArguments<'q, C::Db>,
+    (i64,): for<'r> sqlx::FromRow<'r, <C::Db as sqlx::Database>::Row>,
+{
+    let (sql, values) = Query::select()
+        .expr(Func::count(Expr::col(Asterisk)))
+        .from(C::schema_table("identity", Tenants::Table))
+        .build_sqlx(C::builder());
+    let (count,): (i64,) = sqlx::query_as_with(&sql, values)
+        .fetch_one(&mut *conn)
+        .await
+        .internal()?;
+    if count > 1 {
+        return Err(YorishiroError::Internal(anyhow::anyhow!(
+            "this database holds {count} tenants, but the Sqlite engine only ever allows a \
+             single tenant (design memo §8 項目5 段階2); switch YORISHIRO_DATABASE_DRIVER to \
+             postgres for multi-tenant operation"
+        )));
+    }
+    Ok(())
 }
 
 fn tenant_columns() -> [Tenants; 4] {
