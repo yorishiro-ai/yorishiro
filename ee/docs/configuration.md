@@ -86,5 +86,5 @@ That is deliberate: the protection is `ee/LICENSE`, under which using such a bui
 
 ## Email
 
-Transactional email (invite notifications, billing alerts) does not exist: neither Stripe event handler sends any, and there is no environment variable to configure a provider (e.g. SES/Postmark).
+Transactional email (invite notifications, billing alerts) does not exist: the Stripe webhook path sends none, and there is no environment variable to configure a provider (e.g. SES/Postmark).
 A prior `EmailProvider` trait was removed since it had no real implementation and no caller; adding transactional email back requires both a provider implementation and wiring it into the handlers that would use it.

@@ -7,7 +7,8 @@ Yorishiro itself does not automate the concerns below; operators need to set the
 ## Backup and restore
 
 Data lives entirely in PostgreSQL (in the development environment, the named volume `pgdata` in `docker-compose.yml`).
-Docker Compose has no explicit project name set in this repo, so it prefixes the volume with the checkout directory's basename by default (e.g. `<dir>_pgdata`): run `docker compose config` to confirm the resolved name for your checkout.
+Docker Compose has no explicit project name set in this repo, so it prefixes the volume with the checkout directory's basename by default (e.g. `<dir>_pgdata`).
+Run `docker compose config` to confirm the resolved name for your checkout.
 Yorishiro has no built-in backup automation.
 
 Set up scheduled backups with standard `pg_dump`/`pg_restore`, or a WAL-archiving + PITR (Point-in-Time Recovery) setup, on the operator side.

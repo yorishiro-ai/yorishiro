@@ -14,7 +14,7 @@ flowchart TD
     MCPClient["MCPクライアント<br/>(Claude等)"]
     RESTClient["RESTクライアント<br/>(curl/SDK)"]
 
-    subgraph Paid["ee/ (有償版。同じバイナリに composeされる)"]
+    subgraph Paid["ee/ (有償版。同じバイナリに合成される)"]
         HostedMCP["HostedMcpServer<br/>(自身のツールの後、委譲する)"]
         HostedREST["本版のルート<br/>(マーケットプレイス / 出自 / 課金 / OAuth)"]
     end
@@ -37,13 +37,13 @@ flowchart TD
     Core --> DB
 ```
 
-コミュニティ版バイナリ(`yorishiro-ce-server`)は内側のサブグラフ単体である。
-同じAPIルートを、`ee/`を前段に置かずに提供する。
-SPAは`ee/`にあるため、Web UIは提供しない。
+コミュニティ版バイナリ(`yorishiro-ce-server`)は内側のサブグラフ単体です。
+同じAPIルートを、`ee/`を前段に置かずに提供します。
+SPAは`ee/`にあるため、Web UIは提供しません。
 
 - cargo workspace
   - `yorishiro-core`(ドメインロジック)と`yorishiro-server`(HTTPサーバ・アダプタ層)で構成されます。
-  - リポジトリ層を持ちクエリを発行するのは`yorishiro-core`であり、`yorishiro-server`はそれをHTTPとMCPへ橋渡しします。
+  - `yorishiro-core`がモデルを持ちクエリを発行し、`yorishiro-server`はそれをHTTPとMCPへ橋渡しします。
 - 2階層のテナント構造
   - **テナント**(組織/アカウント)は複数の人間の**ユーザー**をowner/admin/member/viewerのロールで紐付けられ、複数の**ワークスペース**を持ちます。
   - 全てのコンテンツ(スキーマ/エンティティ/リレーション)とAPIキーはちょうど1つのワークスペースに属します。
@@ -167,7 +167,7 @@ $ make init
 `yorishiro-ce-server`は、プロプライエタリなコードをディスクに置けない配備のためにあります。
 配布方針、再配布の要件、設定ではなくパッケージを読む監査といった事情です。
 
-有償側は[`ee/README.md`](../../ee/docs/ja/README.md)が自分で説明します。
+有償側は[`ee/README.md`](../../ee/README.md)([日本語](../../ee/docs/ja/README.md))が自分で説明します。
 
 ## ドキュメント一覧
 
