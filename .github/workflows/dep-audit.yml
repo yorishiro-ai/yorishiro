@@ -21,8 +21,8 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
-          # This workflow runs on a schedule against master, never on a PR, so it's always safe
-          # to save, but pin the condition anyway for consistency with ci.yml/clippy-suggestions.yml.
+          # This workflow runs on a schedule against master, never on a PR, so it's always safe to save.
+          # Pin the condition anyway for consistency with ci.yml's own `save-if`.
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Route rustc through sccache
         run: |
