@@ -17,6 +17,9 @@ Pages that need a licence key show the API's own error when it is absent; the UI
 Running `npm install` there instead ignores `pnpm-lock.yaml` entirely and resolves a different dependency tree than the one that was built and tested; use `pnpm install`.
 `pnpm run check` runs the same lint/format/typecheck/build sequence CI does.
 
+`src/types/generated-api.ts` is generated from the server's own OpenAPI document with `pnpm run gen:api-types` (`API_SPEC_URL` overrides the default, which points at a server on `YORISHIRO_BIND`'s default port), and hand-written types in `src/types/api.ts` re-export from it where a shape already exists there rather than transcribing it a second time.
+The generator itself needs a TypeScript 5.x compiler API it walks at runtime, which this project's own TypeScript 7 doesn't provide, so the script runs it through `pnpm dlx` rather than as a project devDependency: an isolated install resolves its own peer instead of the workspace's.
+
 Authenticated data requests go through the same bearer-key REST API documented in [`docs/api.md`](../../docs/api.md) and [this edition's api.md](api.md); the SPA carries no privileged access the API itself doesn't already enforce.
 Login, signup, and the OAuth flow are the exceptions: those are exactly how a bearer key is obtained in the first place, so they're necessarily reachable without one.
 

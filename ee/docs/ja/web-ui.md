@@ -25,6 +25,12 @@ lockfileは`pnpm-lock.yaml`で、pnpmのバージョンは`package.json`の`pack
 `pnpm install`を使ってください。
 `pnpm run check`はCIと同じlint/format/typecheck/buildの一連を実行します。
 
+`src/types/generated-api.ts`は`pnpm run gen:api-types`でサーバ自身のOpenAPIドキュメントから生成されます(`API_SPEC_URL`でデフォルトを上書きできます、デフォルトは`YORISHIRO_BIND`の既定ポートで動くサーバを指します)。
+`src/types/api.ts`の手書き型は、既に生成済みの型がある場合そこから再エクスポートし、二重に書き写しません。
+生成ツール自体は実行時にTypeScript 5系のコンパイラAPIを歩くため、このプロジェクト自身のTypeScript 7では動きません。
+このためスクリプトはプロジェクトのdevDependencyとしてではなく`pnpm dlx`経由で実行します。
+独立したインストールがワークスペースとは別に自身のpeer依存を解決するためです。
+
 認証後のデータ取得・更新リクエストは、[APIリファレンス本体](../../../docs/ja/api.md)および[api.md](api.md)に記載されている、bearerキー方式のREST APIを経由します。
 SPA自体はAPIが強制していない特権的なアクセス権を一切持ちません。
 ログイン・サインアップ・OAuthフローは例外です。

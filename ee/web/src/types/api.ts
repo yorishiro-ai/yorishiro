@@ -54,14 +54,10 @@ export interface MemberRecord {
   role: "owner" | "admin" | "member" | "viewer";
 }
 
-export interface Workspace {
-  id: string;
-  tenant_id: string;
-  schema_id: string;
-  name: string;
-  max_entities: number | null;
-  created_at: string;
-}
+/// Generated from the server's own OpenAPI document (`pnpm run gen:api-types`) rather than
+/// hand-transcribed, so a field the server adds or drops here is a type error rather than a
+/// silent mismatch. See `generated-api.ts`'s header for how to regenerate it.
+export type Workspace = import("./generated-api").components["schemas"]["WorkspaceRecord"];
 
 export interface WorkspaceDetail {
   id: string;
