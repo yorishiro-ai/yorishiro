@@ -332,6 +332,10 @@ fn sqlite_satisfies_the_generic_bounds() {
     let _ = crate::models::entities::get::<sqlx::SqliteConnection>;
     let _ = crate::models::entities::count::<sqlx::SqliteConnection>;
     let _ = crate::models::entities::update::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::migration_dry_run::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::snapshot::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::snapshots_for_job::<sqlx::SqliteConnection>;
+    let _ = crate::models::entities::undo_job::<sqlx::SqliteConnection>;
     let _ = crate::models::relations::create::<sqlx::SqliteConnection>;
     let _ = crate::models::export::export_all::<sqlx::SqliteConnection>;
 }
