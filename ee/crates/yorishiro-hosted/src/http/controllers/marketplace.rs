@@ -188,6 +188,7 @@ pub struct ForkResponse {
 #[utoipa::path(
     post,
     path = "/api/marketplace/{id}/fork",
+    operation_id = "fork_marketplace_template",
     params(("id" = Uuid, Path, description = "Template ID"), ForkParams),
     responses(
         (status = 201, description = "Forked into the caller's tenant, private", body = ForkResponse),
