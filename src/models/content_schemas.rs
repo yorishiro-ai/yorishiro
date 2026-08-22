@@ -103,3 +103,29 @@ pub async fn get_active_schema(
         ))),
     }
 }
+
+/// Fetches a specific schema version by id (used to resolve the version an entity references).
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it
+/// takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+pub async fn get_by_id(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<SchemaRecord, YorishiroError> {
+    use super::_entities::content_schemas::Column;
+
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Id.eq(schema_id))
+        .one(conn)
+        .await
+        .internal()?;
+
+    match row {
+        Some(row) => row.try_into(),
+        None => Err(YorishiroError::not_found(format!(
+            "schema '{schema_id}' was not found"
+        ))),
+    }
+}

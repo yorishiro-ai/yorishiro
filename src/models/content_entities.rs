@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QuerySelect};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -13,11 +14,16 @@ pub type ContentEntities = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
+    /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
+    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with
+    /// `..Default::default()` (this crate's usual pattern, as opposed to loading a `Model` and
+    /// calling `.into_active_model()`) leaves untouched fields `NotSet`, not `Unchanged`, and
+    /// `is_unchanged()` only matches the latter.
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        if !insert && self.updated_at.is_unchanged() {
+        if !insert && !self.updated_at.is_set() {
             let mut this = self;
             this.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
             Ok(this)
@@ -77,6 +83,31 @@ pub struct CreateEntityInput {
     pub schema_name: String,
     pub entity_type: String,
     pub data: Value,
+}
+
+pub const DEFAULT_LIST_LIMIT: i64 = 50;
+
+pub struct ListEntitiesQuery {
+    pub entity_type: Option<String>,
+    /// JSONB containment filter (`data @> filter`), e.g. `{"status": "active"}`.
+    pub filter: Option<Value>,
+    /// Restricts results to entities created against this schema version.
+    /// Entities keep the version they were written against, so this selects the entities a given version produced rather than the ones that would validate against it today.
+    pub schema_version: Option<i32>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl Default for ListEntitiesQuery {
+    fn default() -> Self {
+        Self {
+            entity_type: None,
+            filter: None,
+            schema_version: None,
+            limit: DEFAULT_LIST_LIMIT,
+            offset: 0,
+        }
+    }
 }
 
 /// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
@@ -256,4 +287,95 @@ pub async fn get(
         .internal()?
         .map(EntityRecord::from)
         .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
+}
+
+/// Fully replaces an existing entity's `data`.
+/// Validation is done against the schema version the entity was actually created with (i.e. the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
+/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn update(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+    data: Value,
+    updated_by: Option<Uuid>,
+) -> Result<EntityRecord, YorishiroError> {
+    let existing = get(conn, workspace_id, id).await?;
+    let schema =
+        crate::models::content_schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
+    let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
+    validate_data(entity_type_def, &data)?;
+
+    let active = ActiveModel {
+        id: ActiveValue::Unchanged(id),
+        data: ActiveValue::Set(data),
+        updated_by: ActiveValue::Set(updated_by),
+        ..Default::default()
+    };
+    let row = active.update(conn).await.internal()?;
+
+    Ok(row.into())
+}
+
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn delete(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<(), YorishiroError> {
+    use super::_entities::content_entities::Column;
+
+    let result = Entity::delete_many()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Id.eq(id))
+        .exec(conn)
+        .await
+        .internal()?;
+
+    if result.rows_affected == 0 {
+        Err(YorishiroError::not_found(format!(
+            "entity '{id}' was not found"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+///
+/// `query.filter` (JSONB containment, `data @> filter`) is the one condition here the entity
+/// API's `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated
+/// to Postgres's `@>` operator): it's added as a raw `Expr::cust_with_values` condition mixed
+/// into the same `.filter()` chain as the ordinary column filters, per this repository's rule
+/// that raw SQL stays scoped to what the entity layer genuinely can't express.
+pub async fn list(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    query: ListEntitiesQuery,
+) -> Result<Vec<EntityRecord>, YorishiroError> {
+    use super::_entities::content_entities::Column;
+
+    let limit = query.limit.clamp(1, 200);
+    let offset = query.offset.max(0);
+
+    let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
+    if let Some(entity_type) = query.entity_type {
+        select = select.filter(Column::EntityType.eq(entity_type));
+    }
+    if let Some(filter) = query.filter {
+        select = select.filter(Expr::cust_with_values("data @> $1", [filter]));
+    }
+    if let Some(schema_version) = query.schema_version {
+        select = select.filter(Column::SchemaVersion.eq(schema_version));
+    }
+
+    select
+        .order_by_desc(Column::CreatedAt)
+        .limit(limit as u64)
+        .offset(offset as u64)
+        .all(conn)
+        .await
+        .internal()
+        .map(|rows| rows.into_iter().map(EntityRecord::from).collect())
 }
