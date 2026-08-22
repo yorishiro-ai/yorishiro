@@ -1,5 +1,10 @@
 [workspace]
 resolver = "2"
+# ".": this manifest is both the workspace root and the base package (yorishiro-core), the flat
+# layout this session's CLAUDE.md records as decided-2026-08-22, not carried forward from
+# master's crates/ split. ee/crates/yorishiro-hosted depends on it by path; the reverse
+# dependency must never appear, see CLAUDE.md's "Editions and the ee/ boundary".
+members = [".", "ee/crates/yorishiro-hosted"]
 
 [package]
 name = "yorishiro-core"

@@ -12,3 +12,5 @@ pub mod services;
 pub mod tasks;
 pub mod views;
 pub mod workers;
+
+pub use error::YorishiroError;

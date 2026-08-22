@@ -109,6 +109,32 @@ See <https://github.com/yotsunagi/yorishiro/issues/221> for the design history, 
   Any sentence of the form "it does not depend on X" is the wrong test.
 - Unclear cases are a question for the user, asked as the classification itself rather than buried in the options of an implementation question.
 
+### `ee/` composition on the Loco rebuild
+
+**Decided (2026-08-22): base stays flat, `ee/crates/yorishiro-hosted` is the one added workspace member.**
+Master's `crates/yorishiro-core`/`crates/yorishiro-server` split does not exist on this branch, and `ee/crates/yorishiro-hosted` there depended on both, so neither `git merge master` nor copying `ee/` wholesale produces something that compiles against the rebuilt layout.
+The root `Cargo.toml`'s `[workspace] members` lists `"."` (the root package is `yorishiro-core` itself) and `"ee/crates/yorishiro-hosted"`.
+This is an architectural call made without the user's sign-off in the moment; it does not block work, but it is vetoable, and if overturned the alternative is restoring the `crates/` split master used.
+
+**The seam is Loco's own `Hooks` trait, not the five sqlx-era contracts that died with the sqlx layer.**
+`ee/crates/yorishiro-hosted/src/lib.rs` defines `HostedApp`, a second `Hooks` impl distinct from `yorishiro_core::app::App`.
+Every method delegates to the matching associated fn on `App` first (`App::routes(ctx)`, `App::after_context(ctx).await`, and so on), because `Hooks`'s methods take no `self`, so they compose by direct call rather than trait inheritance.
+`ee/`-only behaviour is layered around that call, not duplicated inside it: `HostedApp::after_context` calls `App::after_context` for the RLS pool and authenticator seam, then resolves and stores the licence state on top.
+The bin `ee/crates/yorishiro-hosted/src/bin/yorishiro_server.rs` calls `cli::main::<HostedApp, Migrator>()`, mirroring `yorishiro-core`'s own `bin/main.rs` with `HostedApp` in place of `App`.
+`yorishiro_core::error::YorishiroError` is now re-exported at the crate root (`pub use error::YorishiroError;` in `src/lib.rs`), restoring the pre-rebuild short path `ee/` code (and anything else outside the crate) needs it at.
+
+**Bin naming is deferred to the packaging slice.** The ee bin is named `yorishiro-server` (matching master and the shipping convention `.claude/rules/workspace-checklist.md` in `yorishiro-specs` records), but nothing in this repository or `test-loco/` has been renamed to it yet: `test-loco/docker-compose.yml` still mounts `yorishiro_core-cli` by name, deliberately, since renaming it now would be renaming ahead of the slice that actually needs the distinction.
+
+**First slice landed: the seam plus the licence gate, nothing else.**
+`ee/crates/yorishiro-hosted/src/services/licence.rs` is `services/licence.rs` from `master:ee/crates/yorishiro-hosted`, ported with no logic changes (only the internal `YorishiroError` import path, unchanged in content), since it depended on nothing else in the old `ee/` tree.
+`ee/LICENSE` and `keys/licence-public.pem` are copied from master as-is; the matching private key already lived in `yorishiro-specs/licence/licence-signing-key.pem` and was confirmed to still verify against the copied public key (`openssl rsa -pubout` from the private key byte-matches the committed public PEM).
+Verified live: booting `yorishiro-server` with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: paid features are disabled" and serves every base route unchanged (401 on an unauthed `/api/entities`, matching `yorishiro_core-cli`'s own behaviour); booting it with a freshly minted key (signed with the specs private key, the README's own documented procedure) logs "licence key accepted: paid features are enabled" and answers 200 on `/_ping`; booting the plain `yorishiro_core-cli` bin afterward still works unmodified.
+Tests: `ee/crates/yorishiro-hosted/tests/licence.rs`, 7 cases covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`, regression-tested by flipping the operator and confirming the test catches it), and config-file key parsing; signs its own throwaway RSA keypair (`tests/keys/`, not the specs signing key) so the suite runs with no external file dependency.
+
+**Inventory of what master's `ee/` held, not yet ported** (`git ls-tree -r --name-only master ee/crates/yorishiro-hosted/src`, so this list is read from the tree, not recalled): identity/OAuth (`services/oauth/*`, `http/controllers/oauth.rs`, `models/oauth_users.rs`), billing (`services/plan.rs`, `models/billing.rs`, `models/usage.rs`, `http/controllers/stripe.rs`, `models/stripe_events.rs`), marketplace (`services/marketplace.rs`, `models/marketplace.rs`, `http/controllers/marketplace.rs`), the origin/merge chain (`services/origin.rs`, `services/merge.rs`, `models/origin.rs`, `http/controllers/origin.rs`), inference / fill mode B (`services/inference.rs`, `http/controllers/inference.rs`, `models/llm_keys.rs`), the tenant dashboard (`http/controllers/dashboard.rs`), entity columns (`models/entity_columns.rs`, `http/controllers/entity_columns.rs`), `services/authz.rs`, `services/hmac_sign.rs`, `services/official_templates.rs`, `services/tenant_auth.rs`, and the SPA embed (`web/mod.rs`, `state.rs`).
+Every one of these still depends on the old sqlx-era `AppState`/`state.rs` shape in the master source and needs re-deriving against `AppContext`/`TenantDb`, the same way `licence.rs` did not.
+**Identity (signup/invite/login) is the natural second slice**, ahead of the rest: it both unblocks OAuth here and is what `.claude/rules/workspace-checklist.md` in `yorishiro-specs` names as the open item for re-attributing the provisionally restored task-list import (`created_by = NULL`).
+
 ## No internal-planning references in this repository
 
 - This repository's source, comments, error messages, PR bodies and commit messages describe only what is true of this repository.

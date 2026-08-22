@@ -1,0 +1,35 @@
+[package]
+name = "yorishiro-hosted"
+version = "0.1.0"
+edition = "2024"
+# Not `license.workspace = true`: this manifest has no workspace-level license field to
+# inherit from (the root package's Cargo.toml carries no `[workspace.package]`), and even if
+# it did, `ee/` is not BUSL-1.1. `ee/LICENSE` adds a Competing Use restriction the rest of the
+# repository doesn't carry.
+license-file = "../../LICENSE"
+publish = false
+
+# Both editions install their binary as `yorishiro-server`; see `ee/LICENSE` and
+# `.claude/rules/workspace-checklist.md` in yorishiro-specs for the on-disk-identical
+# packaging convention this name exists to support once packaging lands.
+[[bin]]
+name = "yorishiro-server"
+path = "src/bin/yorishiro_server.rs"
+
+[dependencies]
+yorishiro-core = { path = "../../.." }
+migration = { path = "../../../migration" }
+loco-rs = { version = "1.1" }
+tokio = { version = "1.45", default-features = false, features = ["rt-multi-thread"] }
+axum = { version = "0.8" }
+async-trait = { version = "0.1" }
+jsonwebtoken = { version = "9" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = { version = "0.10" }
+chrono = { version = "0.4" }
+anyhow = { version = "1" }
+tracing = { version = "0.1" }
+
+[dev-dependencies]
+base64 = { version = "0.22" }
+serde_json = { version = "1" }
