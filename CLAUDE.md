@@ -185,10 +185,17 @@ SeaORM entity's `Column` enum already is the one place a column list lives; ther
 
 Loco's own layout, not the pre-rebuild `http/*`: controllers in `src/controllers/`, models
 (entity extensions) in `src/models/`, services in `src/services/`, background workers in
-`src/workers/`, admin/one-off commands in `src/tasks/` (via `cargo loco task`). MCP tools and
-their middleware don't have an established location yet — decide by checking how the pre-rebuild
-`http/mcp/`/`http/middleware/` responsibilities map onto Loco's structure when that work starts,
-rather than assuming `http/mcp/` still applies.
+`src/workers/`, admin/one-off commands in `src/tasks/` (via `cargo loco task`).
+
+**MCP**: the server type (`YorishiroMcpServer`) and per-domain `#[tool_router]` implementations
+live in `src/services/mcp/`, since it's a thing `ee/` composes against (the sixth seam,
+alongside the five published contracts) rather than route logic. Route *mounting* is a one-line
+`src/controllers/mcp.rs::mount()`, called from `Hooks::after_routes` in `app.rs`: `rmcp`'s
+`StreamableHttpService` is a plain `tower::Service`, not something `Routes`/`AppRoutes` can
+carry, and `after_routes` is Loco's own documented hook for exactly this (custom Axum logic
+after Loco's own routes are built). MCP middleware (rate limiting, request-body limits on the
+`/mcp` route specifically) hasn't come up yet; decide when it does, don't assume `http/middleware/`
+still applies.
 
 ## Tests
 
@@ -221,6 +228,15 @@ rule in `yorishiro-specs`), not just a happy-path unit test.
 `content_relations::create`'s foreign-key-violation branch (source/target deleted between the
 existence check and the insert, mapped to 404) belongs on the same list: it can't be triggered
 without a similar race, and has only ever been read, never executed.
+
+**Adding or removing an MCP tool breaks three places** (`.claude/rules/workspace-checklist.md`
+in `yorishiro-specs`, carried over from the pre-rebuild code): the tool-count assertion, whatever
+test builds dummy arguments per tool name (`dummy_arguments_for_tool` in the old suite), and the
+count stated in prose in `docs/{,ja/}api.md` (covered here by the recorded specs-doc deferral
+above, so only the first two need a fix on this side once tests exist). No test lands with the
+MCP slice itself (`services/mcp/`, 14 tools: entities create/get/update/delete/list, relations
+create/get/list/delete/set_relation_status, schemas create/get_active/get_by_id, import_jsonl),
+so this note exists precisely because the first two traps don't yet have a test to trip on them.
 
 ## Imports
 

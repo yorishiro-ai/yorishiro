@@ -87,6 +87,15 @@ impl Hooks for App {
             .add_route(controllers::relations::routes())
             .add_route(controllers::schemas::routes())
     }
+
+    /// Mounts the MCP server under `/mcp`. `rmcp`'s `StreamableHttpService` is a plain
+    /// `tower::Service`, not something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted
+    /// here instead: this hook runs after Loco's own routes are built, which is where Loco
+    /// itself says custom Axum logic belongs.
+    async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
+        Ok(controllers::mcp::mount(router, ctx))
+    }
+
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
         Ok(())
     }

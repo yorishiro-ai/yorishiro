@@ -3,6 +3,7 @@ pub mod error;
 pub mod export;
 pub mod extractors;
 pub mod import;
+pub mod mcp;
 pub mod relations;
 pub mod schemas;
 

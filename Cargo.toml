@@ -51,6 +51,8 @@ rand = { version = "0.9" }
 sha2 = { version = "0.10" }
 sea-query = { version = "1.0" }
 jsonschema = { version = "0.49" }
+rmcp = { version = "3.0.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars = { version = "1", features = ["uuid1"] }
 
 [[bin]]
 name = "yorishiro_core-cli"
