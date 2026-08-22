@@ -1,6 +1,7 @@
 pub mod entities;
 pub mod error;
 pub mod extractors;
+pub mod schemas;
 
 pub use error::ApiError;
 

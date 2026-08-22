@@ -1,3 +1,4 @@
+use sea_orm::Statement;
 use sea_orm::entity::prelude::*;
 
 pub use super::_entities::identity_workspaces::{ActiveModel, Entity, Model};
@@ -45,4 +46,37 @@ pub async fn is_schema_pending(
         .map(|model| model.status);
 
     Ok(status.is_some_and(|s| s == WORKSPACE_STATUS_SCHEMA_PENDING))
+}
+
+/// Marks a workspace active and records its first schema, idempotently.
+///
+/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema
+/// creations must not both see `schema_id` as `NULL` and each overwrite the other's write with
+/// their own. The caller (`content_schemas::create_schema`) already serializes concurrent
+/// creates for the same workspace+name with an advisory lock, but this statement's own atomicity
+/// is what protects a workspace with two different schema names created at once.
+///
+/// Raw SQL, not `ActiveModel`, for two reasons: `COALESCE(...)` is an expression the entity
+/// layer's `Set(...)` can't express (it only assigns literal values), and `yorishiro_app` holds
+/// UPDATE only on `identity_workspaces (status, schema_id)` (a column-level GRANT), so this
+/// statement must touch exactly those two columns and no others.
+pub async fn mark_active(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<(), YorishiroError> {
+    conn.execute_raw(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "UPDATE identity_workspaces \
+         SET status = $1, schema_id = COALESCE(schema_id, $2) \
+         WHERE id = $3",
+        [
+            WORKSPACE_STATUS_ACTIVE.into(),
+            schema_id.into(),
+            workspace_id.into(),
+        ],
+    ))
+    .await
+    .internal()?;
+    Ok(())
 }

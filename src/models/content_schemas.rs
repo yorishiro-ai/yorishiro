@@ -1,12 +1,13 @@
 use chrono::{DateTime, Utc};
-use sea_orm::QueryOrder;
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ActiveValue, QueryOrder, SqlErr};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use super::_entities::content_schemas::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::MetaSchemaDefinition;
+use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff, validate_definition};
 
 pub type ContentSchemas = Entity;
 
@@ -128,4 +129,101 @@ pub async fn get_by_id(
             "schema '{schema_id}' was not found"
         ))),
     }
+}
+
+/// Registers a new schema definition, after validating it with `validate_definition`.
+/// If no schema of this name exists yet, creates version 1 as active; otherwise computes a
+/// `versioning::diff` against the current active version, archives it, and always inserts the
+/// new definition as the next version (reporting whether the diff is breaking).
+///
+/// The template-origin chain (`origin_template_id` linkage, upstream-change detection,
+/// three-way merge base) is not ported yet: this always inserts with no origin
+/// (`origin_status = detached`), matching a schema written by hand. Templates are a later slice.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`. That
+/// transaction is also this function's lock/read/archive/insert scope: it does not open a
+/// nested transaction of its own, since the request transaction already is the unit of work
+/// (the caller commits it after this returns, via `Authorized::commit()`).
+pub async fn create_schema(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    definition: MetaSchemaDefinition,
+) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
+    use super::_entities::content_schemas::Column;
+
+    validate_definition(&definition)?;
+
+    let name = definition.name.clone();
+
+    crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
+        .await
+        .internal()?;
+
+    let previous = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Name.eq(&name))
+        .filter(Column::Status.eq("active"))
+        .order_by_desc(Column::Version)
+        .one(conn)
+        .await
+        .internal()?
+        .map(SchemaRecord::try_from)
+        .transpose()?;
+
+    let (next_version, diff) = match &previous {
+        Some(previous) => {
+            let diff = metaschema::diff(&previous.definition, &definition);
+            (previous.version + 1, diff)
+        }
+        None => (
+            1,
+            VersioningDiff {
+                is_breaking: false,
+                reasons: Vec::new(),
+            },
+        ),
+    };
+
+    if previous.is_some() {
+        Entity::update_many()
+            .col_expr(Column::Status, Expr::value("archived"))
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Name.eq(&name))
+            .filter(Column::Status.eq("active"))
+            .exec(conn)
+            .await
+            .internal()?;
+    }
+
+    let definition_json = serde_json::to_value(&definition).internal()?;
+
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        workspace_id: ActiveValue::Set(workspace_id),
+        name: ActiveValue::Set(name.clone()),
+        version: ActiveValue::Set(next_version),
+        definition: ActiveValue::Set(definition_json),
+        status: ActiveValue::Set("active".to_string()),
+        origin_status: ActiveValue::Set(ORIGIN_STATUS_DETACHED.to_string()),
+        ..Default::default()
+    };
+    let row = active.insert(conn).await.map_err(|err| {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
+            YorishiroError::Conflict {
+                message: format!(
+                    "schema '{name}' version {next_version} already exists (concurrent create?)"
+                ),
+            }
+        } else {
+            YorishiroError::Internal(err.into())
+        }
+    })?;
+
+    // Inside the transaction: a workspace must not be left active by a schema insert that then
+    // rolls back. Unconditional and idempotent: every version after the first finds it active
+    // already, and checking first would only add a round trip.
+    crate::models::identity_workspaces::mark_active(conn, workspace_id, row.id).await?;
+
+    Ok((row.try_into()?, diff))
 }
