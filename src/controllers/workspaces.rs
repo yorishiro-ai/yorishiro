@@ -104,7 +104,7 @@ pub async fn get_workspace(
 
     let entity_count = content_entities::count(authorized.txn(), workspace.id).await?;
     let relation_count = content_relations::count(authorized.txn(), workspace.id).await?;
-    let schema_count = content_schemas::count_active(authorized.txn(), workspace.tenant_id).await?;
+    let schema_count = content_schemas::count_active(authorized.txn(), workspace.id).await?;
 
     Ok(Json(WorkspaceDetail {
         id: workspace.id,
