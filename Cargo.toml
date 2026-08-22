@@ -31,6 +31,7 @@ sea-orm = { version = "2.0", features = [
   "sqlx-postgres",
   "runtime-tokio-rustls",
   "macros",
+  "postgres-vector",
 ] }
 chrono = { version = "0.4" }
 validator = { version = "0.20" }
@@ -40,6 +41,10 @@ uuid = { version = "1.6", features = ["v4"] }
 # and a headless app can still emit them for external consumers.
 ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
 include_dir = { version = "0.7" }
+# Raw pool for RLS session-state handling: Loco's own ConnectOptions has no after_connect/
+# after_release hook, so this stays a hand-built sqlx pool beside SeaORM's DatabaseConnection.
+# See https://github.com/yotsunagi/yorishiro/issues/221.
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 
 [[bin]]
 name = "yorishiro_core-cli"

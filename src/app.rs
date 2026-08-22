@@ -1,11 +1,10 @@
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
-    bgworker::{BackgroundWorker, Queue},
+    bgworker::Queue,
     boot::{create_app, BootResult, StartMode},
     config::Config,
     controller::AppRoutes,
-    db::{self, truncate_table},
     environment::Environment,
     task::Tasks,
     Result,
@@ -14,7 +13,7 @@ use migration::Migrator;
 use std::path::Path;
 
 #[allow(unused_imports)]
-use crate::{controllers, models::_entities::users, tasks, workers::downloader::DownloadWorker};
+use crate::{controllers, tasks};
 
 pub struct App;
 #[async_trait]
@@ -45,27 +44,48 @@ impl Hooks for App {
         Ok(vec![])
     }
 
-    fn routes(_ctx: &AppContext) -> AppRoutes {
-        AppRoutes::with_default_routes() // controller routes below
-            .add_route(controllers::auth::routes())
+    /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store`.
+    ///
+    /// Loco's own database connection (`ctx.db`, a `sea_orm::DatabaseConnection`) is built from
+    /// `sea_orm::ConnectOptions`, which has no `after_connect`/`after_release` hook. This
+    /// deployment's row-level security depends on a `SET ROLE` per physical connection and
+    /// `set_config(...)` per request, so that lifecycle is built separately here, on a
+    /// hand-constructed `sqlx::PgPool`, and stored for handlers to retrieve via
+    /// `ctx.shared_store.get_ref::<crate::db::DbHandle>()`. See
+    /// <https://github.com/yotsunagi/yorishiro/issues/221>.
+    async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        let database_url = ctx.config.database.uri.clone();
+        let tenant = crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
+            .await
+            .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
+        // The identity pool connects as the migration role (bypassing RLS) for control-plane
+        // access: signup, setup, the admin CLI. It's a plain pool with no after_connect/
+        // after_release, since it never scopes to a tenant/workspace.
+        let identity = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(ctx.config.database.max_connections)
+            .connect(&database_url)
+            .await
+            .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
+        ctx.shared_store
+            .insert(crate::db::DbHandle { tenant, identity });
+        Ok(ctx)
     }
-    async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
-        queue.register(DownloadWorker::build(ctx)).await?;
+
+    fn routes(_ctx: &AppContext) -> AppRoutes {
+        AppRoutes::with_default_routes()
+    }
+    async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
         Ok(())
     }
 
     #[allow(unused_variables)]
     fn register_tasks(tasks: &mut Tasks) {
         // tasks-inject (do not remove)
-        tasks.register(tasks::user_create::UserCreate);
     }
-    async fn truncate(ctx: &AppContext) -> Result<()> {
-        truncate_table(&ctx.db, users::Entity).await?;
+    async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())
     }
-    async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
-        db::seed::<users::ActiveModel>(&ctx.db, &base.join("users.yaml").display().to_string())
-            .await?;
+    async fn seed(_ctx: &AppContext, _base: &Path) -> Result<()> {
         Ok(())
     }
 }
