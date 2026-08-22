@@ -55,6 +55,12 @@ impl MembershipRole {
             MembershipRole::Viewer => ApiKeyScope::Read,
         }
     }
+
+    /// Whether this role may manage the tenant itself: members, workspaces, and everything
+    /// `require_tenant_admin` gates.
+    pub fn administers_tenant(self) -> bool {
+        matches!(self, MembershipRole::Owner | MembershipRole::Admin)
+    }
 }
 
 /// Creates a human user account. The password is hashed with `loco_rs::hash` (Argon2id) before
@@ -152,6 +158,46 @@ pub async fn add_member(
     Ok(())
 }
 
+/// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by
+/// email, never creates one).
+pub async fn get_user_by_email(
+    conn: &impl ConnectionTrait,
+    email: &str,
+) -> Result<Option<identity_users::Model>, YorishiroError> {
+    identity_users::Entity::find()
+        .filter(identity_users::Column::Email.eq(email))
+        .one(conn)
+        .await
+        .internal()
+}
+
+/// Every member of a tenant, joined against their user row.
+pub async fn list_members(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+) -> Result<Vec<MembershipRecord>, YorishiroError> {
+    let memberships = identity_tenant_memberships::Entity::find()
+        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
+        .find_also_related(identity_users::Entity)
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(memberships
+        .into_iter()
+        .filter_map(|(membership, user)| {
+            let user = user?;
+            let role = MembershipRole::from_db_str(&membership.role)?;
+            Some(MembershipRecord {
+                user_id: user.id,
+                email: user.email,
+                display_name: user.display_name,
+                role,
+            })
+        })
+        .collect())
+}
+
 /// Looks up a single user's role within a tenant, or `None` if they aren't a member.
 pub async fn get_membership_role(
     conn: &impl ConnectionTrait,
@@ -197,6 +243,16 @@ pub async fn create_invite(
 
     let invite = active.insert(conn).await.internal()?;
     Ok((invite, token))
+}
+
+/// A tenant member as reported to a caller: `GET /api/members`, and the response body of adding
+/// one via `POST /api/members`.
+#[derive(Debug, Serialize)]
+pub struct MembershipRecord {
+    pub user_id: Uuid,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub role: MembershipRole,
 }
 
 /// What a redeemed invite grants: resolved once, since the invite row is consumed by the same

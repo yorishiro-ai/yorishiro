@@ -85,6 +85,7 @@ impl Hooks for App {
             .add_route(controllers::entities::routes())
             .add_route(controllers::export::routes())
             .add_route(controllers::import::routes())
+            .add_route(controllers::members::routes())
             .add_route(controllers::relations::routes())
             .add_route(controllers::schemas::routes())
             .add_route(controllers::whoami::routes())
