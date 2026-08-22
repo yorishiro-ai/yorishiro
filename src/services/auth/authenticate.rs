@@ -50,6 +50,12 @@ pub async fn authenticate(
 /// Records the API key's last-used timestamp, on a raw `sqlx` connection.
 /// Best-effort: doesn't affect authentication outcomes, so callers don't need to fail the
 /// whole request if it errors.
+///
+/// Deliberately not run on the request's `DatabaseTransaction`: a read-only handler drops that
+/// transaction without committing (see `Authorized::commit`'s doc comment), which would
+/// silently roll this update back along with it. Every caller uses a short-lived connection
+/// from `TenantDb::acquire_for_workspace` instead (see `authorize`/`touch_last_used_on`), which
+/// persists independently of whatever the request transaction does.
 pub async fn touch_last_used(
     conn: &mut sqlx::PgConnection,
     api_key_id: Uuid,
@@ -59,21 +65,5 @@ pub async fn touch_last_used(
         .execute(conn)
         .await
         .internal()?;
-    Ok(())
-}
-
-/// The same update as [`touch_last_used`], on a SeaORM connection (a `DatabaseTransaction` or
-/// `DatabaseConnection`), for callers that already hold one instead of a raw `sqlx` connection.
-pub async fn touch_last_used_orm(
-    conn: &impl sea_orm::ConnectionTrait,
-    api_key_id: Uuid,
-) -> Result<(), YorishiroError> {
-    conn.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "UPDATE identity_api_keys SET last_used_at = now() WHERE id = $1",
-        [api_key_id.into()],
-    ))
-    .await
-    .internal()?;
     Ok(())
 }

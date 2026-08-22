@@ -3,7 +3,7 @@ use sea_orm::DatabaseTransaction;
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 
-use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used, touch_last_used_orm};
+use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used};
 
 /// Enforces that an authenticated context satisfies the required scope, returning
 /// `YorishiroError::ScopeInsufficient` when it doesn't.
@@ -32,6 +32,10 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
 /// The caller owns the returned transaction's lifetime: a write handler must call
 /// `txn.commit().await` explicitly, or every write in it is silently discarded when the
 /// transaction drops.
+///
+/// `last_used_at` is touched through `touch_last_used_on`'s independent short-lived connection,
+/// not on the returned transaction: a read-only handler drops its transaction without
+/// committing (by design), which would silently roll the update back if it ran there.
 pub async fn authorize(
     db: &DbHandle,
     authenticator: &dyn Authenticator,
@@ -50,9 +54,7 @@ pub async fn authorize(
         .await
         .internal()?;
 
-    if let Err(err) = touch_last_used_orm(&txn, ctx.api_key_id).await {
-        tracing::warn!(error = %err, "failed to update api key last_used_at");
-    }
+    touch_last_used_on(db, ctx.tenant_id, ctx.workspace_id, ctx.api_key_id).await;
 
     Ok((ctx, txn))
 }
