@@ -95,9 +95,16 @@ pub async fn import_jsonl(
             ExportRecord::Schema(schema) => {
                 let old_id = schema.id;
                 let name = schema.definition.name.clone();
-                content_schemas::create_schema(conn, tenant_id, workspace_id, schema.definition)
-                    .await
-                    .map_err(|err| annotate_line(line_no, err))?;
+                content_schemas::create_schema(
+                    conn,
+                    tenant_id,
+                    workspace_id,
+                    schema.definition,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|err| annotate_line(line_no, err))?;
                 schema_name_by_old_id.insert(old_id, name);
                 result.schemas += 1;
             }

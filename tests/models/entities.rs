@@ -44,7 +44,7 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
             }
         });
         let v1_def = serde_json::from_value(v1).expect("parse v1");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, v1_def)
+        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, v1_def, None, None)
             .await
             .expect("create v1");
 
@@ -74,7 +74,7 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
             }
         });
         let v2_def = serde_json::from_value(v2).expect("parse v2");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, v2_def)
+        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, v2_def, None, None)
             .await
             .expect("create v2");
 

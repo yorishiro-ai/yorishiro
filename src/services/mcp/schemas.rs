@@ -39,7 +39,13 @@ pub struct CreateSchemaArgs {
     /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
     /// If a schema with the same name already exists, whether the change is breaking or
     /// non-breaking is detected automatically and it is registered as a new version.
-    pub definition: Value,
+    /// Mutually exclusive with `template_id`; exactly one of the two must be set.
+    pub definition: Option<Value>,
+    /// ID of a template to use as the definition instead of supplying one inline. A UUID names
+    /// one from the tenant's own library (see `list_template_library`); anything else names a
+    /// built-in (see `list_templates`).
+    /// Mutually exclusive with `definition`; exactly one of the two must be set.
+    pub template_id: Option<String>,
 }
 
 #[tool_router(vis = "pub(crate)", router = tool_router_schemas)]
@@ -105,24 +111,63 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Schema);
 
-        let definition: MetaSchemaDefinition = match serde_json::from_value(args.definition) {
-            Ok(definition) => definition,
-            Err(err) => {
+        let mut origin_template_id = None;
+        let mut origin_snapshot = None;
+
+        let definition: MetaSchemaDefinition = match (args.definition, args.template_id) {
+            (Some(_), Some(_)) => {
                 return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
-                    message: format!("invalid schema definition: {err}"),
+                    message: "definition and template_id are mutually exclusive".into(),
                     details: vec![],
-                    hint: "Check the structure of MetaSchemaDefinition \
-                           (name/description/entity_types/relation_types)"
-                        .into(),
+                    hint: "Set exactly one of `definition` or `template_id`".into(),
                 }));
+            }
+            (None, None) => {
+                return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
+                    message: "one of definition or template_id is required".into(),
+                    details: vec![],
+                    hint: "Set exactly one of `definition` or `template_id`".into(),
+                }));
+            }
+            (Some(definition), None) => match serde_json::from_value(definition) {
+                Ok(definition) => definition,
+                Err(err) => {
+                    return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
+                        message: format!("invalid schema definition: {err}"),
+                        details: vec![],
+                        hint: "Check the structure of MetaSchemaDefinition \
+                               (name/description/entity_types/relation_types)"
+                            .into(),
+                    }));
+                }
+            },
+            (None, Some(template_id)) => {
+                let (definition, origin) = mcp_try!(
+                    crate::models::identity_templates::resolve_template_definition(
+                        &self.ctx.db,
+                        authorized.ctx.tenant_id,
+                        &template_id,
+                    )
+                    .await
+                );
+                origin_template_id = origin;
+                origin_snapshot = origin.map(|_| definition.clone());
+                definition
             }
         };
 
         let tenant_id = authorized.ctx.tenant_id;
         let workspace_id = authorized.ctx.workspace_id;
         let (record, diff) = mcp_try!(
-            content_schemas::create_schema(authorized.txn(), tenant_id, workspace_id, definition)
-                .await
+            content_schemas::create_schema(
+                authorized.txn(),
+                tenant_id,
+                workspace_id,
+                definition,
+                origin_template_id,
+                origin_snapshot,
+            )
+            .await
         );
         authorized.commit().await?;
         ok_json(serde_json::json!({

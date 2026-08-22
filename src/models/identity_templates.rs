@@ -130,3 +130,25 @@ pub async fn get_template(
         ))),
     }
 }
+
+/// Resolves a `template_id` as either a library template or a built-in, and says which.
+///
+/// A UUID can only mean the library; anything else can only mean a built-in. Parsing decides
+/// which, so neither lookup runs against an id that could not name it, and a library miss
+/// reports the library's own not-found rather than the built-in one.
+///
+/// The returned id is the origin to record: `Some` for a library template, whose later edits the
+/// schema can then be told about, and `None` for a built-in, which has no row to point at.
+pub async fn resolve_template_definition(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    template_id: &str,
+) -> Result<(MetaSchemaDefinition, Option<uuid::Uuid>), YorishiroError> {
+    match uuid::Uuid::parse_str(template_id) {
+        Ok(id) => {
+            let template = get_template(conn, tenant_id, id).await?;
+            Ok((template.definition, Some(template.id)))
+        }
+        Err(_) => Ok((crate::templates::get_template(template_id)?, None)),
+    }
+}

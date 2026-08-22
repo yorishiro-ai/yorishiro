@@ -214,24 +214,13 @@ pub async fn list(
     Ok(rows.into_iter().map(SchemaSummary::from).collect())
 }
 
-/// Registers a new schema definition, after validating it with `validate_definition`.
-/// If no schema of this name exists yet, creates version 1 as active; otherwise computes a
-/// `versioning::diff` against the current active version, archives it, and always inserts the
-/// new definition as the next version (reporting whether the diff is breaking).
-///
-/// The template-origin chain (`origin_template_id` linkage, upstream-change detection,
-/// three-way merge base) is not ported yet: this always inserts with no origin
-/// (`origin_status = detached`), matching a schema written by hand. Templates are a later slice.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`. That
-/// transaction is also this function's lock/read/archive/insert scope: it does not open a
-/// nested transaction of its own, since the request transaction already is the unit of work
-/// (the caller commits it after this returns, via `Authorized::commit()`).
 pub async fn create_schema(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     workspace_id: Uuid,
     definition: MetaSchemaDefinition,
+    origin_template_id: Option<Uuid>,
+    origin_snapshot: Option<MetaSchemaDefinition>,
 ) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
     use super::_entities::content_schemas::Column;
 
@@ -280,6 +269,15 @@ pub async fn create_schema(
     }
 
     let definition_json = serde_json::to_value(&definition).internal()?;
+    let origin_snapshot_json = origin_snapshot
+        .map(|snapshot| serde_json::to_value(&snapshot))
+        .transpose()
+        .internal()?;
+    let origin_status = if origin_template_id.is_some() {
+        ORIGIN_STATUS_LINKED
+    } else {
+        ORIGIN_STATUS_DETACHED
+    };
 
     let active = ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
@@ -288,7 +286,9 @@ pub async fn create_schema(
         version: ActiveValue::Set(next_version),
         definition: ActiveValue::Set(definition_json),
         status: ActiveValue::Set("active".to_string()),
-        origin_status: ActiveValue::Set(ORIGIN_STATUS_DETACHED.to_string()),
+        origin_template_id: ActiveValue::Set(origin_template_id),
+        origin_status: ActiveValue::Set(origin_status.to_string()),
+        origin_snapshot: ActiveValue::Set(origin_snapshot_json),
         ..Default::default()
     };
     let row = active.insert(conn).await.map_err(|err| {

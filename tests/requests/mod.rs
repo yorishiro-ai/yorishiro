@@ -1,5 +1,6 @@
 mod auth;
 mod members;
+mod schemas;
 mod system;
 mod workspaces;
 
