@@ -6,6 +6,7 @@ pub mod dtos;
 pub mod error;
 pub mod initializers;
 pub mod mailers;
+pub mod metaschema;
 pub mod models;
 pub mod services;
 pub mod tasks;
