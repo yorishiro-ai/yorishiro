@@ -45,6 +45,11 @@ include_dir = { version = "0.7" }
 # after_release hook, so this stays a hand-built sqlx pool beside SeaORM's DatabaseConnection.
 # See https://github.com/yotsunagi/yorishiro/issues/221.
 sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+thiserror = { version = "2" }
+anyhow = { version = "1" }
+rand = { version = "0.9" }
+sha2 = { version = "0.10" }
+sea-query = { version = "1.0" }
 
 [[bin]]
 name = "yorishiro_core-cli"
