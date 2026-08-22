@@ -7,6 +7,7 @@ pub mod import;
 pub mod mcp;
 pub mod relations;
 pub mod schemas;
+pub mod whoami;
 
 pub use error::ApiError;
 

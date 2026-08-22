@@ -87,6 +87,7 @@ impl Hooks for App {
             .add_route(controllers::import::routes())
             .add_route(controllers::relations::routes())
             .add_route(controllers::schemas::routes())
+            .add_route(controllers::whoami::routes())
     }
 
     /// Mounts the MCP server under `/mcp`. `rmcp`'s `StreamableHttpService` is a plain
