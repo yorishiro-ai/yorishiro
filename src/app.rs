@@ -93,14 +93,21 @@ impl Hooks for App {
             .add_route(controllers::workspaces::routes())
     }
 
-    /// Mounts the MCP server under `/mcp` and layers the maintenance guard over everything,
-    /// REST and MCP alike. `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
-    /// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here instead: this
-    /// hook runs after Loco's own routes are built, which is where Loco itself says custom Axum
-    /// logic belongs. The middleware layer must come after the MCP mount, not before: `.layer`
-    /// wraps everything already on the router at the point it's called.
+    /// Mounts the MCP server under `/mcp` and layers the maintenance guard and the auth rate
+    /// limiter over everything, REST and MCP alike. `rmcp`'s `StreamableHttpService` is a plain
+    /// `tower::Service`, not something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted
+    /// here instead: this hook runs after Loco's own routes are built, which is where Loco
+    /// itself says custom Axum logic belongs. The middleware layers must come after the MCP
+    /// mount, not before: `.layer` wraps everything already on the router at the point it's
+    /// called.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
         let router = controllers::mcp::mount(router, ctx);
+        let rate_limiter =
+            std::sync::Arc::new(crate::services::rate_limit::RateLimiter::from_env());
+        let router = router.layer(axum::middleware::from_fn_with_state(
+            rate_limiter,
+            crate::services::rate_limit::enforce,
+        ));
         Ok(router.layer(axum::middleware::from_fn_with_state(
             ctx.clone(),
             crate::services::maintenance::maintenance_guard,
