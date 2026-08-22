@@ -182,6 +182,20 @@ and reached elsewhere with `use crate::tests::test_helpers;`; that constraint (d
 test_helpers;` in several files trips `clippy::duplicate_mod`) is a `cargo`/`clippy` fact
 independent of the rebuild and still applies wherever `ee/`'s tests land.
 
+**The bridge-pattern question above is not just style: it decides whether RLS is even active
+under test.** `begin_for_workspace`'s `SET ROLE yorishiro_app` is behind `#[cfg(test)]`, live
+only because the old crates compiled `tests/` into the lib (`autotests = false` plus `#[path]`
+includes, `.claude/rules/workspace-checklist.md` in `yorishiro-specs`).
+Loco's plain `tests/` integration-test crate builds the lib normally, without `cfg(test)`, so
+adopting that convention outright means writing an equivalent for the RLS role some other way,
+not just picking a different file layout.
+
+**Two advisory-lock gates have never been raced**, `entities::create`'s quota lock and
+`create_schema`'s version-serialization lock (the latter's 409 branch has never executed).
+Whichever test strategy lands needs a widened-race test for both (multiple concurrent callers
+behind a barrier, per `.claude/rules/workspace-checklist.md`'s gate-is-not-a-gate-until-raced
+rule in `yorishiro-specs`), not just a happy-path unit test.
+
 ## Imports
 
 - Always `use axum::http::StatusCode;`.
