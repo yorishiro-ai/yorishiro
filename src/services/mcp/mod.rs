@@ -2,6 +2,7 @@ mod entities;
 mod import;
 mod relations;
 mod schemas;
+mod template_library;
 
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
@@ -32,7 +33,8 @@ impl YorishiroMcpServer {
             tool_router: Self::tool_router_entities()
                 + Self::tool_router_import()
                 + Self::tool_router_relations()
-                + Self::tool_router_schemas(),
+                + Self::tool_router_schemas()
+                + Self::tool_router_template_library(),
         }
     }
 }

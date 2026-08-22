@@ -1,5 +1,19 @@
-pub use super::_entities::identity_templates::{ActiveModel, Entity, Model};
+//! CRUD for `identity_templates`, the user-contributed schema template library.
+//!
+//! Distinct from `crate::templates` (the built-in templates shipped with the binary and served
+//! from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and
+//! manage. Runs on `ctx.db` (the migration-role connection), matching the rest of the identity
+//! surface: `identity_templates` has no RLS of its own, so every function here takes a
+//! `tenant_id` and filters/checks visibility explicitly.
+
+pub use super::_entities::identity_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
+use sea_orm::{Condition, QueryOrder};
+use serde::Serialize;
+
+use crate::error::{ResultExt, YorishiroError};
+use crate::metaschema::MetaSchemaDefinition;
+
 pub type IdentityTemplates = Entity;
 
 #[async_trait::async_trait]
@@ -30,3 +44,89 @@ impl ActiveModel {}
 
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
+
+/// A row from the tenant's DB-backed template library, with `definition` parsed.
+#[derive(Debug, Clone, Serialize)]
+pub struct TemplateRecord {
+    pub id: uuid::Uuid,
+    pub tenant_id: uuid::Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub definition: MetaSchemaDefinition,
+    pub tags: Vec<String>,
+    pub locale: Option<String>,
+    pub visibility: String,
+    pub author: Option<String>,
+    pub fork_of: Option<uuid::Uuid>,
+    pub created_by: Option<uuid::Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl TryFrom<Model> for TemplateRecord {
+    type Error = YorishiroError;
+
+    fn try_from(model: Model) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: model.id,
+            tenant_id: model.tenant_id,
+            name: model.name,
+            description: model.description,
+            definition: serde_json::from_value(model.definition).internal()?,
+            tags: model.tags,
+            locale: model.locale,
+            visibility: model.visibility,
+            author: model.author,
+            fork_of: model.fork_of,
+            created_by: model.created_by,
+            created_at: model.created_at.into(),
+            updated_at: model.updated_at.into(),
+        })
+    }
+}
+
+/// Templates visible to `tenant_id`: its own templates plus any published with community
+/// visibility.
+fn visible_to(tenant_id: uuid::Uuid) -> Condition {
+    Condition::any()
+        .add(Column::TenantId.eq(tenant_id))
+        .add(Column::Visibility.eq("community"))
+}
+
+/// Lists templates visible to `tenant_id`: its own templates plus any published with community
+/// visibility (cross-tenant sharing; not yet reachable through the API, but the query already
+/// honors it so nothing else needs to change when publishing ships).
+pub async fn list_templates(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+) -> Result<Vec<TemplateRecord>, YorishiroError> {
+    let rows = Entity::find()
+        .filter(visible_to(tenant_id))
+        .order_by_asc(Column::CreatedAt)
+        .all(conn)
+        .await
+        .internal()?;
+
+    rows.into_iter().map(TemplateRecord::try_from).collect()
+}
+
+/// Fetches a single template, allowed when it belongs to `tenant_id` or is community-visible.
+pub async fn get_template(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    template_id: uuid::Uuid,
+) -> Result<TemplateRecord, YorishiroError> {
+    let row = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(visible_to(tenant_id))
+        .one(conn)
+        .await
+        .internal()?;
+
+    match row {
+        Some(row) => row.try_into(),
+        None => Err(YorishiroError::not_found(format!(
+            "template '{template_id}' was not found"
+        ))),
+    }
+}
