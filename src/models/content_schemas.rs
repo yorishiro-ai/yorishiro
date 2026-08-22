@@ -243,6 +243,19 @@ pub async fn create_schema(
         .map(SchemaRecord::try_from)
         .transpose()?;
 
+    // Only the first version of a name mints an origin from what the caller passed. Every later
+    // one inherits the origin its predecessor already had, unless the caller states a new one:
+    // editing a schema does not un-link it from the template it was copied from, and treating an
+    // omitted origin as "detach" would silently break that link on every version after the
+    // first.
+    let (origin_template_id, origin_snapshot) = match &previous {
+        Some(previous) if origin_template_id.is_none() => (
+            previous.origin_template_id,
+            previous.origin_snapshot.clone(),
+        ),
+        _ => (origin_template_id, origin_snapshot),
+    };
+
     let (next_version, diff) = match &previous {
         Some(previous) => {
             let diff = metaschema::diff(&previous.definition, &definition);
