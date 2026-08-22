@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue, QuerySelect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
 pub use super::_entities::content_entities::{ActiveModel, Entity, Model};
@@ -36,10 +36,13 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// A row in the `content_entities` table, for the RLS-scoped request path.
-/// `embedding` is managed separately by the search/embedding pipeline, so this module's CRUD doesn't touch it.
+/// The RLS-scoped request path's view of a `content_entities` row.
+/// A distinct type from the generated `Model` because `Model` carries `embedding`
+/// (`Option<PgVector>`), which this API never returns: the search/embedding pipeline manages
+/// that column separately, and serializing a raw vector out of a CRUD response was never the
+/// old API's shape either.
 /// `created_by`/`updated_by` are `None` for entities touched by an unattributed (service/automation) API key, since there's no user to record.
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -51,6 +54,23 @@ pub struct EntityRecord {
     pub updated_at: DateTime<Utc>,
     pub created_by: Option<Uuid>,
     pub updated_by: Option<Uuid>,
+}
+
+impl From<Model> for EntityRecord {
+    fn from(row: Model) -> Self {
+        EntityRecord {
+            id: row.id,
+            workspace_id: row.workspace_id,
+            schema_id: row.schema_id,
+            schema_version: row.schema_version,
+            entity_type: row.entity_type,
+            data: row.data,
+            created_at: row.created_at.into(),
+            updated_at: row.updated_at.into(),
+            created_by: row.created_by,
+            updated_by: row.updated_by,
+        }
+    }
 }
 
 pub struct CreateEntityInput {
@@ -122,16 +142,17 @@ fn resolve_entity_type<'a>(
 /// `NULL` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
 /// The app role only has SELECT on `identity_workspaces`, which is enough to read this column without needing write access to the control-plane table.
 async fn check_entity_quota(
-    conn: &mut PgConnection,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    let max_entities: Option<i32> =
-        sqlx::query_scalar("SELECT max_entities FROM identity_workspaces WHERE id = $1")
-            .bind(workspace_id)
-            .fetch_optional(&mut *conn)
-            .await
-            .internal()?
-            .flatten();
+    let max_entities = crate::models::identity_workspaces::Entity::find_by_id(workspace_id)
+        .select_only()
+        .column(crate::models::_entities::identity_workspaces::Column::MaxEntities)
+        .into_tuple::<Option<i32>>()
+        .one(conn)
+        .await
+        .internal()?
+        .flatten();
 
     let Some(max) = max_entities else {
         return Ok(());
@@ -152,14 +173,15 @@ async fn check_entity_quota(
 }
 
 /// Counts how many entities a workspace holds, for both quota enforcement (`create`, above) and workspace-detail summaries.
-pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, YorishiroError> {
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM content_entities WHERE workspace_id = $1")
-            .bind(workspace_id)
-            .fetch_one(&mut *conn)
-            .await
-            .internal()?;
-    Ok(count)
+pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
+    use super::_entities::content_entities::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .count(conn)
+        .await
+        .internal()
+        .map(|n| n as i64)
 }
 
 /// Creates a new entity: resolves the schema name to its currently active schema, checks that the entity_type exists in that version, validates `data`, and persists the result.
@@ -167,26 +189,25 @@ pub async fn count(conn: &mut PgConnection, workspace_id: Uuid) -> Result<i64, Y
 ///
 /// The quota check and insert are serialized with a workspace-scoped advisory lock: without it, concurrent creates could each read a count under `max_entities` and both insert, overshooting the cap.
 ///
-/// Runs on the RLS-scoped raw connection a request handler holds via `Authorized::conn()`, not
-/// through the SeaORM entity layer: see the "which pool" rule in this repository's Loco-rebuild
-/// notes (product `CLAUDE.md`).
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`. That
+/// transaction is also this function's lock/quota/insert scope: it does not open a nested
+/// transaction of its own, since the request transaction already is the unit of work (the
+/// caller commits it after this returns, via `Authorized::commit()`).
 pub async fn create(
-    conn: &mut PgConnection,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     input: CreateEntityInput,
     created_by: Option<Uuid>,
 ) -> Result<EntityRecord, YorishiroError> {
-    let mut tx = conn.begin().await.internal()?;
-
-    crate::db::lock_for_update(&mut tx, &workspace_id.to_string())
+    crate::db::lock_for_update(conn, &workspace_id.to_string())
         .await
         .internal()?;
 
-    check_entity_quota(&mut tx, workspace_id).await?;
+    check_entity_quota(conn, workspace_id).await?;
 
     // Before resolving the schema, so an empty workspace is told it is empty.
     // Resolving first would report the schema name as not found, which reads as a typo rather than as "nothing has been defined here yet".
-    if crate::models::identity_workspaces::is_schema_pending(&mut tx, workspace_id).await? {
+    if crate::models::identity_workspaces::is_schema_pending(conn, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "workspace '{workspace_id}' has no schema yet, so there is nothing to \
@@ -199,53 +220,40 @@ pub async fn create(
         });
     }
 
-    let schema = crate::models::content_schemas::get_active_schema(
-        &mut tx,
-        workspace_id,
-        &input.schema_name,
-    )
-    .await?;
+    let schema =
+        crate::models::content_schemas::get_active_schema(conn, workspace_id, &input.schema_name)
+            .await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 
-    let row: EntityRecord = sqlx::query_as(
-        "INSERT INTO content_entities (workspace_id, schema_id, schema_version, entity_type, data, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6) \
-         RETURNING id, workspace_id, schema_id, schema_version, entity_type, data, \
-                   created_at, updated_at, created_by, updated_by",
-    )
-    .bind(workspace_id)
-    .bind(schema.id)
-    .bind(schema.version)
-    .bind(&input.entity_type)
-    .bind(&input.data)
-    .bind(created_by)
-    .fetch_one(&mut *tx)
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        workspace_id: ActiveValue::Set(workspace_id),
+        schema_id: ActiveValue::Set(schema.id),
+        schema_version: ActiveValue::Set(schema.version),
+        entity_type: ActiveValue::Set(input.entity_type),
+        data: ActiveValue::Set(input.data),
+        created_by: ActiveValue::Set(created_by),
+        ..Default::default()
+    };
+    let row = active.insert(conn).await.internal()?;
 
-    tx.commit().await.internal()?;
-
-    Ok(row)
+    Ok(row.into())
 }
 
-/// Runs on the RLS-scoped raw connection a request handler holds via `Authorized::conn()`, not
-/// through the SeaORM entity layer: see the "which pool" rule in this repository's Loco-rebuild
-/// notes (product `CLAUDE.md`).
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn get(
-    conn: &mut PgConnection,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<EntityRecord, YorishiroError> {
-    sqlx::query_as(
-        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
-                created_at, updated_at, created_by, updated_by \
-         FROM content_entities WHERE workspace_id = $1 AND id = $2",
-    )
-    .bind(workspace_id)
-    .bind(id)
-    .fetch_optional(&mut *conn)
-    .await
-    .internal()?
-    .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
+    use super::_entities::content_entities::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Id.eq(id))
+        .one(conn)
+        .await
+        .internal()?
+        .map(EntityRecord::from)
+        .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }

@@ -6,8 +6,6 @@ use axum::extract::{ConnectInfo, FromRef, FromRequestParts};
 use axum::http::header;
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
-use sqlx::PgConnection;
-use sqlx::pool::PoolConnection;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
@@ -132,18 +130,31 @@ impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
 
-/// An extractor that authenticates, verifies the required scope, and acquires a connection with
-/// the RLS context already set, all in one step. There is no way to obtain a `&mut PgConnection`
-/// except through this type, which structurally prevents forgetting the scope check.
+/// An extractor that authenticates, verifies the required scope, and begins a transaction with
+/// the RLS context already set, all in one step (see `TenantDb::begin_for_workspace`). There is
+/// no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which
+/// structurally prevents forgetting the scope check.
+///
+/// **A write handler must call `.commit().await?` before returning, or every write it made is
+/// silently discarded** (`DatabaseTransaction` rolls back on drop). A read-only handler can just
+/// let it drop; a rollback of nothing-written is a no-op.
 pub struct Authorized<R> {
     pub ctx: auth::AuthContext,
-    conn: PoolConnection<sqlx::Postgres>,
+    txn: sea_orm::DatabaseTransaction,
     _scope: PhantomData<R>,
 }
 
 impl<R> Authorized<R> {
-    pub fn conn(&mut self) -> &mut PgConnection {
-        &mut self.conn
+    pub fn txn(&self) -> &sea_orm::DatabaseTransaction {
+        &self.txn
+    }
+
+    /// Commits the transaction. Every write handler must call this before returning `Ok`.
+    pub async fn commit(self) -> Result<(), ApiError> {
+        self.txn
+            .commit()
+            .await
+            .map_err(|e| ApiError(YorishiroError::Internal(anyhow::anyhow!(e))))
     }
 }
 
@@ -163,14 +174,14 @@ where
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
-        let (ctx, conn) =
+        let (ctx, txn) =
             auth::authorize(&db, auth_impl.as_ref(), presented_key, R::SCOPE, &headers)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Authorized {
             ctx,
-            conn,
+            txn,
             _scope: PhantomData,
         })
     }

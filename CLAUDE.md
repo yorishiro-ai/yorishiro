@@ -47,24 +47,28 @@ these, not an escape hatch to avoid.
 (a diff there means the migration changed and entities need regenerating, not that the file itself
 was wrong). Business logic goes in `src/models/<table>.rs`, which wraps the generated `Entity`/
 `Model`/`ActiveModel`: reads on `impl Model`, writes on `impl ActiveModel`, everything else
-(custom finders, multi-step operations like key issuance) on `impl Entity`. A query against a
-fixed-column table goes through the entity (`ActiveModel` with `Set(...)`, `Entity::find()...`);
-raw `sqlx`/`Statement` stays for what the entity layer genuinely can't express: JSONB-internal
-queries (`data @> filter`), pgvector similarity search, and anything crossing the raw RLS pool
-below.
+(custom finders, multi-step operations like key issuance) on `impl Entity`.
 
-**RLS / two-pool architecture**: Loco's own `ctx.db` (`sea_orm::DatabaseConnection`) is built
-from `ConnectOptions`, which has no `after_connect`/`after_release` hook, so it cannot carry the
-`SET ROLE`/`set_config(...)` session-state lifecycle this deployment's row-level security
-depends on. `src/db.rs` builds a separate raw `sqlx::PgPool` (`TenantDb`) with that lifecycle,
-plus a plain `identity` pool for control-plane access (signup, setup, admin CLI, bypassing RLS
-via the migration role). Both are constructed in `Hooks::after_context` (`src/app.rs`) and
-stored as `db::DbHandle` in `ctx.shared_store`, retrieved via
-`ctx.shared_store.get_ref::<db::DbHandle>()`. Most of the actual tenant-scoped request path
-runs through this pool, not `ctx.db`. `SessionLock` (session-scoped `pg_advisory_lock`, used
-where a caller needs the same lock held across steps that can't share one transaction) lives
-here too, permanently, for the same reason: `DatabaseConnection` re-acquires a connection per
-call, so it cannot express "hold this one connection."
+**The SeaORM entity API is the default on every path, control-plane and RLS-scoped tenant CRUD alike.**
+An earlier version of this section said the RLS-scoped path had to stay on raw `sqlx` because Loco's own `ctx.db` can't carry the `SET ROLE`/`set_config(...)` session-state lifecycle RLS depends on.
+That premise (`ctx.db` can't carry it) is correct; the conclusion (so the entity API can't run there) does not follow, and turned out wrong once checked against SeaORM 2.0 itself: see the RLS / two-pool section below for the mechanism.
+`content_entities`/`content_schemas` CRUD reached from a request handler goes through `Entity::find()...`/`ActiveModel`/`Set(...)` exactly like control-plane code does, on the `DatabaseTransaction` `Authorized::txn()` hands the handler.
+Raw SQL (`execute_unprepared`/`execute_raw` on that same transaction) stays only for what the entity layer genuinely can't express: JSONB containment (`data @> filter`), pgvector similarity search, and `pg_advisory_xact_lock`.
+Free functions living in `src/models/<table>.rs` below that table's entity impls (`get_active_schema`, `is_schema_pending`, `entities::create`/`get`, and so on) take `&impl ConnectionTrait` so the same function works whether the caller holds a `DatabaseTransaction` or Loco's own `ctx.db`.
+
+**A write handler must call `Authorized::commit()` before returning `Ok`, or the write silently vanishes.**
+`Authorized<R>::txn()` is a `DatabaseTransaction`, which rolls back on drop; a handler that inserts a row and returns `201` without committing looks identical to a working handler in every test that only checks the status code, and the row is gone.
+A read-only handler needs no commit: dropping an uncommitted, nothing-written transaction is a no-op.
+Verification for any new write handler must include a follow-up read confirming the row is actually there, not just that the write call returned `Ok`.
+
+**RLS / two-pool architecture**: Loco's own `ctx.db` (`sea_orm::DatabaseConnection`) is built from `ConnectOptions`, which has no `after_connect`/`after_release` hook, so it cannot carry the `SET ROLE`/`set_config(...)` session-state lifecycle this deployment's row-level security depends on.
+`src/db.rs` builds a separate raw `sqlx::PgPool` (`TenantDb`) with that lifecycle, plus a plain `identity` pool for control-plane access (signup, setup, admin CLI, bypassing RLS via the migration role).
+`TenantDb` also wraps its own pool as a `sea_orm::DatabaseConnection` (`SqlxPostgresConnector::from_sqlx_postgres_pool`), which does not remove the wrapped pool's `after_connect` hook: that hook is a property of the underlying `sqlx::PgPool`, not of SeaORM's wrapper around it.
+`TenantDb::begin_for_workspace(tenant_id, workspace_id)` begins a transaction on that wrapped connection and sets `app.current_tenant`/`app.current_workspace` transaction-locally (`set_config(..., true)`), so RLS policies see them for every statement on that transaction, entity API and raw SQL alike, and they disappear automatically at commit or rollback with no `after_release` reset needed for the GUCs specifically.
+Both pools are constructed in `Hooks::after_context` (`src/app.rs`) and stored as `db::DbHandle` in `ctx.shared_store`, retrieved via `ctx.shared_store.get_ref::<db::DbHandle>()`.
+`Authorized<R>`'s extractor calls `begin_for_workspace` and hands the handler the resulting `DatabaseTransaction`.
+`SessionLock` (session-scoped `pg_advisory_lock`, used where a caller needs the same lock held across steps that can't share one transaction) is the one thing that still has no SeaORM equivalent and stays on the raw `sqlx::PgPool` permanently: `begin`/entity API re-acquire a connection per call or pin one only for a transaction's lifetime, and neither expresses "hold this one connection across steps with no enclosing transaction."
+See <https://github.com/yotsunagi/yorishiro/issues/221> for the design history, including the raw-SQL-only version of this section that stood briefly before the entity-API mechanism above was verified against SeaORM 2.0's actual behavior.
 
 ## Editions and the `ee/` boundary
 

@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
+use sea_orm::QueryOrder;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sqlx::PgConnection;
 use uuid::Uuid;
 
 pub use super::_entities::content_schemas::{ActiveModel, Entity, Model};
@@ -53,69 +52,52 @@ pub struct SchemaRecord {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(sqlx::FromRow)]
-struct SchemaRow {
-    id: Uuid,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-    name: String,
-    version: i32,
-    definition: Value,
-    status: String,
-    origin_template_id: Option<Uuid>,
-    origin_status: String,
-    origin_snapshot: Option<Value>,
-    created_at: DateTime<Utc>,
-}
+impl TryFrom<Model> for SchemaRecord {
+    type Error = YorishiroError;
 
-impl SchemaRow {
-    fn into_record(self) -> Result<SchemaRecord, YorishiroError> {
-        let definition = serde_json::from_value(self.definition).internal()?;
+    fn try_from(row: Model) -> Result<Self, Self::Error> {
         Ok(SchemaRecord {
-            id: self.id,
-            tenant_id: self.tenant_id,
-            workspace_id: self.workspace_id,
-            name: self.name,
-            version: self.version,
-            definition,
-            status: self.status,
-            origin_template_id: self.origin_template_id,
-            origin_status: self.origin_status,
-            origin_snapshot: self
+            id: row.id,
+            tenant_id: row.tenant_id,
+            workspace_id: row.workspace_id,
+            name: row.name,
+            version: row.version,
+            definition: serde_json::from_value(row.definition).internal()?,
+            status: row.status,
+            origin_template_id: row.origin_template_id,
+            origin_status: row.origin_status,
+            origin_snapshot: row
                 .origin_snapshot
                 .map(serde_json::from_value)
                 .transpose()
                 .internal()?,
-            created_at: self.created_at,
+            created_at: row.created_at.into(),
         })
     }
 }
 
 /// Fetches the currently active schema (the latest version with status='active') for the given workspace and name.
 ///
-/// Runs on the RLS-scoped raw connection a request handler holds via `Authorized::conn()`, not
-/// through the SeaORM entity layer: see the "which pool" rule in this repository's Loco-rebuild
-/// notes (product `CLAUDE.md`).
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it
+/// takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
 pub async fn get_active_schema(
-    conn: &mut PgConnection,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     name: &str,
 ) -> Result<SchemaRecord, YorishiroError> {
-    let row: Option<SchemaRow> = sqlx::query_as(
-        "SELECT id, tenant_id, workspace_id, name, version, definition, status, \
-         origin_template_id, origin_status, origin_snapshot, created_at \
-         FROM content_schemas \
-         WHERE workspace_id = $1 AND name = $2 AND status = 'active' \
-         ORDER BY version DESC LIMIT 1",
-    )
-    .bind(workspace_id)
-    .bind(name)
-    .fetch_optional(&mut *conn)
-    .await
-    .internal()?;
+    use super::_entities::content_schemas::Column;
+
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Name.eq(name))
+        .filter(Column::Status.eq("active"))
+        .order_by_desc(Column::Version)
+        .one(conn)
+        .await
+        .internal()?;
 
     match row {
-        Some(row) => row.into_record(),
+        Some(row) => row.try_into(),
         None => Err(YorishiroError::not_found(format!(
             "no active schema named '{name}'"
         ))),

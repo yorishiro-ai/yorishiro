@@ -1,10 +1,9 @@
-use sqlx::Postgres;
-use sqlx::pool::PoolConnection;
+use sea_orm::DatabaseTransaction;
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 
-use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used};
+use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used, touch_last_used_orm};
 
 /// Enforces that an authenticated context satisfies the required scope, returning
 /// `YorishiroError::ScopeInsufficient` when it doesn't.
@@ -23,34 +22,39 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
 }
 
 /// The single entry point for authorization: validates the presented raw key, confirms it
-/// satisfies the required scope, and returns a connection with the RLS context already set.
-/// REST and MCP adapters have no way to obtain a `&mut PgConnection` except through this
-/// function, which structurally prevents a scope check from being forgotten. The key is
-/// resolved through `authenticator` rather than by this function directly, so a deployment that
-/// replaces the rule (see [`Authenticator`]) is honoured on every path that authorizes.
+/// satisfies the required scope, and returns a transaction with the RLS context already set
+/// (see `TenantDb::begin_for_workspace`). REST and MCP adapters have no way to obtain a
+/// `DatabaseTransaction` on the tenant pool except through this function, which structurally
+/// prevents a scope check from being forgotten. The key is resolved through `authenticator`
+/// rather than by this function directly, so a deployment that replaces the rule (see
+/// [`Authenticator`]) is honoured on every path that authorizes.
+///
+/// The caller owns the returned transaction's lifetime: a write handler must call
+/// `txn.commit().await` explicitly, or every write in it is silently discarded when the
+/// transaction drops.
 pub async fn authorize(
     db: &DbHandle,
     authenticator: &dyn Authenticator,
     presented_key: &str,
     required: ApiKeyScope,
     headers: &[(String, String)],
-) -> Result<(AuthContext, PoolConnection<Postgres>), YorishiroError> {
+) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
     let ctx = authenticator
         .authenticate(db, presented_key, headers)
         .await?;
     require_scope(&ctx, required)?;
 
-    let mut conn = db
+    let txn = db
         .tenant
-        .acquire_for_workspace(ctx.tenant_id, ctx.workspace_id)
+        .begin_for_workspace(ctx.tenant_id, ctx.workspace_id)
         .await
         .internal()?;
 
-    if let Err(err) = touch_last_used(conn.as_mut(), ctx.api_key_id).await {
+    if let Err(err) = touch_last_used_orm(&txn, ctx.api_key_id).await {
         tracing::warn!(error = %err, "failed to update api key last_used_at");
     }
 
-    Ok((ctx, conn))
+    Ok((ctx, txn))
 }
 
 /// Touches `last_used_at` through a connection freshly acquired for this workspace, logging

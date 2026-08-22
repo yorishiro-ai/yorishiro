@@ -3,12 +3,26 @@
 //!
 //! Loco's own pool construction (`sea_orm::ConnectOptions`) has no `after_connect`/
 //! `after_release` hook, so the RLS session-state lifecycle this deployment depends on
-//! (`SET ROLE` per physical connection, `set_config(...)` per request, reset on release)
-//! is built here as a standalone `sqlx::PgPool` and stored in `AppContext::shared_store`
-//! (see `Hooks::after_context` in `src/app.rs`). Most of the actual request-handling query
-//! path runs through this pool, not Loco's `ctx.db`; see
-//! <https://github.com/yotsunagi/yorishiro/issues/221> for why.
+//! (`SET ROLE` per physical connection, `set_config(...)` per request) is built here as a
+//! standalone `sqlx::PgPool` and stored in `AppContext::shared_store` (see
+//! `Hooks::after_context` in `src/app.rs`).
+//!
+//! That pool is also wrapped as a `sea_orm::DatabaseConnection`
+//! (`SqlxPostgresConnector::from_sqlx_postgres_pool`), which preserves the wrapped pool's own
+//! `after_connect` hook: wrapping doesn't touch it, since the hook is a property of the sqlx
+//! pool, not of SeaORM. `TenantDb::begin_for_workspace` begins a transaction on that wrapped
+//! connection and sets `app.current_tenant`/`app.current_workspace` transaction-locally
+//! (`set_config(..., true)`), so Postgres RLS policies see them for the rest of that
+//! transaction and they vanish automatically at commit or rollback, no `after_release` reset
+//! needed for the GUCs. The SeaORM entity API (`Entity::find()`, `ActiveModel::insert()`, ...)
+//! runs directly on the returned `DatabaseTransaction`; raw SQL the entity layer can't express
+//! (JSONB containment, pgvector search, advisory locks) runs on the same handle via
+//! `execute_unprepared`/`execute_raw`. See
+//! <https://github.com/yotsunagi/yorishiro/issues/221> for the full history of this design.
 use async_trait::async_trait;
+use sea_orm::{
+    ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
+};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
@@ -32,6 +46,7 @@ pub trait Storage: Send + Sync {
 #[derive(Clone)]
 pub struct TenantDb {
     pool: PgPool,
+    orm: DatabaseConnection,
 }
 
 impl TenantDb {
@@ -39,7 +54,8 @@ impl TenantDb {
     /// Callers must separately guarantee that `app.current_tenant`/`app.current_workspace`
     /// get reset when a connection returns to the pool (use `connect` for production).
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        let orm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+        Self { pool, orm }
     }
 
     /// Builds the production pool.
@@ -47,7 +63,9 @@ impl TenantDb {
     /// subsequent queries run as the `yorishiro_app` role, which cannot bypass RLS.
     /// The `after_release` hook resets `app.current_tenant`/`app.current_workspace` before
     /// returning a connection to the pool, preventing one workspace's session state from
-    /// leaking to whichever workspace borrows the connection next.
+    /// leaking to whichever workspace borrows the connection next. Belt-and-suspenders
+    /// alongside `begin_for_workspace`'s transaction-local `set_config`: a connection reused
+    /// outside a transaction (`acquire_for_workspace`, below) still needs this.
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, sqlx::Error> {
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
@@ -72,11 +90,46 @@ impl TenantDb {
             })
             .connect(database_url)
             .await?;
-        Ok(Self { pool })
+        Ok(Self::new(pool))
     }
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    /// Begins a transaction scoped to `tenant_id`/`workspace_id`: the unit of work for one
+    /// RLS-scoped request. `app.current_tenant`/`app.current_workspace` are set
+    /// transaction-locally (`set_config(..., true)`), so Postgres RLS policies see them for
+    /// every statement run on the returned transaction, entity API and raw SQL alike, and they
+    /// disappear automatically at commit or rollback.
+    ///
+    /// The caller owns the transaction's lifetime: a write handler must call
+    /// `txn.commit().await` explicitly, or every write in it is silently discarded when the
+    /// transaction drops.
+    pub async fn begin_for_workspace(
+        &self,
+        tenant_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Result<DatabaseTransaction, DbErr> {
+        let txn = self.orm.begin().await?;
+
+        #[cfg(test)]
+        txn.execute_unprepared("SET ROLE yorishiro_app").await?;
+
+        txn.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT set_config('app.current_tenant', $1, true)",
+            [tenant_id.to_string().into()],
+        ))
+        .await?;
+        txn.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT set_config('app.current_workspace', $1, true)",
+            [workspace_id.to_string().into()],
+        ))
+        .await?;
+
+        Ok(txn)
     }
 
     /// Sets the session variables `app.current_tenant` and `app.current_workspace` on this
@@ -140,12 +193,15 @@ pub struct DbHandle {
 /// Serializes a transaction against others naming the same `key`, until it commits.
 ///
 /// The lock is transaction-scoped, so it releases on commit or rollback without an unlock
-/// call to forget.
-pub async fn lock_for_update(conn: &mut sqlx::PgConnection, key: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(key)
-        .execute(conn)
-        .await?;
+/// call to forget. Takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in
+/// practice), since every caller already holds one via `Authorized::txn()`.
+pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(), DbErr> {
+    conn.execute_raw(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [key.into()],
+    ))
+    .await?;
     Ok(())
 }
 

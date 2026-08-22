@@ -20,7 +20,7 @@ pub struct CreateEntityRequest {
 }
 
 pub async fn create_entity(
-    mut authorized: Authorized<WriteScope>,
+    authorized: Authorized<WriteScope>,
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
@@ -31,18 +31,19 @@ pub async fn create_entity(
     };
     let created_by = authorized.ctx.user_id;
     let record =
-        content_entities::create(authorized.conn(), workspace_id, input, created_by).await?;
+        content_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
     // Embedding sync runs asynchronously off the request path in the old implementation; the
     // worker port for it hasn't landed yet in this rebuild, so it's a no-op for now.
+    authorized.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
 
 pub async fn get_entity(
-    mut authorized: Authorized<ReadScope>,
+    authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record = content_entities::get(authorized.conn(), workspace_id, id).await?;
+    let record = content_entities::get(authorized.txn(), workspace_id, id).await?;
     Ok(Json(record))
 }
 
