@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
-use crate::controllers::extractors::{Authorized, ReadScope};
+use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
 use crate::error::YorishiroError;
 use crate::models::_entities::identity_workspaces;
@@ -66,15 +66,17 @@ pub async fn create_workspace(
 ) -> Result<impl IntoResponse, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
 
-    // No embedding provider is wired up yet (see the Loco rebuild worklist, slice E): every
-    // workspace this creates is stamped with the deployment default until that lands.
+    let provider = embedding_provider(&ctx)?;
+    let embedding_model = crate::services::embedding::model_name_from_env();
+    let dimensions = provider.dimensions() as i32;
+
     let workspace = tenancy::create_workspace(
         &ctx.db,
         auth.tenant_id,
         &body.name,
         body.max_entities,
         body.schema_id,
-        None,
+        Some((&embedding_model, dimensions)),
     )
     .await?;
     Ok((StatusCode::CREATED, Json(workspace)))

@@ -34,7 +34,16 @@ impl Task for ResyncEmbeddings {
             .parse()
             .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
 
-        let provider = embedding::build_embedding_provider().map_err(|err| {
+        // `build_embedding_provider` no longer fails when unconfigured (see its doc comment): it
+        // falls back to `UnconfiguredEmbeddingProvider`, which satisfies the dimension count but
+        // errors on every actual call. Left unchecked, every candidate below would fail
+        // individually and the summary line would read as an ordinary "N failed" outcome instead
+        // of the operator's actual problem (nothing is configured). One embed call up front,
+        // before the loop, turns that into the same hard failure `build_embedding_provider`
+        // itself used to be.
+        let provider = embedding::build_embedding_provider()
+            .map_err(|err| Error::Message(format!("failed to build embedding provider: {err}")))?;
+        provider.embed_batch(&[]).await.map_err(|err| {
             Error::Message(format!("embedding provider must be configured: {err}"))
         })?;
 

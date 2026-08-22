@@ -86,6 +86,16 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
     }
 }
 
+/// The model name this deployment is configured for, for stamping onto new workspaces.
+///
+/// Read from the environment rather than the provider: `EmbeddingProvider` exposes
+/// `dimensions()` because callers need it, and adding a `model()` for this one caller would put
+/// a naming question ("what does an unconfigured provider call itself?") into a trait every
+/// implementation would have to answer.
+pub fn model_name_from_env() -> String {
+    std::env::var("YORISHIRO_EMBEDDING_MODEL").unwrap_or_else(|_| "unconfigured".into())
+}
+
 /// Builds the embedding provider from environment variables.
 ///
 /// `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible

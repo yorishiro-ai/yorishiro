@@ -20,6 +20,29 @@ use crate::models::_entities::{
 };
 use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
 
+/// Reads and parses `YORISHIRO_MAX_TENANTS`.
+/// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and
+/// fails loudly rather than silently falling back to unlimited.
+pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
+    match std::env::var("YORISHIRO_MAX_TENANTS") {
+        Ok(raw) => {
+            let parsed = raw.parse::<i32>().map_err(|_| {
+                YorishiroError::Internal(anyhow::anyhow!(
+                    "YORISHIRO_MAX_TENANTS must be an integer, got '{raw}'"
+                ))
+            })?;
+            match parsed {
+                0 => Ok(None),
+                n if n < 0 => Err(YorishiroError::Internal(anyhow::anyhow!(
+                    "YORISHIRO_MAX_TENANTS must not be negative, got '{raw}'"
+                ))),
+                n => Ok(Some(n)),
+            }
+        }
+        Err(_) => Ok(None),
+    }
+}
+
 /// Mirrors the `identity_tenant_memberships.role` check constraint (`owner`/`admin`/`member`/`viewer`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
