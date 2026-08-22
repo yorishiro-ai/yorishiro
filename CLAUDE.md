@@ -10,6 +10,11 @@ helpers, or the `Engine` trait are stale and are being replaced section by secti
 reaches each area**; treat a stale section as describing what used to be true, not a live rule,
 until this note is removed.
 
+**`yorishiro-specs`' `Yorishiro_v1_technical_spec*.md` documents are not being updated slice by
+slice during this rebuild**, a deliberate deferral rather than drift: they describe the shipped
+v0.50.0 behavior, which is still what a reader of those documents needs until `develop` actually
+merges and replaces it. They get brought current as part of that merge, not each commit here.
+
 **Before writing any Loco/SeaORM code, check the actual behavior against Loco's own
 documentation or source (`https://loco.rs/docs/`, DeepWiki on `loco-rs/loco` and
 `SeaQL/sea-orm`) rather than assuming from a general Rails/ActiveRecord mental model.** Several
