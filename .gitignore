@@ -8,3 +8,8 @@
 /models
 # `ee/web/` carries its own .gitignore for `dist/` and `node_modules/`, including the
 # `!dist/.gitkeep` exception the embed needs.
+
+# Loco rebuild reference: the pre-rebuild tree, kept locally for porting. Never committed:
+# old/ee/** sits outside ee/, so committing it would relicense paid code as BUSL.
+/old
+debug/
