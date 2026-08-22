@@ -44,3 +44,5 @@ uuid.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 wiremock.workspace = true
+sqlite-vec = "=0.1.9"
+libsqlite3-sys = "0.30"

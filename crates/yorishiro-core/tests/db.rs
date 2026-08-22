@@ -422,8 +422,8 @@ mod sqlite_execution {
     use std::str::FromStr;
     use uuid::Uuid;
 
-    use crate::YorishiroError;
     use crate::models::{entities, relations};
+    use crate::{ResultExt, YorishiroError};
 
     /// The real Sqlite migration set (`migrations_sqlite/`), not test-local DDL: a column the
     /// code queries but the migration forgot now fails here rather than only in a hand-written
@@ -971,5 +971,176 @@ mod sqlite_execution {
                 window[1]
             );
         }
+    }
+
+    /// Spike for infra-adapter-and-migration-spec.md item 5 stage 4: does the linked libsqlite3
+    /// actually carry FTS5, in the connection this crate uses (not the `sqlite3` CLI, which can
+    /// link a different libsqlite3 than what `libsqlite3-sys` bundles or links against).
+    /// `PRAGMA compile_options` lists every `SQLITE_ENABLE_*`/`SQLITE_OMIT_*` baked into the
+    /// linked library at compile time: this is not a runtime toggle, so a missing `ENABLE_FTS5`
+    /// entry means the feature does not exist here, not merely that it is off.
+    #[tokio::test]
+    async fn linked_sqlite_reports_its_compile_options() -> Result<(), YorishiroError> {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").internal()?;
+        let mut conn = SqliteConnection::connect_with(&options).await.internal()?;
+
+        let opts: Vec<(String,)> = sqlx::query_as("PRAGMA compile_options")
+            .fetch_all(&mut conn)
+            .await
+            .internal()?;
+        let opts: Vec<String> = opts.into_iter().map(|(o,)| o).collect();
+
+        assert!(
+            opts.iter().any(|o| o == "ENABLE_FTS5"),
+            "linked libsqlite3 was built without FTS5; compile_options: {opts:?}"
+        );
+        Ok(())
+    }
+
+    /// Records why the runtime `.extension()` path was rejected in favor of static linking
+    /// (`sqlite_vec_answers_a_knn_query_when_statically_registered` below), not a precondition
+    /// of the chosen path: `sqlite3_auto_extension`'s own implementation
+    /// (`libsqlite3-sys-0.30.1/sqlite3/sqlite3.c:137911`) is never guarded by
+    /// `#ifdef SQLITE_OMIT_LOAD_EXTENSION`, only `sqlite3_load_extension`/`sqlite3_enable_load_extension`
+    /// are, so static registration works even when this assertion would fail. Kept as a
+    /// same-layer companion to the FTS5 check above (`compile_options`, not a runtime probe),
+    /// documenting the constraint the abandoned path ran into: some distro builds omit
+    /// `sqlite3_load_extension` entirely for security (Debian/Ubuntu's system libsqlite3
+    /// historically has, via `OMIT_LOAD_EXTENSION`).
+    ///
+    /// The runtime `.extension()` call against a nonexistent file that this constraint was
+    /// originally measured against panicked instead of returning an `Err` (`sqlx-sqlite 0.8.6`,
+    /// `EstablishParams::establish`, `establish.rs:243`, "expected error code to be set in
+    /// current context"), inside `sqlx_sqlite::connection::worker::ConnectionWorker::establish`
+    /// on a background worker thread. The panic fires deep in the failure-handling path itself
+    /// (after `sqlite3_enable_load_extension` succeeds, while turning the SQLite error code from
+    /// the failed `sqlite3_load_extension` call into an `SqliteError`), so it swallowed the very
+    /// distinction ("not authorized" vs "file not found") that probe needed, and the `Err` arm
+    /// that caught it was matching sqlx's worker-crashed error, not SQLite's.
+    /// A test built on top of that would have measured nothing: green for the wrong reason.
+    ///
+    /// That bug alone rules out shipping sqlite-vec as a runtime-loaded `.so`/`.dylib` on this
+    /// sqlx version regardless of whether loading itself would succeed: a missing or mispathed
+    /// extension file becomes a cryptic worker-thread panic with the cause erased, the opposite
+    /// of this codebase's loud-fail/exit-78 rule. `sea-query`'s sqlx pin does not move independent
+    /// of `pgvector`'s (`docs/dependency-modernization-investigation.md` §1.2), so this is
+    /// recorded as a standing constraint rather than something to wait out, and static linking
+    /// (below) sidesteps it entirely rather than working around it.
+    /// Diagnostic only, not a pass/fail gate: `OMIT_LOAD_EXTENSION` describes the abandoned
+    /// runtime-`.extension()` path (see the doc comment above), not the static-registration path
+    /// this crate actually uses. A build that defines it is still a valid target for
+    /// `sqlite_vec_answers_a_knn_query_when_statically_registered` below, so asserting its
+    /// absence here would fail CI on a correct build the moment such a target showed up
+    /// (`bundled`, a hardened distro package), contradicting this very doc comment's claim that
+    /// static registration is unaffected by it.
+    #[tokio::test]
+    async fn linked_sqlite_permits_extension_loading_at_compile_time() -> Result<(), YorishiroError>
+    {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").internal()?;
+        let mut conn = SqliteConnection::connect_with(&options).await.internal()?;
+
+        let opts: Vec<(String,)> = sqlx::query_as("PRAGMA compile_options")
+            .fetch_all(&mut conn)
+            .await
+            .internal()?;
+        let opts: Vec<String> = opts.into_iter().map(|(o,)| o).collect();
+
+        if opts.iter().any(|o| o == "OMIT_LOAD_EXTENSION") {
+            tracing::info!(
+                ?opts,
+                "linked libsqlite3 omits runtime extension loading; irrelevant to the static \
+                 registration path this crate uses"
+            );
+        }
+        Ok(())
+    }
+
+    /// Spike, static-link path: register `sqlite-vec`'s `sqlite3_vec_init` once via
+    /// `sqlite3_auto_extension` (a C-level global registration, `libsqlite3-sys` already links
+    /// against the same libsqlite3 headers) before opening any connection, then prove `vec0`
+    /// actually answers a KNN query end to end.
+    ///
+    /// This sidesteps the runtime `.extension()` bug found above entirely: nothing calls
+    /// `sqlite3_load_extension` at connection time, so `establish.rs:243` is never reached.
+    /// It also removes the distribution question a `.so`/`.dylib` path would carry (fetching and
+    /// pinning a platform-specific extension binary at deploy time): `sqlite-vec` ships its
+    /// static C sources and links them into this binary at compile time, the same shape as
+    /// `pgvector`/`ort` already have.
+    ///
+    /// `sqlite3_auto_extension` is process-global and idempotent-by-address (SQLite silently
+    /// no-ops a second registration of the same function pointer), so calling it once via
+    /// `std::sync::Once` here is representative of what a real driver's startup would do once
+    /// per process, not once per connection.
+    #[tokio::test]
+    async fn sqlite_vec_answers_a_knn_query_when_statically_registered() {
+        static REGISTER: std::sync::Once = std::sync::Once::new();
+        REGISTER.call_once(|| unsafe {
+            // Safety: `sqlite-vec`'s own crate tests register it the same way (its `src/lib.rs`
+            // declares `sqlite3_vec_init` as a bare `extern "C" fn()`, not typed to the
+            // `xEntryPoint` signature `sqlite3_auto_extension` expects); the C side resolves the
+            // real prototype at the SQLite extension-loading callsite. Runs once, before any
+            // connection in this process is opened.
+            libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute::<
+                *const (),
+                unsafe extern "C" fn(
+                    *mut libsqlite3_sys::sqlite3,
+                    *mut *mut std::os::raw::c_char,
+                    *const libsqlite3_sys::sqlite3_api_routines,
+                ) -> std::os::raw::c_int,
+            >(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        });
+
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let mut conn = SqliteConnection::connect_with(&options).await.unwrap();
+
+        let (version,): (String,) = sqlx::query_as("SELECT vec_version()")
+            .fetch_one(&mut conn)
+            .await
+            .expect("vec_version() unavailable: sqlite3_auto_extension registration did not take");
+        assert!(!version.is_empty());
+
+        sqlx::query("CREATE VIRTUAL TABLE spike_vec USING vec0(embedding float[3])")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        for (rowid, values) in [
+            (1i64, "[1.0, 0.0, 0.0]"),
+            (2i64, "[0.0, 1.0, 0.0]"),
+            (3i64, "[0.9, 0.1, 0.0]"),
+        ] {
+            sqlx::query("INSERT INTO spike_vec(rowid, embedding) VALUES (?, ?)")
+                .bind(rowid)
+                .bind(values)
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+
+        // KNN query shape `vec0` requires: `embedding MATCH ? ORDER BY distance LIMIT ?`.
+        let hits: Vec<(i64, f64)> = sqlx::query_as(
+            "SELECT rowid, distance FROM spike_vec \
+             WHERE embedding MATCH ? ORDER BY distance LIMIT 2",
+        )
+        .bind("[1.0, 0.0, 0.0]")
+        .fetch_all(&mut conn)
+        .await
+        .unwrap();
+
+        assert_eq!(hits.len(), 2, "expected 2 nearest neighbours, got {hits:?}");
+        assert_eq!(
+            hits[0].0, 1,
+            "exact match (rowid 1) must rank first: {hits:?}"
+        );
+        assert_eq!(
+            hits[1].0, 3,
+            "the near-match (rowid 3) must rank second: {hits:?}"
+        );
+        assert!(
+            hits[0].1 < hits[1].1,
+            "distance must increase with dissimilarity: {hits:?}"
+        );
     }
 }
