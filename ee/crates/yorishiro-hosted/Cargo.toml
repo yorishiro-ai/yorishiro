@@ -33,3 +33,4 @@ tracing = { version = "0.1" }
 [dev-dependencies]
 base64 = { version = "0.22" }
 serde_json = { version = "1" }
+tempfile = { version = "3" }

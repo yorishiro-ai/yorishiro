@@ -1,9 +1,55 @@
 use yorishiro_hosted::services::licence::{LicenceClaims, LicenceState, licence_key_in, verify};
 
-const TEST_PUBLIC_KEY: &[u8] = include_bytes!("keys/test-public.pem");
-const TEST_PRIVATE_KEY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/keys/test-private.pem");
+/// A keypair generated fresh per test process rather than checked into the repository: it signs
+/// only throwaway JWTs this suite mints and verifies itself, so committing it would be a private
+/// key in source control for no reason a scanner can tell apart from a real one.
+struct TestKeypair {
+    private_key_path: std::path::PathBuf,
+    public_key_pem: Vec<u8>,
+    _dir: tempfile::TempDir,
+}
 
-fn sign(claims: &LicenceClaims) -> String {
+fn test_keypair() -> TestKeypair {
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().expect("tempdir for the test keypair");
+    let private_key_path = dir.path().join("private.pem");
+    let public_key_path = dir.path().join("public.pem");
+
+    let status = Command::new("openssl")
+        .args([
+            "genrsa",
+            "-out",
+            private_key_path.to_str().unwrap(),
+            "2048",
+        ])
+        .status()
+        .expect("openssl must be on PATH to generate the test keypair");
+    assert!(status.success(), "openssl genrsa failed");
+
+    let status = Command::new("openssl")
+        .args([
+            "rsa",
+            "-in",
+            private_key_path.to_str().unwrap(),
+            "-pubout",
+            "-out",
+            public_key_path.to_str().unwrap(),
+        ])
+        .status()
+        .expect("openssl must be on PATH to derive the test public key");
+    assert!(status.success(), "openssl rsa -pubout failed");
+
+    let public_key_pem = std::fs::read(&public_key_path).expect("reading the derived public key");
+
+    TestKeypair {
+        private_key_path,
+        public_key_pem,
+        _dir: dir,
+    }
+}
+
+fn sign(private_key_path: &std::path::Path, claims: &LicenceClaims) -> String {
     use std::process::{Command, Stdio};
     use std::io::Write;
 
@@ -12,7 +58,7 @@ fn sign(claims: &LicenceClaims) -> String {
     let signing_input = format!("{header}.{payload}");
 
     let mut child = Command::new("openssl")
-        .args(["dgst", "-sha256", "-sign", TEST_PRIVATE_KEY_PATH])
+        .args(["dgst", "-sha256", "-sign", private_key_path.to_str().unwrap()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -36,24 +82,27 @@ fn base64_url(bytes: &[u8]) -> String {
 
 #[test]
 fn verify_accepts_a_correctly_signed_unexpired_token() {
+    let keypair = test_keypair();
     let claims = LicenceClaims {
         sub: "test-customer".into(),
         plan: "enterprise".into(),
         exp: chrono::Utc::now().timestamp() + 3600,
     };
-    let token = sign(&claims);
-    let verified = verify(&token, TEST_PUBLIC_KEY).expect("a correctly signed token must verify");
+    let token = sign(&keypair.private_key_path, &claims);
+    let verified =
+        verify(&token, &keypair.public_key_pem).expect("a correctly signed token must verify");
     assert_eq!(verified.plan, "enterprise");
 }
 
 #[test]
 fn verify_rejects_a_token_signed_by_a_different_key() {
+    let keypair = test_keypair();
     let claims = LicenceClaims {
         sub: "test-customer".into(),
         plan: "enterprise".into(),
         exp: chrono::Utc::now().timestamp() + 3600,
     };
-    let token = sign(&claims);
+    let token = sign(&keypair.private_key_path, &claims);
     // The compiled-in production public key, not the test key that actually signed this token.
     let production_key = include_bytes!("../keys/licence-public.pem");
     assert!(verify(&token, production_key).is_err());

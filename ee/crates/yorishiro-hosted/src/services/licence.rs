@@ -47,10 +47,16 @@ pub(crate) fn resolve_licence_key(
     }
 }
 
-/// `license_key:` from the config file, read here rather than in `yorishiro-core`'s own loader.
+/// `license_key:` from the config file, read here rather than in a shared config loader.
 ///
-/// That loader copies every setting it parses into the environment, and doing so for this one would put the string `YORISHIRO_LICENSE_KEY` into the community binary, which the release gate scans for and rejects, correctly: that build is meant to carry no trace of the paid edition.
-/// The shared struct therefore accepts the key and ignores it, and the edition that actually uses it reads the file itself.
+/// **Stale, pending a decision (2026-08-22): this reads `config.yml`, master's pre-rebuild
+/// server config file, which does not exist on the Loco rebuild.** Loco resolves `config/
+/// {environment}.yaml` itself, and no `license_key:` field exists there; `YORISHIRO_CONFIG_PATH`
+/// is not a variable this rebuild defines. Ported unchanged rather than deleted, since the file
+/// fallback is the correct shape once Loco config wires in a field for it; until then this
+/// function is a no-op that always returns `None`, and only the environment-variable path
+/// (`YORISHIRO_LICENSE_KEY`, checked in `LicenceState::from_env` before this is ever called) is
+/// live. See CLAUDE.md's `ee/` composition section.
 ///
 /// Environment first, file second, matching every other setting.
 fn licence_key_from_config() -> Option<String> {
