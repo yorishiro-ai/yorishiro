@@ -199,34 +199,22 @@ still applies.
 
 ## Tests
 
-**Not yet re-established post-rebuild.** The pre-rebuild `#[path = "..."]` bridge pattern
-(private-item access from `tests/`, `autotests = false`) matched the old three-crate layout;
-Loco's own scaffold uses a plain `tests/` integration-test crate instead (`tests/mod.rs` at the
-root, `#[tokio::test]`/`request::<App, _, _>(...)` style, per Loco's own testing docs). Whether
-the old bridge pattern still has a reason to exist once real tests are written for the ported
-code, or whether Loco's own convention supersedes it outright, is an open question for whoever
-writes the first real test file â€” check `https://loco.rs/docs/` and this crate's `tests/`
-scaffold before deciding, don't assume the old pattern.
+**Decided (2026-08-22): Loco's own plain `tests/` integration-test crate, not the pre-rebuild
+`#[path = "..."]` bridge pattern.** The bridge existed for one reason, private-item access from
+outside the crate under `autotests = false`, and that reason no longer applies: `src/db.rs`'s
+production path (`TenantDb::connect`) runs `SET ROLE yorishiro_app` unconditionally in
+`after_connect`, so a test helper needs no special access to exercise RLS, it just calls
+`TenantDb::connect(url, max_connections)` against a real test database the same way
+`Hooks::after_context` does. `config/test.yaml`'s `database.uri` already reads `DATABASE_URL`
+with `auto_migrate: true`, so `cargo test` against a scratch Postgres runs converge and gets a
+role-and-RLS-correct connection with no bridge, no `#[path]`, no `autotests = false`. The
+`#[cfg(test)]` `SET ROLE` lines that only mattered for `TenantDb::new(pool)` (bypassing
+`after_connect`) were removed from `begin_for_workspace`/`acquire_for_workspace`: nothing calls
+`new` and nothing should, `connect` is the only path a test needs.
 In `ee/`, shared test helpers (`tests/test_helpers.rs`) were declared **once**, in `tests/lib.rs`,
 and reached elsewhere with `use crate::tests::test_helpers;`; that constraint (declaring `mod
 test_helpers;` in several files trips `clippy::duplicate_mod`) is a `cargo`/`clippy` fact
 independent of the rebuild and still applies wherever `ee/`'s tests land.
-
-**Corrected (2026-08-22): the claim below about `#[cfg(test)]` gating RLS was wrong in this
-rebuilt codebase**, carried over from the old repo's actual constraint without rechecking
-`src/db.rs` against it. In production (`TenantDb::connect`, `after_context`'s only call site),
-`SET ROLE yorishiro_app` runs unconditionally in `after_connect`, once per physical connection,
-confirmed live in server logs (`SET ROLE yorishiro_app` at boot and per request). The
-`#[cfg(test)]` lines in `begin_for_workspace`/`acquire_for_workspace` only matter for a caller
-that builds a `TenantDb` via `TenantDb::new(pool)` (a bare pool, skipping `after_connect`
-entirely) rather than `TenantDb::connect(url)`: nothing in the codebase calls `new` yet, so this
-is dead code waiting for whatever test helper gets written. **The real constraint is narrower
-than "RLS needs `tests/` compiled into the lib": it's "if a test helper constructs `TenantDb`
-via `new` instead of `connect`, that helper must run as part of `yorishiro-core`'s own
-`#[cfg(test)]` build for the inline `SET ROLE` to exist at all"**, and the simpler fix is for the
-helper to call `connect` against a real URL (RLS active unconditionally, no `cfg(test)`
-dependency) rather than reproducing the old bridge pattern to keep `new` working. Check this
-file again before deciding the test strategy, don't reason from this note's history.
 
 **`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against
 `loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs
@@ -247,6 +235,16 @@ CURRENT_USER`, required on PostgreSQL 16+ per `Yorishiro_v1_technical_spec.md` Â
 `yorishiro-specs`, since even a role's creator can't `SET ROLE` to it without that grant). This
 too went unnoticed because the migrating role in every prior run was a superuser, which can `SET
 ROLE` regardless of membership.
+
+**`m20260822_100000_tenants`'s `GRANT yorishiro_app TO CURRENT_USER` has only ever run as a
+superuser**, `test-loco/`'s migrating role, which can `SET ROLE` regardless of grant membership.
+That proves the statement executes, not that it's sufficient: per the checklist's
+verify-on-a-non-superuser-role decision (`.claude/rules/workspace-checklist.md` in
+`yorishiro-specs`, the pre-rebuild `create_schema` 500 and the `FORCE ROW LEVEL SECURITY` break
+both hid behind exactly this gap), the real check is migrating a fresh volume as a `ph1user`-style
+non-superuser role and confirming `SET ROLE yorishiro_app` then succeeds without it. Needs a
+non-superuser migration role and a fresh `test-loco/` volume, which the test slice above will need
+regardless, so verify it there rather than as a one-off.
 
 **Two advisory-lock gates have never been raced**, `entities::create`'s quota lock and
 `create_schema`'s version-serialization lock (the latter's 409 branch has never executed).

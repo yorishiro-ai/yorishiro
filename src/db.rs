@@ -128,9 +128,6 @@ impl TenantDb {
     ) -> Result<DatabaseTransaction, DbErr> {
         let txn = self.orm.begin().await?;
 
-        #[cfg(test)]
-        txn.execute_unprepared("SET ROLE yorishiro_app").await?;
-
         txn.execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             "SELECT set_config('app.current_tenant', $1, true)",
@@ -162,10 +159,6 @@ impl TenantDb {
     ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, sqlx::Error> {
         let mut conn = self.pool.acquire().await?;
 
-        #[cfg(test)]
-        sqlx::query("SET ROLE yorishiro_app")
-            .execute(conn.as_mut())
-            .await?;
         sqlx::query("SELECT set_config('app.current_tenant', $1, false)")
             .bind(tenant_id.to_string())
             .execute(conn.as_mut())
