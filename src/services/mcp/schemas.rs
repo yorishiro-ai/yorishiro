@@ -27,6 +27,14 @@ pub struct GetSchemaByIdArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetEntityTypeJsonSchemaArgs {
+    /// Name of the active schema.
+    pub schema_name: String,
+    /// entity_type name within that schema.
+    pub entity_type: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateSchemaArgs {
     /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
     /// If a schema with the same name already exists, whether the change is breaking or
@@ -36,6 +44,22 @@ pub struct CreateSchemaArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_schemas)]
 impl YorishiroMcpServer {
+    #[tool(
+        description = "List summaries of all schemas registered for the workspace (all \
+                           versions, including archived). Use this to discover what schemas \
+                           exist (requires read scope)"
+    )]
+    pub async fn list_schemas(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let summaries = mcp_try!(content_schemas::list(authorized.txn(), workspace_id).await);
+        ok_json(summaries)
+    }
+
     #[tool(
         description = "Get the currently active schema definition by name (requires read scope)"
     )]
@@ -105,5 +129,48 @@ impl YorishiroMcpServer {
             "schema": record,
             "diff": diff,
         }))
+    }
+
+    #[tool(
+        description = "List built-in schema templates that can be used as a starting point for \
+                           create_schema instead of writing a definition from scratch (requires \
+                           read scope)"
+    )]
+    pub async fn list_templates(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let _authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+
+        ok_json(crate::templates::list_templates())
+    }
+
+    #[tool(
+        description = "Get a specific entity_type within the active schema as a JSON Schema \
+                           (requires read scope). Use this to let an agent learn field types, \
+                           required fields, enums, etc. ahead of time."
+    )]
+    pub async fn get_entity_type_json_schema(
+        &self,
+        Parameters(args): Parameters<GetEntityTypeJsonSchemaArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let record = mcp_try!(
+            content_schemas::get_active_schema(authorized.txn(), workspace_id, &args.schema_name)
+                .await
+        );
+
+        match record.definition.entity_types.get(&args.entity_type) {
+            Some(entity_type_def) => ok_json(crate::metaschema::entity_type_to_json_schema(
+                entity_type_def,
+            )),
+            None => Ok(err_to_tool_result(YorishiroError::not_found(format!(
+                "entity_type '{}' not found in schema '{}'",
+                args.entity_type, args.schema_name
+            )))),
+        }
     }
 }

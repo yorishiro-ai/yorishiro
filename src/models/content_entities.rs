@@ -398,3 +398,233 @@ pub async fn export_all(
         .internal()
         .map(|rows| rows.into_iter().map(EntityRecord::from).collect())
 }
+
+/// How one entity stands relative to the active version of its schema.
+///
+/// Entities are migrated lazily: a schema gaining a version does not rewrite the rows written
+/// against earlier ones, and an update validates against the version the entity was created
+/// with. That is deliberate: it is what stops a schema change from invalidating stored data.
+/// But it leaves a reader unable to tell whether a field is absent because nobody filled it in
+/// or because it did not exist when the entity was written.
+#[derive(Debug, Clone, Serialize)]
+pub struct EntityDrift {
+    pub entity_id: Uuid,
+    pub entity_type: String,
+    /// The version this entity was written against.
+    pub schema_version: i32,
+    /// The newest active version of the same schema.
+    pub active_schema_version: i32,
+    /// Fields the active version defines that this entity's version did not. Empty when the
+    /// entity is current, and empty as well when the newer version only changed fields the
+    /// entity already carries.
+    pub missing_fields: Vec<DriftField>,
+}
+
+/// A field an entity predates.
+#[derive(Debug, Clone, Serialize)]
+pub struct DriftField {
+    pub name: String,
+    /// The field's type in the active version, so a caller can tell what would go there.
+    pub r#type: metaschema::FieldTypeName,
+    /// Whether the active version marks it required. A required field an old entity lacks is
+    /// the case worth surfacing: the entity is valid under its own version and would not be
+    /// under the current one.
+    pub required: bool,
+}
+
+/// Reports how `entity_id` stands against the active version of its schema.
+pub async fn drift(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+) -> Result<EntityDrift, YorishiroError> {
+    let entity = get(conn, workspace_id, entity_id).await?;
+    let own = super::content_schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
+    let active = super::content_schemas::get_active_schema(conn, workspace_id, &own.name).await?;
+
+    // The entity's own type definition may be absent from the active version: the type was
+    // dropped. Nothing is "missing" in that case; the whole type is, which the version numbers
+    // already say.
+    let own_fields = own
+        .definition
+        .entity_types
+        .get(&entity.entity_type)
+        .map(|def| &def.fields);
+    let active_fields = active
+        .definition
+        .entity_types
+        .get(&entity.entity_type)
+        .map(|def| &def.fields);
+
+    let missing_fields = match (own_fields, active_fields) {
+        (Some(own_fields), Some(active_fields)) => active_fields
+            .iter()
+            .filter(|(name, _)| !own_fields.contains_key(*name))
+            .map(|(name, def)| DriftField {
+                name: name.clone(),
+                r#type: def.r#type,
+                required: def.required,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(EntityDrift {
+        entity_id: entity.id,
+        entity_type: entity.entity_type,
+        schema_version: entity.schema_version,
+        active_schema_version: active.version,
+        missing_fields,
+    })
+}
+
+/// What a batch migration would find, without doing it.
+///
+/// Migration is lazy: an entity keeps validating against the version it was written with, so a
+/// workspace accumulates entities spread across versions. This counts them before anything is
+/// touched, because the useful question before a migration is how much of the corpus it would
+/// have to fill in.
+#[derive(Debug, Clone, Serialize)]
+pub struct MigrationDryRun {
+    pub schema_name: String,
+    /// The version everything would be brought to.
+    pub active_version: i32,
+    pub total_entities: i64,
+    /// Already on the active version. Nothing to do for these.
+    pub current: i64,
+    /// On an older version, but missing no field the active version requires: they validate as
+    /// they stand and only their version marker is behind.
+    pub behind_but_valid: i64,
+    /// On an older version and missing at least one field the active version requires. These
+    /// are what a migration has to fill in.
+    pub needs_values: i64,
+    /// Per entity type, so an operator can see whether the work is spread or concentrated.
+    pub by_entity_type: Vec<DryRunByType>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DryRunByType {
+    pub entity_type: String,
+    pub behind: i64,
+    pub needs_values: i64,
+    /// The required fields those entities lack, so the report names the work rather than only
+    /// counting it.
+    pub missing_required: Vec<String>,
+}
+
+/// Counts what a batch migration to `schema_name`'s active version would face. Reads only.
+///
+/// The counting is done in one query per (entity_type, schema_id) group rather than one per
+/// entity: a workspace can hold far more entities than it holds distinct old versions, and the
+/// answer is the same either way.
+pub async fn migration_dry_run(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_name: &str,
+) -> Result<MigrationDryRun, YorishiroError> {
+    use super::_entities::content_entities::Column;
+
+    let active = super::content_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
+
+    // (entity_type, schema_id, count) for everything under this schema name, whatever version.
+    #[derive(Debug, sea_orm::FromQueryResult)]
+    struct GroupedCount {
+        entity_type: String,
+        schema_id: Uuid,
+        count: i64,
+    }
+
+    let rows: Vec<GroupedCount> = Entity::find()
+        .select_only()
+        .column(Column::EntityType)
+        .column(Column::SchemaId)
+        .column_as(Column::Id.count(), "count")
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            super::_entities::content_entities::Relation::ContentSchemas.def(),
+        )
+        .filter(super::_entities::content_schemas::Column::Name.eq(schema_name))
+        .group_by(Column::EntityType)
+        .group_by(Column::SchemaId)
+        .into_model::<GroupedCount>()
+        .all(conn)
+        .await
+        .internal()?;
+
+    let mut total = 0i64;
+    let mut current = 0i64;
+    let mut behind_valid = 0i64;
+    let mut needs_values = 0i64;
+    let mut by_type: std::collections::BTreeMap<String, DryRunByType> =
+        std::collections::BTreeMap::new();
+
+    // Each distinct old version is fetched once, not once per entity.
+    let mut definitions: std::collections::HashMap<Uuid, metaschema::MetaSchemaDefinition> =
+        std::collections::HashMap::new();
+
+    for row in rows {
+        total += row.count;
+
+        if row.schema_id == active.id {
+            current += row.count;
+            continue;
+        }
+
+        let old = match definitions.get(&row.schema_id) {
+            Some(def) => def.clone(),
+            None => {
+                let record =
+                    super::content_schemas::get_by_id(conn, workspace_id, row.schema_id).await?;
+                definitions.insert(row.schema_id, record.definition.clone());
+                record.definition
+            }
+        };
+
+        // Required in the active version, absent from the version these were written with.
+        let missing: Vec<String> = match (
+            active.definition.entity_types.get(&row.entity_type),
+            old.entity_types.get(&row.entity_type),
+        ) {
+            (Some(active_type), Some(old_type)) => active_type
+                .fields
+                .iter()
+                .filter(|(name, def)| def.required && !old_type.fields.contains_key(*name))
+                .map(|(name, _)| name.clone())
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        let entry = by_type
+            .entry(row.entity_type.clone())
+            .or_insert_with(|| DryRunByType {
+                entity_type: row.entity_type,
+                behind: 0,
+                needs_values: 0,
+                missing_required: Vec::new(),
+            });
+        entry.behind += row.count;
+
+        if missing.is_empty() {
+            behind_valid += row.count;
+        } else {
+            needs_values += row.count;
+            entry.needs_values += row.count;
+            for name in missing {
+                if !entry.missing_required.contains(&name) {
+                    entry.missing_required.push(name);
+                }
+            }
+        }
+    }
+
+    Ok(MigrationDryRun {
+        schema_name: schema_name.to_string(),
+        active_version: active.version,
+        total_entities: total,
+        current,
+        behind_but_valid: behind_valid,
+        needs_values,
+        by_entity_type: by_type.into_values().collect(),
+    })
+}

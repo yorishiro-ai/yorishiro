@@ -172,6 +172,48 @@ pub async fn get_by_id(
     }
 }
 
+/// A row in a schema listing. A lightweight summary that omits the `definition` body, used as
+/// the entry point for MCP clients (LLMs) to discover what schemas exist for a workspace.
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub version: i32,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<Model> for SchemaSummary {
+    fn from(model: Model) -> Self {
+        Self {
+            id: model.id,
+            name: model.name,
+            version: model.version,
+            status: model.status,
+            created_at: model.created_at.into(),
+        }
+    }
+}
+
+/// Lists all of a workspace's schemas (every version, including archived) ordered by name and
+/// version.
+pub async fn list(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<SchemaSummary>, YorishiroError> {
+    use super::_entities::content_schemas::Column;
+
+    let rows = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::Name)
+        .order_by_asc(Column::Version)
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(rows.into_iter().map(SchemaSummary::from).collect())
+}
+
 /// Registers a new schema definition, after validating it with `validate_definition`.
 /// If no schema of this name exists yet, creates version 1 as active; otherwise computes a
 /// `versioning::diff` against the current active version, archives it, and always inserts the

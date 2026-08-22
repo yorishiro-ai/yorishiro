@@ -44,6 +44,11 @@ pub struct DeleteEntityArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct MigrationDryRunArgs {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
@@ -152,5 +157,46 @@ impl YorishiroMcpServer {
         let workspace_id = authorized.ctx.workspace_id;
         let records = mcp_try!(content_entities::list(authorized.txn(), workspace_id, query).await);
         ok_json(records)
+    }
+
+    #[tool(
+        description = "Report how an entity stands against the active version of its schema \
+                           (requires read scope). Entities are migrated lazily, so one written \
+                           against an older version simply lacks fields added since. Use this to \
+                           tell an absent field apart from an unfilled one before answering from \
+                           the entity's data."
+    )]
+    pub async fn get_entity_drift(
+        &self,
+        Parameters(args): Parameters<GetEntityArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let drift =
+            mcp_try!(content_entities::drift(authorized.txn(), workspace_id, args.id).await);
+        ok_json(drift)
+    }
+
+    #[tool(
+        description = "Count what migrating a schema's entities to its active version would \
+                           face, without doing it (requires read scope). Reports how many are \
+                           current, how many are behind but still valid, and how many lack a \
+                           field the active version requires: the last being the work a \
+                           migration would have to fill in."
+    )]
+    pub async fn migration_dry_run(
+        &self,
+        Parameters(args): Parameters<MigrationDryRunArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let report = mcp_try!(
+            content_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name).await
+        );
+        ok_json(report)
     }
 }
