@@ -25,6 +25,13 @@ documented answer, not a workaround).
 `crates/yorishiro-server`. Migrations live in the `migration/` crate. `ee/` still composes on
 top per the edition rules below; how it re-joins this structure is not yet ported.
 
+**`yorishiro-specs/test/docker-compose.yml` still mounts `target/debug/yorishiro-server`**, the
+pre-rebuild binary name: it will not find `target/debug/yorishiro_core-cli` and needs updating
+before dogfooding against this rebuild through that compose file, the same "nothing builds it
+until the integration step discovers it" shape as v0.47.0's renamed-binary release failure
+(`yorishiro-specs/.claude/rules/workspace-checklist.md`). Not yet fixed as of this note; a slice
+that touches packaging/dogfooding should update the mount rather than rediscover this cold.
+
 **Schema namespace**: the old two-schema split (`identity.*`, `content.*`) is retired. Every
 table lives in `public`, with the old schema name kept as a table-name *prefix*
 (`identity_workspaces`, `content_entities`), since Loco's schema builder has no PostgreSQL
@@ -195,6 +202,9 @@ not just picking a different file layout.
 Whichever test strategy lands needs a widened-race test for both (multiple concurrent callers
 behind a barrier, per `.claude/rules/workspace-checklist.md`'s gate-is-not-a-gate-until-raced
 rule in `yorishiro-specs`), not just a happy-path unit test.
+`content_relations::create`'s foreign-key-violation branch (source/target deleted between the
+existence check and the insert, mapped to 404) belongs on the same list: it can't be triggered
+without a similar race, and has only ever been read, never executed.
 
 ## Imports
 

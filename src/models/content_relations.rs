@@ -219,7 +219,15 @@ pub async fn set_status(
         status: ActiveValue::Set(status.to_string()),
         ..Default::default()
     };
-    active.update(conn).await.internal()
+    // A concurrent delete between `get` above and this update surfaces as
+    // `DbErr::RecordNotUpdated`, not a row: map it to the same 404 the upfront `get` would have
+    // returned had it lost the race instead, rather than letting `.internal()` turn it into a 500.
+    active.update(conn).await.map_err(|err| match err {
+        DbErr::RecordNotUpdated => {
+            YorishiroError::not_found(format!("relation '{id}' was not found"))
+        }
+        err => YorishiroError::Internal(err.into()),
+    })
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
