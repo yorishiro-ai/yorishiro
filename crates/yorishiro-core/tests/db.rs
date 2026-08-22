@@ -422,8 +422,8 @@ mod sqlite_execution {
     use std::str::FromStr;
     use uuid::Uuid;
 
-    use crate::YorishiroError;
     use crate::models::{entities, relations};
+    use crate::{ResultExt, YorishiroError};
 
     /// The real Sqlite migration set (`migrations_sqlite/`), not test-local DDL: a column the
     /// code queries but the migration forgot now fails here rather than only in a hand-written
@@ -980,20 +980,21 @@ mod sqlite_execution {
     /// linked library at compile time: this is not a runtime toggle, so a missing `ENABLE_FTS5`
     /// entry means the feature does not exist here, not merely that it is off.
     #[tokio::test]
-    async fn linked_sqlite_reports_its_compile_options() {
-        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
-        let mut conn = SqliteConnection::connect_with(&options).await.unwrap();
+    async fn linked_sqlite_reports_its_compile_options() -> Result<(), YorishiroError> {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").internal()?;
+        let mut conn = SqliteConnection::connect_with(&options).await.internal()?;
 
         let opts: Vec<(String,)> = sqlx::query_as("PRAGMA compile_options")
             .fetch_all(&mut conn)
             .await
-            .unwrap();
+            .internal()?;
         let opts: Vec<String> = opts.into_iter().map(|(o,)| o).collect();
 
         assert!(
             opts.iter().any(|o| o == "ENABLE_FTS5"),
             "linked libsqlite3 was built without FTS5; compile_options: {opts:?}"
         );
+        Ok(())
     }
 
     /// Records why the runtime `.extension()` path was rejected in favor of static linking
@@ -1025,22 +1026,33 @@ mod sqlite_execution {
     /// of `pgvector`'s (`docs/dependency-modernization-investigation.md` §1.2), so this is
     /// recorded as a standing constraint rather than something to wait out, and static linking
     /// (below) sidesteps it entirely rather than working around it.
+    /// Diagnostic only, not a pass/fail gate: `OMIT_LOAD_EXTENSION` describes the abandoned
+    /// runtime-`.extension()` path (see the doc comment above), not the static-registration path
+    /// this crate actually uses. A build that defines it is still a valid target for
+    /// `sqlite_vec_answers_a_knn_query_when_statically_registered` below, so asserting its
+    /// absence here would fail CI on a correct build the moment such a target showed up
+    /// (`bundled`, a hardened distro package), contradicting this very doc comment's claim that
+    /// static registration is unaffected by it.
     #[tokio::test]
-    async fn linked_sqlite_permits_extension_loading_at_compile_time() {
-        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
-        let mut conn = SqliteConnection::connect_with(&options).await.unwrap();
+    async fn linked_sqlite_permits_extension_loading_at_compile_time() -> Result<(), YorishiroError>
+    {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").internal()?;
+        let mut conn = SqliteConnection::connect_with(&options).await.internal()?;
 
         let opts: Vec<(String,)> = sqlx::query_as("PRAGMA compile_options")
             .fetch_all(&mut conn)
             .await
-            .unwrap();
+            .internal()?;
         let opts: Vec<String> = opts.into_iter().map(|(o,)| o).collect();
 
-        assert!(
-            !opts.iter().any(|o| o == "OMIT_LOAD_EXTENSION"),
-            "linked libsqlite3 was built without extension-loading support; \
-             sqlite-vec cannot be loaded as a runtime .so on this system: {opts:?}"
-        );
+        if opts.iter().any(|o| o == "OMIT_LOAD_EXTENSION") {
+            tracing::info!(
+                ?opts,
+                "linked libsqlite3 omits runtime extension loading; irrelevant to the static \
+                 registration path this crate uses"
+            );
+        }
+        Ok(())
     }
 
     /// Spike, static-link path: register `sqlite-vec`'s `sqlite3_vec_init` once via
