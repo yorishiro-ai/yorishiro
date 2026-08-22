@@ -1,6 +1,0 @@
-node_modules/
-# The build output is not committed, but the directory itself must exist: `rust-embed` fails to
-# compile against a missing folder, so a bare `cargo check` on a fresh clone needs `.gitkeep`
-# here even before anyone has run pnpm.
-dist/*
-!dist/.gitkeep
