@@ -212,13 +212,21 @@ and reached elsewhere with `use crate::tests::test_helpers;`; that constraint (d
 test_helpers;` in several files trips `clippy::duplicate_mod`) is a `cargo`/`clippy` fact
 independent of the rebuild and still applies wherever `ee/`'s tests land.
 
-**The bridge-pattern question above is not just style: it decides whether RLS is even active
-under test.** `begin_for_workspace`'s `SET ROLE yorishiro_app` is behind `#[cfg(test)]`, live
-only because the old crates compiled `tests/` into the lib (`autotests = false` plus `#[path]`
-includes, `.claude/rules/workspace-checklist.md` in `yorishiro-specs`).
-Loco's plain `tests/` integration-test crate builds the lib normally, without `cfg(test)`, so
-adopting that convention outright means writing an equivalent for the RLS role some other way,
-not just picking a different file layout.
+**Corrected (2026-08-22): the claim below about `#[cfg(test)]` gating RLS was wrong in this
+rebuilt codebase**, carried over from the old repo's actual constraint without rechecking
+`src/db.rs` against it. In production (`TenantDb::connect`, `after_context`'s only call site),
+`SET ROLE yorishiro_app` runs unconditionally in `after_connect`, once per physical connection,
+confirmed live in server logs (`SET ROLE yorishiro_app` at boot and per request). The
+`#[cfg(test)]` lines in `begin_for_workspace`/`acquire_for_workspace` only matter for a caller
+that builds a `TenantDb` via `TenantDb::new(pool)` (a bare pool, skipping `after_connect`
+entirely) rather than `TenantDb::connect(url)`: nothing in the codebase calls `new` yet, so this
+is dead code waiting for whatever test helper gets written. **The real constraint is narrower
+than "RLS needs `tests/` compiled into the lib": it's "if a test helper constructs `TenantDb`
+via `new` instead of `connect`, that helper must run as part of `yorishiro-core`'s own
+`#[cfg(test)]` build for the inline `SET ROLE` to exist at all"**, and the simpler fix is for the
+helper to call `connect` against a real URL (RLS active unconditionally, no `cfg(test)`
+dependency) rather than reproducing the old bridge pattern to keep `new` working. Check this
+file again before deciding the test strategy, don't reason from this note's history.
 
 **Two advisory-lock gates have never been raced**, `entities::create`'s quota lock and
 `create_schema`'s version-serialization lock (the latter's 409 branch has never executed).
