@@ -2,6 +2,7 @@ mod auth;
 mod members;
 mod schemas;
 mod system;
+mod template_library;
 mod workspaces;
 
 /// `after_context` opens two pools Loco's own request-test harness knows nothing about: the

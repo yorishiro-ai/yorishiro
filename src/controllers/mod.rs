@@ -9,6 +9,7 @@ pub mod members;
 pub mod relations;
 pub mod schemas;
 pub mod system;
+pub mod template_library;
 pub mod whoami;
 pub mod workspaces;
 
