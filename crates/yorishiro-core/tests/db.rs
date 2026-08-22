@@ -973,9 +973,9 @@ mod sqlite_execution {
         }
     }
 
-    /// Spike for infra-adapter-and-migration-spec.md item 5 stage 4: does the linked libsqlite3
-    /// actually carry FTS5, in the connection this crate uses (not the `sqlite3` CLI, which can
-    /// link a different libsqlite3 than what `libsqlite3-sys` bundles or links against).
+    /// Does the linked libsqlite3 actually carry FTS5, in the connection this crate uses (not
+    /// the `sqlite3` CLI, which can link a different libsqlite3 than what `libsqlite3-sys`
+    /// bundles or links against).
     /// `PRAGMA compile_options` lists every `SQLITE_ENABLE_*`/`SQLITE_OMIT_*` baked into the
     /// linked library at compile time: this is not a runtime toggle, so a missing `ENABLE_FTS5`
     /// entry means the feature does not exist here, not merely that it is off.
@@ -1022,10 +1022,10 @@ mod sqlite_execution {
     /// That bug alone rules out shipping sqlite-vec as a runtime-loaded `.so`/`.dylib` on this
     /// sqlx version regardless of whether loading itself would succeed: a missing or mispathed
     /// extension file becomes a cryptic worker-thread panic with the cause erased, the opposite
-    /// of this codebase's loud-fail/exit-78 rule. `sea-query`'s sqlx pin does not move independent
-    /// of `pgvector`'s (`docs/dependency-modernization-investigation.md` §1.2), so this is
-    /// recorded as a standing constraint rather than something to wait out, and static linking
-    /// (below) sidesteps it entirely rather than working around it.
+    /// of this codebase's loud-fail/exit-78 rule. This crate's `sqlx` version is pinned by
+    /// `pgvector`'s own compatible-version range, so it cannot move on its own; this is recorded
+    /// as a standing constraint rather than something to wait out, and static linking (below)
+    /// sidesteps it entirely rather than working around it.
     /// Diagnostic only, not a pass/fail gate: `OMIT_LOAD_EXTENSION` describes the abandoned
     /// runtime-`.extension()` path (see the doc comment above), not the static-registration path
     /// this crate actually uses. A build that defines it is still a valid target for
