@@ -239,6 +239,28 @@ Nothing calls `new` and nothing should, `connect` is the only path a test needs.
 In `ee/`, shared test helpers (`tests/test_helpers.rs`) were declared **once**, in `tests/lib.rs`, and reached elsewhere with `use crate::tests::test_helpers;`.
 That constraint (declaring `mod test_helpers;` in several files trips `clippy::duplicate_mod`) is a `cargo`/`clippy` fact independent of the rebuild and still applies wherever `ee/`'s tests land.
 
+**First real test landed: `tests/requests/auth.rs`, a full `loco_rs::testing::request::request_with_create_db::<App, _, _>` round trip** (signup, login, replay-rejection, wrong-password 401), the idiomatic Loco pattern, not a hand-rolled one.
+Three pitfalls this uncovered, each fixed rather than worked around:
+
+**A boot failure inside `request_with_create_db` surfaces as a `DROP DATABASE` panic during `loco_rs`'s own cleanup, not as the actual boot error.**
+`after_context` opens the identity pool eagerly, before `db::converge` runs; if `converge` then fails, that pool still holds a session on the throwaway test database, and `loco_rs::testing::db::PostgresTest::cleanup_db`'s `DROP DATABASE` fails with "being accessed by other users", panics, and the real `H::boot` error is swallowed (`loco_rs-1.1.0/src/testing/request.rs:218`, inside the `Err(err)` arm).
+**Read that as "why did boot fail", not "find the leaked pool"**: a significant amount of time went into closing every pool this app opens (`close_app_pools` in `tests/requests/auth.rs`, still correct and still required) before the actual cause turned out to be `converge` itself failing, for the reason below.
+
+**Loco's request-test harness creates each throwaway database with `CREATE DATABASE`, which copies `template1`, not the database `init-extensions.sql` installs `vector`/`pg_trgm` into.**
+`test-loco/init-extensions.sql` in `yorishiro-specs` ran those `CREATE EXTENSION`s against `POSTGRES_DB` only; every throwaway test database inherited a `template1` with neither, so `converge` failed on `content_entities.embedding` inside every request test, for exactly the boot-failure-looks-like-cleanup-panic reason above.
+Fixed in `yorishiro-specs` (`\c template1` plus the same two `CREATE EXTENSION`s, same commit that documents this).
+**Confirmed at its own layer** (`psql -d template1 -c '\dx'`), not assumed: template1 held only `plpgsql` until the fix landed.
+
+**A request test that boots through `request_with_create_db` must call a pool-closing helper before its closure returns, or teardown panics even on a passing test.**
+`after_context` opens two pools Loco's harness doesn't know about (identity, eager; tenant, lazy), and `config/test.yaml`'s `min_connections: 1` keeps one connection open on `ctx.db` itself; none of the three close on their own when the closure returns.
+`close_app_pools` in `tests/requests/auth.rs` is the pattern every future request test copies.
+The Postgres queue provider (`config/test.yaml`'s `queue:` block) is a fourth pool this same way, and it has no public close path at all (`shutdown()` only cancels its polling loop, confirmed by reading `bgworker/pg.rs`), so `queue:` is **omitted entirely from `config/test.yaml`**: nothing in this codebase enqueues a job yet (`connect_workers` is a no-op), so no test needs one, and there is no fix on the closing side for a pool with no closing method.
+
+**`redeem_invite`'s race-safety claim (two concurrent redemptions of the same token can't both succeed) is documented but not tested.**
+`tests/requests/auth.rs`'s replay-rejection assertion is a *sequential* replay (redeem, then redeem again in a later, separate request); it exercises that a used invite is rejected, not the concurrent `UPDATE ... WHERE used_at IS NULL` race the doc comment claims is safe.
+Confirmed by deliberately breaking the `WHERE` guard (removing the `used_at IS NULL`/`expires_at > now()` filters from the `UPDATE`) and rerunning: the existing test still passed, because the upfront `SELECT` still filters correctly on a sequential replay.
+A real regression test needs two racing redemption calls behind a barrier, per the checklist's gate-is-not-a-gate-until-raced rule, same shape as the two never-raced advisory locks below.
+
 **`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against
 `loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs
 `db::converge` only after `create_context` returns). Nothing in `after_context` may assume a

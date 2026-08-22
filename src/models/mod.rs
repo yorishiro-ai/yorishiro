@@ -13,3 +13,4 @@ pub mod identity_tenants;
 pub mod identity_users;
 pub mod identity_workspaces;
 pub mod import;
+pub mod tenancy;

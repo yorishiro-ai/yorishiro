@@ -81,6 +81,7 @@ impl Hooks for App {
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes()
+            .add_route(controllers::auth::routes())
             .add_route(controllers::entities::routes())
             .add_route(controllers::export::routes())
             .add_route(controllers::import::routes())
@@ -105,6 +106,7 @@ impl Hooks for App {
         tasks.register(tasks::create_tenant::CreateTenant);
         tasks.register(tasks::create_workspace::CreateWorkspace);
         tasks.register(tasks::create_api_key::CreateApiKey);
+        tasks.register(tasks::create_invite::CreateInvite);
         // tasks-inject (do not remove)
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
