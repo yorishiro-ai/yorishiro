@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, TransactionTrait};
+use sea_orm::{ActiveValue, QueryOrder, TransactionTrait};
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::services::auth::{
@@ -71,5 +71,45 @@ impl Entity {
             user_id,
             plaintext,
         })
+    }
+
+    /// Every API key issued for a workspace, oldest first. Never returns `key_hash`: the
+    /// plaintext key is shown once, at creation, and this listing exists for operators to see
+    /// what exists and revoke by id, not to recover a lost key.
+    pub async fn list_for_workspace(
+        conn: &impl ConnectionTrait,
+        workspace_id: uuid::Uuid,
+    ) -> Result<Vec<Model>, YorishiroError> {
+        use super::_entities::identity_api_keys::Column;
+
+        Entity::find()
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .order_by_asc(Column::CreatedAt)
+            .all(conn)
+            .await
+            .internal()
+    }
+
+    /// Deletes an API key by id, revoking it immediately: authentication looks up the key on
+    /// every request, so there is no cached credential to also invalidate.
+    pub async fn revoke(
+        conn: &impl ConnectionTrait,
+        key_id: uuid::Uuid,
+    ) -> Result<(), YorishiroError> {
+        use super::_entities::identity_api_keys::Column;
+
+        let result = Entity::delete_many()
+            .filter(Column::Id.eq(key_id))
+            .exec(conn)
+            .await
+            .internal()?;
+
+        if result.rows_affected == 0 {
+            Err(YorishiroError::not_found(format!(
+                "api key '{key_id}' was not found"
+            )))
+        } else {
+            Ok(())
+        }
     }
 }

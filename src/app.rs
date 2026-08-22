@@ -135,6 +135,16 @@ impl Hooks for App {
         tasks.register(tasks::create_workspace::CreateWorkspace);
         tasks.register(tasks::create_api_key::CreateApiKey);
         tasks.register(tasks::create_invite::CreateInvite);
+        tasks.register(tasks::list_tenants::ListTenants);
+        tasks.register(tasks::list_workspaces::ListWorkspaces);
+        tasks.register(tasks::create_user::CreateUser);
+        tasks.register(tasks::add_member::AddMember);
+        tasks.register(tasks::list_members::ListMembers);
+        tasks.register(tasks::list_api_keys::ListApiKeys);
+        tasks.register(tasks::revoke_api_key::RevokeApiKey);
+        tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
+        tasks.register(tasks::maintenance::Maintenance);
+        tasks.register(tasks::maintenance_status::MaintenanceStatus);
         // tasks-inject (do not remove)
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
