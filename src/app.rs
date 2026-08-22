@@ -88,16 +88,23 @@ impl Hooks for App {
             .add_route(controllers::members::routes())
             .add_route(controllers::relations::routes())
             .add_route(controllers::schemas::routes())
+            .add_route(controllers::system::routes())
             .add_route(controllers::whoami::routes())
             .add_route(controllers::workspaces::routes())
     }
 
-    /// Mounts the MCP server under `/mcp`. `rmcp`'s `StreamableHttpService` is a plain
-    /// `tower::Service`, not something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted
-    /// here instead: this hook runs after Loco's own routes are built, which is where Loco
-    /// itself says custom Axum logic belongs.
+    /// Mounts the MCP server under `/mcp` and layers the maintenance guard over everything,
+    /// REST and MCP alike. `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
+    /// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here instead: this
+    /// hook runs after Loco's own routes are built, which is where Loco itself says custom Axum
+    /// logic belongs. The middleware layer must come after the MCP mount, not before: `.layer`
+    /// wraps everything already on the router at the point it's called.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
-        Ok(controllers::mcp::mount(router, ctx))
+        let router = controllers::mcp::mount(router, ctx);
+        Ok(router.layer(axum::middleware::from_fn_with_state(
+            ctx.clone(),
+            crate::services::maintenance::maintenance_guard,
+        )))
     }
 
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
