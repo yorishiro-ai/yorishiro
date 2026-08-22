@@ -8,6 +8,23 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let db = manager.get_connection();
+        // Idempotent (`duplicate_object` swallowed): every `GRANT ... TO yorishiro_app` in a
+        // later migration, and every RLS-scoped connection's `after_connect` (`src/db.rs`),
+        // requires this role to already exist. PostgreSQL 16+ doesn't let even the role's
+        // creator `SET ROLE` to it automatically, so the migration also grants membership to
+        // itself right after creating it; a superuser migration role never notices the missing
+        // grant (a superuser can `SET ROLE` regardless of membership), which is why this was
+        // dropped without symptom when the port ran under one.
+        db.execute_unprepared(
+            "DO $$ BEGIN \
+             CREATE ROLE yorishiro_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION \
+             NOBYPASSRLS NOLOGIN; \
+             EXCEPTION WHEN duplicate_object THEN NULL; END $$; \
+             GRANT yorishiro_app TO CURRENT_USER;",
+        )
+        .await?;
+
         manager
             .create_table(
                 Table::create()
@@ -21,7 +38,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        let db = manager.get_connection();
         // yorishiro_app gets no GRANT at all here: this table is reached only through the
         // migration-role identity pool (see src/db.rs), never a tenant-scoped request
         // connection. Enabling RLS anyway is defense in depth against a future grant added

@@ -66,6 +66,22 @@ impl TenantDb {
     /// leaking to whichever workspace borrows the connection next. Belt-and-suspenders
     /// alongside `begin_for_workspace`'s transaction-local `set_config`: a connection reused
     /// outside a transaction (`acquire_for_workspace`, below) still needs this.
+    ///
+    /// `connect_lazy`, not `connect`: `Hooks::after_context` (this function's only caller) runs
+    /// before Loco's own `db::converge` applies migrations, and the migration is what creates
+    /// the `yorishiro_app` role `after_connect` requires. Eagerly opening a physical connection
+    /// here would run `SET ROLE` against a role that doesn't exist yet on a fresh database,
+    /// failing every connection attempt until the pool's `acquire_timeout` gives up
+    /// (`PoolTimedOut`, with no clearer error underneath it). `connect_lazy` defers opening any
+    /// physical connection until first use, by which point converge has already run.
+    /// Tolerating the `SET ROLE` failure instead (warn and continue as the connecting role) was
+    /// rejected: that role can bypass RLS, and failing to assume `yorishiro_app` must fail the
+    /// connection, not silently degrade into the exact blindness `FORCE ROW LEVEL SECURITY`
+    /// exists to prevent (`.claude/rules/workspace-checklist.md` in `yorishiro-specs`).
+    /// The trade-off: a bad `DATABASE_URL` or a role that never gets created no longer fails at
+    /// boot, only on the first request that needs this pool. The identity pool below still
+    /// connects eagerly (it has no role dependency), so a URL typo still fails fast; only the
+    /// role's existence goes unverified until first use.
     pub async fn connect(database_url: &str, max_connections: u32) -> Result<Self, sqlx::Error> {
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
@@ -88,8 +104,7 @@ impl TenantDb {
                     Ok(true)
                 })
             })
-            .connect(database_url)
-            .await?;
+            .connect_lazy(database_url)?;
         Ok(Self::new(pool))
     }
 

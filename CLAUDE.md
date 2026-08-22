@@ -228,6 +228,26 @@ helper to call `connect` against a real URL (RLS active unconditionally, no `cfg
 dependency) rather than reproducing the old bridge pattern to keep `new` working. Check this
 file again before deciding the test strategy, don't reason from this note's history.
 
+**`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against
+`loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs
+`db::converge` only after `create_context` returns). Nothing in `after_context` may assume a
+migration-created object exists yet. `TenantDb::connect`'s `after_connect` hook requires the
+`yorishiro_app` role, which a migration creates, so the pool it builds there is `connect_lazy`
+rather than `connect`: opening no physical connection at construction time defers `SET ROLE`
+until first use, by which point migrations have already run. This surfaced only when this
+deployment first booted against a genuinely fresh, unmigrated database (`test-loco/` in
+`yorishiro-specs`, 2026-08-22); every earlier boot this session reused an already-migrated
+container, which masked it exactly the way the checklist's recurring-mistakes section describes.
+
+**A fresh database also needs a `CREATE ROLE yorishiro_app` step, which no migration ran until
+`m20260822_100000_tenants` gained one.** Every migration file's `helpers::grant` assumes the
+role already exists; none of them created it, unlike the pre-rebuild
+`20260814000000_initial.sql`, which did (idempotently, plus `GRANT yorishiro_app TO
+CURRENT_USER`, required on PostgreSQL 16+ per `Yorishiro_v1_technical_spec.md` §2.1 in
+`yorishiro-specs`, since even a role's creator can't `SET ROLE` to it without that grant). This
+too went unnoticed because the migrating role in every prior run was a superuser, which can `SET
+ROLE` regardless of membership.
+
 **Two advisory-lock gates have never been raced**, `entities::create`'s quota lock and
 `create_schema`'s version-serialization lock (the latter's 409 branch has never executed).
 Whichever test strategy lands needs a widened-race test for both (multiple concurrent callers
