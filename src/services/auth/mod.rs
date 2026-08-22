@@ -3,8 +3,12 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 mod authenticate;
+mod authenticator;
+mod authorize;
 
 pub use authenticate::*;
+pub use authenticator::*;
+pub use authorize::*;
 
 pub(crate) const KEY_PREFIX_BYTES: usize = 6;
 pub(crate) const KEY_SECRET_BYTES: usize = 24;

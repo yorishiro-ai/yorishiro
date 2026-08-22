@@ -68,6 +68,11 @@ impl Hooks for App {
             .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
         ctx.shared_store
             .insert(crate::db::DbHandle { tenant, identity });
+        // The authenticator seam: a deployment that needs a different authentication rule
+        // (a key naming its workspace per request, an external identity system) replaces this
+        // insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
+        ctx.shared_store
+            .insert(crate::services::auth::default_authenticator());
         Ok(ctx)
     }
 
