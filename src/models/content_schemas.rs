@@ -105,6 +105,25 @@ pub async fn get_active_schema(
     }
 }
 
+/// Counts a workspace's currently *active* schemas: one row per distinct name, since
+/// `create_schema` archives the previous version before activating a new one. For
+/// workspace-detail summaries, this is a more meaningful "how many schemas does this workspace
+/// define" figure than counting every archived version too.
+pub async fn count_active(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<i64, YorishiroError> {
+    use super::_entities::content_schemas::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Status.eq("active"))
+        .count(conn)
+        .await
+        .internal()
+        .map(|n| n as i64)
+}
+
 /// Fetches every schema version (active and archived) for the workspace, ordered by
 /// `(name, version)`, for a full-workspace data export.
 ///

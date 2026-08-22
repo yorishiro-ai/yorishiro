@@ -8,13 +8,16 @@
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::hash;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
+    QueryFilter, SqlErr,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{identity_invites, identity_tenant_memberships, identity_users};
+use crate::models::_entities::{
+    identity_invites, identity_tenant_memberships, identity_users, identity_workspaces,
+};
 use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
 
 /// Mirrors the `identity_tenant_memberships.role` check constraint (`owner`/`admin`/`member`/`viewer`).
@@ -401,6 +404,127 @@ pub async fn get_workspace_tenant(
         .internal()?
         .map(|w| w.tenant_id)
         .ok_or_else(|| YorishiroError::not_found("workspace not found"))
+}
+
+/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap. `None`
+/// means unlimited, which is the default so self-hosted deployments are never capped unless an
+/// operator explicitly sets a limit.
+///
+/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a
+/// later write produced by a different model can be refused where it happens rather than at
+/// query time. `None` leaves the workspace on "whatever the deployment is configured for".
+pub async fn create_workspace(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    name: &str,
+    max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
+    embedding: Option<(&str, i32)>,
+) -> Result<identity_workspaces::Model, YorishiroError> {
+    use crate::models::_entities::identity_tenants;
+    use crate::models::identity_workspaces::{
+        WORKSPACE_STATUS_ACTIVE, WORKSPACE_STATUS_SCHEMA_PENDING,
+    };
+
+    let tenant = identity_tenants::Entity::find_by_id(tenant_id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
+
+    if let Some(max) = tenant.max_workspaces {
+        let count = identity_workspaces::Entity::find()
+            .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+            .count(conn)
+            .await
+            .internal()?;
+        if count >= max as u64 {
+            return Err(YorishiroError::Conflict {
+                message: format!(
+                    "tenant '{tenant_id}' has reached its workspace limit ({max}); \
+                     raise max_workspaces or delete an existing workspace"
+                ),
+            });
+        }
+    }
+
+    let active = identity_workspaces::ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        name: ActiveValue::Set(name.to_string()),
+        max_entities: ActiveValue::Set(max_entities),
+        schema_id: ActiveValue::Set(schema_id),
+        status: ActiveValue::Set(
+            if schema_id.is_some() {
+                WORKSPACE_STATUS_ACTIVE
+            } else {
+                WORKSPACE_STATUS_SCHEMA_PENDING
+            }
+            .to_string(),
+        ),
+        embedding_model: ActiveValue::Set(embedding.map(|(model, _)| model.to_string())),
+        embedding_dimensions: ActiveValue::Set(embedding.map(|(_, dimensions)| dimensions)),
+        ..Default::default()
+    };
+
+    active.insert(conn).await.internal()
+}
+
+/// Fetches a workspace by id.
+pub async fn get_workspace(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<identity_workspaces::Model, YorishiroError> {
+    use crate::models::_entities::identity_workspaces;
+
+    identity_workspaces::Entity::find_by_id(workspace_id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
+        })
+}
+
+/// Deletes a workspace, refusing to remove a tenant's last one.
+///
+/// `db::lock_for_update` serializes concurrent deletes against the same tenant before counting
+/// its workspaces, so two requests racing to delete the tenant's last two workspaces cannot both
+/// see a spare one and proceed: a plain `DELETE ... WHERE EXISTS (another workspace)` reads a
+/// snapshot each transaction takes independently, which is exactly the race this avoids.
+pub async fn delete_workspace(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::identity_workspaces;
+
+    let workspace = identity_workspaces::Entity::find_by_id(workspace_id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
+        })?;
+
+    crate::db::lock_for_update(conn, &format!("workspace-delete:{}", workspace.tenant_id))
+        .await
+        .internal()?;
+
+    let remaining = identity_workspaces::Entity::find()
+        .filter(identity_workspaces::Column::TenantId.eq(workspace.tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
+    if remaining <= 1 {
+        return Err(YorishiroError::Conflict {
+            message: "cannot delete a tenant's only remaining workspace".into(),
+        });
+    }
+
+    identity_workspaces::Entity::delete_by_id(workspace_id)
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]

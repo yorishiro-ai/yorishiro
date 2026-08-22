@@ -9,6 +9,7 @@ pub mod members;
 pub mod relations;
 pub mod schemas;
 pub mod whoami;
+pub mod workspaces;
 
 pub use error::ApiError;
 

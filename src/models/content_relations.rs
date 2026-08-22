@@ -288,6 +288,18 @@ pub async fn list(
         .internal()
 }
 
+/// Counts how many relations a workspace holds, for workspace-detail summaries.
+pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
+    use super::_entities::content_relations::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .count(conn)
+        .await
+        .internal()
+        .map(|n| n as i64)
+}
+
 /// Fetches every relation for the workspace, with no pagination limit, for a full-workspace data
 /// export.
 ///
