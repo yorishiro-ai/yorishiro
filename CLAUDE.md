@@ -15,6 +15,17 @@ slice during this rebuild**, a deliberate deferral rather than drift: they descr
 v0.50.0 behavior, which is still what a reader of those documents needs until `develop` actually
 merges and replaces it. They get brought current as part of that merge, not each commit here.
 
+**`import_jsonl` attributes every imported entity to the importing key's own `user_id`, never to
+the exported `created_by`.** The old code passed `entity.created_by` straight through
+unremapped, which only ever worked because every restore it ran happened to target the same
+deployment that minted that user; a restore into a different tenant (this rebuild's fresh
+database has no `identity_users` rows at all, since signup isn't ported yet) hits
+`fk_content_entities_created_by` immediately, and `yorishiro_app` has no grant to even check
+`identity_users` for existence first. Attributing to the importer is always FK-safe, and for the
+common case (an owner restoring their own backup into the same deployment) still names the right
+person. `updated_by` was never populated by import either way (`content_entities::create`
+doesn't take one).
+
 **Before writing any Loco/SeaORM code, check the actual behavior against Loco's own
 documentation or source (`https://loco.rs/docs/`, DeepWiki on `loco-rs/loco` and
 `SeaQL/sea-orm`) rather than assuming from a general Rails/ActiveRecord mental model.** Several

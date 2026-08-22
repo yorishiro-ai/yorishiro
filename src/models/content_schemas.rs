@@ -105,6 +105,28 @@ pub async fn get_active_schema(
     }
 }
 
+/// Fetches every schema version (active and archived) for the workspace, ordered by
+/// `(name, version)`, for a full-workspace data export.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn export_all(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<SchemaRecord>, YorishiroError> {
+    use super::_entities::content_schemas::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::Name)
+        .order_by_asc(Column::Version)
+        .all(conn)
+        .await
+        .internal()?
+        .into_iter()
+        .map(SchemaRecord::try_from)
+        .collect()
+}
+
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it

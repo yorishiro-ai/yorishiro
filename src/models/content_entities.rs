@@ -379,3 +379,22 @@ pub async fn list(
         .internal()
         .map(|rows| rows.into_iter().map(EntityRecord::from).collect())
 }
+
+/// Fetches every entity for the workspace, with no pagination limit, for a full-workspace data
+/// export.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn export_all(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<EntityRecord>, YorishiroError> {
+    use super::_entities::content_entities::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::CreatedAt)
+        .all(conn)
+        .await
+        .internal()
+        .map(|rows| rows.into_iter().map(EntityRecord::from).collect())
+}

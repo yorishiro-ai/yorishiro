@@ -287,3 +287,21 @@ pub async fn list(
         .await
         .internal()
 }
+
+/// Fetches every relation for the workspace, with no pagination limit, for a full-workspace data
+/// export.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn export_all(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<RelationRecord>, YorishiroError> {
+    use super::_entities::content_relations::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::CreatedAt)
+        .all(conn)
+        .await
+        .internal()
+}
