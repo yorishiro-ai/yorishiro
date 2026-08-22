@@ -25,7 +25,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(1),
                     )
-                    .col(ColumnDef::new(Alias::new("definition")).json_binary().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("definition"))
+                            .json_binary()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Alias::new("status"))
                             .text()
@@ -63,7 +67,10 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_content_schemas_origin_template_id")
-                            .from(Alias::new("content_schemas"), Alias::new("origin_template_id"))
+                            .from(
+                                Alias::new("content_schemas"),
+                                Alias::new("origin_template_id"),
+                            )
                             .to(Alias::new("identity_templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
@@ -178,7 +185,11 @@ impl MigrationTrait for Migration {
         db.execute_unprepared("DROP FUNCTION IF EXISTS detach_orphaned_schema_origin();")
             .await?;
         manager
-            .drop_table(Table::drop().table(Alias::new("content_schemas")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("content_schemas"))
+                    .to_owned(),
+            )
             .await
     }
 }

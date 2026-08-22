@@ -21,14 +21,20 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_tenant_memberships_tenant_id")
-                            .from(Alias::new("identity_tenant_memberships"), Alias::new("tenant_id"))
+                            .from(
+                                Alias::new("identity_tenant_memberships"),
+                                Alias::new("tenant_id"),
+                            )
                             .to(Alias::new("identity_tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_tenant_memberships_user_id")
-                            .from(Alias::new("identity_tenant_memberships"), Alias::new("user_id"))
+                            .from(
+                                Alias::new("identity_tenant_memberships"),
+                                Alias::new("user_id"),
+                            )
                             .to(Alias::new("identity_users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )

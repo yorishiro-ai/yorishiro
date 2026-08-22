@@ -6,8 +6,8 @@ use axum::extract::{ConnectInfo, FromRef, FromRequestParts};
 use axum::http::header;
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
-use sqlx::pool::PoolConnection;
 use sqlx::PgConnection;
+use sqlx::pool::PoolConnection;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
@@ -59,15 +59,21 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
 }
 
 fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
-    ctx.shared_store
-        .get::<DbHandle>()
-        .ok_or_else(|| ApiError(YorishiroError::Internal(anyhow::anyhow!("DbHandle missing"))))
+    ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
+        ApiError(YorishiroError::Internal(anyhow::anyhow!(
+            "DbHandle missing"
+        )))
+    })
 }
 
 fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiError> {
     ctx.shared_store
         .get::<Arc<dyn Authenticator>>()
-        .ok_or_else(|| ApiError(YorishiroError::Internal(anyhow::anyhow!("Authenticator missing"))))
+        .ok_or_else(|| {
+            ApiError(YorishiroError::Internal(anyhow::anyhow!(
+                "Authenticator missing"
+            )))
+        })
 }
 
 /// The sole entry point for authenticated requests with no scope requirement and no DB
@@ -157,9 +163,10 @@ where
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
-        let (ctx, conn) = auth::authorize(&db, auth_impl.as_ref(), presented_key, R::SCOPE, &headers)
-            .await
-            .inspect_err(|err| log_auth_rejection(parts, err))?;
+        let (ctx, conn) =
+            auth::authorize(&db, auth_impl.as_ref(), presented_key, R::SCOPE, &headers)
+                .await
+                .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Authorized {
             ctx,

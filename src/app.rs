@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use loco_rs::{
+    Result,
     app::{AppContext, Hooks, Initializer},
     bgworker::Queue,
-    boot::{create_app, BootResult, StartMode},
+    boot::{BootResult, StartMode, create_app},
     config::Config,
     controller::AppRoutes,
     environment::Environment,
     task::Tasks,
-    Result,
 };
 use migration::Migrator;
 use std::path::Path;
@@ -55,9 +55,12 @@ impl Hooks for App {
     /// <https://github.com/yotsunagi/yorishiro/issues/221>.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         let database_url = ctx.config.database.uri.clone();
-        let tenant = crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
-            .await
-            .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
+        let tenant =
+            crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
+                .await
+                .map_err(|e| {
+                    loco_rs::Error::Message(format!("failed to build tenant pool: {e}"))
+                })?;
         // The identity pool connects as the migration role (bypassing RLS) for control-plane
         // access: signup, setup, the admin CLI. It's a plain pool with no after_connect/
         // after_release, since it never scopes to a tenant/workspace.
@@ -77,7 +80,7 @@ impl Hooks for App {
     }
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
-        AppRoutes::with_default_routes()
+        AppRoutes::with_default_routes().add_route(controllers::entities::routes())
     }
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
         Ok(())

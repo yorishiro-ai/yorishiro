@@ -17,7 +17,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("source_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("target_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("relation_type")).text().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("relation_type"))
+                            .text()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Alias::new("properties"))
                             .json_binary()
@@ -114,7 +118,11 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Alias::new("content_relations")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("content_relations"))
+                    .to_owned(),
+            )
             .await
     }
 }

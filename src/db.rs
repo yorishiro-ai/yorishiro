@@ -9,8 +9,8 @@
 //! path runs through this pool, not Loco's `ctx.db`; see
 //! <https://github.com/yotsunagi/yorishiro/issues/221> for why.
 use async_trait::async_trait;
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 /// Where the deployment's data lives, for tenant-scoped request handling.

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
 
-use super::{authenticate, AuthContext};
+use super::{AuthContext, authenticate};
 
 /// Resolves a presented API key into an [`AuthContext`].
 ///

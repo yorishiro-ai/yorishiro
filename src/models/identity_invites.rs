@@ -1,5 +1,5 @@
+pub use super::_entities::identity_invites::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub use super::_entities::identity_invites::{ActiveModel, Model, Entity};
 pub type IdentityInvites = Entity;
 
 #[async_trait::async_trait]

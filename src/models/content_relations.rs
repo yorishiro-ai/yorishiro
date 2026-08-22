@@ -1,5 +1,5 @@
+pub use super::_entities::content_relations::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub use super::_entities::content_relations::{ActiveModel, Model, Entity};
 pub type ContentRelations = Entity;
 
 #[async_trait::async_trait]

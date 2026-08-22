@@ -18,7 +18,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(ColumnDef::new(Alias::new("description")).text())
-                    .col(ColumnDef::new(Alias::new("definition")).json_binary().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("definition"))
+                            .json_binary()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Alias::new("locale")).text())
                     .col(
                         ColumnDef::new(Alias::new("visibility"))
@@ -106,7 +110,11 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Alias::new("identity_templates")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("identity_templates"))
+                    .to_owned(),
+            )
             .await
     }
 }

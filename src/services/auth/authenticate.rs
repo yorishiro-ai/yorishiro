@@ -3,7 +3,7 @@ use uuid::Uuid;
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 
-use super::{hash_key, ApiKeyScope, AuthContext};
+use super::{ApiKeyScope, AuthContext, hash_key};
 
 /// Verifies a presented raw API key and resolves the workspace, tenant, and scope it belongs
 /// to.

@@ -18,7 +18,11 @@ impl MigrationTrait for Migration {
                     .col(helpers::uuidv7_pk())
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("schema_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("schema_version")).integer().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("schema_version"))
+                            .integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Alias::new("entity_type")).text().not_null())
                     .col(ColumnDef::new(Alias::new("data")).json_binary().not_null())
                     .col(ColumnDef::new(Alias::new("created_by")).uuid())
@@ -114,7 +118,11 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Alias::new("content_entities")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("content_entities"))
+                    .to_owned(),
+            )
             .await
     }
 }

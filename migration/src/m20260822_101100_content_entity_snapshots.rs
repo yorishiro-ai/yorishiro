@@ -24,7 +24,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("entity_id")).uuid().not_null())
                     // No foreign key in the old DDL either.
                     .col(ColumnDef::new(Alias::new("schema_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("schema_version")).integer().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("schema_version"))
+                            .integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Alias::new("data")).json_binary().not_null())
                     .col(helpers::created_at())
                     .foreign_key(
@@ -78,14 +82,23 @@ impl MigrationTrait for Migration {
         // The old DDL granted this table via a schema-wide
         // "GRANT ... ON ALL TABLES IN SCHEMA content", now individualized per-table since every
         // table shares one schema after the public-schema unification.
-        helpers::grant(db, "SELECT, INSERT, UPDATE, DELETE", "content_entity_snapshots").await?;
+        helpers::grant(
+            db,
+            "SELECT, INSERT, UPDATE, DELETE",
+            "content_entity_snapshots",
+        )
+        .await?;
 
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Alias::new("content_entity_snapshots")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("content_entity_snapshots"))
+                    .to_owned(),
+            )
             .await
     }
 }

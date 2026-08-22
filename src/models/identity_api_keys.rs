@@ -3,7 +3,7 @@ use sea_orm::{ActiveValue, TransactionTrait};
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::services::auth::{
-    hash_key, random_hex, ApiKeyScope, CreatedApiKey, KEY_PREFIX_BYTES, KEY_SECRET_BYTES,
+    ApiKeyScope, CreatedApiKey, KEY_PREFIX_BYTES, KEY_SECRET_BYTES, hash_key, random_hex,
 };
 
 pub use super::_entities::identity_api_keys::{ActiveModel, Entity, Model};

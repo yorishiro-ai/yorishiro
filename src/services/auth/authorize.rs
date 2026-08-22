@@ -1,10 +1,10 @@
-use sqlx::pool::PoolConnection;
 use sqlx::Postgres;
+use sqlx::pool::PoolConnection;
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 
-use super::{touch_last_used, ApiKeyScope, AuthContext, Authenticator};
+use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used};
 
 /// Enforces that an authenticated context satisfies the required scope, returning
 /// `YorishiroError::ScopeInsufficient` when it doesn't.
@@ -61,7 +61,11 @@ pub async fn touch_last_used_on(
     workspace_id: uuid::Uuid,
     api_key_id: uuid::Uuid,
 ) {
-    match db.tenant.acquire_for_workspace(tenant_id, workspace_id).await {
+    match db
+        .tenant
+        .acquire_for_workspace(tenant_id, workspace_id)
+        .await
+    {
         Ok(mut conn) => {
             if let Err(err) = touch_last_used(conn.as_mut(), api_key_id).await {
                 tracing::warn!(error = %err, "failed to update api key last_used_at");

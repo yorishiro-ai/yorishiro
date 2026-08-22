@@ -1,5 +1,5 @@
+pub use super::_entities::identity_templates::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub use super::_entities::identity_templates::{ActiveModel, Model, Entity};
 pub type IdentityTemplates = Entity;
 
 #[async_trait::async_trait]

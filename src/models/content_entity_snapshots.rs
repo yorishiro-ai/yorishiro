@@ -1,5 +1,5 @@
+pub use super::_entities::content_entity_snapshots::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub use super::_entities::content_entity_snapshots::{ActiveModel, Model, Entity};
 pub type ContentEntitySnapshots = Entity;
 
 #[async_trait::async_trait]

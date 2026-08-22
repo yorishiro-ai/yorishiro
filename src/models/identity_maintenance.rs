@@ -1,5 +1,5 @@
+pub use super::_entities::identity_maintenance::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub use super::_entities::identity_maintenance::{ActiveModel, Model, Entity};
 pub type IdentityMaintenance = Entity;
 
 #[async_trait::async_trait]

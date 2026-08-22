@@ -1,5 +1,5 @@
+pub use super::_entities::identity_tenant_memberships::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub use super::_entities::identity_tenant_memberships::{ActiveModel, Model, Entity};
 pub type IdentityTenantMemberships = Entity;
 
 #[async_trait::async_trait]
