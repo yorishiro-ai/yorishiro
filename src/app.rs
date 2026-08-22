@@ -91,6 +91,9 @@ impl Hooks for App {
 
     #[allow(unused_variables)]
     fn register_tasks(tasks: &mut Tasks) {
+        tasks.register(tasks::create_tenant::CreateTenant);
+        tasks.register(tasks::create_workspace::CreateWorkspace);
+        tasks.register(tasks::create_api_key::CreateApiKey);
         // tasks-inject (do not remove)
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
