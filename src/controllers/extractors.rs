@@ -78,6 +78,19 @@ pub(crate) fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, 
         })
 }
 
+/// See `db_handle`'s doc comment: also used by `services::mcp`.
+pub(crate) fn embedding_provider(
+    ctx: &AppContext,
+) -> Result<Arc<dyn crate::services::embedding::EmbeddingProvider>, ApiError> {
+    ctx.shared_store
+        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
+        .ok_or_else(|| {
+            ApiError(YorishiroError::Internal(anyhow::anyhow!(
+                "EmbeddingProvider missing"
+            )))
+        })
+}
+
 /// The sole entry point for authenticated requests with no scope requirement and no DB
 /// connection. Requiring this type as a handler argument is itself a declaration that "this
 /// route requires authentication."

@@ -1,0 +1,70 @@
+use axum::http::request::Parts;
+use rmcp::ErrorData;
+use rmcp::handler::server::common::Extension;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::CallToolResult;
+use rmcp::tool;
+use rmcp::tool_router;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json::Value;
+
+use super::{YorishiroMcpServer, mcp_try, ok_json, verified};
+use crate::controllers::extractors::{db_handle, embedding_provider};
+use crate::models::search;
+use crate::services::auth::ApiKeyScope;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SearchEntitiesArgs {
+    /// Natural-language query text. Vectorized via the embedding provider and matched against
+    /// entities' `x-embed` field by cosine distance. Also used, as-is, for an auxiliary pg_trgm
+    /// fuzzy text match against entities that have no embedding.
+    pub query_text: String,
+    pub entity_type: Option<String>,
+    /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
+    pub filter: Option<Value>,
+    /// Upper bound on the number of results returned (defaults to 10 if omitted).
+    pub limit: Option<i64>,
+}
+
+#[tool_router(vis = "pub(crate)", router = tool_router_search)]
+impl YorishiroMcpServer {
+    #[tool(
+        description = "Vector similarity search over entities using a natural-language query (requires read scope)"
+    )]
+    pub async fn search_entities(
+        &self,
+        Parameters(args): Parameters<SearchEntitiesArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth_ctx = verified!(&self.ctx, &parts, ApiKeyScope::Read);
+
+        let default = search::SearchQuery::default();
+        let query = search::SearchQuery {
+            entity_type: args.entity_type,
+            filter: args.filter,
+            limit: args.limit.unwrap_or(default.limit),
+        };
+
+        // Embedding generation happens before acquiring a DB connection: don't hold a pool
+        // connection while waiting on the provider's HTTP round trip.
+        let provider = mcp_try!(embedding_provider(&self.ctx).map_err(|err| err.0));
+        let vector = mcp_try!(search::embed_query(provider.as_ref(), &args.query_text).await);
+
+        let workspace_id = auth_ctx.workspace_id;
+        let db = mcp_try!(db_handle(&self.ctx).map_err(|err| err.0));
+        // A read-only transaction, same as `Authorized`'s: dropped without committing when this
+        // returns, which is a no-op since nothing was written.
+        let txn = mcp_try!(
+            db.tenant
+                .begin_for_workspace(auth_ctx.tenant_id, workspace_id)
+                .await
+                .map_err(|err| crate::error::YorishiroError::Internal(err.into()))
+        );
+
+        let hits = mcp_try!(
+            search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query).await
+        );
+        ok_json(hits)
+    }
+}

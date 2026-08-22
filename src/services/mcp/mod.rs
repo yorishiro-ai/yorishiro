@@ -1,7 +1,9 @@
 mod entities;
 mod import;
+mod recall;
 mod relations;
 mod schemas;
+mod search;
 mod template_library;
 
 use axum::http::request::Parts;
@@ -32,8 +34,10 @@ impl YorishiroMcpServer {
             ctx,
             tool_router: Self::tool_router_entities()
                 + Self::tool_router_import()
+                + Self::tool_router_recall()
                 + Self::tool_router_relations()
                 + Self::tool_router_schemas()
+                + Self::tool_router_search()
                 + Self::tool_router_template_library(),
         }
     }
@@ -78,6 +82,14 @@ impl Authorized {
 /// information an agent can act on.
 pub(super) enum AuthzOutcome {
     Authorized(Authorized),
+    ScopeDenied(CallToolResult),
+}
+
+/// A connection-less version of `Authorized`: only authenticates and verifies scope, without
+/// opening a transaction. Tools that do slow work before touching the database (embedding
+/// generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
+pub(super) enum VerifyOutcome {
+    Verified(AuthContext),
     ScopeDenied(CallToolResult),
 }
 
@@ -130,6 +142,32 @@ pub(super) async fn authorize(
         Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
         Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
             Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
+        }
+        Err(YorishiroError::Unauthenticated) => {
+            Err(ErrorData::invalid_request("authentication failed", None))
+        }
+        Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+    }
+}
+
+/// Connection-less counterpart to `authorize`, used by tools that must run a slow step (embedding
+/// generation) before touching the database. See `services::auth::authorize_scope`.
+pub(super) async fn verify(
+    ctx: &AppContext,
+    parts: &Parts,
+    required: ApiKeyScope,
+) -> Result<VerifyOutcome, ErrorData> {
+    let presented_key = extract_bearer_key(parts)?;
+    let headers = header_pairs(parts);
+
+    let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
+    let auth_impl =
+        authenticator(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
+
+    match auth::authorize_scope(&db, auth_impl.as_ref(), presented_key, required, &headers).await {
+        Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
+        Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
+            Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
         }
         Err(YorishiroError::Unauthenticated) => {
             Err(ErrorData::invalid_request("authentication failed", None))
@@ -191,6 +229,20 @@ macro_rules! authorized {
     };
 }
 pub(crate) use authorized;
+
+/// Connection-less counterpart to `authorized!`. Expands to the caller's `AuthContext` on
+/// success; on a scope-denied outcome it early-returns the tool result.
+macro_rules! verified {
+    ($ctx:expr, $parts:expr, $scope:expr) => {
+        match $crate::services::mcp::verify($ctx, $parts, $scope).await? {
+            $crate::services::mcp::VerifyOutcome::Verified(ctx) => ctx,
+            $crate::services::mcp::VerifyOutcome::ScopeDenied(result) => {
+                return ::core::result::Result::Ok(result);
+            }
+        }
+    };
+}
+pub(crate) use verified;
 
 /// Unwraps a repository/service call's `Ok` value, or early-returns the tool-level error result
 /// for its `Err` value. A macro rather than a function because it early-returns from the

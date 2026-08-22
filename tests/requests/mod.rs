@@ -1,6 +1,7 @@
 mod auth;
 mod members;
 mod schemas;
+mod search;
 mod system;
 mod template_library;
 mod workspaces;

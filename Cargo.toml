@@ -58,6 +58,14 @@ sea-query = { version = "1.0" }
 jsonschema = { version = "0.49" }
 rmcp = { version = "3.0.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 schemars = { version = "1", features = ["uuid1"] }
+# OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
+# vLLM/real OpenAI over HTTP.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature
+# (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so
+# `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter
+# (search.rs, sync.rs), without pinning a second, possibly-mismatched version.
+pgvector = { version = "0.4", default-features = false }
 
 [[bin]]
 name = "yorishiro_core-cli"

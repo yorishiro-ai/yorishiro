@@ -1,16 +1,42 @@
 use axum::Json;
-use axum::extract::{Path, Query};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
+use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, WriteScope};
+use crate::controllers::extractors::{Authorized, ReadScope, WriteScope, embedding_provider};
 use crate::models::content_entities::{self, EntityRecord};
+
+/// Fires embedding sync in the background after the caller's own transaction has committed:
+/// generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this
+/// must never add that latency to the entity write it follows, nor hold a DB connection open for
+/// it. Errors (provider unreachable, dimension mismatch) are logged, not surfaced: the entity
+/// write already succeeded and embedding is an auxiliary feature (see `sync_embedding`'s doc
+/// comment). Loco's queue backend isn't wired yet (`Hooks::connect_workers` is a no-op, see
+/// #221's scope), so `tokio::spawn` is the lazy stand-in until it is.
+fn spawn_embedding_sync(ctx: AppContext, workspace_id: Uuid, record: EntityRecord) {
+    let Ok(provider) = embedding_provider(&ctx) else {
+        return;
+    };
+    tokio::spawn(async move {
+        if let Err(err) = crate::services::embedding::sync::sync_embedding_for_record(
+            &ctx.db,
+            workspace_id,
+            &record,
+            provider.as_ref(),
+        )
+        .await
+        {
+            tracing::warn!(entity_id = %record.id, error = %err, "embedding sync failed");
+        }
+    });
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEntityRequest {
@@ -36,6 +62,7 @@ pub struct ListEntitiesParams {
 }
 
 pub async fn create_entity(
+    State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -48,9 +75,8 @@ pub async fn create_entity(
     let created_by = authorized.ctx.user_id;
     let record =
         content_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
-    // Embedding sync runs asynchronously off the request path in the old implementation; the
-    // worker port for it hasn't landed yet in this rebuild, so it's a no-op for now.
     authorized.commit().await?;
+    spawn_embedding_sync(ctx, workspace_id, record.clone());
     Ok((StatusCode::CREATED, Json(record)))
 }
 
@@ -64,6 +90,7 @@ pub async fn get_entity(
 }
 
 pub async fn update_entity(
+    State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateEntityRequest>,
@@ -72,9 +99,8 @@ pub async fn update_entity(
     let updated_by = authorized.ctx.user_id;
     let record =
         content_entities::update(authorized.txn(), workspace_id, id, body.data, updated_by).await?;
-    // Embedding sync runs asynchronously off the request path in the old implementation; the
-    // worker port for it hasn't landed yet in this rebuild, so it's a no-op for now.
     authorized.commit().await?;
+    spawn_embedding_sync(ctx, workspace_id, record.clone());
     Ok(Json(record))
 }
 

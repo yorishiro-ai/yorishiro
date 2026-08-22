@@ -1,5 +1,6 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
+use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -316,4 +317,144 @@ pub async fn export_all(
         .all(conn)
         .await
         .internal()
+}
+
+pub const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;
+
+/// A relation together with the entity on the other end of it, relative to the entity
+/// `neighbors_batch` was called for.
+/// `direction` is `"out"` when the queried entity is the relation's source (the neighbor is the
+/// target) and `"in"` when it's the target (the neighbor is the source).
+#[derive(Debug, Clone, Serialize)]
+pub struct Neighbor {
+    pub relation_id: Uuid,
+    pub relation_type: String,
+    pub direction: String,
+    pub properties: Value,
+    pub entity: EntityRecord,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct BatchNeighborRow {
+    pivot_id: Uuid,
+    relation_id: Uuid,
+    relation_type: String,
+    direction: String,
+    properties: Value,
+    // Only used to drive the SQL-level ORDER BY; not read on the Rust side.
+    #[allow(dead_code)]
+    relation_created_at: chrono::DateTime<chrono::FixedOffset>,
+    entity_id: Uuid,
+    entity_workspace_id: Uuid,
+    entity_schema_id: Uuid,
+    entity_schema_version: i32,
+    entity_type: String,
+    entity_data: Value,
+    entity_created_at: chrono::DateTime<chrono::FixedOffset>,
+    entity_updated_at: chrono::DateTime<chrono::FixedOffset>,
+    entity_created_by: Option<Uuid>,
+    entity_updated_by: Option<Uuid>,
+}
+
+impl BatchNeighborRow {
+    fn into_neighbor(self) -> Neighbor {
+        Neighbor {
+            relation_id: self.relation_id,
+            relation_type: self.relation_type,
+            direction: self.direction,
+            properties: self.properties,
+            entity: EntityRecord {
+                id: self.entity_id,
+                workspace_id: self.entity_workspace_id,
+                schema_id: self.entity_schema_id,
+                schema_version: self.entity_schema_version,
+                entity_type: self.entity_type,
+                data: self.entity_data,
+                created_at: self.entity_created_at.into(),
+                updated_at: self.entity_updated_at.into(),
+                created_by: self.entity_created_by,
+                updated_by: self.entity_updated_by,
+            },
+        }
+    }
+}
+
+/// Batched neighbor lookup: finds up to `limit` neighbors of every id in `pivot_ids` in one
+/// round trip instead of one call per id, via `CROSS JOIN LATERAL` so each pivot still gets its
+/// own `limit`-bounded result (a plain `WHERE source_id = ANY(...) LIMIT n` would apply `limit`
+/// across the whole batch instead of per pivot, which is not the same query).
+///
+/// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from
+/// the map rather than present with an empty vec. A duplicate id in `pivot_ids` contributes only
+/// once (deduped before querying).
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn neighbors_batch(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    pivot_ids: &[Uuid],
+    limit: i64,
+) -> Result<std::collections::HashMap<Uuid, Vec<Neighbor>>, YorishiroError> {
+    let limit = limit.clamp(1, 200);
+    let pivot_ids: Vec<Uuid> = pivot_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if pivot_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per
+    // pivot; the outer ORDER BY guarantees those rows come back to Rust in per-pivot,
+    // most-recent-first order too: `CROSS JOIN LATERAL` doesn't otherwise promise the driving
+    // join order is preserved across pivots, and `recall_context`'s truncation check relies on
+    // it.
+    let rows = BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \
+                n.properties, n.relation_created_at, n.entity_id, n.entity_workspace_id, \
+                n.entity_schema_id, n.entity_schema_version, n.entity_type, n.entity_data, \
+                n.entity_created_at, n.entity_updated_at, n.entity_created_by, \
+                n.entity_updated_by \
+         FROM unnest($2::uuid[]) AS pivot(id) \
+         CROSS JOIN LATERAL ( \
+             SELECT r.id AS relation_id, r.relation_type, 'out' AS direction, r.properties, \
+                    r.created_at AS relation_created_at, \
+                    e.id AS entity_id, e.workspace_id AS entity_workspace_id, \
+                    e.schema_id AS entity_schema_id, e.schema_version AS entity_schema_version, \
+                    e.entity_type, e.data AS entity_data, e.created_at AS entity_created_at, \
+                    e.updated_at AS entity_updated_at, e.created_by AS entity_created_by, \
+                    e.updated_by AS entity_updated_by \
+             FROM content_relations r \
+             JOIN content_entities e ON e.id = r.target_id AND e.workspace_id = r.workspace_id \
+             WHERE r.workspace_id = $1 AND r.source_id = pivot.id AND r.status = 'active' \
+             UNION ALL \
+             SELECT r.id, r.relation_type, 'in' AS direction, r.properties, r.created_at, \
+                    e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, e.data, \
+                    e.created_at, e.updated_at, e.created_by, e.updated_by \
+             FROM content_relations r \
+             JOIN content_entities e ON e.id = r.source_id AND e.workspace_id = r.workspace_id \
+             WHERE r.workspace_id = $1 AND r.target_id = pivot.id AND r.status = 'active' \
+             ORDER BY relation_created_at DESC \
+             LIMIT $3 \
+         ) AS n \
+         ORDER BY pivot.id, n.relation_created_at DESC",
+        [workspace_id.into(), pivot_ids.into(), limit.into()],
+    ))
+    .all(conn)
+    .await
+    .internal()?;
+
+    let mut by_pivot: std::collections::HashMap<Uuid, Vec<Neighbor>> =
+        std::collections::HashMap::new();
+    for row in rows {
+        by_pivot
+            .entry(row.pivot_id)
+            .or_default()
+            .push(row.into_neighbor());
+    }
+
+    Ok(by_pivot)
 }

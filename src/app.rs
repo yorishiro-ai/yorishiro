@@ -76,6 +76,14 @@ impl Hooks for App {
         // insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
         ctx.shared_store
             .insert(crate::services::auth::default_authenticator());
+        // The embedding provider seam, read from shared_store the same way as DbHandle/
+        // Authenticator above. Boot fails loudly if it's misconfigured (missing env vars, or a
+        // provider the config can't build) rather than deferring the error to the first search.
+        let embedding_provider =
+            crate::services::embedding::build_embedding_provider().map_err(|e| {
+                loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
+            })?;
+        ctx.shared_store.insert(embedding_provider);
         Ok(ctx)
     }
 
@@ -89,6 +97,7 @@ impl Hooks for App {
             .add_route(controllers::relations::routes())
             .add_route(controllers::schemas::routes())
             .add_route(controllers::schemas::template_routes())
+            .add_route(controllers::search::routes())
             .add_route(controllers::system::routes())
             .add_route(controllers::template_library::routes())
             .add_route(controllers::whoami::routes())
