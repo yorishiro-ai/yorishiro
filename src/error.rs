@@ -55,11 +55,37 @@ impl YorishiroError {
         }
     }
 
+    /// A machine-readable identifier for this variant, stable across releases.
+    /// Every variant must have one: a new variant with no arm here fails to compile, which is
+    /// the point, since `ValidationFailed` and `RelationTypeMismatch` otherwise collide on the
+    /// same 422 status with no way for a client to tell them apart.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ValidationFailed { .. } => "validation_failed",
+            Self::NotFound { .. } => "not_found",
+            Self::ScopeInsufficient { .. } => "scope_insufficient",
+            Self::Conflict { .. } => "conflict",
+            Self::RelationTypeMismatch { .. } => "relation_type_mismatch",
+            Self::Unauthenticated => "unauthenticated",
+            Self::Maintenance { read_only, .. } => {
+                if *read_only {
+                    "maintenance_read_only"
+                } else {
+                    "maintenance_full_lock"
+                }
+            }
+            Self::ProviderBusy { .. } => "provider_busy",
+            Self::ProviderUnreachable { .. } => "provider_unreachable",
+            Self::Internal(_) => "internal",
+        }
+    }
+
     /// Maps this error to an HTTP status code and JSON response body.
     /// Every axum error wrapper built on `YorishiroError` delegates here so the status/body
     /// mapping is defined once and never duplicated as a second `match`. Internal errors are
     /// logged here (the caller should not log them again).
     pub fn into_http_parts(self) -> (u16, serde_json::Value) {
+        let code = self.code();
         match self {
             Self::ValidationFailed {
                 message,
@@ -67,24 +93,27 @@ impl YorishiroError {
                 hint,
             } => (
                 422,
-                serde_json::json!({ "error": { "message": message, "details": details, "hint": hint } }),
+                serde_json::json!({ "error": { "code": code, "message": message, "details": details, "hint": hint } }),
             ),
-            Self::NotFound { message } => {
-                (404, serde_json::json!({ "error": { "message": message } }))
-            }
+            Self::NotFound { message } => (
+                404,
+                serde_json::json!({ "error": { "code": code, "message": message } }),
+            ),
             Self::ScopeInsufficient { message, hint } => (
                 403,
-                serde_json::json!({ "error": { "message": message, "hint": hint } }),
+                serde_json::json!({ "error": { "code": code, "message": message, "hint": hint } }),
             ),
-            Self::Conflict { message } => {
-                (409, serde_json::json!({ "error": { "message": message } }))
-            }
-            Self::RelationTypeMismatch { message } => {
-                (422, serde_json::json!({ "error": { "message": message } }))
-            }
+            Self::Conflict { message } => (
+                409,
+                serde_json::json!({ "error": { "code": code, "message": message } }),
+            ),
+            Self::RelationTypeMismatch { message } => (
+                422,
+                serde_json::json!({ "error": { "code": code, "message": message } }),
+            ),
             Self::Unauthenticated => (
                 401,
-                serde_json::json!({ "error": { "message": "authentication required" } }),
+                serde_json::json!({ "error": { "code": code, "message": "authentication required" } }),
             ),
             Self::Maintenance {
                 message,
@@ -94,6 +123,7 @@ impl YorishiroError {
                 if read_only { 423 } else { 503 },
                 serde_json::json!({
                     "error": {
+                        "code": code,
                         "message": message,
                         "retry_after_seconds": retry_after,
                     }
@@ -106,6 +136,7 @@ impl YorishiroError {
                 503,
                 serde_json::json!({
                     "error": {
+                        "code": code,
                         "message": message,
                         "retry_after_seconds": retry_after.as_secs(),
                     }
@@ -115,6 +146,7 @@ impl YorishiroError {
                 502,
                 serde_json::json!({
                     "error": {
+                        "code": code,
                         "message": format!("the embedding provider at {url} could not be reached: {message}"),
                         "hint": "check that the provider is running and that YORISHIRO_EMBEDDING_BASE_URL points at it",
                     }
@@ -124,7 +156,7 @@ impl YorishiroError {
                 tracing::error!(error = %err, "internal error");
                 (
                     500,
-                    serde_json::json!({ "error": { "message": "internal server error" } }),
+                    serde_json::json!({ "error": { "code": code, "message": "internal server error" } }),
                 )
             }
         }

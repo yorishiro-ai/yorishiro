@@ -165,11 +165,15 @@ Every one of these still depends on the old sqlx-era `AppState`/`state.rs` shape
   Both names are fixed; do not rename either.
 - The Stripe webhook (`stripe_webhook`) returns a plain `impl IntoResponse` with raw status codes, because Stripe expects simple text rather than a JSON error envelope.
   It is the sole exception to using `HostedApiError`.
+- Every `YorishiroError` variant has a machine-readable `code()` (`yorishiro_core::error`), emitted as `error.code` in the JSON body by `into_http_parts()`.
+  A new variant with no arm in `code()`'s match fails to compile, which is what makes `ValidationFailed` and `RelationTypeMismatch` distinguishable on the wire even though both answer 422.
+  Do not add a variant without adding its code.
 
 ## Router integration (`ee/`)
 
-- The hosted router MUST have `apply_observability_layers()` applied before it is merged into `build_app()`.
-  `axum::Router::merge` does not propagate layers.
+- **Stale, superseded by Loco's own middleware config.** The pre-rebuild `apply_observability_layers()`/`build_app()` contract does not exist on this branch (CLAUDE.md's own "Visibility and dead code" section already flags this).
+  Request-ID stamping and access logging are Loco's own `request_id`/`logger` middlewares, enabled in `server.middlewares` in every `config/*.yaml`, not a hand-rolled tower layer applied at router-merge time.
+  `HostedApp`'s `Hooks` methods delegate to `App`'s per the composition pattern above, so a middleware Loco applies once at boot covers both editions' routes with no merge-layer step to remember.
 - `Router::merge` panics on a duplicate route, and only a booted server sees it.
   A route registered on both sides is therefore a startup crash rather than a compile error.
 
