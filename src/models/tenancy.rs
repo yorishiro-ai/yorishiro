@@ -1,9 +1,6 @@
-//! Control-plane CRUD for users, invites, and tenant memberships: signup, login, and the
-//! `admin create-invite` chain.
+//! Control-plane CRUD for users, invites, and tenant memberships: signup, login, and the `admin create-invite` chain.
 //!
-//! Everything here runs on `ctx.db` (Loco's own migration-role connection), never the
-//! RLS-scoped tenant pool: no workspace exists yet for RLS to scope by, the same reasoning
-//! `TenantDb::connect`'s doc comment gives for the identity pool.
+//! Everything here runs on `ctx.db` (Loco's own migration-role connection), never the RLS-scoped tenant pool: no workspace exists yet for RLS to scope by, the same reasoning `TenantDb::connect`'s doc comment gives for the identity pool.
 
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::hash;
@@ -64,8 +61,7 @@ pub async fn create_tenant(
 }
 
 /// Reads and parses `YORISHIRO_MAX_TENANTS`.
-/// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and
-/// fails loudly rather than silently falling back to unlimited.
+/// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and fails loudly rather than silently falling back to unlimited.
 pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
     match std::env::var("YORISHIRO_MAX_TENANTS") {
         Ok(raw) => {
@@ -125,20 +121,16 @@ impl MembershipRole {
         }
     }
 
-    /// Whether this role may manage the tenant itself: members, workspaces, and everything
-    /// `require_tenant_admin` gates.
+    /// Whether this role may manage the tenant itself: members, workspaces, and everything `require_tenant_admin` gates.
     pub fn administers_tenant(self) -> bool {
         matches!(self, MembershipRole::Owner | MembershipRole::Admin)
     }
 }
 
-/// Creates a human user account. The password is hashed with `loco_rs::hash` (Argon2id) before
-/// ever reaching the database.
+/// Creates a human user account.
+/// The password is hashed with `loco_rs::hash` (Argon2id) before ever reaching the database.
 ///
-/// Takes `&impl ConnectionTrait` rather than a pool handle so a caller can compose this with
-/// `add_member` in one transaction: the two must succeed or fail together, or a failure between
-/// them leaves an orphaned user row that can never join a tenant (see `signup`, which wraps both
-/// in one transaction).
+/// Takes `&impl ConnectionTrait` rather than a pool handle so a caller can compose this with `add_member` in one transaction: the two must succeed or fail together, or a failure between them leaves an orphaned user row that can never join a tenant (see `signup`, which wraps both in one transaction).
 pub async fn create_user(
     conn: &impl ConnectionTrait,
     email: &str,
@@ -166,9 +158,8 @@ pub async fn create_user(
     })
 }
 
-/// Verifies an email/password pair against the stored Argon2id hash, returning the matching user
-/// on success. An OAuth-only account (`password_hash = NULL`) never matches, same as a wrong
-/// password: `loco_rs::hash::verify_password` needs a hash to compare against.
+/// Verifies an email/password pair against the stored Argon2id hash, returning the matching user on success.
+/// An OAuth-only account (`password_hash = NULL`) never matches, same as a wrong password: `loco_rs::hash::verify_password` needs a hash to compare against.
 pub async fn verify_login(
     conn: &impl ConnectionTrait,
     email: &str,
@@ -194,8 +185,7 @@ pub async fn verify_login(
 
 /// Adds (or updates the role of) a user's membership in a tenant.
 ///
-/// Takes `&impl ConnectionTrait` so a caller can compose this with `create_user` in one
-/// transaction, same reasoning as `create_user`'s doc comment.
+/// Takes `&impl ConnectionTrait` so a caller can compose this with `create_user` in one transaction, same reasoning as `create_user`'s doc comment.
 pub async fn add_member(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -227,8 +217,7 @@ pub async fn add_member(
     Ok(())
 }
 
-/// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by
-/// email, never creates one).
+/// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by email, never creates one).
 pub async fn get_user_by_email(
     conn: &impl ConnectionTrait,
     email: &str,
@@ -286,10 +275,8 @@ pub async fn get_membership_role(
 const INVITE_TOKEN_BYTES: usize = 24;
 
 /// Creates an invite token for `email` to join `tenant_id` with `role`.
-/// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is
-/// persisted, so this is the only place the plaintext is ever available. Callers must surface it
-/// themselves (printed by the admin CLI today; a transactional-email integration is not
-/// provided).
+/// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
+/// Callers must surface it themselves (printed by the admin CLI today; a transactional-email integration is not provided).
 pub async fn create_invite(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -314,8 +301,7 @@ pub async fn create_invite(
     Ok((invite, token))
 }
 
-/// A tenant member as reported to a caller: `GET /api/members`, and the response body of adding
-/// one via `POST /api/members`.
+/// A tenant member as reported to a caller: `GET /api/members`, and the response body of adding one via `POST /api/members`.
 #[derive(Debug, Serialize)]
 pub struct MembershipRecord {
     pub user_id: Uuid,
@@ -324,20 +310,16 @@ pub struct MembershipRecord {
     pub role: MembershipRole,
 }
 
-/// What a redeemed invite grants: resolved once, since the invite row is consumed by the same
-/// call that reads it.
+/// What a redeemed invite grants: resolved once, since the invite row is consumed by the same call that reads it.
 pub struct RedeemedInvite {
     pub tenant_id: Uuid,
     pub email: String,
     pub role: MembershipRole,
 }
 
-/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it
-/// grants, or `None` if the token doesn't match any invite, is already used, or has expired.
+/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it grants, or `None` if the token doesn't match any invite, is already used, or has expired.
 ///
-/// The lookup and the `used_at` update happen in a single statement (`UpdateMany` with all three
-/// conditions in its `WHERE`), so two concurrent redemptions of the same token can't both
-/// succeed: whichever commits first's `used_at IS NULL` no longer holds for the loser.
+/// The lookup and the `used_at` update happen in a single statement (`UpdateMany` with all three conditions in its `WHERE`), so two concurrent redemptions of the same token can't both succeed: whichever commits first's `used_at IS NULL` no longer holds for the loser.
 pub async fn redeem_invite(
     conn: &impl ConnectionTrait,
     raw_token: &str,
@@ -345,10 +327,7 @@ pub async fn redeem_invite(
     let token_hash = hash_key(raw_token);
     let now = Utc::now();
 
-    // Read first to build the response: the update itself does not return rows affected as
-    // model data, and a second SELECT after the UPDATE could observe a different row (e.g. one
-    // this same call just marked used) if invites were ever deletable, which they are not, so
-    // this is safe, not merely convenient.
+    // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
     let invite = identity_invites::Entity::find()
         .filter(identity_invites::Column::TokenHash.eq(token_hash.clone()))
         .filter(identity_invites::Column::UsedAt.is_null())
@@ -374,8 +353,7 @@ pub async fn redeem_invite(
         .internal()?;
 
     if update_result.rows_affected == 0 {
-        // Lost the race: another concurrent redemption already claimed this token between the
-        // read above and this UPDATE.
+        // Lost the race: another concurrent redemption already claimed this token between the read above and this UPDATE.
         return Ok(None);
     }
 
@@ -399,8 +377,7 @@ pub struct WorkspaceSummary {
     pub name: String,
 }
 
-/// Every workspace under `tenant_id`, for the signup response (which workspaces the new member
-/// can now log into).
+/// Every workspace under `tenant_id`, for the signup response (which workspaces the new member can now log into).
 pub async fn list_workspaces(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -422,9 +399,8 @@ pub async fn list_workspaces(
         .collect())
 }
 
-/// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold
-/// a membership in. Used by `/auth/login` to resolve `workspace_id` automatically when the
-/// caller can only reach one.
+/// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
+/// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
 pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
@@ -472,13 +448,11 @@ pub async fn get_workspace_tenant(
         .ok_or_else(|| YorishiroError::not_found("workspace not found"))
 }
 
-/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap. `None`
-/// means unlimited, which is the default so self-hosted deployments are never capped unless an
-/// operator explicitly sets a limit.
+/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
+/// `None` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
 ///
-/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a
-/// later write produced by a different model can be refused where it happens rather than at
-/// query time. `None` leaves the workspace on "whatever the deployment is configured for".
+/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a later write produced by a different model can be refused where it happens rather than at query time.
+/// `None` leaves the workspace on "whatever the deployment is configured for".
 pub async fn create_workspace(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -537,9 +511,7 @@ pub async fn create_workspace(
 
 /// Sets a tenant's `max_workspaces` cap.
 ///
-/// A self-hosted deployment never calls this (its tenants keep whatever cap they were created
-/// with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap
-/// that comes with a plan change.
+/// A self-hosted deployment never calls this (its tenants keep whatever cap they were created with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap that comes with a plan change.
 pub async fn set_tenant_max_workspaces(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -577,10 +549,7 @@ pub async fn get_workspace(
 
 /// Deletes a workspace, refusing to remove a tenant's last one.
 ///
-/// `db::lock_for_update` serializes concurrent deletes against the same tenant before counting
-/// its workspaces, so two requests racing to delete the tenant's last two workspaces cannot both
-/// see a spare one and proceed: a plain `DELETE ... WHERE EXISTS (another workspace)` reads a
-/// snapshot each transaction takes independently, which is exactly the race this avoids.
+/// `db::lock_for_update` serializes concurrent deletes against the same tenant before counting its workspaces, so two requests racing to delete the tenant's last two workspaces cannot both see a spare one and proceed: a plain `DELETE ... WHERE EXISTS (another workspace)` reads a snapshot each transaction takes independently, which is exactly the race this avoids.
 pub async fn delete_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

@@ -20,8 +20,7 @@ pub struct CreateRelationArgs {
     pub target_id: Uuid,
     /// relation_type name declared in the schema's `relation_types` definition.
     pub relation_type: String,
-    /// Arbitrary properties attached to the relation (JSON object, defaults to an empty object
-    /// if omitted).
+    /// Arbitrary properties attached to the relation (JSON object, defaults to an empty object if omitted).
     pub properties: Option<Value>,
 }
 

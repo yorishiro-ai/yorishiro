@@ -1,10 +1,7 @@
 //! Deployment-wide maintenance state.
 //!
-//! One row, read on every request that could be refused and written only by an operator. It
-//! lives in the database rather than in the process because a flag held in memory would put one
-//! replica in maintenance while its siblings kept serving. The request role has SELECT only on
-//! this table (`migration/src/m20260822_100700_maintenance.rs`), so `set` runs on `ctx.db`
-//! (the migration-role connection), never the RLS-scoped tenant transaction.
+//! One row, read on every request that could be refused and written only by an operator.
+//! The request role has SELECT only on this table (`migration/src/m20260822_100700_maintenance.rs`), so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
 
 pub use super::_entities::identity_maintenance::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
@@ -16,10 +13,8 @@ pub type IdentityMaintenance = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with
-    /// `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and
-    /// `is_unchanged()` only matches the latter. See `content_entities.rs`'s copy of this
-    /// comment for where this was caught live.
+    /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
+    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and `is_unchanged()` only matches the latter.
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
@@ -64,9 +59,8 @@ impl MaintenanceMode {
         }
     }
 
-    /// Parses the stored value. Unknown values are rejected rather than treated as `Off`:
-    /// reading a row this crate does not understand and concluding "serve everything" would
-    /// turn a corrupt row into an outage of the protection itself.
+    /// Parses the stored value.
+    /// Unknown values are rejected rather than treated as `Off`: reading a row this crate does not understand and concluding "serve everything" would turn a corrupt row into an outage of the protection itself.
     pub fn from_db_str(value: &str) -> Option<Self> {
         match value {
             "off" => Some(Self::Off),
@@ -85,8 +79,8 @@ pub struct MaintenanceState {
 }
 
 impl MaintenanceState {
-    /// The error to refuse a request with, or `None` when it may proceed. `is_write` decides
-    /// whether read-only applies; full lock refuses either way.
+    /// The error to refuse a request with, or `None` when it may proceed.
+    /// `is_write` decides whether read-only applies; full lock refuses either way.
     pub fn refusal(&self, is_write: bool) -> Option<YorishiroError> {
         let (refuse, read_only) = match self.mode {
             MaintenanceMode::Off => (false, false),
@@ -111,17 +105,14 @@ impl MaintenanceState {
     }
 }
 
-/// Reads the current state. Runs on the request connection, so the row is readable by the
-/// application role.
+/// Reads the current state.
+/// Runs on the request connection, so the row is readable by the application role.
 pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, YorishiroError> {
-    // The row's primary key is a boolean singleton, checked by a CHECK constraint to be
-    // exactly TRUE, rather than the usual uuidv7 PK.
+    // Primary key is a boolean singleton (CHECK constraint enforces exactly TRUE).
     let row = Entity::find_by_id(true).one(conn).await.internal()?;
 
-    // A missing row means nobody has set maintenance, which is the same as off. Never expected
-    // once the migration's seed row exists, but the harmless read stays for the same reason
-    // `models::maintenance::get` on master kept it: a missing row is a survivable "off", not a
-    // panic.
+    // A missing row means off.
+    // Not expected once the migration's seed row exists, but a missing row should be a survivable "off", not a panic.
     let Some(row) = row else {
         return Ok(MaintenanceState {
             mode: MaintenanceMode::Off,
@@ -144,8 +135,8 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
     })
 }
 
-/// Sets the state. Takes the migration-role connection (`ctx.db`): the request role has SELECT
-/// only, since entering maintenance is an operator action.
+/// Sets the state.
+/// Takes the migration-role connection (`ctx.db`): the request role has SELECT only, since entering maintenance is an operator action.
 pub async fn set(
     conn: &impl ConnectionTrait,
     mode: MaintenanceMode,

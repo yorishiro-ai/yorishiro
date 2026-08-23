@@ -1,12 +1,7 @@
-//! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token
-//! by design, same as `/auth/signup` and `/auth/login`.
+//! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
-//! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the
-//! deployment's first tenant/workspace from scratch: there is no one to invite from yet. Gated
-//! on `YORISHIRO_MAX_TENANTS` resolving to an actual cap (default 1; `0` means unlimited) rather
-//! than a separate flag, so the wizard can never be enabled on a deployment that lacks the
-//! tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a
-//! deploy and its first real tenant and claim ownership of the whole deployment.
+//! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the deployment's first tenant/workspace from scratch: there is no one to invite from yet.
+//! Gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap (default 1; `0` means unlimited) rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
 
 use axum::Json;
 use axum::extract::State;
@@ -74,9 +69,8 @@ pub async fn setup(
         .into());
     }
 
-    // A fast-path check before doing any work; not the guarantee. Two concurrent POST /setup
-    // calls could both pass this and both proceed, so the real check runs again after the
-    // advisory lock below, inside the transaction that also does the writes.
+    // A fast-path check before doing any work, not the guarantee: two concurrent POST /setup calls could both pass this and both proceed.
+    // The real check runs again after the advisory lock below, inside the transaction that also does the writes.
     if tenancy::count_tenants(&ctx.db).await? > 0 {
         return Err(YorishiroError::Conflict {
             message: "this deployment has already been set up".into(),
@@ -88,13 +82,8 @@ pub async fn setup(
     let embedding_model = crate::services::embedding::model_name_from_env();
     let dimensions = provider.dimensions() as i32;
 
-    // tenant + workspace + user + membership run in one transaction, same reasoning as
-    // `signup`'s create_user + add_member: a request that dies part-way must not leave rows
-    // nothing can finish or undo. The advisory lock closes the TOCTOU window the fast-path check
-    // above has, the same way `content_entities::create`'s quota check does
-    // (`db::lock_for_update`): a fixed key, serializing every setup attempt on this deployment
-    // against every other, so the second caller's re-check (below) sees the first caller's
-    // commit before it decides whether to proceed.
+    // tenant + workspace + user + membership run in one transaction: a request that dies part-way must not leave rows nothing can finish or undo.
+    // `db::lock_for_update` closes the TOCTOU window the fast-path check above has: a fixed key, serializing every setup attempt on this deployment against every other, so the second caller's re-check (below) sees the first caller's commit before it decides whether to proceed.
     let txn = ctx.db.begin().await.internal()?;
     crate::db::lock_for_update(&txn, "setup").await.internal()?;
     if tenancy::count_tenants(&txn).await? > 0 {

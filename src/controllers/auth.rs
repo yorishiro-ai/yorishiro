@@ -1,8 +1,6 @@
-//! `/auth/signup` and `/auth/login`: the only two endpoints reachable without a bearer token, by
-//! design, since their entire purpose is to hand one out.
+//! `/auth/signup` and `/auth/login`: the only two endpoints reachable without a bearer token, by design, since their entire purpose is to hand one out.
 //!
-//! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin
-//! CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
+//! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
 
 use axum::Json;
 use axum::extract::State;
@@ -141,9 +139,9 @@ async fn signup_without_invite(
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
-    /// Which of the account's workspaces to issue an API key for. Omit this when the account
-    /// can only reach one workspace; it resolves automatically. An account reaching more than
-    /// one must specify explicitly (422 otherwise), and the refusal lists the candidates.
+    /// Which of the account's workspaces to issue an API key for.
+    /// Omit this when the account can only reach one workspace; it resolves automatically.
+    /// An account reaching more than one must specify explicitly (422 otherwise), and the refusal lists the candidates.
     pub workspace_id: Option<Uuid>,
 }
 

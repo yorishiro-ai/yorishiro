@@ -21,21 +21,12 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
     }
 }
 
-/// The single entry point for authorization: validates the presented raw key, confirms it
-/// satisfies the required scope, and returns a transaction with the RLS context already set
-/// (see `TenantDb::begin_for_workspace`). REST and MCP adapters have no way to obtain a
-/// `DatabaseTransaction` on the tenant pool except through this function, which structurally
-/// prevents a scope check from being forgotten. The key is resolved through `authenticator`
-/// rather than by this function directly, so a deployment that replaces the rule (see
-/// [`Authenticator`]) is honoured on every path that authorizes.
+/// The single entry point for authorization: validates the presented raw key, confirms it satisfies the required scope, and returns a transaction with the RLS context already set (see `TenantDb::begin_for_workspace`).
+/// REST and MCP adapters have no other way to obtain a `DatabaseTransaction` on the tenant pool, so a scope check can't be forgotten.
 ///
-/// The caller owns the returned transaction's lifetime: a write handler must call
-/// `txn.commit().await` explicitly, or every write in it is silently discarded when the
-/// transaction drops.
+/// The caller owns the returned transaction's lifetime: a write handler must call `txn.commit().await` explicitly, or every write in it is silently discarded when the transaction drops.
 ///
-/// `last_used_at` is touched through `touch_last_used_on`'s independent short-lived connection,
-/// not on the returned transaction: a read-only handler drops its transaction without
-/// committing (by design), which would silently roll the update back if it ran there.
+/// `last_used_at` is touched through `touch_last_used_on`'s independent short-lived connection, not on the returned transaction: a read-only handler drops its transaction without committing, which would silently roll the update back if it ran there.
 pub async fn authorize(
     db: &DbHandle,
     authenticator: &dyn Authenticator,
@@ -59,8 +50,7 @@ pub async fn authorize(
     Ok((ctx, txn))
 }
 
-/// Touches `last_used_at` through a connection freshly acquired for this workspace, logging
-/// (never failing the caller) on either step's error.
+/// Touches `last_used_at` through a connection freshly acquired for this workspace, logging (never failing the caller) on either step's error.
 pub async fn touch_last_used_on(
     db: &DbHandle,
     tenant_id: uuid::Uuid,
@@ -83,11 +73,7 @@ pub async fn touch_last_used_on(
     }
 }
 
-/// A connection-free variant of `authorize`, used on paths that need to run a slow step (like
-/// embedding generation) before touching the DB. `authorize` holds a connection for the
-/// handler's entire lifetime, which would tie up a pool connection during a long-running step;
-/// this only performs authentication and scope validation, updating `last_used_at` through a
-/// short-lived connection that's returned immediately.
+/// A connection-free variant of `authorize`, used on paths that need to run a slow step (like embedding generation) before touching the DB: it only authenticates and validates scope, updating `last_used_at` through a short-lived connection that's returned immediately.
 pub async fn authorize_scope(
     db: &DbHandle,
     authenticator: &dyn Authenticator,

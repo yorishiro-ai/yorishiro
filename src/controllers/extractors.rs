@@ -147,14 +147,11 @@ impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
 
-/// An extractor that authenticates, verifies the required scope, and begins a transaction with
-/// the RLS context already set, all in one step (see `TenantDb::begin_for_workspace`). There is
-/// no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which
-/// structurally prevents forgetting the scope check.
+/// An extractor that authenticates, verifies the required scope, and begins a transaction with the RLS context already set, all in one step (see `TenantDb::begin_for_workspace`).
+/// There is no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which structurally prevents forgetting the scope check.
 ///
-/// **A write handler must call `.commit().await?` before returning, or every write it made is
-/// silently discarded** (`DatabaseTransaction` rolls back on drop). A read-only handler can just
-/// let it drop; a rollback of nothing-written is a no-op.
+/// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
+/// A read-only handler can just let it drop; a rollback of nothing-written is a no-op.
 pub struct Authorized<R> {
     pub ctx: auth::AuthContext,
     txn: sea_orm::DatabaseTransaction,
@@ -204,9 +201,8 @@ where
     }
 }
 
-/// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s
-/// scope, without acquiring a DB connection. Handlers that do slow work before touching the
-/// database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
+/// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
+/// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified<R> {
     pub ctx: auth::AuthContext,
     _scope: PhantomData<R>,

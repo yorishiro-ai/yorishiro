@@ -25,9 +25,7 @@ pub enum YorishiroError {
     Unauthenticated,
 
     /// The deployment is in maintenance.
-    /// `read_only` refuses writes (423), `full_lock` refuses everything (503); `retry_after`
-    /// is seconds, and reaches the caller as a header as well as in the body, since agents
-    /// retry on the header.
+    /// `read_only` refuses writes (423), `full_lock` refuses everything (503); `retry_after` is seconds, and reaches the caller as a header as well as in the body, since agents retry on the header.
     #[error("maintenance: {message}")]
     Maintenance {
         message: String,
@@ -79,9 +77,8 @@ impl YorishiroError {
     }
 
     /// Maps this error to an HTTP status code and JSON response body.
-    /// Every axum error wrapper built on `YorishiroError` delegates here so the status/body
-    /// mapping is defined once and never duplicated as a second `match`. Internal errors are
-    /// logged here (the caller should not log them again).
+    /// Every axum error wrapper built on `YorishiroError` delegates here so the status/body mapping is defined once and never duplicated as a second `match`.
+    /// Internal errors are logged here; the caller should not log them again.
     pub fn into_http_parts(self) -> (u16, serde_json::Value) {
         let code = self.code();
         match self {

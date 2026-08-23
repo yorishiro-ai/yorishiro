@@ -79,8 +79,7 @@ impl TryFrom<Model> for SchemaRecord {
 
 /// Fetches the currently active schema (the latest version with status='active') for the given workspace and name.
 ///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it
-/// takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
 pub async fn get_active_schema(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -105,10 +104,8 @@ pub async fn get_active_schema(
     }
 }
 
-/// Counts a workspace's currently *active* schemas: one row per distinct name, since
-/// `create_schema` archives the previous version before activating a new one. For
-/// workspace-detail summaries, this is a more meaningful "how many schemas does this workspace
-/// define" figure than counting every archived version too.
+/// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
+/// For workspace-detail summaries, this is a more meaningful "how many schemas does this workspace define" figure than counting every archived version too.
 pub async fn count_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -124,8 +121,7 @@ pub async fn count_active(
         .map(|n| n as i64)
 }
 
-/// Fetches every schema version (active and archived) for the workspace, ordered by
-/// `(name, version)`, for a full-workspace data export.
+/// Fetches every schema version (active and archived) for the workspace, ordered by `(name, version)`, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn export_all(
@@ -148,8 +144,7 @@ pub async fn export_all(
 
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
 ///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it
-/// takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
 pub async fn get_by_id(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -174,14 +169,11 @@ pub async fn get_by_id(
 
 /// A schema whose origin template has been edited since the copy was taken.
 ///
-/// The signal only (what changed and where), with no diff and no application. Whether to follow
-/// the upstream edit is the workspace's call, since applying it could invalidate entities already
-/// stored against the current definition.
+/// The signal only (what changed and where), with no diff and no application.
+/// Whether to follow the upstream edit is the workspace's call, since applying it could invalidate entities already stored against the current definition.
 ///
-/// Lives here rather than in `ee/` because it names `content_schemas` fields (`schema_id`,
-/// `version`) this module already owns; the endpoint that produces one (`ee/`'s
-/// `GET /api/schemas/upstream-changes`) is what makes following it enterprise, not the shape of
-/// the value itself.
+/// Lives here rather than in `ee/` because it names `content_schemas` fields (`schema_id`, `version`) this module already owns.
+/// The endpoint that produces one (`ee/`'s `GET /api/schemas/upstream-changes`) is what makes following it enterprise, not the shape of the value itself.
 #[derive(Debug, Clone, Serialize)]
 pub struct UpstreamChange {
     pub schema_id: Uuid,
@@ -194,8 +186,8 @@ pub struct UpstreamChange {
     pub changed_at: DateTime<Utc>,
 }
 
-/// A row in a schema listing. A lightweight summary that omits the `definition` body, used as
-/// the entry point for MCP clients (LLMs) to discover what schemas exist for a workspace.
+/// A row in a schema listing.
+/// A lightweight summary that omits the `definition` body, used as the entry point for MCP clients (LLMs) to discover what schemas exist for a workspace.
 #[derive(Debug, Clone, Serialize)]
 pub struct SchemaSummary {
     pub id: Uuid,
@@ -217,8 +209,7 @@ impl From<Model> for SchemaSummary {
     }
 }
 
-/// Lists all of a workspace's schemas (every version, including archived) ordered by name and
-/// version.
+/// Lists all of a workspace's schemas (every version, including archived) ordered by name and version.
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -265,11 +256,8 @@ pub async fn create_schema(
         .map(SchemaRecord::try_from)
         .transpose()?;
 
-    // Only the first version of a name mints an origin from what the caller passed. Every later
-    // one inherits the origin its predecessor already had, unless the caller states a new one:
-    // editing a schema does not un-link it from the template it was copied from, and treating an
-    // omitted origin as "detach" would silently break that link on every version after the
-    // first.
+    // Only the first version of a name mints an origin from what the caller passed.
+    // Every later one inherits the origin its predecessor already had, unless the caller states a new one: editing a schema does not un-link it from the template it was copied from, and treating an omitted origin as "detach" would silently break that link on every version after the first.
     let (origin_template_id, origin_snapshot) = match &previous {
         Some(previous) if origin_template_id.is_none() => (
             previous.origin_template_id,
@@ -338,9 +326,8 @@ pub async fn create_schema(
         }
     })?;
 
-    // Inside the transaction: a workspace must not be left active by a schema insert that then
-    // rolls back. Unconditional and idempotent: every version after the first finds it active
-    // already, and checking first would only add a round trip.
+    // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.
+    // Unconditional and idempotent: every version after the first finds it active already, and checking first would only add a round trip.
     crate::models::identity_workspaces::mark_active(conn, workspace_id, row.id).await?;
 
     Ok((row.try_into()?, diff))

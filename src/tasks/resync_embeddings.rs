@@ -8,10 +8,7 @@ use crate::services::embedding;
 
 /// `cargo loco task resync_embeddings workspace_id:<uuid>`
 ///
-/// Re-syncs embeddings for entities whose `embedding` column is still NULL: an operational
-/// recovery command for entities that fell out of search due to a failed background sync (a
-/// transient embedding API outage, or the process exiting while `spawn_embedding_sync`'s task
-/// was still in flight, see `controllers::entities`'s doc comment on that gap).
+/// Re-syncs embeddings for entities whose `embedding` column is still NULL: an operational recovery command for entities that fell out of search due to a failed background sync (a transient embedding API outage, or the process exiting while `spawn_embedding_sync`'s task was still in flight, see `controllers::entities`'s doc comment on that gap).
 pub struct ResyncEmbeddings;
 
 #[derive(Debug, FromQueryResult)]
@@ -34,13 +31,8 @@ impl Task for ResyncEmbeddings {
             .parse()
             .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
 
-        // `build_embedding_provider` no longer fails when unconfigured (see its doc comment): it
-        // falls back to `UnconfiguredEmbeddingProvider`, which satisfies the dimension count but
-        // errors on every actual call. Left unchecked, every candidate below would fail
-        // individually and the summary line would read as an ordinary "N failed" outcome instead
-        // of the operator's actual problem (nothing is configured). One embed call up front,
-        // before the loop, turns that into the same hard failure `build_embedding_provider`
-        // itself used to be.
+        // An unconfigured embedding provider satisfies the dimension count but errors on every actual call.
+        // Probe it once up front so a misconfiguration is one clear failure, not N per-candidate ones that read as an ordinary "N failed" outcome.
         let provider = embedding::build_embedding_provider()
             .map_err(|err| Error::Message(format!("failed to build embedding provider: {err}")))?;
         provider.embed_batch(&[]).await.map_err(|err| {

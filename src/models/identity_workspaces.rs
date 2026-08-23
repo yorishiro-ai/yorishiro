@@ -33,8 +33,7 @@ pub const WORKSPACE_STATUS_ACTIVE: &str = "active";
 
 /// Whether the workspace is still waiting for its first schema.
 ///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it
-/// takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
 pub async fn is_schema_pending(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -50,16 +49,9 @@ pub async fn is_schema_pending(
 
 /// Marks a workspace active and records its first schema, idempotently.
 ///
-/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema
-/// creations must not both see `schema_id` as `NULL` and each overwrite the other's write with
-/// their own. The caller (`content_schemas::create_schema`) already serializes concurrent
-/// creates for the same workspace+name with an advisory lock, but this statement's own atomicity
-/// is what protects a workspace with two different schema names created at once.
+/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other's write.
 ///
-/// Raw SQL, not `ActiveModel`, for two reasons: `COALESCE(...)` is an expression the entity
-/// layer's `Set(...)` can't express (it only assigns literal values), and `yorishiro_app` holds
-/// UPDATE only on `identity_workspaces (status, schema_id)` (a column-level GRANT), so this
-/// statement must touch exactly those two columns and no others.
+/// Raw SQL, not `ActiveModel`: `COALESCE(...)` can't be expressed via `Set(...)`, and `yorishiro_app` holds UPDATE only on `identity_workspaces (status, schema_id)` (a column-level GRANT), so the statement must touch exactly those two columns.
 pub async fn mark_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

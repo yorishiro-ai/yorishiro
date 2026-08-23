@@ -1,19 +1,8 @@
-//! A per-key fixed-window rate limiter, applied to whichever routes are reachable without a
-//! bearer token: `/auth/signup` and `/auth/login`, the ones exposed to unauthenticated
-//! credential/invite-token brute-forcing, plus `ee/`'s `/auth/oauth/authorize` and
-//! `/auth/oauth/callback` when that crate is composed in. Base has no compile-time dependency on
-//! `ee/` (see `CLAUDE.md`'s edition rule), so this names the two paths as string literals rather
-//! than importing anything from there; the paths are absent from the router entirely when `ee/`
-//! isn't linked in, so the match is simply never reached.
-//! `/auth/oauth/callback` is the one OAuth route that can issue a Yorishiro API key from
-//! caller-supplied input (an authorization code), which is exactly why it shares this quota with
-//! `/auth/login`; `/auth/oauth/status` is deliberately excluded, since it carries no secret and
-//! the login page polls it on every load.
+//! A per-key fixed-window rate limiter, applied to whichever routes are reachable without a bearer token: `/auth/signup` and `/auth/login`, plus `ee/`'s `/auth/oauth/authorize` and `/auth/oauth/callback` when that crate is composed in.
+//! Base has no compile-time dependency on `ee/`, so the `ee/` paths are named as string literals rather than imported; they're absent from the router entirely when `ee/` isn't linked in, so the match is simply never reached.
+//! `/auth/oauth/status` is deliberately excluded, since it carries no secret and the login page polls it on every load.
 //!
-//! Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo` is present on
-//! the request. Loco's own boot path (`app.into_make_service_with_connect_info::<SocketAddr>()`)
-//! always populates it, so this only matters for a request driven directly through the router
-//! without going through a real socket (e.g. some test harnesses).
+//! Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo` is present on the request (Loco's boot path always populates it, so this only matters for a request driven directly through the router, e.g. some test harnesses).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

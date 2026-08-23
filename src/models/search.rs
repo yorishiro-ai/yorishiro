@@ -1,10 +1,9 @@
-//! Vector similarity search over `content_entities`, ported from master's `models::search`.
+//! Vector similarity search over `content_entities`.
 //!
-//! Two queries, not one, same reason as master: pgvector's HNSW index serves exactly one shape
-//! (`ORDER BY embedding <=> $q LIMIT k`), and any other leading sort key takes it out of play.
-//! Ranking vector hits ahead of trigram-only ones in a single statement needs
-//! `ORDER BY (embedding IS NULL), distance`, which makes the planner sort the whole workspace
-//! instead of using the index. The two halves run separately and merge here.
+//! Two queries run here, not one.
+//! pgvector's HNSW index serves exactly one shape (`ORDER BY embedding <=> $q LIMIT k`), and any other leading sort key takes it out of play.
+//! Ranking vector hits ahead of trigram-only ones in a single statement needs `ORDER BY (embedding IS NULL), distance`, which makes the planner sort the whole workspace instead of using the index.
+//! The two halves run separately and merge here.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;
@@ -37,9 +36,9 @@ impl Default for SearchQuery {
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchHit {
     pub entity: EntityRecord,
-    /// pgvector cosine distance (the `<=>` operator). Closer to 0 means more similar. `None`
-    /// when the entity has no embedding and was only surfaced through the pg_trgm fuzzy text
-    /// match on `query_text`.
+    /// pgvector cosine distance (the `<=>` operator).
+    /// Closer to 0 means more similar.
+    /// `None` when the entity has no embedding and was only surfaced through the pg_trgm fuzzy text match on `query_text`.
     pub distance: Option<f64>,
 }
 
@@ -79,9 +78,7 @@ impl SearchRow {
 }
 
 /// Converts query text into an embedding vector; used together with [`search_by_vector`].
-/// On request paths, call this before acquiring a DB connection: embedding generation can take a
-/// long time (an external API call), and holding a connection while waiting would let pool
-/// exhaustion spill over onto unrelated endpoints.
+/// On request paths, call this before acquiring a DB connection: embedding generation can take a long time (an external API call), and holding a connection while waiting would let pool exhaustion spill over onto unrelated endpoints.
 pub async fn embed_query(
     provider: &dyn EmbeddingProvider,
     query_text: &str,
@@ -89,9 +86,7 @@ pub async fn embed_query(
     provider.embed_as(EmbedKind::Query, query_text).await
 }
 
-/// The `WHERE` fragment (and its bound values) both halves of the search apply, appended after
-/// `$3` (vector half) / no vector (trigram half) so callers pass in the params that come before
-/// it and get back the ones to append.
+/// The `WHERE` fragment (and its bound values) both halves of the search apply, appended after `$3` (vector half) / no vector (trigram half) so callers pass in the params that come before it and get back the ones to append.
 fn scope_clause(
     workspace_id: Uuid,
     query: &SearchQuery,
@@ -117,11 +112,9 @@ fn scope_clause(
 const HIT_COLUMNS: &str = "e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, \
      e.data, e.created_at, e.updated_at, e.created_by, e.updated_by";
 
-/// Returns entities ordered by cosine distance between the given embedding vector and the
-/// `content_entities.embedding` column, closest first.
-/// As an auxiliary path, entities with no embedding are also included when `query_text` is a
-/// pg_trgm fuzzy match (`data::text % query_text`) against their data. Vector matches are always
-/// ranked ahead of trgm-only matches; trgm-only matches are ordered by similarity.
+/// Returns entities ordered by cosine distance between the given embedding vector and the `content_entities.embedding` column, closest first.
+/// As an auxiliary path, entities with no embedding are also included when `query_text` is a pg_trgm fuzzy match (`data::text % query_text`) against their data.
+/// Vector matches are always ranked ahead of trgm-only matches; trgm-only matches are ordered by similarity.
 pub async fn search_by_vector(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -152,8 +145,7 @@ pub async fn search_by_vector(
     .internal()?;
 
     // Trigram half, for what the vector half cannot reach: entities with no embedding at all.
-    // Only run when there is room left: a full page of vector hits already outranks every
-    // trigram-only match.
+    // Only run when there is room left: a full page of vector hits already outranks every trigram-only match.
     if (rows.len() as i64) < limit {
         let remaining = limit - rows.len() as i64;
         let (scope_sql, mut scope_values) = scope_clause(workspace_id, &query, 2);

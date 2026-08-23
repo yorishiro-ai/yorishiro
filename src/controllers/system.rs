@@ -1,8 +1,7 @@
 //! Deployment-wide controls, as opposed to anything scoped to a tenant or a workspace.
 //!
-//! Only maintenance lives here. It is deployment-wide by nature: one row in
-//! `identity_maintenance` decides whether every caller is served, and there is no per-tenant
-//! version of it.
+//! Only maintenance lives here.
+//! It is deployment-wide by nature: one row in `identity_maintenance` decides whether every caller is served, and there is no per-tenant version of it.
 
 use axum::Json;
 use axum::extract::State;
@@ -16,16 +15,16 @@ use crate::controllers::extractors::{Authorized, MigrationScope};
 use crate::error::YorishiroError;
 use crate::models::identity_maintenance::{self, MaintenanceMode, MaintenanceState};
 
-/// The state as the API reports it. `MaintenanceState` is the repository's own type and is not
-/// serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is
-/// declared here rather than reused directly.
+/// The state as the API reports it.
+/// `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
 #[derive(Debug, Serialize)]
 pub struct MaintenanceResponse {
     /// `off`, `read-only` or `full-lock`.
     pub mode: String,
     /// Seconds a refused caller is told to wait, sent as `Retry-After` on the refusal itself.
     pub retry_after: u32,
-    /// Why, when whoever set it said. Absent when nothing was given.
+    /// Why, when whoever set it said.
+    /// Absent when nothing was given.
     pub reason: Option<String>,
 }
 
@@ -53,10 +52,9 @@ pub struct SetMaintenanceRequest {
 
 const DEFAULT_RETRY_AFTER: u32 = 300;
 
-/// Accepts what an operator types at the CLI. `MaintenanceMode::from_db_str` parses the stored
-/// spelling (`read_only`), while an operator typing at this endpoint spells it kebab-cased
-/// (`read-only`), same as clap would render it. Both spellings are taken; anything else is
-/// refused rather than read as `off`.
+/// Accepts what an operator types at the CLI.
+/// `MaintenanceMode::from_db_str` parses the stored spelling (`read_only`), while an operator typing at this endpoint spells it kebab-cased (`read-only`), same as clap would render it.
+/// Both spellings are taken; anything else is refused rather than read as `off`.
 pub(crate) fn parse_mode(value: &str) -> Option<MaintenanceMode> {
     match value {
         "off" => Some(MaintenanceMode::Off),

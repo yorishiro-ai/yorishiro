@@ -6,8 +6,7 @@ use crate::models::identity_api_keys::Entity as ApiKeys;
 
 /// `cargo loco task revoke_api_key key_id:<uuid>`
 ///
-/// Authentication looks up the key in the database on every request, so deleting the row
-/// revokes it immediately (takes effect on the next request).
+/// Authentication looks up the key in the database on every request, so deleting the row revokes it immediately (takes effect on the next request).
 pub struct RevokeApiKey;
 
 #[async_trait]

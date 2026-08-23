@@ -5,8 +5,8 @@ use crate::models::tenancy;
 
 /// `cargo loco task create_user email:owner@example.com password:hunter2-hunter2 [display_name:Alice]`
 ///
-/// Wraps `tenancy::create_user`, which hashes the password (Argon2id) before writing it. A
-/// created user holds no tenant membership yet; follow with `add_member`.
+/// Wraps `tenancy::create_user`, which hashes the password (Argon2id) before writing it.
+/// A created user holds no tenant membership yet; follow with `add_member`.
 pub struct CreateUser;
 
 #[async_trait]

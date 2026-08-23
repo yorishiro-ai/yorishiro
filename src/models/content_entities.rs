@@ -15,10 +15,7 @@ pub type ContentEntities = Entity;
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
-    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with
-    /// `..Default::default()` (this crate's usual pattern, as opposed to loading a `Model` and
-    /// calling `.into_active_model()`) leaves untouched fields `NotSet`, not `Unchanged`, and
-    /// `is_unchanged()` only matches the latter.
+    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and `is_unchanged()` only matches the latter.
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
@@ -43,11 +40,8 @@ impl ActiveModel {}
 impl Entity {}
 
 /// The RLS-scoped request path's view of a `content_entities` row.
-/// A distinct type from the generated `Model` because `Model` carries `embedding`
-/// (`Option<PgVector>`), which this API never returns: the search/embedding pipeline manages
-/// that column separately, and serializing a raw vector out of a CRUD response was never the
-/// old API's shape either.
-/// `created_by`/`updated_by` are `None` for entities touched by an unattributed (service/automation) API key, since there's no user to record.
+/// Distinct from the generated `Model` because `Model` carries `embedding` (`Option<PgVector>`), which this API never returns: the search/embedding pipeline manages that column separately.
+/// `created_by`/`updated_by` are `None` for entities touched by an unattributed API key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityRecord {
     pub id: Uuid,
@@ -92,7 +86,8 @@ pub struct ListEntitiesQuery {
     /// JSONB containment filter (`data @> filter`), e.g. `{"status": "active"}`.
     pub filter: Option<Value>,
     /// Restricts results to entities created against this schema version.
-    /// Entities keep the version they were written against, so this selects the entities a given version produced rather than the ones that would validate against it today.
+    /// Entities keep the version they were written against, so this selects the entities a
+    /// given version produced, not the ones that would validate against it today.
     pub schema_version: Option<i32>,
     pub limit: i64,
     pub offset: i64,
@@ -169,9 +164,8 @@ fn resolve_entity_type<'a>(
     })
 }
 
-/// Checks the workspace's `max_entities` cap (billing/quota enforcement) before an insert.
-/// `NULL` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
-/// The app role only has SELECT on `identity_workspaces`, which is enough to read this column without needing write access to the control-plane table.
+/// Checks the workspace's `max_entities` cap before an insert.
+/// `NULL` means unlimited, the default for self-hosted deployments.
 async fn check_entity_quota(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -203,7 +197,7 @@ async fn check_entity_quota(
     }
 }
 
-/// Counts how many entities a workspace holds, for both quota enforcement (`create`, above) and workspace-detail summaries.
+/// Counts how many entities a workspace holds, for quota enforcement and workspace-detail summaries.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
     use super::_entities::content_entities::Column;
 
@@ -216,14 +210,9 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
 }
 
 /// Creates a new entity: resolves the schema name to its currently active schema, checks that the entity_type exists in that version, validates `data`, and persists the result.
-/// `created_by` is the acting user's ID (from `AuthContext::user_id`), or `None` for an unattributed service/automation API key.
+/// `created_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
 ///
 /// The quota check and insert are serialized with a workspace-scoped advisory lock: without it, concurrent creates could each read a count under `max_entities` and both insert, overshooting the cap.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`. That
-/// transaction is also this function's lock/quota/insert scope: it does not open a nested
-/// transaction of its own, since the request transaction already is the unit of work (the
-/// caller commits it after this returns, via `Authorized::commit()`).
 pub async fn create(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -236,8 +225,7 @@ pub async fn create(
 
     check_entity_quota(conn, workspace_id).await?;
 
-    // Before resolving the schema, so an empty workspace is told it is empty.
-    // Resolving first would report the schema name as not found, which reads as a typo rather than as "nothing has been defined here yet".
+    // Before resolving the schema, so an empty workspace is told it is empty rather than reporting the schema name as not found.
     if crate::models::identity_workspaces::is_schema_pending(conn, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
@@ -290,10 +278,8 @@ pub async fn get(
 }
 
 /// Fully replaces an existing entity's `data`.
-/// Validation is done against the schema version the entity was actually created with (i.e. the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
-/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key: this overwrites whatever `updated_by` the previous update (if any) left behind.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+/// Validation is done against the schema version the entity was actually created with (the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
+/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
 pub async fn update(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -342,13 +328,7 @@ pub async fn delete(
     }
 }
 
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-///
-/// `query.filter` (JSONB containment, `data @> filter`) is the one condition here the entity
-/// API's `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated
-/// to Postgres's `@>` operator): it's added as a raw `Expr::cust_with_values` condition mixed
-/// into the same `.filter()` chain as the ordinary column filters, per this repository's rule
-/// that raw SQL stays scoped to what the entity layer genuinely can't express.
+/// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's added as a raw `Expr::cust_with_values` condition instead.
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -380,8 +360,7 @@ pub async fn list(
         .map(|rows| rows.into_iter().map(EntityRecord::from).collect())
 }
 
-/// Fetches every entity for the workspace, with no pagination limit, for a full-workspace data
-/// export.
+/// Fetches every entity for the workspace, with no pagination limit, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn export_all(
@@ -401,11 +380,8 @@ pub async fn export_all(
 
 /// How one entity stands relative to the active version of its schema.
 ///
-/// Entities are migrated lazily: a schema gaining a version does not rewrite the rows written
-/// against earlier ones, and an update validates against the version the entity was created
-/// with. That is deliberate: it is what stops a schema change from invalidating stored data.
-/// But it leaves a reader unable to tell whether a field is absent because nobody filled it in
-/// or because it did not exist when the entity was written.
+/// Entities are migrated lazily: a schema gaining a version does not rewrite rows written against earlier ones.
+/// This exists so a reader can tell whether a field is absent because nobody filled it in or because it did not exist when the entity was written.
 #[derive(Debug, Clone, Serialize)]
 pub struct EntityDrift {
     pub entity_id: Uuid,
@@ -414,9 +390,8 @@ pub struct EntityDrift {
     pub schema_version: i32,
     /// The newest active version of the same schema.
     pub active_schema_version: i32,
-    /// Fields the active version defines that this entity's version did not. Empty when the
-    /// entity is current, and empty as well when the newer version only changed fields the
-    /// entity already carries.
+    /// Fields the active version defines that this entity's version did not.
+    /// Empty when the entity is current, and empty as well when the newer version only changed fields the entity already carries.
     pub missing_fields: Vec<DriftField>,
 }
 
@@ -426,9 +401,8 @@ pub struct DriftField {
     pub name: String,
     /// The field's type in the active version, so a caller can tell what would go there.
     pub r#type: metaschema::FieldTypeName,
-    /// Whether the active version marks it required. A required field an old entity lacks is
-    /// the case worth surfacing: the entity is valid under its own version and would not be
-    /// under the current one.
+    /// Whether the active version marks it required.
+    /// A required field an old entity lacks is the case worth surfacing: the entity is valid under its own version and would not be under the current one.
     pub required: bool,
 }
 
@@ -479,11 +453,7 @@ pub async fn drift(
 }
 
 /// What a batch migration would find, without doing it.
-///
-/// Migration is lazy: an entity keeps validating against the version it was written with, so a
-/// workspace accumulates entities spread across versions. This counts them before anything is
-/// touched, because the useful question before a migration is how much of the corpus it would
-/// have to fill in.
+/// Counts entities before anything is touched, since a workspace accumulates entities spread across schema versions.
 #[derive(Debug, Clone, Serialize)]
 pub struct MigrationDryRun {
     pub schema_name: String,
@@ -492,11 +462,10 @@ pub struct MigrationDryRun {
     pub total_entities: i64,
     /// Already on the active version. Nothing to do for these.
     pub current: i64,
-    /// On an older version, but missing no field the active version requires: they validate as
-    /// they stand and only their version marker is behind.
+    /// On an older version, but missing no field the active version requires: they validate as they stand and only their version marker is behind.
     pub behind_but_valid: i64,
-    /// On an older version and missing at least one field the active version requires. These
-    /// are what a migration has to fill in.
+    /// On an older version and missing at least one field the active version requires.
+    /// These are what a migration has to fill in.
     pub needs_values: i64,
     /// Per entity type, so an operator can see whether the work is spread or concentrated.
     pub by_entity_type: Vec<DryRunByType>,
@@ -507,16 +476,14 @@ pub struct DryRunByType {
     pub entity_type: String,
     pub behind: i64,
     pub needs_values: i64,
-    /// The required fields those entities lack, so the report names the work rather than only
-    /// counting it.
+    /// The required fields those entities lack, so the report names the work rather than only counting it.
     pub missing_required: Vec<String>,
 }
 
-/// Counts what a batch migration to `schema_name`'s active version would face. Reads only.
+/// Counts what a batch migration to `schema_name`'s active version would face.
+/// Reads only.
 ///
-/// The counting is done in one query per (entity_type, schema_id) group rather than one per
-/// entity: a workspace can hold far more entities than it holds distinct old versions, and the
-/// answer is the same either way.
+/// The counting is done in one query per (entity_type, schema_id) group rather than one per entity: a workspace can hold far more entities than it holds distinct old versions, and the answer is the same either way.
 pub async fn migration_dry_run(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -648,23 +615,16 @@ pub struct UndoReport {
     pub job_id: Uuid,
     /// Entities restored to the data they held before.
     pub restored: i64,
-    /// Snapshots whose entity no longer exists. Counted rather than treated as an error: a batch
-    /// partially undone leaves a workspace in a state nobody chose, and an entity deleted since
-    /// is not a reason to refuse the rest.
+    /// Snapshots whose entity no longer exists.
+    /// Counted rather than treated as an error: a batch partially undone leaves a workspace in a state nobody chose, and an entity deleted since is not a reason to refuse the rest.
     pub missing: i64,
 }
 
 /// Records what `entity_id` holds now, tagged with `job_id`.
 ///
-/// Called before an overwrite. One statement (`INSERT ... SELECT`), not a read followed by a
-/// write: even inside the caller's own transaction, two statements under READ COMMITTED can see
-/// different committed data, so a separate read could snapshot an image the row no longer holds
-/// by the time the insert runs. Taking the image from the row this way means it is what the
-/// database actually holds, not what the caller believed it held.
+/// One statement (`INSERT ... SELECT`), not a read followed by a write: under READ COMMITTED, two statements can see different committed data, so a separate read could snapshot an image the row no longer holds by the time the insert runs.
 ///
-/// `content_entity_snapshots`'s RLS policy is the lenient variant (matches nothing rather than
-/// raising when no workspace is named), so a wrong `workspace_id` or a missing entity silently
-/// inserts zero rows: `rows_affected == 0` is the only signal that catches it.
+/// `content_entity_snapshots`'s RLS policy matches nothing rather than raising when no workspace is named, so a wrong `workspace_id` or missing entity silently inserts zero rows: `rows_affected == 0` is the only signal that catches it.
 pub async fn snapshot(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -694,16 +654,10 @@ pub async fn snapshot(
 
 /// Puts every entity in `job_id` back to what it held before.
 ///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, which is
-/// what gives this its atomicity: a half-undone batch is a state nobody asked for, and worse
-/// than either end of it. An entity deleted since the snapshot is counted rather than failed:
-/// refusing the whole undo because one row is gone would leave the rest wrong.
+/// An entity deleted since the snapshot is counted rather than failed: refusing the whole undo because one row is gone would leave the rest wrong.
 ///
-/// Restores `schema_id` and `schema_version` alongside `data`, not just `data`: an undo that put
-/// the data back but left the entity claiming a newer version would leave it validating against
-/// a definition its data no longer matches. This is why it builds the `ActiveModel` directly
-/// rather than calling `update()`, which cannot set those two columns and would also re-validate
-/// and re-stamp `updated_by` for a restore that isn't a user edit.
+/// Restores `schema_id` and `schema_version` alongside `data`, not just `data`: otherwise the entity would claim a version its restored data no longer matches.
+/// Builds the `ActiveModel` directly rather than calling `update()`, which cannot set those two columns and would also re-validate and re-stamp `updated_by` for a restore that isn't a user edit.
 pub async fn undo_job(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -714,9 +668,8 @@ pub async fn undo_job(
     let snapshots: Vec<EntitySnapshot> = content_entity_snapshots::Entity::find()
         .filter(content_entity_snapshots::Column::WorkspaceId.eq(workspace_id))
         .filter(content_entity_snapshots::Column::JobId.eq(job_id))
-        // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the
-        // same tick. Both are uuidv7 / time-ordered, so this is a second sort key rather than a
-        // different one.
+        // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the same tick.
+        // Both are uuidv7 / time-ordered, so this is a second sort key.
         .order_by_asc(content_entity_snapshots::Column::CreatedAt)
         .order_by_asc(content_entity_snapshots::Column::Id)
         .into_model::<EntitySnapshot>()
@@ -734,10 +687,7 @@ pub async fn undo_job(
     let mut missing = 0i64;
 
     for snap in &snapshots {
-        // Each `snap.entity_id` is already workspace-scoped: the query above filtered snapshots
-        // by `workspace_id`, so an entity_id here can only belong to this workspace. No extra
-        // filter needed on the write, matching `update()`'s own reliance on RLS for the plain
-        // `.update(conn)` call once existence/ownership is established.
+        // `snap.entity_id` is already workspace-scoped by the query above, so no extra filter is needed on the write.
         let active = ActiveModel {
             id: ActiveValue::Unchanged(snap.entity_id),
             data: ActiveValue::Set(snap.data.clone()),

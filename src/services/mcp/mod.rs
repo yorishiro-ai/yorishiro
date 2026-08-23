@@ -20,8 +20,7 @@ use crate::services::auth::{self, ApiKeyScope, AuthContext};
 
 /// Yorishiro MCP server, assembled from each domain's `#[tool_router]` implementation.
 ///
-/// The sixth seam `ee/` composes against (`specs` CLAUDE.md): `ee/` calls this type directly,
-/// so a grep finds the caller and it's deliberately not on the five-contract immunity list.
+/// `ee/` composes against this type directly by calling it, so a grep for callers finds the dependency without needing this type to carry any special stability guarantee of its own.
 #[derive(Clone)]
 pub struct YorishiroMcpServer {
     ctx: AppContext,
@@ -55,8 +54,7 @@ impl ServerHandler for YorishiroMcpServer {
     }
 }
 
-/// Auth context plus a transaction with RLS already configured, held by calls that passed
-/// authentication and scope checks.
+/// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
 pub(super) struct Authorized {
     pub(super) ctx: AuthContext,
     txn: DatabaseTransaction,
@@ -76,25 +74,21 @@ impl Authorized {
     }
 }
 
-/// `authorize` splits its outcome into two kinds rather than a single failure case: a
-/// protocol-level failure (`Err`) and a scope-insufficient business outcome (`Ok` variant). The
-/// former is a dead end an agent can't usefully retry (missing/invalid API key); the latter is
-/// information an agent can act on.
+/// `authorize` splits its outcome into two kinds rather than a single failure case: a protocol-level failure (`Err`) and a scope-insufficient business outcome (`Ok` variant).
+/// The former is a dead end an agent can't usefully retry (missing/invalid API key); the latter is information an agent can act on.
 pub(super) enum AuthzOutcome {
     Authorized(Authorized),
     ScopeDenied(CallToolResult),
 }
 
-/// A connection-less version of `Authorized`: only authenticates and verifies scope, without
-/// opening a transaction. Tools that do slow work before touching the database (embedding
-/// generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
+/// A connection-less version of `Authorized`: only authenticates and verifies scope, without opening a transaction.
+/// Tools that do slow work before touching the database (embedding generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub(super) enum VerifyOutcome {
     Verified(AuthContext),
     ScopeDenied(CallToolResult),
 }
 
-/// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the
-/// REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
+/// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
 fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
     parts
         .headers
@@ -118,14 +112,9 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     .ok_or_else(|| ErrorData::invalid_request("missing or malformed Authorization header", None))
 }
 
-/// The sole entry point for every tool handler. Because there is no other way to obtain a
-/// `DatabaseTransaction`, forgetting the scope check is structurally impossible.
+/// The sole entry point for every tool handler. Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
-/// Shares `services::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this
-/// just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the
-/// protocol level, `CallToolResult` at the tool-result level) since one MCP route dispatches
-/// many tools with different required scopes, which a route-level, compile-time-typed extractor
-/// can't express.
+/// Shares `services::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
 pub(super) async fn authorize(
     ctx: &AppContext,
     parts: &Parts,
@@ -150,8 +139,8 @@ pub(super) async fn authorize(
     }
 }
 
-/// Connection-less counterpart to `authorize`, used by tools that must run a slow step (embedding
-/// generation) before touching the database. See `services::auth::authorize_scope`.
+/// Connection-less counterpart to `authorize`, used by tools that must run a slow step (embedding generation) before touching the database.
+/// See `services::auth::authorize_scope`.
 pub(super) async fn verify(
     ctx: &AppContext,
     parts: &Parts,
@@ -176,9 +165,7 @@ pub(super) async fn verify(
     }
 }
 
-/// Converts a business-logic error into a tool call result (`is_error: true`). `Internal` errors
-/// are logged with detail but only a generic message reaches the client, matching the REST
-/// adapter's `ApiError` policy.
+/// Converts a business-logic error into a tool call result (`is_error: true`). `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(super) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let message = match err {
         YorishiroError::Internal(err) => {
@@ -214,10 +201,8 @@ pub(super) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
-/// Authenticates the caller and verifies scope, opening an RLS-scoped transaction. Expands to
-/// the `Authorized` value on success; on a scope-denied outcome it early-returns the tool result.
-/// A macro rather than a function because it early-returns from the enclosing handler (which
-/// must return `Result<CallToolResult, ErrorData>`).
+/// Authenticates the caller and verifies scope, opening an RLS-scoped transaction. Expands to the `Authorized` value on success; on a scope-denied outcome it early-returns the tool result.
+/// A macro rather than a function because it early-returns from the enclosing handler (which must return `Result<CallToolResult, ErrorData>`).
 macro_rules! authorized {
     ($ctx:expr, $parts:expr, $scope:expr) => {
         match $crate::services::mcp::authorize($ctx, $parts, $scope).await? {
@@ -230,8 +215,7 @@ macro_rules! authorized {
 }
 pub(crate) use authorized;
 
-/// Connection-less counterpart to `authorized!`. Expands to the caller's `AuthContext` on
-/// success; on a scope-denied outcome it early-returns the tool result.
+/// Connection-less counterpart to `authorized!`. Expands to the caller's `AuthContext` on success; on a scope-denied outcome it early-returns the tool result.
 macro_rules! verified {
     ($ctx:expr, $parts:expr, $scope:expr) => {
         match $crate::services::mcp::verify($ctx, $parts, $scope).await? {
@@ -244,10 +228,9 @@ macro_rules! verified {
 }
 pub(crate) use verified;
 
-/// Unwraps a repository/service call's `Ok` value, or early-returns the tool-level error result
-/// for its `Err` value. A macro rather than a function because it early-returns from the
-/// enclosing handler. Only fits call sites whose `Err` arm is exactly
-/// `Ok(err_to_tool_result(err))`.
+/// Unwraps a repository/service call's `Ok` value, or early-returns the tool-level error result for its `Err` value.
+/// A macro rather than a function because it early-returns from the enclosing handler.
+/// Only fits call sites whose `Err` arm is exactly `Ok(err_to_tool_result(err))`.
 macro_rules! mcp_try {
     ($expr:expr) => {
         match $expr {

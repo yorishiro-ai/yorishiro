@@ -7,13 +7,10 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, SchemaScope};
 use crate::models::import::{self, ImportResult};
 
-/// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one
-/// `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
-/// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is
-/// itself a schema-scope-only operation elsewhere in the API.
+/// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
 ///
-/// All-or-nothing: on the first error the request fails with that error and, because the
-/// handler never reaches `Authorized::commit()`, nothing imported so far is applied.
+/// All-or-nothing: on the first error the request fails with that error and, because the handler never reaches `Authorized::commit()`, nothing imported so far is applied.
 pub async fn import_jsonl(
     authorized: Authorized<SchemaScope>,
     body: String,

@@ -14,9 +14,8 @@ pub(crate) const KEY_PREFIX_BYTES: usize = 6;
 pub(crate) const KEY_SECRET_BYTES: usize = 24;
 
 /// Permission level held by an API key.
-/// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher
-/// scope subsumes lower ones. The serde representation matches the DB `scope` column
-/// ('read'/'write'/'schema'/'migration').
+/// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
+/// The serde representation matches the DB `scope` column ('read'/'write'/'schema'/'migration').
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
@@ -40,8 +39,7 @@ impl ApiKeyScope {
         }
     }
 
-    /// `None` for anything this crate does not define, which the caller should treat as a
-    /// corrupt row rather than a missing scope.
+    /// `None` for anything this crate does not define, which the caller should treat as a corrupt row rather than a missing scope.
     pub fn from_db_str(s: &str) -> Option<Self> {
         match s {
             "read" => Some(ApiKeyScope::Read),
@@ -79,11 +77,9 @@ pub struct CreatedApiKey {
     pub plaintext: String,
 }
 
-/// Extracts the API key from an `Authorization` header value, or `None` if the header is
-/// absent, is not a `Bearer` credential, or carries an empty one.
+/// Extracts the API key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
 ///
-/// Every adapter that authenticates a request routes through here, so `Authorization: Bearer `
-/// with nothing after it gets the same answer everywhere.
+/// Every adapter that authenticates a request routes through here, so `Authorization: Bearer ` with nothing after it gets the same answer everywhere.
 pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
     header_value
         .and_then(|value| value.strip_prefix("Bearer "))

@@ -13,10 +13,7 @@ use crate::models::content_schemas;
 pub use crate::models::export::ExportRecord;
 
 /// Outcome of a successful `import_jsonl` call: how many records of each kind were inserted.
-/// Since the whole import runs on the caller's RLS-scoped request transaction (see
-/// `import_jsonl`), a non-empty `errors` here never coexists with partially-applied data: an
-/// error return means the caller never calls `Authorized::commit()`, so the transaction rolls
-/// back on drop and none of it is applied.
+/// The whole import runs on the caller's RLS-scoped request transaction, so an error return means the caller never calls `Authorized::commit()` and nothing is applied (rollback on drop).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ImportResult {
     pub schemas: u64,
@@ -24,41 +21,14 @@ pub struct ImportResult {
     pub relations: u64,
 }
 
-/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the same
-/// shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Imports a JSON Lines document produced by `export::export_all` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 ///
-/// The first malformed line or repository-level failure (e.g. an entity referencing an unknown
-/// schema, a relation referencing an unknown entity) returns `Err` describing the problem;
-/// nothing imported so far is visible outside this call unless the caller goes on to commit the
-/// transaction it's running on (see `ImportResult`'s doc comment).
+/// Schemas and entities are re-inserted with freshly generated IDs, so an entity line resolves its schema by *name* (preferring a schema line this same import already processed over the exported, workspace-local `schema_id`), and a relation line's `source_id`/`target_id` are remapped through the entity lines this same import already processed.
+/// A schema/entity line must therefore appear before anything that references it: the order `export::export_all` produces (schemas, then entities, then relations).
 ///
-/// Schemas and entities are re-inserted with freshly generated IDs (`create_schema`/
-/// `content_entities::create` always mint a new one; entities are also re-validated against the
-/// *current* active schema rather than trusting the exported `schema_version`), so:
+/// `tenant_id` comes from the authenticated request, not the export: an exported schema's `tenant_id` is only meaningful in its source tenant, and reusing it here would violate `content_schemas`' FK to `identity_tenants` once source and destination tenants differ.
 ///
-/// - an entity line resolves its schema by *name*, preferring a schema line this same import
-///   already processed over the (workspace-local, so likely meaningless here) exported
-///   `schema_id`;
-/// - a relation line's `source_id`/`target_id` are remapped through the entity lines this same
-///   import already processed.
-///
-/// Because of this, a schema/entity line must appear before anything that references it: exactly
-/// the order `export::export_all` produces (schemas, then entities, then relations).
-///
-/// `tenant_id` comes from the authenticated request, not from the export: an exported schema's
-/// `tenant_id` is only meaningful in the *source* tenant it came from, and inserting under it
-/// here would violate `content_schemas`' FK to `identity_tenants` the moment source and
-/// destination tenants differ (as they always do across a restore into a fresh deployment).
-///
-/// Every imported entity is attributed to `imported_by` (the importing key's own `user_id`, or
-/// `None` for an unattributed key), not to the exported `created_by`: the exported value names a
-/// user in the *source* tenant, which `yorishiro_app` can't even check for existence
-/// (`identity_users` carries no grant to that role), so trusting it risks an FK violation on
-/// every restore into a different deployment. Attributing to the importer instead is always
-/// FK-safe and, for the common case of an owner restoring their own backup into the same
-/// deployment, still names the right person.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+/// Every imported entity is attributed to `imported_by`, not the exported `created_by`: the exported value names a user in the source tenant that `yorishiro_app` can't verify exists (`identity_users` carries no grant to that role), risking an FK violation on restore.
 pub async fn import_jsonl(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -68,10 +38,7 @@ pub async fn import_jsonl(
 ) -> Result<ImportResult, YorishiroError> {
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
-    // Exported `schema_id`s are only meaningful in the *source* workspace they came from:
-    // `create_schema` always mints a fresh ID. So entity lines can't resolve their schema by
-    // re-querying the exported `schema_id` in the destination workspace; instead track
-    // name-by-old-id for every schema line this import itself has processed so far.
+    // Exported schema_ids are workspace-local to the source, so track name-by-old-id for schema lines this import has processed instead of re-querying the exported id.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
 
     for (line_no, line) in reader.lines().enumerate() {
@@ -111,13 +78,8 @@ pub async fn import_jsonl(
             ExportRecord::Entity(entity) => {
                 let old_id = entity.id;
 
-                // `content_entities::create` takes a schema *name* (it always resolves against
-                // the workspace's currently active version), not a schema ID. Prefer the name of
-                // a schema line this same import just created; a `schema_id` exported from a
-                // different workspace means nothing here.
-                // Fall back to looking the ID up in the destination workspace, for the case of
-                // importing entities against a schema that already exists there (not part of
-                // this import).
+                // `content_entities::create` takes a schema name, not an ID.
+                // Prefer a schema line this import just created; fall back to looking the exported ID up in the destination workspace, for a schema that already exists there.
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {

@@ -5,9 +5,7 @@ use crate::models::_entities::identity_tenants::ActiveModel;
 
 /// `cargo loco task create_tenant name:acme`
 ///
-/// Runs on `ctx.db` (Loco's own connection, not the RLS-scoped tenant pool): a control-plane
-/// operation with no workspace to scope RLS to, same as `services::auth::default_authenticator`
-/// and the signup/setup path `after_context`'s doc comment describes.
+/// Runs on `ctx.db` (Loco's own connection, not the RLS-scoped tenant pool): a control-plane operation with no workspace to scope RLS to.
 pub struct CreateTenant;
 
 #[async_trait]

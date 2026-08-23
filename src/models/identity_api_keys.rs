@@ -27,10 +27,8 @@ impl ActiveModel {}
 
 // implement your custom finders, selectors oriented logic here
 impl Entity {
-    /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part
-    /// (192 bits) is the actual credential. SHA-256 is sufficient here rather than a slow KDF
-    /// like bcrypt/argon2, since API keys already carry enough entropy that offline
-    /// brute-forcing isn't a realistic threat.
+    /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
+    /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     pub async fn create_api_key(
         db: &sea_orm::DatabaseConnection,
         workspace_id: uuid::Uuid,
@@ -73,9 +71,8 @@ impl Entity {
         })
     }
 
-    /// Every API key issued for a workspace, oldest first. Never returns `key_hash`: the
-    /// plaintext key is shown once, at creation, and this listing exists for operators to see
-    /// what exists and revoke by id, not to recover a lost key.
+    /// Every API key issued for a workspace, oldest first.
+    /// Never returns `key_hash`: the plaintext key is shown once, at creation, and this listing exists for operators to see what exists and revoke by id, not to recover a lost key.
     pub async fn list_for_workspace(
         conn: &impl ConnectionTrait,
         workspace_id: uuid::Uuid,
@@ -90,8 +87,7 @@ impl Entity {
             .internal()
     }
 
-    /// Deletes an API key by id, revoking it immediately: authentication looks up the key on
-    /// every request, so there is no cached credential to also invalidate.
+    /// Deletes an API key by id, revoking it immediately: authentication looks up the key on every request, so there is no cached credential to also invalidate.
     pub async fn revoke(
         conn: &impl ConnectionTrait,
         key_id: uuid::Uuid,

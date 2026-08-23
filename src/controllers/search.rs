@@ -20,8 +20,7 @@ pub struct SearchEntitiesParams {
 
 pub async fn search_entities(
     State(ctx): State<AppContext>,
-    // `Verified`, not `Authorized`: no connection is acquired here, since one isn't needed until
-    // after the slow embedding call below.
+    // `Verified`, not `Authorized`: no connection is acquired here until after the slow embedding call below.
     verified: Verified<ReadScope>,
     Query(params): Query<SearchEntitiesParams>,
 ) -> Result<Json<Vec<SearchHit>>, ApiError> {
@@ -34,14 +33,12 @@ pub async fn search_entities(
 
     let provider = embedding_provider(&ctx)?;
 
-    // Embedding generation happens before acquiring a DB connection: don't hold a pool
-    // connection while waiting on the provider's HTTP round trip.
+    // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
     let vector = search::embed_query(provider.as_ref(), &params.query_text).await?;
 
     let workspace_id = verified.ctx.workspace_id;
     let db = db_handle(&ctx)?;
-    // A read-only transaction: dropped without committing when this returns, a no-op since
-    // nothing was written.
+    // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
     let txn = db
         .tenant
         .begin_for_workspace(verified.ctx.tenant_id, workspace_id)

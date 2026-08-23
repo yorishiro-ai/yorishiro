@@ -16,9 +16,9 @@ use crate::services::auth::ApiKeyScope;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {
-    /// Natural-language query text. Vectorized via the embedding provider and matched against
-    /// entities' `x-embed` field by cosine distance. Also used, as-is, for an auxiliary pg_trgm
-    /// fuzzy text match against entities that have no embedding.
+    /// Natural-language query text.
+    /// Vectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.
+    /// Also used, as-is, for an auxiliary pg_trgm fuzzy text match against entities that have no embedding.
     pub query_text: String,
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
@@ -46,15 +46,13 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        // Embedding generation happens before acquiring a DB connection: don't hold a pool
-        // connection while waiting on the provider's HTTP round trip.
+        // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
         let provider = mcp_try!(embedding_provider(&self.ctx).map_err(|err| err.0));
         let vector = mcp_try!(search::embed_query(provider.as_ref(), &args.query_text).await);
 
         let workspace_id = auth_ctx.workspace_id;
         let db = mcp_try!(db_handle(&self.ctx).map_err(|err| err.0));
-        // A read-only transaction, same as `Authorized`'s: dropped without committing when this
-        // returns, which is a no-op since nothing was written.
+        // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
         let txn = mcp_try!(
             db.tenant
                 .begin_for_workspace(auth_ctx.tenant_id, workspace_id)

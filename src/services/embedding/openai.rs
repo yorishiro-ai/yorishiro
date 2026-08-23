@@ -141,9 +141,8 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
 
 /// How long to wait before retrying, or `None` when the response is not a reason to retry.
 ///
-/// 429 and 503 are the two the providers use for "later"; everything else is a request that
-/// will fail again the same way. `Retry-After` is honoured when the provider sends it; a
-/// default stands in when it does not.
+/// 429 and 503 are the two the providers use for "later"; everything else is a request that will fail again the same way.
+/// `Retry-After` is honoured when the provider sends it; a default stands in when it does not.
 fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     if status != 429 && status != 503 {
         return None;

@@ -32,13 +32,9 @@ pub async fn list_schemas(
 
 /// Either an inline schema definition, or a reference to a template.
 ///
-/// `template_id` accepts both kinds of template, because a caller holding an id should not have
-/// to know which kind it is: a built-in id (`"task-management"`, see `GET /api/templates`)
-/// served from the binary, or a UUID from the tenant's template library (`GET
-/// /api/template-library`).
+/// `template_id` accepts both kinds of template, because a caller holding an id should not have to know which kind it is: a built-in id (`"task-management"`, see `GET /api/templates`) served from the binary, or a UUID from the tenant's template library (`GET /api/template-library`).
 ///
-/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working
-/// unchanged.
+/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum CreateSchemaRequest {
@@ -53,12 +49,11 @@ pub async fn create_schema(
 ) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
     let tenant_id = authorized.ctx.tenant_id;
 
-    // Carried alongside the definition so the schema can record which library template it came
-    // from. A built-in has no row to point at, so it stays None.
+    // Carried alongside the definition so the schema can record which library template it came from.
+    // A built-in has no row to point at, so it stays None.
     let mut origin_template_id = None;
-    // What the template said, kept as the merge base. Only a template body has one: a
-    // definition posted inline is not a copy of anything, even when a template of the same name
-    // exists.
+    // What the template said, kept as the merge base.
+    // Only a template body has one: a definition posted inline is not a copy of anything, even when a template of the same name exists.
     let mut origin_snapshot = None;
     let definition = match body {
         CreateSchemaRequest::Definition(definition) => definition,

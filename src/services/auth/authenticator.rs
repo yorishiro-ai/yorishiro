@@ -9,21 +9,13 @@ use super::{AuthContext, authenticate};
 
 /// Resolves a presented API key into an [`AuthContext`].
 ///
-/// # Why this is a trait
-///
-/// Authentication is the one decision every `/api/*` route and every MCP tool passes through.
-/// A deployment that needs a different rule (a key that names its workspace per request, a key
-/// issued by an external identity system) cannot get there by adding routes, because the
-/// decision happens *inside* the handlers those routes already own. So it is a seam rather than
-/// a fixed function. [`DefaultAuthenticator`] is this crate's own rule and stays the behaviour
-/// of every deployment that does not replace it.
+/// A seam: a deployment can replace this rule (a key that names its workspace per request, a key issued by an external identity system) without touching the routes that call it.
+/// [`DefaultAuthenticator`] is the behaviour of every deployment that does not replace it.
 ///
 /// # Contract
 ///
 /// - **must** reject a key it cannot verify, by returning [`YorishiroError::Unauthenticated`].
-/// - **must** return a context whose `tenant_id` owns its `workspace_id`. The RLS session
-///   variables are set from both, so a mismatched pair silently produces a session that can see
-///   one tenant's workspace under another tenant's policies.
+/// - **must** return a context whose `tenant_id` owns its `workspace_id`. The RLS session variables are set from both, so a mismatched pair silently produces a session that can see one tenant's workspace under another tenant's policies.
 /// - **may** read `headers` for anything the key itself does not carry.
 #[async_trait]
 pub trait Authenticator: Send + Sync {

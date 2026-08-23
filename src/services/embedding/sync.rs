@@ -1,10 +1,7 @@
 //! Generates and stores an entity's embedding vector after its own request transaction commits.
-//! Ported from master's `services::embedding::sync`.
 //!
-//! Call this from a controller after `Authorized::commit()`, not before: it performs an HTTP
-//! call to the embedding provider (up to 30s), and holding a DB connection or transaction for
-//! that long risks connection pool exhaustion and lock contention. Runs on `ctx.db` (Loco's own
-//! pooled `DatabaseConnection`), a fresh connection independent of the request's own transaction.
+//! Call this from a controller after `Authorized::commit()`, not before: it performs an HTTP call to the embedding provider (up to 30s), and holding a DB connection or transaction for that long risks connection pool exhaustion and lock contention.
+//! Runs on `ctx.db` (Loco's own pooled `DatabaseConnection`), a fresh connection independent of the request's own transaction.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde_json::Value;
@@ -16,10 +13,8 @@ use crate::models::content_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 /// Concatenates the values of `x-embed` fields as `"field: value"` to build the text to embed.
-/// Field names are kept because bare values would lose semantic context that helps the embedding
-/// model, compared to concatenating raw values alone.
-/// Returns `None` when there are no such fields or all are absent, so callers can skip the
-/// embedding API call entirely.
+/// Field names are kept because bare values would lose semantic context that helps the embedding model, compared to concatenating raw values alone.
+/// Returns `None` when there are no such fields or all are absent, so callers can skip the embedding API call entirely.
 pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> Option<String> {
     let parts: Vec<String> = entity_type_def
         .fields
@@ -39,10 +34,8 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
     }
 }
 
-/// Generates an embedding vector from an entity's `x-embed` fields and updates the
-/// `content_entities.embedding` column. Returns `Ok(())` without doing anything if the schema
-/// has no `x-embed` fields or none have values: embedding is an auxiliary feature and must never
-/// block the entity write it follows.
+/// Generates an embedding vector from an entity's `x-embed` fields and updates the `content_entities.embedding` column.
+/// Returns `Ok(())` without doing anything if the schema has no `x-embed` fields or none have values: embedding is an auxiliary feature and must never block the entity write it follows.
 pub async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -58,14 +51,7 @@ pub async fn sync_embedding(
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
-    // Refuse a vector that would not sit alongside what the workspace already holds. The column
-    // is dimensionless, so a mismatched write succeeds and the damage surfaces somewhere else
-    // entirely: the next search over that workspace fails with a dimension-mismatch error naming
-    // neither the entity nor the write that caused it. Checking here turns a broken workspace
-    // into one refused write.
-    //
-    // A workspace with no stamp (created before this existed) takes whatever the deployment
-    // produces, which is what it has always done.
+    // The column is dimensionless, so a mismatched write would succeed silently and the damage would surface later as a dimension-mismatch error on search, naming neither the entity nor the write that caused it. Check here instead.
     if let Some(expected) = workspace_embedding_dimensions(conn, workspace_id).await?
         && vector.len() != expected as usize
     {
@@ -80,11 +66,9 @@ pub async fn sync_embedding(
         });
     }
 
-    // Including the `updated_at` match as a write condition prevents a vector computed from
-    // stale data from overwriting a newer one when consecutive updates to the same entity
-    // complete out of order due to differing embedding API latencies (writing the embedding
-    // itself doesn't change `updated_at`, so this condition never blocks a subsequent legitimate
-    // sync).
+    // `updated_at` as a write condition prevents a vector computed from stale data from
+    // overwriting a newer one when concurrent syncs for the same entity finish out of order.
+    // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later sync.
     let result = conn
         .execute_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
@@ -110,10 +94,8 @@ pub async fn sync_embedding(
     Ok(())
 }
 
-/// Resolves the schema definition needed for embedding sync on its own, relying only on the
-/// return value of `content_entities::create`/`update` (`EntityRecord`), then calls
-/// [`sync_embedding`]. The record's data belongs to the schema version it was validated against
-/// (`record.schema_id`), so fetching by ID rather than the active version is correct.
+/// Resolves the schema definition needed for embedding sync on its own, relying only on the return value of `content_entities::create`/`update` (`EntityRecord`), then calls [`sync_embedding`].
+/// The record's data belongs to the schema version it was validated against (`record.schema_id`), so fetching by ID rather than the active version is correct.
 ///
 /// The intended entry point for controllers to call after `Authorized::commit()`.
 pub async fn sync_embedding_for_record(

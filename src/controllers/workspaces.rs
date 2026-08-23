@@ -19,10 +19,8 @@ use crate::models::_entities::identity_workspaces;
 use crate::models::tenancy;
 use crate::models::{content_entities, content_relations, content_schemas};
 
-/// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or
-/// act on another tenant's workspace by guessing its id: `identity_workspaces` has no RLS of its
-/// own (it's read through `ctx.db`, the migration-role connection), so this check is the only
-/// thing enforcing that boundary for these handlers.
+/// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or act on another tenant's workspace by guessing its id.
+/// `identity_workspaces` has no RLS of its own (it's read through `ctx.db`, the migration-role connection), so this check is the only thing enforcing that boundary for these handlers.
 async fn get_workspace_in_tenant(
     ctx: &AppContext,
     tenant_id: Uuid,
@@ -52,9 +50,11 @@ pub async fn list_workspaces(
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
     pub name: String,
-    /// Cap on the number of entities this workspace may hold. Omit for unlimited.
+    /// Cap on the number of entities this workspace may hold.
+    /// Omit for unlimited.
     pub max_entities: Option<i32>,
-    /// Schema to associate with this workspace. Omit to leave it unset.
+    /// Schema to associate with this workspace.
+    /// Omit to leave it unset.
     #[serde(default)]
     pub schema_id: Option<Uuid>,
 }
@@ -92,8 +92,7 @@ pub struct WorkspaceDetail {
     pub created_at: DateTime<Utc>,
     pub entity_count: i64,
     pub relation_count: i64,
-    /// Currently *active* schemas only (one per distinct schema name): not a raw row count,
-    /// which would also include archived versions.
+    /// Currently *active* schemas only (one per distinct schema name), not a raw row count, which would also include archived versions.
     pub schema_count: i64,
 }
 

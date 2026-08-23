@@ -1,10 +1,7 @@
 //! CRUD for `identity_templates`, the user-contributed schema template library.
 //!
-//! Distinct from `crate::templates` (the built-in templates shipped with the binary and served
-//! from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and
-//! manage. Runs on `ctx.db` (the migration-role connection), matching the rest of the identity
-//! surface: `identity_templates` has no RLS of its own, so every function here takes a
-//! `tenant_id` and filters/checks visibility explicitly.
+//! Distinct from `crate::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
+//! Runs on `ctx.db` (the migration-role connection): `identity_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
 
 pub use super::_entities::identity_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
@@ -18,10 +15,8 @@ pub type IdentityTemplates = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with
-    /// `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and
-    /// `is_unchanged()` only matches the latter. See `content_entities.rs`'s copy of this
-    /// comment for where this was caught live.
+    /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
+    /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and `is_unchanged()` only matches the latter.
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
@@ -85,17 +80,14 @@ impl TryFrom<Model> for TemplateRecord {
     }
 }
 
-/// Templates visible to `tenant_id`: its own templates plus any published with community
-/// visibility.
+/// Templates visible to `tenant_id`: its own templates plus any published with community visibility.
 fn visible_to(tenant_id: uuid::Uuid) -> Condition {
     Condition::any()
         .add(Column::TenantId.eq(tenant_id))
         .add(Column::Visibility.eq("community"))
 }
 
-/// Lists templates visible to `tenant_id`: its own templates plus any published with community
-/// visibility (cross-tenant sharing; not yet reachable through the API, but the query already
-/// honors it so nothing else needs to change when publishing ships).
+/// Lists templates visible to `tenant_id`: its own templates plus any published with community visibility.
 pub async fn list_templates(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
@@ -133,12 +125,10 @@ pub async fn get_template(
 
 /// Resolves a `template_id` as either a library template or a built-in, and says which.
 ///
-/// A UUID can only mean the library; anything else can only mean a built-in. Parsing decides
-/// which, so neither lookup runs against an id that could not name it, and a library miss
-/// reports the library's own not-found rather than the built-in one.
+/// A UUID can only mean the library; anything else can only mean a built-in.
+/// Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
 ///
-/// The returned id is the origin to record: `Some` for a library template, whose later edits the
-/// schema can then be told about, and `None` for a built-in, which has no row to point at.
+/// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
 pub async fn resolve_template_definition(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
@@ -153,8 +143,8 @@ pub async fn resolve_template_definition(
     }
 }
 
-/// Input for creating a new template. `visibility` is not settable here: every template starts
-/// as tenant-private; community publishing is a future, separate operation.
+/// Input for creating a new template.
+/// `visibility` is not settable here: every template starts as tenant-private.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CreateTemplateInput {
     pub name: String,
@@ -166,8 +156,8 @@ pub struct CreateTemplateInput {
     pub author: Option<String>,
 }
 
-/// Input for updating an existing template. Every field is optional; `None` leaves the existing
-/// value unchanged.
+/// Input for updating an existing template.
+/// Every field is optional; `None` leaves the existing value unchanged.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct UpdateTemplateInput {
     pub name: Option<String>,
@@ -215,8 +205,8 @@ pub async fn create_template(
     row.try_into()
 }
 
-/// Updates a template's editable fields. Only the owning tenant may update its own template
-/// (community-visible templates from other tenants are read-only to everyone but their owner).
+/// Updates a template's editable fields.
+/// Only the owning tenant may update its own template (community-visible templates from other tenants are read-only to everyone but their owner).
 pub async fn update_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
@@ -288,8 +278,7 @@ pub async fn delete_template(
     }
 }
 
-/// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned
-/// by `tenant_id`, recording `fork_of` so the lineage is traceable.
+/// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned by `tenant_id`, recording `fork_of` so the lineage is traceable.
 pub async fn fork_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,

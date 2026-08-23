@@ -10,9 +10,7 @@ use crate::models::content_entities::{self, EntityRecord};
 
 pub type ContentRelations = Entity;
 
-/// The generated `Model` already matches this API's response shape (unlike `content_entities`,
-/// there's no `embedding`-style column to exclude), so this is an alias rather than a distinct
-/// struct.
+/// The generated `Model` already matches this API's response shape, so this is an alias rather than a distinct struct.
 pub type RelationRecord = Model;
 
 #[async_trait::async_trait]
@@ -41,8 +39,7 @@ pub const RELATION_STATUS_ACTIVE: &str = "active";
 pub const RELATION_STATUSES: [&str; 3] = ["active", "deprecated", "archived"];
 
 /// Whether `status` names a state a relation may hold.
-/// Callers validate before writing so an unknown value is a 422 naming the field, not a
-/// constraint violation surfacing as a 500.
+/// Callers validate before writing so an unknown value is a 422 naming the field, not a constraint violation surfacing as a 500.
 pub fn is_valid_relation_status(status: &str) -> bool {
     RELATION_STATUSES.contains(&status)
 }
@@ -61,8 +58,7 @@ pub struct ListRelationsQuery {
     pub target_id: Option<Uuid>,
     pub relation_type: Option<String>,
     /// Restricts the listing to one state.
-    /// `None` lists every state, so a caller that does not pass `status` sees deprecated and
-    /// archived relations along with every other state.
+    /// `None` lists every state, so a caller that does not pass `status` sees deprecated and archived relations along with every other state.
     pub status: Option<String>,
     pub limit: i64,
     pub offset: i64,
@@ -82,9 +78,7 @@ impl Default for ListRelationsQuery {
 }
 
 /// Validates that `relation_type` doesn't conflict with the source/target entity_types.
-/// The metaschema definition is resolved against the schema the source entity was actually
-/// created with (the row's `schema_id`), as with `content_entities::update`, so existing
-/// relationships between entities don't silently break even as the active schema evolves.
+/// The metaschema definition is resolved against the schema the source entity was actually created with (the row's `schema_id`), so existing relationships between entities don't silently break even as the active schema evolves.
 async fn validate_relation_type(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -158,9 +152,8 @@ pub async fn create(
             err.sql_err(),
             Some(SqlErr::ForeignKeyConstraintViolation(_))
         ) {
-            // A TOCTOU window between checking source/target existence and the INSERT, during
-            // which another transaction could delete the entity. Treated as NotFound, same as
-            // the upfront check.
+            // A TOCTOU window between checking source/target existence and the INSERT, during which another transaction could delete the entity.
+            // Treated as NotFound, same as the upfront check.
             YorishiroError::not_found(format!(
                 "source '{}' or target '{}' no longer exists",
                 input.source_id, input.target_id
@@ -189,8 +182,7 @@ pub async fn get(
 }
 
 /// Moves a relation to another state.
-/// Retiring a relation this way keeps the record that it existed, which deleting it does not;
-/// traversal stops following it either way.
+/// Retiring a relation this way keeps the record that it existed, which deleting it does not; traversal stops following it either way.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn set_status(
@@ -220,9 +212,8 @@ pub async fn set_status(
         status: ActiveValue::Set(status.to_string()),
         ..Default::default()
     };
-    // A concurrent delete between `get` above and this update surfaces as
-    // `DbErr::RecordNotUpdated`, not a row: map it to the same 404 the upfront `get` would have
-    // returned had it lost the race instead, rather than letting `.internal()` turn it into a 500.
+    // A concurrent delete between `get` above and this update surfaces as `DbErr::RecordNotUpdated`, not a row.
+    // Map it to the same 404 the upfront `get` would have returned had it lost the race instead, rather than letting `.internal()` turn it into a 500.
     active.update(conn).await.map_err(|err| match err {
         DbErr::RecordNotUpdated => {
             YorishiroError::not_found(format!("relation '{id}' was not found"))
@@ -301,8 +292,7 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
         .map(|n| n as i64)
 }
 
-/// Fetches every relation for the workspace, with no pagination limit, for a full-workspace data
-/// export.
+/// Fetches every relation for the workspace, with no pagination limit, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn export_all(
@@ -321,10 +311,8 @@ pub async fn export_all(
 
 pub const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;
 
-/// A relation together with the entity on the other end of it, relative to the entity
-/// `neighbors_batch` was called for.
-/// `direction` is `"out"` when the queried entity is the relation's source (the neighbor is the
-/// target) and `"in"` when it's the target (the neighbor is the source).
+/// A relation together with the entity on the other end of it, relative to the entity `neighbors_batch` was called for.
+/// `direction` is `"out"` when the queried entity is the relation's source (the neighbor is the target) and `"in"` when it's the target (the neighbor is the source).
 #[derive(Debug, Clone, Serialize)]
 pub struct Neighbor {
     pub relation_id: Uuid,
@@ -379,14 +367,10 @@ impl BatchNeighborRow {
     }
 }
 
-/// Batched neighbor lookup: finds up to `limit` neighbors of every id in `pivot_ids` in one
-/// round trip instead of one call per id, via `CROSS JOIN LATERAL` so each pivot still gets its
-/// own `limit`-bounded result (a plain `WHERE source_id = ANY(...) LIMIT n` would apply `limit`
-/// across the whole batch instead of per pivot, which is not the same query).
+/// Batched neighbor lookup: finds up to `limit` neighbors of every id in `pivot_ids` in one round trip instead of one call per id, via `CROSS JOIN LATERAL` so each pivot still gets its own `limit`-bounded result (a plain `WHERE source_id = ANY(...) LIMIT n` would apply `limit` across the whole batch instead of per pivot, which is not the same query).
 ///
-/// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from
-/// the map rather than present with an empty vec. A duplicate id in `pivot_ids` contributes only
-/// once (deduped before querying).
+/// Returns a map from pivot id to its neighbors; a pivot with no relations at all is absent from the map rather than present with an empty vec.
+/// A duplicate id in `pivot_ids` contributes only once (deduped before querying).
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn neighbors_batch(
@@ -406,11 +390,8 @@ pub async fn neighbors_batch(
         return Ok(std::collections::HashMap::new());
     }
 
-    // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per
-    // pivot; the outer ORDER BY guarantees those rows come back to Rust in per-pivot,
-    // most-recent-first order too: `CROSS JOIN LATERAL` doesn't otherwise promise the driving
-    // join order is preserved across pivots, and `recall_context`'s truncation check relies on
-    // it.
+    // The lateral's own ORDER BY/LIMIT already picks the right *set* of up-to-`limit` rows per pivot; the outer ORDER BY guarantees those rows come back to Rust in per-pivot, most-recent-first order too.
+    // `CROSS JOIN LATERAL` doesn't otherwise promise the driving join order is preserved across pivots, and `recall_context`'s truncation check relies on it.
     let rows = BatchNeighborRow::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT pivot.id AS pivot_id, n.relation_id, n.relation_type, n.direction, \

@@ -1,11 +1,7 @@
-//! Embedding provider abstraction, ported from master's `services::embedding`.
+//! Embedding provider abstraction.
 //!
-//! Master also ships a local ONNX provider (`services::embedding::onnx`) as the zero-dependency
-//! default. Not ported here: it needs model files (`models/model.onnx`, `models/tokenizer.json`)
-//! that are not bundled and must be fetched separately, and this deployment's actually-reachable
-//! embedding backend is LM Studio (OpenAI-compatible, confirmed reachable at `10.0.3.200:1234`
-//! this session), which the `openai` provider already serves. Add ONNX back if a deployment needs
-//! to run with no external embedding service at all.
+//! No local ONNX provider: it needs model files not bundled here.
+//! Add one back if a deployment needs to run with no external embedding service at all.
 
 pub mod openai;
 pub mod sync;
@@ -18,10 +14,9 @@ use crate::error::YorishiroError;
 
 /// What a piece of text is being embedded for.
 ///
-/// Asymmetric models (Qwen3-Embedding among them) expect a search query to carry an instruction
-/// prefix that a stored document must not have. Embedding both the same way costs nothing
-/// visible: the vectors are the right shape and normalize, the results are just worse. Providers
-/// that need no such distinction ignore this.
+/// Asymmetric models expect a search query to carry an instruction prefix that a stored document must not have.
+/// Embedding both the same way costs nothing visible: the vectors are the right shape and normalize, the results are just worse.
+/// Providers that need no such distinction ignore this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbedKind {
     /// Text a user or agent is searching with.
@@ -61,11 +56,8 @@ pub trait EmbeddingProvider: Send + Sync {
     }
 }
 
-/// A provider that satisfies the dimension count but errors on every actual call. Stands in
-/// when `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` are unset, so a deployment
-/// (or a test booting through the real `Hooks::after_context`) with no embedding backend
-/// configured still boots; search/recall simply error if invoked, rather than boot itself
-/// failing.
+/// A provider that satisfies the dimension count but errors on every actual call.
+/// Stands in when `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` are unset, so boot succeeds with no embedding backend configured; search/recall simply error if invoked.
 pub struct UnconfiguredEmbeddingProvider {
     dimensions: usize,
 }
@@ -87,23 +79,16 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 }
 
 /// The model name this deployment is configured for, for stamping onto new workspaces.
-///
-/// Read from the environment rather than the provider: `EmbeddingProvider` exposes
-/// `dimensions()` because callers need it, and adding a `model()` for this one caller would put
-/// a naming question ("what does an unconfigured provider call itself?") into a trait every
-/// implementation would have to answer.
+/// Read from the environment rather than the provider, to avoid adding a `model()` method to
+/// the trait for this one caller.
 pub fn model_name_from_env() -> String {
     std::env::var("YORISHIRO_EMBEDDING_MODEL").unwrap_or_else(|_| "unconfigured".into())
 }
 
 /// Builds the embedding provider from environment variables.
 ///
-/// `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible
-/// provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with
-/// [`UnconfiguredEmbeddingProvider`] rather than failing (see its doc comment).
-/// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768, matching this deployment's migrated
-/// `vector(768)` HNSW index (`migration/src/m20260822_100900_content_entities.rs`) and LM
-/// Studio's `text-embedding-qwen3-embedding-0.6b`.
+/// `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with [`UnconfiguredEmbeddingProvider`] rather than failing.
+/// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 pub fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "768".into())

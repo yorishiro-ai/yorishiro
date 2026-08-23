@@ -4,11 +4,9 @@ use ts_rs::TS;
 /// A page of results: the items, plus the framework's pagination metadata
 /// flattened alongside them.
 ///
-/// The field names are exactly `PagerMeta`'s (`page`, `page_size`,
-/// `total_pages`, `total_items`), so an app has one pagination vocabulary
-/// whether a handler answers with this typed envelope or with the framework's
-/// own `Pager`. Build it with [`Page::from_query`] rather than by hand — that
-/// is what keeps the two in step.
+/// Field names must stay exactly `PagerMeta`'s (`page`, `page_size`,
+/// `total_pages`, `total_items`). Build it with [`Page::from_query`] rather
+/// than by hand, to keep the two in step.
 #[derive(serde::Serialize, serde::Deserialize, TS)]
 #[ts(export, export_to = "../frontend/src/bindings/")]
 pub struct Page<T: TS> {

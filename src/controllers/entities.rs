@@ -15,13 +15,9 @@ use crate::controllers::extractors::{
 };
 use crate::models::content_entities::{self, EntityRecord, UndoReport};
 
-/// Fires embedding sync in the background after the caller's own transaction has committed:
-/// generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this
-/// must never add that latency to the entity write it follows, nor hold a DB connection open for
-/// it. Errors (provider unreachable, dimension mismatch) are logged, not surfaced: the entity
-/// write already succeeded and embedding is an auxiliary feature (see `sync_embedding`'s doc
-/// comment). Loco's queue backend isn't wired yet (`Hooks::connect_workers` is a no-op, see
-/// #221's scope), so `tokio::spawn` is the lazy stand-in until it is.
+/// Fires embedding sync in the background after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
+/// Errors (provider unreachable, dimension mismatch) are logged, not surfaced: the entity write already succeeded and embedding is an auxiliary feature (see `sync_embedding`'s doc comment).
+/// Loco's queue backend isn't wired yet (`Hooks::connect_workers` is a no-op), so `tokio::spawn` is the lazy stand-in until it is.
 fn spawn_embedding_sync(ctx: AppContext, workspace_id: Uuid, record: EntityRecord) {
     let Ok(provider) = embedding_provider(&ctx) else {
         return;
@@ -136,9 +132,7 @@ pub async fn list_entities(
 
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
-/// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope
-/// that would gate the job that produced the snapshots, e.g. `ee/`'s fill-proposal confirmation),
-/// not an ordinary entity write.
+/// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. `ee/`'s fill-proposal confirmation), not an ordinary entity write.
 pub async fn undo_migration_job(
     authorized: Authorized<MigrationScope>,
     Path(job_id): Path<Uuid>,

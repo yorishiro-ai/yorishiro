@@ -1,8 +1,6 @@
 //! Refuses requests while the deployment is in maintenance.
 //!
-//! Layered in `Hooks::after_routes` so it covers REST and MCP alike, and reads the state per
-//! request rather than caching it: an operator turning maintenance off expects the next request
-//! to be served, not the one after some TTL.
+//! Layered in `Hooks::after_routes` so it covers REST and MCP alike, and reads the state per request rather than caching it: an operator turning maintenance off expects the next request to be served, not the one after some TTL.
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -14,15 +12,12 @@ use crate::models::identity_maintenance;
 
 /// Paths that answer even under full lock.
 ///
-/// `/_ping`, `/_health` and `/_readiness` are Loco's own health-check routes, how an
-/// orchestrator decides whether the process is alive. Refusing them would have the scheduler
-/// restart a server that is deliberately paused, and restarting it would not clear the state,
-/// which lives in the database, so the loop would not converge.
+/// `/_ping`, `/_health` and `/_readiness` are Loco's own health-check routes, how an orchestrator decides whether the process is alive.
+/// Refusing them would have the scheduler restart a server that is deliberately paused, and restarting it would not clear the state, which lives in the database, so the loop would not converge.
 ///
-/// `/api/system/maintenance` is the switch itself. Behind the guard, a full lock entered over
-/// REST could only be left over the CLI, making the endpoint a one-way door for anyone without
-/// shell access to the host. Being served is not being open: reaching the handler still needs a
-/// `migration`-scoped key, exactly as it does when the deployment is serving normally.
+/// `/api/system/maintenance` is the switch itself.
+/// Behind the guard, a full lock entered over REST could only be left over the CLI, making the endpoint a one-way door for anyone without shell access to the host.
+/// Being served is not being open: reaching the handler still needs a `migration`-scoped key, exactly as it does when the deployment is serving normally.
 fn always_served(path: &str) -> bool {
     matches!(
         path,
@@ -32,10 +27,8 @@ fn always_served(path: &str) -> bool {
 
 /// Whether the request intends to change something.
 ///
-/// Decided by method: `POST` to `/mcp` may be a read, but the middleware cannot know which tool
-/// without parsing the body, and a body consumed here is a body the handler no longer has.
-/// Read-only mode therefore refuses MCP wholesale, which errs toward refusing a read rather than
-/// admitting a write.
+/// Decided by method: `POST` to `/mcp` may be a read, but the middleware cannot know which tool without parsing the body, and a body consumed here is a body the handler no longer has.
+/// Read-only mode therefore refuses MCP wholesale, which errs toward refusing a read rather than admitting a write.
 fn is_write(request: &Request) -> bool {
     !matches!(request.method().as_str(), "GET" | "HEAD" | "OPTIONS")
 }

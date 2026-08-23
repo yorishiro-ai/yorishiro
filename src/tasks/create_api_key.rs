@@ -7,12 +7,10 @@ use crate::services::auth::ApiKeyScope;
 
 /// `cargo loco task create_api_key workspace_id:<uuid> scope:write`
 ///
-/// `scope` is one of `read`/`write`/`schema`/`migration`. `user_id` is optional; omitted, the
-/// key is unattributed (a service/automation key, `user_id = NULL`), same meaning as elsewhere
-/// in this codebase.
+/// `scope` is one of `read`/`write`/`schema`/`migration`.
+/// `user_id` is optional; omitted, the key is unattributed (a service/automation key, `user_id = NULL`), same meaning as elsewhere in this codebase.
 ///
-/// Wraps the already-ported `identity_api_keys::Entity::create_api_key`, which does the actual
-/// insert (and the workspace-exists check) on `ctx.db`.
+/// Wraps `identity_api_keys::Entity::create_api_key`, which does the actual insert (and the workspace-exists check) on `ctx.db`.
 pub struct CreateApiKey;
 
 #[async_trait]

@@ -7,10 +7,8 @@ use crate::models::content_entities::{self, EntityRecord};
 use crate::models::content_relations::{self, RelationRecord};
 use crate::models::content_schemas::{self, SchemaRecord};
 
-/// One line of a JSONL export: a tagged union so schema/entity/relation records can be told
-/// apart on read-back without a separate line-position convention.
-/// `Deserialize` is derived too so `models::import::import_jsonl` can read the same shape back
-/// in.
+/// One line of a JSONL export: a tagged union so schema/entity/relation records can be told apart on read-back without a separate line-position convention.
+/// `Deserialize` is derived so `models::import::import_jsonl` can read the same shape back in.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
 pub enum ExportRecord {
@@ -19,12 +17,8 @@ pub enum ExportRecord {
     Relation(RelationRecord),
 }
 
-/// Fetches every schema (all versions, including archived), entity, and relation for the
-/// workspace, for a full-workspace data export.
-/// Schemas come first so a reader can resolve the entity_types/relation_types that the entities
-/// and relations after them reference.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+/// Fetches every schema (all versions, including archived), entity, and relation for the workspace.
+/// Schemas come first so a reader can resolve the entity_types/relation_types that entities and relations after them reference.
 pub async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
