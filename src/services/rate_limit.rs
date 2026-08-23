@@ -1,6 +1,14 @@
 //! A per-key fixed-window rate limiter, applied to whichever routes are reachable without a
 //! bearer token: `/auth/signup` and `/auth/login`, the ones exposed to unauthenticated
-//! credential/invite-token brute-forcing.
+//! credential/invite-token brute-forcing, plus `ee/`'s `/auth/oauth/authorize` and
+//! `/auth/oauth/callback` when that crate is composed in. Base has no compile-time dependency on
+//! `ee/` (see `CLAUDE.md`'s edition rule), so this names the two paths as string literals rather
+//! than importing anything from there; the paths are absent from the router entirely when `ee/`
+//! isn't linked in, so the match is simply never reached.
+//! `/auth/oauth/callback` is the one OAuth route that can issue a Yorishiro API key from
+//! caller-supplied input (an authorization code), which is exactly why it shares this quota with
+//! `/auth/login`; `/auth/oauth/status` is deliberately excluded, since it carries no secret and
+//! the login page polls it on every load.
 //!
 //! Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo` is present on
 //! the request. Loco's own boot path (`app.into_make_service_with_connect_info::<SocketAddr>()`)
@@ -19,7 +27,10 @@ use axum::response::{IntoResponse, Response};
 
 /// Paths this guard applies to. Anything else passes through untouched.
 fn is_guarded(path: &str) -> bool {
-    matches!(path, "/auth/signup" | "/auth/login")
+    matches!(
+        path,
+        "/auth/signup" | "/auth/login" | "/auth/oauth/authorize" | "/auth/oauth/callback"
+    )
 }
 
 pub struct RateLimiter {
@@ -99,4 +110,24 @@ pub async fn enforce(
     }
 
     next.run(req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_guarded;
+
+    #[test]
+    fn guards_base_and_ee_credential_issuing_routes() {
+        assert!(is_guarded("/auth/signup"));
+        assert!(is_guarded("/auth/login"));
+        assert!(is_guarded("/auth/oauth/authorize"));
+        assert!(is_guarded("/auth/oauth/callback"));
+    }
+
+    #[test]
+    fn does_not_guard_oauth_status_or_unrelated_paths() {
+        assert!(!is_guarded("/auth/oauth/status"));
+        assert!(!is_guarded("/api/workspaces"));
+        assert!(!is_guarded("/setup"));
+    }
 }
