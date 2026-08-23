@@ -172,6 +172,7 @@ impl Hooks for HostedApp {
     fn register_tasks(tasks: &mut Tasks) {
         App::register_tasks(tasks);
         tasks.register(tasks::seed_official_templates::SeedOfficialTemplates);
+        tasks.register(tasks::create_tenant_api_key::CreateTenantApiKey);
     }
 
     async fn truncate(ctx: &AppContext) -> Result<()> {
