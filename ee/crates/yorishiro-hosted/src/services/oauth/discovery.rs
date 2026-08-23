@@ -1,11 +1,6 @@
 //! OIDC discovery and token exchange.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/oauth/discovery.rs`.
 //!
-//! Deliberately not a full OAuth/OIDC client library: the flow this crate needs is narrow
-//! (authorize redirect, code exchange, ID token parse), so this hand-rolls just those three HTTP
-//! calls against whatever the provider's own discovery document says, rather than pulling in a
-//! general-purpose crate whose surface area (device flow, refresh tokens, dynamic client
-//! registration, ...) this never uses.
+//! This hand-rolls just the three HTTP calls the flow needs: authorize redirect, code exchange, ID token parse, against whatever the provider's own discovery document says.
 
 use std::time::Duration;
 
@@ -16,8 +11,7 @@ use yorishiro_core::error::ResultExt;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// `true` for a host that only ever means "this machine": the one case an `http://` OIDC
-/// endpoint is legitimate (local development against a mock/dev IdP with no TLS in front of it).
+/// `true` for a host that only ever means "this machine": the one case an `http://` OIDC endpoint is legitimate.
 /// Every other host must be reached over `https://`, see `redirect_policy`.
 fn is_loopback_host(host: &str) -> bool {
     host == "localhost"
@@ -26,21 +20,13 @@ fn is_loopback_host(host: &str) -> bool {
             .is_ok_and(|ip| ip.is_loopback())
 }
 
-/// `true` for a URL this crate is willing to send an OIDC discovery/JWKS/token request to:
-/// `https://`, or plain `http://` if the host is loopback (see `is_loopback_host`).
+/// `true` for a URL this crate is willing to send an OIDC discovery/JWKS/token request to: `https://`, or plain `http://` if the host is loopback (see `is_loopback_host`).
 fn is_https_or_loopback(url: &reqwest::Url) -> bool {
     url.scheme() == "https" || url.host_str().is_some_and(is_loopback_host)
 }
 
-/// Rejects a redirect whose target is not itself `https://`-or-loopback, regardless of the
-/// scheme the request that is being redirected started on.
-/// `reqwest`'s default policy follows redirects across schemes without restriction, which would
-/// let a compromised or misconfigured hop silently redirect an OIDC discovery/JWKS/token request
-/// to a plaintext, non-loopback target, including one starting from the loopback exemption
-/// itself.
-/// Delegates every target this rule *accepts* to `Policy::default()`'s own `redirect`: a custom
-/// policy does not inherit the default policy's 10-hop chain limit and loop detection
-/// automatically, so this must apply that itself rather than always returning `attempt.follow()`.
+/// Rejects a redirect whose target is not itself `https://`-or-loopback, regardless of the scheme the request that is being redirected started on: `reqwest`'s default policy follows redirects across schemes without restriction, which would let a compromised or misconfigured hop silently redirect an OIDC request to a plaintext target.
+/// Delegates every accepted target to `Policy::default()`'s own `redirect`: a custom policy does not inherit the default policy's 10-hop limit and loop detection automatically.
 fn redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         if !is_https_or_loopback(attempt.url()) {
@@ -58,10 +44,7 @@ fn http_client() -> reqwest::Client {
         .expect("reqwest client configuration is static and always valid")
 }
 
-/// Applies `is_https_or_loopback` to the initial request URL itself: the same rule
-/// `redirect_policy` enforces for every redirect hop (discovery/JWKS/token endpoints are read
-/// from the issuer's own discovery document, which this crate does not otherwise validate the
-/// scheme of).
+/// Applies `is_https_or_loopback` to the initial request URL itself: the same rule `redirect_policy` enforces for every redirect hop.
 fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
     let parsed = url::Url::parse(url).internal()?;
     if is_https_or_loopback(&parsed) {
@@ -73,10 +56,7 @@ fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
     )))
 }
 
-/// The subset of an OIDC discovery document (`{issuer}/.well-known/openid-configuration`) this
-/// crate reads.
-/// Every OIDC-compliant provider (Google, Microsoft Entra ID, Okta, Auth0, ...) publishes one at
-/// this well-known path.
+/// The subset of an OIDC discovery document (`{issuer}/.well-known/openid-configuration`) this crate reads.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiscoveryDocument {
     pub authorization_endpoint: String,
@@ -84,10 +64,7 @@ pub struct DiscoveryDocument {
     pub jwks_uri: String,
 }
 
-/// `GET`s `url` and parses the response body as JSON, failing with a `YorishiroError::Internal`
-/// that names `url` and the rejecting status if the response is not a 2xx.
-/// Shared by `fetch_discovery_document`/`fetch_jwks`: both are a plain unauthenticated `GET`
-/// returning JSON, differing only in the URL and the response type.
+/// `GET`s `url` and parses the response body as JSON, failing with a `YorishiroError::Internal` that names `url` and the rejecting status if the response is not a 2xx.
 async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, YorishiroError> {
     require_https_or_loopback(url)?;
     let response = http_client().get(url).send().await.internal()?;
@@ -101,9 +78,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, Yorish
 }
 
 /// Fetches and parses the issuer's discovery document.
-/// Not cached: this runs once per authorize/callback request rather than once at startup,
-/// trading a small amount of latency for never serving a stale endpoint or key set after a
-/// provider rotates either, acceptable here since login is not a hot path.
+/// Not cached: runs once per authorize/callback request so a provider rotating its endpoint or key set is never served stale, acceptable since login is not a hot path.
 pub async fn fetch_discovery_document(
     issuer_url: &str,
 ) -> Result<DiscoveryDocument, YorishiroError> {
@@ -121,9 +96,7 @@ pub struct TokenResponse {
     pub id_token: String,
 }
 
-/// Exchanges an authorization code for tokens at the provider's token endpoint (the
-/// `authorization_code` grant, RFC 6749 §4.1.3), including the PKCE code verifier (RFC 7636)
-/// generated when the flow started.
+/// Exchanges an authorization code for tokens at the provider's token endpoint (the `authorization_code` grant, RFC 6749 §4.1.3), including the PKCE code verifier (RFC 7636) generated when the flow started.
 pub async fn exchange_code_for_tokens(
     token_endpoint: &str,
     client_id: &str,

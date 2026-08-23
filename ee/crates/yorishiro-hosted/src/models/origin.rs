@@ -1,13 +1,10 @@
 //! Reading which schemas have an origin template that moved on without them.
 //!
-//! The query alone: what to do about a change is `services::origin`'s, which decides whether a
-//! merge is safe and what it would produce.
+//! The query alone: what to do about a change is `services::origin`'s, which decides whether a merge is safe and what it would produce.
 //!
-//! Owns no table. `content_schemas` and `identity_templates` are both base's; both are read here
-//! on `ctx.db` (the migration/admin connection), since `identity_templates` carries no GRANT to
-//! `yorishiro_app` and a request's RLS-scoped connection cannot see it at all. That does not make
-//! this base's: the endpoint it serves is enterprise, and an edition is decided by what a feature
-//! is rather than by which tables it reads.
+//! Owns no table.
+//! `content_schemas` and `identity_templates` are both base's; both are read here on `ctx.db` (the migration/admin connection), since `identity_templates` carries no GRANT to `yorishiro_app` and a request's RLS-scoped connection cannot see it at all.
+//! That does not make this base's: the endpoint it serves is enterprise, and an edition is decided by what a feature is rather than by which tables it reads.
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
@@ -27,12 +24,11 @@ struct Row {
 
 /// Schemas in this workspace whose origin template has changed since the copy was taken.
 ///
-/// Nothing is applied. The upstream edit does not reach the copy on its own (an automatic update
-/// could make stored entities invalid against a definition nobody here chose), so this reports
-/// and the workspace decides.
+/// Nothing is applied.
+/// The upstream edit does not reach the copy on its own (an automatic update could make stored entities invalid against a definition nobody here chose), so this reports and the workspace decides.
 ///
-/// A schema whose template was deleted is not reported: the trigger has already detached it, and
-/// there is no longer an update to take. `linked` is the whole population here.
+/// A schema whose template was deleted is not reported: the trigger has already detached it, and there is no longer an update to take.
+/// `linked` is the whole population here.
 pub async fn list_with_upstream_changes(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

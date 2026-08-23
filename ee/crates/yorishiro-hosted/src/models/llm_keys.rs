@@ -1,15 +1,9 @@
 //! A workspace's own LLM credentials, for the one feature that infers values.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/models/llm_keys.rs`, translated to the
-//! raw-SQL-plus-`find_by_statement` idiom this crate's own tables already use (`billing.rs`,
-//! `stripe_events.rs`, `marketplace.rs`): this branch has no `sea-query`/`sea-query-binder`
-//! dependency, and `identity_workspace_llm_keys` gets no SeaORM entity codegen either, matching
-//! `identity_template_versions`/`identity_template_reviews`.
 //!
-//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped
-//! tenant pool: `yorishiro_app` has no GRANT on this table, matching `identity_templates`.
+//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `identity_templates`.
 //!
-//! [`get`] returns the key so the inference client can send it. Nothing else does: [`describe`]
-//! is what an endpoint calls, and it reports the endpoint and model without the secret.
+//! [`get`] returns the key so the inference client can send it.
+//! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;
@@ -46,14 +40,11 @@ struct GetRow {
 
 /// Refuses anything that is not `http://` or `https://`.
 ///
-/// The value is interpolated into a request URL, so a `file://` or `gopher://` there points
-/// reqwest at something that is not an HTTP conversation at all, and a scheme-less string
-/// silently becomes a relative path. Checked here, at the point a person types it, so the
-/// refusal names the field rather than surfacing later as a failed inference run.
+/// The value is interpolated into a request URL, so a `file://` or `gopher://` there points reqwest at something that is not an HTTP conversation at all, and a scheme-less string silently becomes a relative path.
+/// Checked here, at the point a person types it, so the refusal names the field rather than surfacing later as a failed inference run.
 ///
-/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a
-/// policy question for the operator; see `ee/docs/api.md`. This only rules out URLs that could
-/// never be a chat-completions endpoint.
+/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator; see `ee/docs/api.md`.
+/// This only rules out URLs that could never be a chat-completions endpoint.
 fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
     if base_url.starts_with("http://") || base_url.starts_with("https://") {
         return Ok(());
@@ -80,10 +71,7 @@ pub async fn set(
             hint: "remove the configuration instead of storing an empty key".into(),
         });
     }
-    // Normalise once, then validate and store the same string: checking `base_url.trim()` and
-    // storing `base_url` would let "  https://host  " pass and be persisted with its padding,
-    // which `InferenceClient` then interpolates straight into a request URL, so the check and
-    // the stored value have to be the same value.
+    // Normalise once, then validate and store the same string: checking `base_url.trim()` and storing `base_url` would let "  https://host  " pass and be persisted with its padding, which `InferenceClient` then interpolates straight into a request URL, so the check and the stored value have to be the same value.
     let base_url = base_url.trim().trim_end_matches('/');
     check_scheme(base_url)?;
 
@@ -141,9 +129,8 @@ pub async fn describe(
 
 /// The credentials themselves, for making a call.
 ///
-/// `None` means the workspace has configured none. Callers turn that into a refusal rather than
-/// a fallback: inferring nothing and filling defaults instead would look, to the caller, like
-/// inference that produced default-shaped answers.
+/// `None` means the workspace has configured none.
+/// Callers turn that into a refusal rather than a fallback: inferring nothing and filling defaults instead would look, to the caller, like inference that produced default-shaped answers.
 pub async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

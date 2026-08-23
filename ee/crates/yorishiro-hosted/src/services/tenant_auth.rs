@@ -1,18 +1,10 @@
 //! Resolves a key that may be bound to a tenant rather than to one workspace.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`, simplified for
-//! this branch's `DbHandle`: master's has a `Postgres`/`Sqlite` split (the community edition runs
-//! on both), this one is a plain Postgres struct, since `ee/` never runs on Sqlite (see
-//! `services::authz`'s doc comment for the same reasoning).
+//! `ee/` never runs on SQLite, so this uses a plain Postgres pool.
 //!
-//! Base binds every key to exactly one workspace, which means a client working across several
-//! has to hold one key per workspace and swap between them. A key stored with a NULL
-//! `workspace_id` is instead bound to its tenant, and names the workspace per request with
-//! [`WORKSPACE_HEADER`].
+//! Base binds every key to exactly one workspace, which means a client working across several has to hold one key per workspace and swap between them.
+//! A key stored with a NULL `workspace_id` is instead bound to its tenant, and names the workspace per request with [`WORKSPACE_HEADER`].
 //!
-//! Installing this replaces base's own `default_authenticator()` in `shared_store`
-//! (`Arc<dyn Authenticator>` is keyed by `TypeId`, so the later insert wins), which means it is
-//! honoured on every authenticated path in the process, REST and MCP alike, not only the routes
-//! this crate adds.
+//! Installing this replaces base's own `default_authenticator()` in `shared_store` (`Arc<dyn Authenticator>` is keyed by `TypeId`, so the later insert wins), which means it is honoured on every authenticated path in the process, REST and MCP alike, not only the routes this crate adds.
 
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -134,15 +126,10 @@ pub struct CreatedTenantApiKey {
 
 /// Issues a tenant-scoped key.
 ///
-/// Base's own `create_api_key` always records a workspace, so a key with none cannot be made
-/// through it: this writes the row directly. The role cap is the same one that command applies:
-/// a key attributed to a user may not exceed what that user's tenant role permits, since the key
-/// can act as them.
+/// Base's own `create_api_key` always records a workspace, so a key with none cannot be made through it: this writes the row directly.
+/// The role cap is the same one that command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
 ///
-/// **`pool` must be the identity pool (`DbHandle::identity`), not the tenant pool.** This reads
-/// `identity_tenants` and `identity_tenant_memberships`, and neither is granted to
-/// `yorishiro_app` (the tenant pool's role): calling this with `DbHandle::tenant.pool()` fails
-/// with "permission denied for table identity_tenants".
+/// **`pool` must be the identity pool (`DbHandle::identity`), not the tenant pool.** This reads `identity_tenants` and `identity_tenant_memberships`, and neither is granted to `yorishiro_app` (the tenant pool's role): calling this with `DbHandle::tenant.pool()` fails with "permission denied for table identity_tenants".
 pub async fn create_tenant_api_key(
     pool: &PgPool,
     tenant_id: Uuid,
@@ -169,10 +156,7 @@ pub async fn create_tenant_api_key(
 
     if let Some(user_id) = user_id {
         // `tenancy::get_membership_role` takes `&impl sea_orm::ConnectionTrait`, not a raw sqlx
-        // pool: this function operates on the raw tenant pool (matching
-        // `TenantScopedAuthenticator`, since it issues a NULL-workspace key directly), so the
-        // role is read the same raw-SQL way as everything else here rather than pulling in a
-        // SeaORM connection just for this one lookup.
+        // pool, so the role is read the same raw-SQL way as everything else here.
         let role_str: Option<(String,)> = sqlx::query_as(
             "SELECT role FROM identity_tenant_memberships WHERE tenant_id = $1 AND user_id = $2",
         )

@@ -1,10 +1,6 @@
-//! The template marketplace: templates shared between tenants, their published versions, and
-//! what other tenants thought of them.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/http/controllers/marketplace.rs`.
+//! The template marketplace: templates shared between tenants, their published versions, and what other tenants thought of them.
 //!
-//! Distribution between tenants is an enterprise capability, so these routes live here rather
-//! than in the community edition, and gate on the licence: no key means `GET /hosted/marketplace`
-//! and its siblings answer 404, the same way an unlicensed deployment cannot reach `/hosted/stripe`.
+//! These routes gate on the licence: no key means `GET /hosted/marketplace` and its siblings answer 404, the same way an unlicensed deployment cannot reach `/hosted/stripe`.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -23,13 +19,9 @@ use crate::services::authz;
 use crate::services::licence::LicenceState;
 use crate::services::marketplace;
 
-/// The licence gate for every route in this module, paired with authentication so the two cannot
-/// drift apart: a handler added here reaches for this rather than `authz::authenticate_tenant`
-/// directly, and is gated by construction.
+/// The licence gate for every route in this module, paired with authentication so the two cannot drift apart: a handler added here reaches for this rather than `authz::authenticate_tenant` directly, and is gated by construction.
 ///
-/// Checked *before* authentication, so an unlicensed deployment answers the same `404` whether or
-/// not the caller holds a valid key: a marketplace that 401s tells an anonymous prober that it
-/// exists here and is merely locked.
+/// Checked *before* authentication, so an unlicensed deployment answers the same `404` whether or not the caller holds a valid key: a marketplace that 401s tells an anonymous prober that it exists here and is merely locked.
 async fn licensed_tenant(
     ctx: &AppContext,
     headers: &HeaderMap,
@@ -49,15 +41,13 @@ pub struct ListMarketplaceParams {
     pub offset: Option<i64>,
 }
 
-/// `GET /hosted/marketplace`: community-visible templates from every tenant, ordered by name
-/// then id.
+/// `GET /hosted/marketplace`: community-visible templates from every tenant, ordered by name then id.
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Query(params): Query<ListMarketplaceParams>,
 ) -> Result<Json<Vec<MarketplaceListing>>, ApiError> {
-    // The listing spans every tenant, so the identity is not read, but a valid key is still
-    // required, which is what authenticating here enforces.
+    // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
     let _ = licensed_tenant(&ctx, &headers).await?;
     let default = ListMarketplaceQuery::default();
     let query = ListMarketplaceQuery {
@@ -68,8 +58,7 @@ async fn list_marketplace(
     Ok(Json(listings))
 }
 
-/// `GET /hosted/marketplace/{id}/versions`: published versions, plus the caller's own drafts
-/// when it owns the template.
+/// `GET /hosted/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
 async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

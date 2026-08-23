@@ -1,14 +1,7 @@
 //! Which columns the Entities table shows, per workspace and entity type.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/models/entity_columns.rs`, translated to
-//! the raw-SQL-plus-`find_by_statement` idiom this crate's own tables already use.
 //!
-//! The create form has always been schema-driven; the table beside it showed a fixed set of
-//! columns. This is what lets the table follow the schema too, without guessing which fields
-//! matter: the workspace says so.
-//!
-//! Scoped to the workspace rather than the user, so everyone looking at a workspace sees the
-//! same table. A per-user override belongs in this table as a second nullable column, not in a
-//! second table.
+//! Scoped to the workspace rather than the user, so everyone looking at a workspace sees the same table.
+//! A per-user override belongs in this table as a second nullable column, not in a second table.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
@@ -39,9 +32,7 @@ struct Row {
 
 /// Reads the stored preference for one entity type.
 ///
-/// `None` means the workspace has never chosen, which is different from having chosen nothing:
-/// the caller falls back to the schema's own first few fields rather than rendering a table with
-/// no columns.
+/// `None` means the workspace has never chosen, which is different from having chosen nothing: the caller falls back to the schema's own first few fields rather than rendering a table with no columns.
 pub async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -90,8 +81,7 @@ pub async fn list(
 
 /// Stores the choice, replacing whatever was there.
 ///
-/// `ON CONFLICT` rather than a read-then-write: two tabs saving at once would otherwise both
-/// see no row and both insert, and the unique constraint would turn the loser into a 500.
+/// `ON CONFLICT` rather than a read-then-write: two tabs saving at once would otherwise both see no row and both insert, and the unique constraint would turn the loser into a 500.
 pub async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

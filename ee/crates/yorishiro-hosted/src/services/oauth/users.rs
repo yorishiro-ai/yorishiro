@@ -1,18 +1,7 @@
-//! Find-or-create for OAuth-provisioned users, plus the tenant/workspace auto-provisioning that
-//! happens the first time a given identity logs in.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/oauth/users.rs`, restructured
-//! onto this branch's one-transaction pattern (`controllers::setup::setup` is the closest
-//! analog: tenant, workspace, user and membership all committed together, guarded by
-//! `yorishiro_core::db::lock_for_update` rather than master's separate `pg_try_advisory_xact_lock`
-//! polling loop, since every write here already goes through `&impl ConnectionTrait` and can
-//! share one transaction end to end).
+//! Find-or-create for OAuth-provisioned users, plus the tenant/workspace auto-provisioning that happens the first time a given identity logs in.
+//! Tenant, workspace, user and membership are all committed together in one transaction, guarded by `yorishiro_core::db::lock_for_update`.
 //!
-//! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh
-//! OAuth-provisioned row) live in `models::oauth_users`, since `oauth_provider`/
-//! `oauth_subject_id` are columns this repo's own migration adds and `yorishiro_core`'s
-//! `identity_users` model knows nothing about the OAuth-specific lookups over them.
-//! This module owns the decision: which of the two branches a login takes, and how a first
-//! login wires a fresh tenant/workspace/membership together.
+//! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `models::oauth_users`, since `oauth_provider`/`oauth_subject_id` are columns this repo's own migration adds and `yorishiro_core`'s `identity_users` model knows nothing about the OAuth-specific lookups over them.
 
 use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, PaginatorTrait};
 use uuid::Uuid;
@@ -27,10 +16,7 @@ use crate::models::oauth_users::{
     CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_identity,
 };
 
-/// The workspace an OAuth login should issue its API key for, alongside the tenant/membership
-/// role that key's scope is derived from: everything the callback controller needs to call
-/// `yorishiro_core::models::identity_api_keys::IdentityApiKeys::create_api_key` exactly the way
-/// `POST /auth/login` does.
+/// The workspace an OAuth login should issue its API key for, alongside the tenant/membership role that key's scope is derived from: everything the callback controller needs to call `IdentityApiKeys::create_api_key` exactly the way `POST /auth/login` does.
 #[derive(Debug)]
 pub struct ProvisionedLogin {
     pub user_id: Uuid,
@@ -39,42 +25,19 @@ pub struct ProvisionedLogin {
     pub role: MembershipRole,
 }
 
-/// Finds the user for `(provider, subject_id)`, creating both the user and a fresh
-/// tenant/workspace/membership if this is the identity's first login.
-/// `email` is required (the design's whole point is looking users up by the ID token's `email`
-/// claim); a provider that omits it fails with `ValidationFailed` rather than silently
-/// provisioning an unusable account.
+/// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
+/// `email` is required (the design's whole point is looking users up by the ID token's `email` claim); a provider that omits it fails with `ValidationFailed` rather than silently provisioning an unusable account.
 ///
-/// New tenants/workspaces are named after the email's local part (e.g. `alice` from
-/// `alice@example.com`) since there is no signup form here to ask for a name.
+/// New tenants/workspaces are named after the email's local part (e.g. `alice` from `alice@example.com`) since there is no signup form here to ask for a name.
 /// An admin can rename either afterward through the existing dashboard/API.
-/// The new member's role is always `member`; an existing identity keeps whatever role it
-/// already holds.
-/// The new workspace gets a schema from the built-in `general-notes` template, unlike
-/// `controllers::setup::setup`'s own bootstrap-from-nothing workspace, which is left
-/// `schema_pending`: `setup` has an admin present to choose a starting schema afterward, an
-/// auto-provisioned SSO login has nobody, so it would otherwise land the new user on a
-/// workspace with nowhere to write anything. `embedding` is the deployment's actual model and
-/// width (the caller reads it from `shared_store`'s `EmbeddingProvider`, the same source
-/// `setup.rs` uses via `embedding_provider(&ctx)`), not a guessed default: this branch's
-/// `content_entities.embedding` index is a fixed width, so a workspace stamped with the wrong
-/// one would fail every entity write's dimension check.
+/// The new member's role is always `member`; an existing identity keeps whatever role it already holds.
+/// The new workspace gets a schema from the built-in `general-notes` template rather than being left `schema_pending`, since an auto-provisioned SSO login has no admin present afterward to choose one.
+/// `embedding` must be the deployment's actual model and width: the `content_entities.embedding` index is a fixed width, so a workspace stamped with the wrong one would fail every entity write's dimension check.
 ///
-/// The whole first-login path (user row, tenant, workspace, membership) runs in one
-/// transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`, so a crash
-/// partway through rolls the entire thing back rather than leaving an orphaned user row with no
-/// tenant membership, which every later login for that identity would otherwise resolve to a
-/// permanent `ScopeInsufficient`. The lock also serializes concurrent first logins for the exact
-/// same identity: without it, two callers racing a brand-new identity (e.g. a double-submitted
-/// callback) could both pass the existence check and both attempt to provision.
+/// The whole first-login path (user row, tenant, workspace, membership) runs in one transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`: a crash partway through rolls everything back rather than leaving an orphaned user row with no tenant membership, and the lock also serializes concurrent first logins for the same identity.
 ///
-/// `YORISHIRO_MAX_TENANTS` is enforced the same way `tenancy::create_tenant`-style paths enforce
-/// it elsewhere: auto-provisioning through SSO must not be a backdoor around a deployment's
-/// tenant cap. The check is not itself race-free against a *different* identity's first login
-/// landing between the count and the insert (this function's lock is keyed per-identity, not
-/// globally), the same residual window `controllers::setup::setup`'s own fast-path check accepts
-/// before its stricter re-check under its own lock; closing it fully is not worth a global lock
-/// on every OAuth login for a race window this narrow.
+/// `YORISHIRO_MAX_TENANTS` is enforced here too, so auto-provisioning through SSO cannot bypass a deployment's tenant cap.
+/// The check is not race-free against a *different* identity's first login landing between the count and the insert, since this function's lock is keyed per-identity, not globally; closing it fully is not worth a global lock on every OAuth login for a race window this narrow.
 pub async fn find_or_create(
     conn: &impl ConnectionTrait,
     provider: &str,
@@ -101,10 +64,8 @@ pub async fn find_or_create(
 
     let user = match create_oauth_user(conn, email, display_name, provider, subject_id).await {
         Ok(user) => user,
-        // The lookup above (under this same lock) confirmed no row exists for this
-        // (provider, subject_id) yet, so this can only be a genuine email collision with an
-        // unrelated account: no other caller can be concurrently inserting the same identity
-        // while this one holds the lock.
+        // The lookup above, under this same lock, confirmed no row exists for this identity
+        // yet, so this can only be a genuine email collision with an unrelated account.
         Err(CreateOauthUserError::UniqueViolation) => {
             return Err(YorishiroError::Conflict {
                 message: format!(
@@ -152,10 +113,8 @@ pub async fn find_or_create(
     )
     .await?;
 
-    // `content_schemas::create_schema` requires an existing `workspace_id` (a schema belongs to
-    // a workspace), so the schema can only be created once the workspace above exists; the
-    // workspace is then updated to point at it, rather than passing `schema_id` at creation
-    // time, which is what moves its `status` from `schema_pending` to `active`.
+    // A schema requires an existing `workspace_id`, so it is created after the workspace and
+    // the workspace is then updated to point at it, moving its `status` to `active`.
     let definition = yorishiro_core::templates::get_template("general-notes")?;
     let (schema, _diff) =
         content_schemas::create_schema(conn, tenant.id, workspace.id, definition, None, None)
@@ -185,14 +144,9 @@ fn identity_lock_key(provider: &str, subject_id: &str) -> String {
 }
 
 /// Resolves a previously-provisioned OAuth identity to the workspace/role its login should use.
-/// Called by `find_or_create` for its one identity lookup, whether that finds a returning user
-/// or a first-login race's winner (this call is always made under the identity's advisory lock,
-/// so a row found here is guaranteed to have finished provisioning its tenant, workspace and
-/// membership).
+/// Always called under the identity's advisory lock, so a row found here is guaranteed to have finished provisioning its tenant, workspace and membership.
 ///
-/// Mirrors `controllers::auth::login`'s own workspace resolution: an account reaching more than
-/// one workspace must be refused rather than silently resolved to an arbitrary one, since a
-/// silent choice could hand a login to the wrong tenant's workspace.
+/// An account reaching more than one workspace is refused rather than silently resolved to an arbitrary one, which could hand a login to the wrong tenant's workspace.
 async fn resolve_existing_login(
     conn: &impl ConnectionTrait,
     user: OAuthUser,

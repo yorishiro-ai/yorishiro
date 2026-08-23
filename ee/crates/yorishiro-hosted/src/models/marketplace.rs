@@ -1,15 +1,7 @@
-//! The template marketplace: `identity_templates` (owned by base) and the two tables this
-//! crate's own migration adds to support it, `identity_template_versions` and
-//! `identity_template_reviews`.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/models/marketplace.rs`, translated from
-//! `sea_query`'s query builder to the raw-SQL-plus-`find_by_statement` idiom the rest of this
-//! crate's models already use (`billing.rs`, `stripe_events.rs`): this branch has no
-//! `sea-query`/`sea-query-binder` dependency, and adding one for a single module would duplicate
-//! what `sea-orm`'s own `Statement::from_sql_and_values` already does.
+//! The template marketplace: `identity_templates` (owned by base) and the two tables this crate's own migration adds to support it, `identity_template_versions` and `identity_template_reviews`.
 //!
-//! Record shapes, input DTOs, and the reads live here. A write that is a genuine decision
-//! (ownership, status validation, version numbering under lock, a rating range) stays in
-//! `services::marketplace`, which calls into this module for the insert/update itself.
+//! Record shapes, input DTOs, and the reads live here.
+//! A write that is a genuine decision (ownership, status validation, version numbering under lock, a rating range) stays in `services::marketplace`, which calls into this module for the insert/update itself.
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
@@ -105,17 +97,11 @@ impl Default for ListMarketplaceQuery {
     }
 }
 
-/// Lists community-visible templates across every tenant, ordered by name then id, one page at a
-/// time.
+/// Lists community-visible templates across every tenant, ordered by name then id, one page at a time.
 ///
-/// A template appears only once it has a non-draft version: `visibility = 'community'` says its
-/// owner is willing to share it, but with nothing published there is nothing to install, and a
-/// listing whose every entry 404s on install is worse than a shorter one.
+/// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
 ///
-/// The three aggregates (latest stable version, review count, average rating) stay correlated
-/// subqueries rather than a `JOIN` + `GROUP BY`: with `limit` bounding the page to at most 200
-/// rows, their cost is bounded by the page size, and nothing here has measured the join rewrite
-/// as faster.
+/// The three aggregates (latest stable version, review count, average rating) stay correlated subqueries rather than a `JOIN` + `GROUP BY`: with `limit` bounding the page to at most 200 rows, their cost is bounded by the page size, and nothing here has measured the join rewrite as faster.
 pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     query: ListMarketplaceQuery,
@@ -174,13 +160,9 @@ pub async fn list_versions(
     .internal()
 }
 
-/// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the
-/// same statement.
+/// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
 ///
-/// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock
-/// (`services::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for
-/// rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum
-/// and collide on the `template_id, version` unique index.
+/// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`services::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
     template_id: Uuid,

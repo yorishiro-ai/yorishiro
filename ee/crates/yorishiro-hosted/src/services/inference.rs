@@ -1,18 +1,11 @@
 //! Calling an LLM to propose values for fields an entity is missing.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/inference.rs`, with error
-//! handling switched from master's simpler `.internal()` to this branch's own
-//! `ProviderUnreachable`/`ProviderBusy` convention (`yorishiro_core::services::embedding::openai`),
-//! since a request that never reached the provider or one that answered "come back later" are
-//! both operator-actionable, not internal server errors.
+//! Errors use `ProviderUnreachable`/`ProviderBusy` (`yorishiro_core::services::embedding::openai`), since a request that never reached the provider or one that answered "come back later" are both operator-actionable, not internal server errors.
 //!
-//! The one place this crate makes an outbound LLM call. Everything else that reaches a model goes
-//! through `yorishiro_core::services::embedding`, which produces vectors rather than text.
+//! The one place this crate makes an outbound LLM call.
+//! Everything else that reaches a model goes through `yorishiro_core::services::embedding`, which produces vectors rather than text.
 //!
-//! The credentials belong to a workspace, not to the deployment: this product does not pay for
-//! inference, so a workspace that wants inferred values brings its own key. A workspace with no
-//! key configured gets a `ValidationFailed` rather than a silent fall back to `default` values: a
-//! caller who asked for inference and received defaults would have no way to tell that nothing
-//! was inferred.
+//! The credentials belong to a workspace, not to the deployment: this product does not pay for inference, so a workspace that wants inferred values brings its own key.
+//! A workspace with no key configured gets a `ValidationFailed` rather than a silent fall back to `default` values: a caller who asked for inference and received defaults would have no way to tell that nothing was inferred.
 
 use std::time::Duration;
 
@@ -21,15 +14,12 @@ use serde_json::Value;
 
 use yorishiro_core::error::{ResultExt, YorishiroError};
 
-/// Longer than the embedding provider's 30s: a chat completion over several fields is a slower
-/// call than embedding one string, and the work is already asynchronous behind a job id, so a
-/// caller is not sitting on this.
+/// Longer than the embedding provider's 30s: a chat completion over several fields is a slower call than embedding one string, and the work is already asynchronous behind a job id, so a caller is not sitting on this.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// An OpenAI-compatible chat-completions endpoint, configured per workspace.
 ///
-/// The same shape `yorishiro_core::services::embedding::OpenAiCompatibleConfig` takes, so a
-/// deployment pointing at Ollama or LM Studio configures both the same way.
+/// The same shape `yorishiro_core::services::embedding::OpenAiCompatibleConfig` takes, so a deployment pointing at Ollama or LM Studio configures both the same way.
 #[derive(Clone)]
 pub struct InferenceConfig {
     /// Example: `https://api.openai.com/v1` (a trailing `/` is optional).
@@ -38,10 +28,8 @@ pub struct InferenceConfig {
     pub api_key: String,
 }
 
-/// Written out rather than derived, because a derived `Debug` prints `api_key` in clear text and
-/// anything that formats this (a tracing field, an error context, one `dbg!` left behind) would
-/// put a workspace's credential into a log. The endpoint and model still show, since those are
-/// what a reader is usually trying to identify.
+/// Written out rather than derived, because a derived `Debug` prints `api_key` in clear text and anything that formats this (a tracing field, an error context, one `dbg!` left behind) would put a workspace's credential into a log.
+/// The endpoint and model still show, since those are what a reader is usually trying to identify.
 impl std::fmt::Debug for InferenceConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InferenceConfig")
@@ -63,15 +51,8 @@ impl InferenceClient {
     pub fn new(config: InferenceConfig) -> Self {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
-            // No redirects. A workspace sets `base_url` freely, and this request carries both
-            // the entity's data and that workspace's bearer key. Following a 307 would re-send
-            // the body, headers included, to a host nobody configured. A chat-completions
-            // endpoint has no reason to redirect across hosts, so refusing costs nothing real
-            // and the error names the endpoint rather than hanging.
-            //
-            // This does not make the destination safe: `base_url` itself is still unrestricted,
-            // which is a policy question about what a tenant may point the server at. See
-            // `ee/docs/api.md`.
+            // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
+            // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at (see `ee/docs/api.md`).
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("reqwest client configuration is static and always valid");
@@ -115,9 +96,7 @@ impl InferenceClient {
                 role: "user",
                 content: &prompt,
             }],
-            // Deterministic: the same record should not produce a different proposal each run,
-            // or a caller comparing two runs cannot tell a model's uncertainty from a change in
-            // the data.
+            // Deterministic: the same record should not produce a different proposal each run, or a caller comparing two runs cannot tell a model's uncertainty from a change in the data.
             temperature: 0.0,
             response_format: ResponseFormat {
                 kind: "json_object",
@@ -144,9 +123,8 @@ impl InferenceClient {
                     retry_after: after,
                 });
             }
-            // The body may quote the key back or carry provider-side detail; neither belongs
-            // in an error a tenant reads. The status is what tells an operator whether to fix
-            // the key (401), the model name (404), or wait (429/503, handled above).
+            // The body may quote the key back or carry provider-side detail; neither belongs in an error a tenant reads.
+            // The status is what tells an operator whether to fix the key (401), the model name (404), or wait (429/503, handled above).
             return Err(YorishiroError::ValidationFailed {
                 message: format!("the configured inference provider returned {status}"),
                 details: vec![],
@@ -180,12 +158,8 @@ impl InferenceClient {
 
 /// How long to wait before retrying, or `None` when the response is not a reason to retry.
 ///
-/// 429 and 503 are the two a provider uses for "later"; everything else is a request that will
-/// fail again the same way. `Retry-After` is honoured when the provider sends it; a default
-/// stands in when it does not. Mirrors
-/// `yorishiro_core::services::embedding::openai`'s own `retry_after`, which is private to that
-/// module: the two providers (chat completions vs. embeddings) have different enough call shapes
-/// that sharing this one small pure function is not worth exporting a cross-crate seam for.
+/// 429 and 503 are the two a provider uses for "later"; everything else is a request that will fail again the same way.
+/// `Retry-After` is honoured when the provider sends it; a default stands in when it does not.
 fn retry_after(status: u16, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     if status != 429 && status != 503 {
         return None;
@@ -237,12 +211,11 @@ struct ChatResponseMessage {
 mod tests {
     use super::*;
 
-    /// Asking for nothing must not produce a request. A workspace whose entities are all
-    /// complete would otherwise pay for a call whose answer is discarded.
+    /// Asking for nothing must not produce a request.
+    /// A workspace whose entities are all complete would otherwise pay for a call whose answer is discarded.
     #[tokio::test]
     async fn no_missing_fields_makes_no_request() {
-        // An unroutable base_url: if a request were made, this would error rather than return
-        // empty.
+        // An unroutable base_url: if a request were made, this would error rather than return empty.
         let client = InferenceClient::new(InferenceConfig {
             base_url: "http://127.0.0.1:1/v1".into(),
             model: "unused".into(),
@@ -257,8 +230,7 @@ mod tests {
         assert!(proposals.is_empty());
     }
 
-    /// A provider that cannot be reached is reported without leaking the key, since the error
-    /// carries the caller's own request context.
+    /// A provider that cannot be reached is reported without leaking the key, since the error carries the caller's own request context.
     #[tokio::test]
     async fn an_unreachable_provider_is_reported_without_leaking_the_key() {
         let client = InferenceClient::new(InferenceConfig {
@@ -279,13 +251,9 @@ mod tests {
         );
     }
 
-    /// `InferenceConfig` holds a workspace's API key, and a derived `Debug` would print it.
-    /// Anything that formats the struct (a tracing field, an error context, one `dbg!` left in
-    /// during a debugging session) would then put the credential in a log, where nothing
-    /// removes it.
+    /// `InferenceConfig` holds a workspace's API key, and a derived `Debug` would print it in clear text into any log formatting the struct.
     ///
-    /// Asserted rather than left to the hand-written impl staying hand-written: adding `Debug`
-    /// back to the derive list is a one-word edit that reads as tidying up.
+    /// Asserted rather than left to the hand-written impl staying hand-written: adding `Debug` back to the derive list is a one-word edit that reads as tidying up.
     #[test]
     fn debug_does_not_render_the_api_key() {
         let config = InferenceConfig {

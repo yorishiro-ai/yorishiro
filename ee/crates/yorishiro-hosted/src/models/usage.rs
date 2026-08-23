@@ -1,5 +1,4 @@
 //! Usage counters for invoicing/dashboard display.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/models/usage.rs`.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;
@@ -36,9 +35,7 @@ async fn fetch_count(
 }
 
 /// Computes usage counters for invoicing/dashboard display.
-/// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every
-/// workspace in a tenant and `content_entities` only has a workspace-level RLS policy, not a
-/// tenant-wide one.
+/// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every workspace in a tenant and `content_entities` only has a workspace-level RLS policy, not a tenant-wide one.
 pub async fn compute_tenant_usage(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

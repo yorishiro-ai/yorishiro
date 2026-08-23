@@ -8,12 +8,9 @@ use crate::services::tenant_auth::create_tenant_api_key;
 /// `cargo loco task create_tenant_api_key tenant_id:<uuid> scope:read [user_id:<uuid>]`
 ///
 /// Separate from base's own `create_api_key` task, which always binds a key to one workspace.
-/// This issues a key with no bound workspace, naming the workspace per request with the
-/// `X-Workspace-Id` header instead: prefer `create_api_key` when a client only ever works in a
-/// single workspace, since a key bound to one workspace reaches less if it leaks.
+/// This issues a key with no bound workspace, naming the workspace per request with the `X-Workspace-Id` header instead: prefer `create_api_key` when a client only ever works in a single workspace, since a key bound to one workspace reaches less if it leaks.
 ///
-/// Wraps the already-ported `services::tenant_auth::create_tenant_api_key`, which does the
-/// actual insert (and the tenant-exists/role-cap checks) on the identity pool.
+/// Wraps `services::tenant_auth::create_tenant_api_key`, which does the actual insert and the tenant-exists/role-cap checks on the identity pool.
 pub struct CreateTenantApiKey;
 
 #[async_trait]

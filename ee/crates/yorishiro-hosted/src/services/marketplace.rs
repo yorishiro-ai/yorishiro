@@ -1,11 +1,7 @@
-//! Decisions about the template marketplace: ownership, status/rating validation, version
-//! numbering under lock, and how a fork's name collision is reported.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/marketplace.rs`.
+//! Decisions about the template marketplace: ownership, status/rating validation, version numbering under lock, and how a fork's name collision is reported.
 //!
-//! The pure reads (`list_marketplace`, `list_versions`, `list_reviews`) have no decision attached
-//! and live in `models::marketplace` alone; `controllers::marketplace` calls them directly.
-//! This module holds only the writes, calling into `models::marketplace` for the insert/update
-//! itself once a decision allows it.
+//! The pure reads (`list_marketplace`, `list_versions`, `list_reviews`) have no decision attached and live in `models::marketplace` alone; `controllers::marketplace` calls them directly.
+//! This module holds only the writes, calling into `models::marketplace` for the insert/update itself once a decision allows it.
 
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
@@ -32,9 +28,7 @@ fn validate_status(status: &str) -> Result<(), YorishiroError> {
 
 /// Publishes the next version of a template.
 ///
-/// Only the owning tenant may publish, and the version number is assigned in the insert itself
-/// rather than taken from the caller: letting a client choose it invites gaps and collisions in a
-/// sequence other tenants read as history.
+/// Only the owning tenant may publish, and the version number is assigned in the insert itself rather than taken from the caller: letting a client choose it invites gaps and collisions in a sequence other tenants read as history.
 pub async fn publish_version(
     ctx: &AppContext,
     tenant_id: Uuid,
@@ -45,16 +39,9 @@ pub async fn publish_version(
     validate_status(&request.status)?;
     require_ownership(ctx, tenant_id, template_id).await?;
 
-    // The insert reads `max(version) + 1` in the same statement it writes, and at READ COMMITTED
-    // Postgres locks no range for the rows that do not exist yet, so two concurrent publishes of
-    // one template both read the same maximum and both try to write the same next version.
-    // The unique index on `(template_id, version)` catches it, which is why this was never
-    // corruption, but the loser got an opaque 500 for doing nothing wrong.
-    //
-    // Serializing on the template turns that into what the caller expects: both succeed, with
-    // consecutive numbers. `db::lock_for_update` is transaction-scoped, so it releases on commit
-    // or rollback with no separate connection to leak (see `controllers::stripe`'s doc comment
-    // for the shape this replaced).
+    // The insert reads `max(version) + 1` in the same statement it writes, and at READ COMMITTED Postgres locks no range for the rows that do not exist yet, so two concurrent publishes of one template both read the same maximum and both try to write the same next version.
+    // Serializing on the template turns that into what the caller expects: both succeed, with consecutive numbers.
+    // `db::lock_for_update` is transaction-scoped, so it releases on commit or rollback with no separate connection to leak.
     let txn = ctx.db.begin().await.internal()?;
     db::lock_for_update(&txn, &format!("template-version:{template_id}"))
         .await
@@ -69,8 +56,7 @@ pub async fn publish_version(
 
 /// Records this tenant's review, replacing its previous one if it had left one.
 ///
-/// `tenant_id` comes from the authenticated context, never from the request body: taking it from
-/// input would let any caller review as any tenant, which is the whole value of a rating.
+/// `tenant_id` comes from the authenticated context, never from the request body: taking it from input would let any caller review as any tenant, which is the whole value of a rating.
 pub async fn submit_review(
     ctx: &AppContext,
     tenant_id: Uuid,
@@ -98,9 +84,7 @@ pub async fn submit_review(
 
 /// Copies a published version of someone else's template into the caller's own library.
 ///
-/// The copy records `fork_of`, and takes the definition from the *version* rather than the
-/// template row: the template keeps moving as its owner edits it, so forking "the template"
-/// would install whatever it happened to be at that instant rather than the version chosen.
+/// The copy records `fork_of`, and takes the definition from the *version* rather than the template row: the template keeps moving as its owner edits it, so forking "the template" would install whatever it happened to be at that instant rather than the version chosen.
 pub async fn fork_template(
     ctx: &AppContext,
     tenant_id: Uuid,
@@ -162,8 +146,7 @@ pub async fn set_visibility(
 
 /// Rejects any operation on a template the caller's tenant does not own.
 ///
-/// Reported as NotFound rather than Forbidden: a caller that cannot act on a template should not
-/// learn it exists from the difference between the two.
+/// Reported as NotFound rather than Forbidden: a caller that cannot act on a template should not learn it exists from the difference between the two.
 async fn require_ownership(
     ctx: &AppContext,
     tenant_id: Uuid,

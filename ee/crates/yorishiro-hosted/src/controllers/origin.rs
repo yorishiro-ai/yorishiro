@@ -1,16 +1,9 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/http/controllers/origin.rs`, at the same
-//! paths: this overlays base's own `/api/schemas` namespace, since merging a schema is a schema
-//! operation from the client's side, not an administrative one like the dashboard or Stripe.
+//! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
 //!
-//! Creating a schema from a template is base's responsibility, untouched by this crate; flowing a
-//! template's later edits into the copies is this edition's.
-//!
-//! Authentication goes through [`authz::authenticate_workspace`] rather than a base extractor,
-//! since this crate's lib may not depend on `yorishiro-server`. It resolves through
-//! `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a
-//! tenant-scoped one names it with `X-Workspace-Id`. The scope check is explicit for the same
-//! reason: there is no extractor here to carry it.
+//! Authentication goes through [`authz::authenticate_workspace`] rather than a base extractor, since this crate's lib may not depend on `yorishiro-server`.
+//! It resolves through `TenantScopedAuthenticator`, so a workspace-scoped key names its own workspace and a tenant-scoped one names it with `X-Workspace-Id`.
+//! The scope check is explicit for the same reason: there is no extractor here to carry it.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -29,8 +22,7 @@ use crate::models::origin as origin_model;
 use crate::services::merge::MergePlan;
 use crate::services::{authz, origin};
 
-/// Base's own extractors enforce a minimum scope by type. Without them, the check is written
-/// out: the ordering on `ApiKeyScope` is the same one they use.
+/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
 fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope < needed {
         return Err(YorishiroError::ScopeInsufficient {
@@ -41,8 +33,7 @@ fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), Yorishiro
     Ok(())
 }
 
-/// The response of a merge, matching the community edition's schema-creation response shape so a
-/// client written against that response shape needs no change.
+/// The response of a merge, matching the community edition's schema-creation response shape so a client written against that response shape needs no change.
 #[derive(Debug, Serialize)]
 pub struct MergeResponse {
     pub schema: SchemaRecord,
@@ -75,8 +66,7 @@ async fn merge_preview(
         .shared_store
         .get::<yorishiro_core::db::DbHandle>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    // The schema is workspace content and comes off the RLS-scoped connection; the template is
-    // control-plane data the request role holds no grant on, hence both `schema_txn` and `ctx`.
+    // The schema is workspace content and comes off the RLS-scoped connection; the template is control-plane data the request role holds no grant on, hence both `schema_txn` and `ctx`.
     let schema_txn = db
         .tenant
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)

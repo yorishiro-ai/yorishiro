@@ -52,9 +52,7 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
         )
         .await?;
 
-        // Compare against the newest version of any status, not just `stable`: publishing a
-        // fresh version every run would otherwise walk the version number up forever while the
-        // definition stayed the same.
+        // Compare against the newest version of any status, not just `stable`: publishing a fresh version every run would otherwise walk the version number up forever while the definition stayed the same.
         let latest = LatestVersion::find_by_statement(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             "SELECT version, definition FROM identity_template_versions \

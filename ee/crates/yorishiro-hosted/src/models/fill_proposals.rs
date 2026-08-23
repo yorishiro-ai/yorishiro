@@ -1,14 +1,9 @@
 //! Proposed values waiting to be confirmed.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/models/fill_proposals.rs`, translated to
-//! the raw-SQL-plus-`find_by_statement` idiom this crate's own tables already use.
 //!
-//! Mode A (base's `fill-defaults`, unrouted on this branch, see the worklist) reads a value out
-//! of the schema; this one asks a model to guess it. A guess written straight into
-//! `content_entities` is indistinguishable afterwards from a value a person entered, so it is
-//! held here until a caller confirms the job.
+//! Mode A (base's `fill-defaults`) reads a value out of the schema; this one asks a model to guess it.
+//! A guess written straight into `content_entities` is indistinguishable afterwards from a value a person entered, so it is held here until a caller confirms the job.
 //!
-//! Confirming reuses `content_entity_snapshots`: the same `job_id` groups the before-images, so
-//! `content_entities::undo_job` reverses a confirmation with no machinery of its own.
+//! Confirming reuses `content_entity_snapshots`: the same `job_id` groups the before-images, so `content_entities::undo_job` reverses a confirmation with no machinery of its own.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;
@@ -31,9 +26,8 @@ pub struct ConfirmReport {
     pub job_id: Uuid,
     /// Entities whose data was changed. Undo takes the same `job_id`.
     pub applied: i64,
-    /// Proposals whose entity no longer exists, or whose value the schema rejects. Skipping is
-    /// not an error: a proposal is a guess, and one guess failing validation should not stop
-    /// the rest of a reviewed batch from landing.
+    /// Proposals whose entity no longer exists, or whose value the schema rejects.
+    /// Skipping is not an error: a proposal is a guess, and one guess failing validation should not stop the rest of a reviewed batch from landing.
     pub skipped: i64,
 }
 
@@ -87,14 +81,10 @@ pub async fn for_job(
 
 /// Applies a job's proposals to the entities they were made for.
 ///
-/// Snapshots each entity under the same `job_id` first, so `content_entities::undo_job`
-/// reverses the whole confirmation. The proposals are deleted afterwards: leaving them would
-/// let the same job be confirmed twice, and the second run would write the same guesses over
-/// whatever the first run's undo had restored.
+/// Snapshots each entity under the same `job_id` first, so `content_entities::undo_job` reverses the whole confirmation.
+/// The proposals are deleted afterwards: leaving them would let the same job be confirmed twice, and the second run would write the same guesses over whatever the first run's undo had restored.
 ///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, which is
-/// what gives this its atomicity: a half-applied confirmation would leave the workspace in a
-/// state nobody reviewed, and the snapshots would describe a rollback point that never existed.
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, which is what gives this its atomicity: a half-applied confirmation would leave the workspace in a state nobody reviewed, and the snapshots would describe a rollback point that never existed.
 pub async fn confirm(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

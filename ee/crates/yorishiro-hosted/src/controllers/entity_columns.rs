@@ -1,10 +1,7 @@
-//! Which columns the Entities table shows, chosen per workspace and entity type. Ported from
-//! master's `ee/crates/yorishiro-hosted/src/http/controllers/entity_columns.rs`, at the same
-//! `/api/workspace/entity-columns` paths: base's own workspace routes are mounted at
-//! `api/workspaces` (plural), so this does not collide.
+//! Which columns the Entities table shows, chosen per workspace and entity type.
+//! Mounted at `/api/workspace/entity-columns` (singular): base's own workspace routes are mounted at `api/workspaces` (plural), so this does not collide.
 //!
-//! Reading needs `read`, writing needs `write`: this is a display preference, not schema state,
-//! so a key that may create entities may also decide how they are listed.
+//! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -19,8 +16,7 @@ use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
 use crate::models::entity_columns::{self, ColumnPreference};
 use crate::services::authz;
 
-/// Base's own extractors enforce a minimum scope by type. Without them, the check is written
-/// out: the ordering on `ApiKeyScope` is the same one they use.
+/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
 fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope < needed {
         return Err(YorishiroError::ScopeInsufficient {
@@ -33,9 +29,8 @@ fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), Yorishiro
 
 #[derive(Debug, Deserialize)]
 pub struct SetColumnsRequest {
-    /// Field names from the schema, in the order they should be displayed. An empty list is a
-    /// choice ("show no fields"), distinct from never having chosen, which is what `DELETE`
-    /// restores.
+    /// Field names from the schema, in the order they should be displayed.
+    /// An empty list is a choice ("show no fields"), distinct from never having chosen, which is what `DELETE` restores.
     pub columns: Vec<String>,
 }
 

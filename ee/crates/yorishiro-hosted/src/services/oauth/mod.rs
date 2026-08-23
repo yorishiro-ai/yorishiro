@@ -1,8 +1,5 @@
-//! OAuth2/OIDC login: an additional, optional way to obtain a Yorishiro API key alongside the
-//! community server's own `POST /auth/login` (email/password).
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/oauth/mod.rs`.
-//! See `config::OAuthConfig` for how this is enabled/disabled, and `controllers::oauth` for the
-//! three routes that use this module.
+//! OAuth2/OIDC login: an additional, optional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login` (email/password).
+//! See `config::OAuthConfig` for how this is enabled/disabled, and `controllers::oauth` for the three routes that use this module.
 
 pub mod config;
 mod discovery;
@@ -16,18 +13,14 @@ pub use users::{ProvisionedLogin, find_or_create};
 
 use yorishiro_core::YorishiroError;
 
-/// Everything `GET /auth/oauth/authorize` needs to build its redirect and set the CSRF cookie
-/// that binds the flow to this browser (see `state_token` module docs).
+/// Everything `GET /auth/oauth/authorize` needs to build its redirect and set the CSRF cookie that binds the flow to this browser (see `state_token` module docs).
 pub struct AuthorizeRedirect {
     pub url: String,
     pub csrf_cookie_value: String,
 }
 
-/// Builds the provider's authorize URL (RFC 6749 §4.1.1) with a freshly issued, signed `state`
-/// (see `state_token`) and PKCE challenge (RFC 7636) attached.
-/// `openid email profile` is a fixed scope request rather than configurable, since `email` is
-/// the one claim this integration actually requires (see `users::find_or_create`) and every
-/// OIDC provider recognizes all three.
+/// Builds the provider's authorize URL (RFC 6749 §4.1.1) with a freshly issued, signed `state` (see `state_token`) and PKCE challenge (RFC 7636) attached.
+/// `openid email profile` is a fixed scope request, not configurable: `email` is the one claim `users::find_or_create` requires.
 pub async fn build_authorize_redirect(
     config: &OAuthConfig,
 ) -> Result<AuthorizeRedirect, YorishiroError> {
@@ -61,15 +54,9 @@ pub struct CallbackIdentity {
     pub display_name: Option<String>,
 }
 
-/// Handles `GET /auth/oauth/callback`'s core logic: verifies `state` and the CSRF cookie it is
-/// bound to (see `state_token` module docs), exchanges `code` for tokens, and verifies the
-/// returned ID token.
-/// Split out from the controller so it has no axum dependency and can be tested without spinning
-/// up a router.
+/// Handles `GET /auth/oauth/callback`'s core logic: verifies `state` and the CSRF cookie it is bound to (see `state_token` module docs), exchanges `code` for tokens, and verifies the returned ID token.
 ///
-/// `csrf_cookie_value` is `None` when the browser presented no CSRF cookie at all (e.g. it was
-/// stripped, or the callback is being hit without ever having visited `/auth/oauth/authorize`
-/// first): treated the same as a mismatched cookie, both rejected before `state` is trusted.
+/// `csrf_cookie_value` is `None` when the browser presented no CSRF cookie at all: treated the same as a mismatched cookie, both rejected before `state` is trusted.
 pub async fn handle_callback(
     config: &OAuthConfig,
     code: &str,
@@ -128,11 +115,8 @@ pub async fn handle_callback(
     })
 }
 
-/// Builds `base` (the provider's discovery document's `authorization_endpoint`, fetched live on
-/// every `/auth/oauth/authorize` request) with `params` appended as a query string.
-/// Returns an error rather than panicking on a malformed `base`, since it comes from an
-/// external, unvalidated network response: a misconfigured or misbehaving provider must not be
-/// able to crash the request-handling task.
+/// Builds `base` (the provider's `authorization_endpoint`) with `params` appended as a query string.
+/// Returns an error rather than panicking on a malformed `base`, since it comes from an external, unvalidated network response.
 fn url_with_query(base: &str, params: &[(&str, &str)]) -> Result<String, YorishiroError> {
     let mut url = url::Url::parse(base).map_err(|err| {
         YorishiroError::Internal(anyhow::anyhow!(

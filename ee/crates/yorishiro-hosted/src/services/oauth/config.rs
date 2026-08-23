@@ -1,17 +1,8 @@
-//! Configuration for OAuth2/OIDC login, read fresh from the environment on every request (see
-//! `controllers::oauth`'s module doc comment for why).
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/oauth/config.rs`, which read it
-//! once at startup instead: master's `require_non_empty_env` could panic there because a bad
-//! config failed the whole boot, fail-fast, before any request was served. Read per-request, the
-//! same panic would crash the task handling whichever request happened to trigger it, so this
-//! version reports `YorishiroError::Internal` instead, matching how every other request-time
-//! failure in this codebase is surfaced.
+//! Configuration for OAuth2/OIDC login, read fresh from the environment on every request (see `controllers::oauth`'s module doc comment for why).
+//! A bad config reports `YorishiroError::Internal` rather than panicking, since a panic here would crash the task handling whichever request triggered it.
 //!
 //! `Ok(None)` (via [`OAuthConfig::from_env`]) means OAuth is disabled.
-//! Every `/auth/oauth/authorize` and `/auth/oauth/callback` request then answers `404`, and
-//! the community server's own `/auth/login` (email/password) is unaffected.
-//! This mirrors how the Stripe webhook stays mounted even when unconfigured, answering its own
-//! kind of "not set up" response instead of not existing.
+//! Every `/auth/oauth/authorize` and `/auth/oauth/callback` request then answers `404`, and the community server's own `/auth/login` (email/password) is unaffected.
 
 use yorishiro_core::YorishiroError;
 
@@ -20,30 +11,22 @@ use crate::services::non_empty_env;
 #[derive(Debug, Clone)]
 pub struct OAuthConfig {
     /// The identity provider's issuer URL, e.g. `https://accounts.google.com`.
-    /// OIDC discovery (`{issuer_url}/.well-known/openid-configuration`) is fetched from this at
-    /// request time, not cached at startup, so a provider that rotates its signing keys or
-    /// endpoints does not require a restart.
+    /// OIDC discovery is fetched from this at request time, not cached at startup.
     pub issuer_url: String,
     pub client_id: String,
     pub client_secret: String,
     /// Where the provider redirects back to after the user authenticates.
-    /// Defaults to a `localhost`-rewritten `YORISHIRO_BIND`, see [`default_redirect_uri`]: a
-    /// bind address is usually `0.0.0.0:...`, not a host a browser can reach.
+    /// Defaults to a `localhost`-rewritten `YORISHIRO_BIND`, see [`default_redirect_uri`]: a bind address is usually `0.0.0.0:...`, not a host a browser can reach.
     pub redirect_uri: String,
     /// HMAC key used to sign the `state` parameter that round-trips through the provider.
-    /// Derived from `client_secret` so no separate secret needs provisioning: the state token's
-    /// only job is proving this process issued it, not protecting data confidentiality.
+    /// Derived from `client_secret` so no separate secret needs provisioning.
     pub state_signing_key: Vec<u8>,
 }
 
 impl OAuthConfig {
     /// Reads the four `YORISHIRO_OAUTH_*` variables.
-    /// Returns `Ok(None)` when `YORISHIRO_OAUTH_ISSUER_URL` is unset or empty: OAuth login is
-    /// opt-in, and every other variable is meaningless without an issuer to talk to.
-    /// `YORISHIRO_OAUTH_CLIENT_ID`/`YORISHIRO_OAUTH_CLIENT_SECRET` are required once the issuer
-    /// is set; a deployment that sets the issuer but leaves one of these unset or empty gets
-    /// `Err` naming which, rather than silently leaving OAuth half-configured or being treated
-    /// the same as simply unconfigured.
+    /// Returns `Ok(None)` when `YORISHIRO_OAUTH_ISSUER_URL` is unset or empty: OAuth login is opt-in, and every other variable is meaningless without an issuer to talk to.
+    /// `YORISHIRO_OAUTH_CLIENT_ID`/`YORISHIRO_OAUTH_CLIENT_SECRET` are required once the issuer is set; a deployment that sets the issuer but leaves one of these unset or empty gets `Err` naming which, rather than silently leaving OAuth half-configured or being treated the same as simply unconfigured.
     pub fn from_env() -> Result<Option<Self>, YorishiroError> {
         let Some(issuer_url) = non_empty_env("YORISHIRO_OAUTH_ISSUER_URL") else {
             return Ok(None);
@@ -67,17 +50,13 @@ impl OAuthConfig {
     }
 
     /// Whether the CSRF cookie `authorize` sets should carry the `Secure` attribute.
-    /// Tied to `redirect_uri`'s scheme rather than a separate variable, so the
-    /// `http://localhost:...` default keeps working for local testing while a real deployment
-    /// (which sets `YORISHIRO_OAUTH_REDIRECT_URI` to a public `https://` URL) gets the stricter
-    /// attribute automatically.
+    /// Tied to `redirect_uri`'s scheme rather than a separate variable.
     pub fn cookies_require_secure(&self) -> bool {
         self.redirect_uri.starts_with("https://")
     }
 }
 
-/// Reads `key` via [`non_empty_env`] or errors naming exactly which variable is missing and why
-/// it matters.
+/// Reads `key` via [`non_empty_env`] or errors naming exactly which variable is missing and why it matters.
 fn require_non_empty_env(key: &str) -> Result<String, YorishiroError> {
     require_non_empty(key, non_empty_env(key).as_deref())
 }
@@ -93,10 +72,8 @@ pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, Yorishi
     }
 }
 
-/// `http://{host}/auth/oauth/callback`, where `host` rewrites an all-interfaces `YORISHIRO_BIND`
-/// to `localhost` since a browser cannot dial `0.0.0.0` directly.
-/// Most real deployments sit behind a reverse proxy on a public hostname, so they are expected
-/// to set `YORISHIRO_OAUTH_REDIRECT_URI` explicitly; this default only covers local testing.
+/// `http://{host}/auth/oauth/callback`, where `host` rewrites an all-interfaces `YORISHIRO_BIND` to `localhost` since a browser cannot dial `0.0.0.0` directly.
+/// This default only covers local testing; a real deployment sets `YORISHIRO_OAUTH_REDIRECT_URI` explicitly.
 fn default_redirect_uri() -> String {
     let bind = std::env::var("YORISHIRO_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     format!(
@@ -105,14 +82,9 @@ fn default_redirect_uri() -> String {
     )
 }
 
-/// Rewrites `host:port` to `localhost:port` when the host is an all-interfaces bind address
-/// (`0.0.0.0` or `::`), leaving everything else (including a real IP that merely *contains* the
-/// substring `"0.0.0.0"`, like `10.0.0.0`) as given.
-/// Parses the whole string as a [`std::net::SocketAddr`] rather than doing a substring replace,
-/// which would corrupt an address like `10.0.0.0:8081` into `1localhost:8081`.
-/// A `bind` that is not a valid `SocketAddr` at all (a hostname, or an unbracketed IPv6 literal)
-/// passes through unchanged: it is either already a browser-reachable host, or malformed enough
-/// that guessing at a rewrite would only make things worse.
+/// Rewrites `host:port` to `localhost:port` when the host is an all-interfaces bind address (`0.0.0.0` or `::`), leaving everything else as given.
+/// Parses the whole string as a [`std::net::SocketAddr`] rather than doing a substring replace, which would corrupt an address like `10.0.0.0:8081` into `1localhost:8081`.
+/// A `bind` that is not a valid `SocketAddr` at all passes through unchanged.
 pub fn rewrite_unspecified_host(bind: &str) -> String {
     match bind.parse::<std::net::SocketAddr>() {
         Ok(addr) if addr.ip().is_unspecified() => format!("localhost:{}", addr.port()),

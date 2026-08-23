@@ -1,10 +1,7 @@
-//! Inferring values for fields an entity is missing, and the per-workspace credentials it runs
-//! on. Ported from master's `ee/crates/yorishiro-hosted/src/http/controllers/inference.rs`.
+//! Inferring values for fields an entity is missing, and the per-workspace credentials it runs on.
 //!
-//! This product does not pay for inference, so a workspace brings its own key. A workspace with
-//! none configured gets a 422 rather than a fall back to `default` values: a caller who asked
-//! for inference and silently received defaults would have no way to tell that nothing was
-//! inferred.
+//! This product does not pay for inference, so a workspace brings its own key.
+//! A workspace with none configured gets a 422 rather than a fall back to `default` values: a caller who asked for inference and silently received defaults would have no way to tell that nothing was inferred.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -24,8 +21,7 @@ use crate::services::authz;
 use crate::services::inference::InferenceClient;
 use crate::services::licence::LicenceState;
 
-/// Base's own extractors enforce a minimum scope by type. Without them, the check is written
-/// out: the ordering on `ApiKeyScope` is the same one they use.
+/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
 fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
     if ctx.scope < needed {
         return Err(YorishiroError::ScopeInsufficient {
@@ -104,9 +100,8 @@ async fn infer_fill(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<InferFillReport>, ApiError> {
-    // The server calls an LLM here, which is the definition of a paid feature. Checked before
-    // authentication so an unlicensed deployment answers the same 404 to everyone, rather than
-    // confirming to a valid key that the endpoint exists and is merely locked.
+    // The server calls an LLM here, which is the definition of a paid feature.
+    // Checked before authentication so an unlicensed deployment answers the same 404 to everyone, rather than confirming to a valid key that the endpoint exists and is merely locked.
     ctx.shared_store
         .get::<LicenceState>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("LicenceState missing")))?
@@ -115,8 +110,7 @@ async fn infer_fill(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     let workspace_id = auth_ctx.workspace_id;
 
-    // Refuse before doing any work: a caller with no key gets one clear error rather than a
-    // scan that reports zero proposals and reads as "nothing to infer".
+    // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero proposals and reads as "nothing to infer".
     let config = llm_keys::get(&ctx.db, workspace_id).await?.ok_or_else(|| {
         YorishiroError::ValidationFailed {
             message: "this workspace has no LLM credentials configured".into(),
@@ -147,9 +141,8 @@ async fn infer_fill(
     let mut proposed = 0i64;
     let mut skipped = 0i64;
 
-    // The same set base's fill-defaults would walk: entities on a version older than the
-    // active one. An entity already on the active version has nothing the schema says is
-    // missing.
+    // The same set base's fill-defaults would walk: entities on a version older than the active one.
+    // An entity already on the active version has nothing the schema says is missing.
     #[derive(sea_orm::FromQueryResult)]
     struct Row {
         id: Uuid,

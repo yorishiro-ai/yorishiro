@@ -1,25 +1,8 @@
-//! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a
-//! Yorishiro API key alongside the community server's own `POST /auth/login`.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/http/controllers/oauth.rs`, onto this
-//! branch's `AppContext` composition seam rather than master's own `HostedState`, and
-//! reading/writing the CSRF cookie by hand (`Set-Cookie`/`Cookie` header strings) rather than
-//! `axum-extra`'s `CookieJar`, since this crate has no other cookie need yet to justify the
-//! dependency.
+//! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login`.
 //!
-//! All three routes are enterprise-only *and* opt-in within the enterprise binary:
-//! `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set,
-//! in which case `authorize`/`callback` return `404 Not Found` before doing anything else,
-//! indistinguishable from the route simply not existing, matching how an unconfigured Stripe
-//! webhook secret is handled. A set issuer with a missing `client_id`/`client_secret` is a
-//! different case, `Err`, and answers `500` naming the misconfiguration rather than either
-//! `404`. There is deliberately no licence gate here: OAuth is opt-in-by-configuration, the same
-//! shape as the Stripe webhook, not a licensed feature a self-hosted operator would expect to
-//! unlock separately from setting it up.
-//!
-//! `OAuthConfig::from_env()` is read fresh on every request rather than cached at boot, matching
-//! `controllers::stripe`'s own `StripeConfig::from_env()` call: this crate has no DI seam for
-//! either, so a test configures either the same way production does, by setting the process
-//! environment for the request's duration.
+//! All three routes are enterprise-only *and* opt-in within the enterprise binary: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing, matching how an unconfigured Stripe webhook secret is handled.
+//! A set issuer with a missing `client_id`/`client_secret` is a different case, `Err`, and answers `500` naming the misconfiguration rather than either `404`.
+//! There is deliberately no licence gate here: OAuth is opt-in-by-configuration, not a licensed feature to unlock separately from setting it up.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -37,8 +20,7 @@ use yorishiro_core::models::identity_api_keys::IdentityApiKeys;
 use crate::services::oauth;
 use crate::services::oauth::OAuthConfig;
 
-/// Name of the CSRF cookie `authorize` sets and `callback` reads back: see `state_token` module
-/// docs for why this binding exists.
+/// Name of the CSRF cookie `authorize` sets and `callback` reads back.
 const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
 
 fn not_found() -> ApiError {
@@ -46,7 +28,6 @@ fn not_found() -> ApiError {
 }
 
 /// Reads `name`'s value out of the request's `Cookie` header, if present.
-/// A minimal parser rather than a crate dependency: this crate has exactly one cookie need.
 fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get(header::COOKIE)?.to_str().ok()?;
     raw.split(';').find_map(|pair| {
@@ -55,9 +36,7 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     })
 }
 
-/// Builds a `Set-Cookie` header value for the CSRF cookie: `HttpOnly`, `SameSite=Lax`, scoped to
-/// the callback path only, `Secure` when the configured redirect URI is itself `https://` (see
-/// `OAuthConfig::cookies_require_secure`), and expiring with the `state` it is bound to.
+/// Builds a `Set-Cookie` header value for the CSRF cookie: `HttpOnly`, `SameSite=Lax`, scoped to the callback path only, `Secure` when the configured redirect URI is itself `https://` (see `OAuthConfig::cookies_require_secure`), and expiring with the `state` it is bound to.
 fn csrf_set_cookie(value: &str, secure: bool) -> String {
     let secure_attr = if secure { "; Secure" } else { "" };
     let max_age = oauth::STATE_TTL_SECS;
@@ -67,35 +46,27 @@ fn csrf_set_cookie(value: &str, secure: bool) -> String {
     )
 }
 
-/// Clears the CSRF cookie: `Max-Age=0` on the same path it was set with, so the browser drops it
-/// immediately rather than leaving it to expire naturally.
+/// Clears the CSRF cookie: `Max-Age=0` on the same path it was set with, so the browser drops it immediately rather than leaving it to expire naturally.
 fn csrf_clear_cookie() -> String {
     format!("{CSRF_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0")
 }
 
 #[derive(Debug, Serialize)]
 pub struct OAuthStatus {
-    /// `false` when `YORISHIRO_OAUTH_ISSUER_URL` is unset, in which case `authorize`/`callback`
-    /// return `404`.
+    /// `false` when `YORISHIRO_OAUTH_ISSUER_URL` is unset, in which case `authorize`/`callback` return `404`.
     pub enabled: bool,
 }
 
-/// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button,
-/// without hardcoding a build-time assumption about whether OAuth is configured. Unlike the
-/// other two routes, this one always returns `200` (`enabled: false` when unconfigured) rather
-/// than `404`, since a client that could not tell "not configured" apart from "not present"
-/// would have no way to decide whether to show the button at all.
+/// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
+/// Unlike the other two routes, this one always returns `200` (`enabled: false` when unconfigured) rather than `404`, since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
 async fn status() -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_env()?.is_some(),
     }))
 }
 
-/// `GET /auth/oauth/authorize`: starts the login flow by redirecting the browser to the identity
-/// provider's own authorization endpoint. Also sets the CSRF cookie that `callback` checks the
-/// returning `state` against: without it, `state`'s HMAC signature alone only proves this server
-/// issued *some* state, not that the browser presenting it at callback time is the one that
-/// started this flow.
+/// `GET /auth/oauth/authorize`: starts the login flow by redirecting the browser to the identity provider's own authorization endpoint.
+/// Also sets the CSRF cookie that `callback` checks the returning `state` against: without it, `state`'s HMAC signature alone only proves this server issued *some* state, not that the browser presenting it at callback time is the one that started this flow.
 async fn authorize() -> Result<Response, ApiError> {
     let config = OAuthConfig::from_env()?.ok_or_else(not_found)?;
 
@@ -120,12 +91,8 @@ struct CallbackParams {
     error_description: Option<String>,
 }
 
-/// `GET /auth/oauth/callback`: the identity provider's redirect target. Exchanges the
-/// authorization code for tokens, verifies the ID token, resolves (or auto-provisions) the
-/// Yorishiro user/tenant/workspace it corresponds to, issues an API key exactly the way
-/// `POST /auth/login` does, and hands it to the client via a URL fragment (`#api_key=...`), a
-/// fragment rather than a query parameter so the key never appears in server access logs or
-/// gets sent back to any server in a `Referer` header.
+/// `GET /auth/oauth/callback`: the identity provider's redirect target.
+/// Exchanges the authorization code for tokens, verifies the ID token, resolves (or auto-provisions) the Yorishiro user/tenant/workspace it corresponds to, issues an API key exactly the way `POST /auth/login` does, and hands it to the client via a URL fragment (`#api_key=...`), a fragment rather than a query parameter so the key never appears in server access logs or gets sent back to any server in a `Referer` header.
 async fn callback(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -133,8 +100,6 @@ async fn callback(
 ) -> Result<Response, ApiError> {
     let config = OAuthConfig::from_env()?.ok_or_else(not_found)?;
 
-    // Read before clearing: both come from the same request, but read first for clarity, same
-    // ordering master's own controller used.
     let csrf_cookie_value = read_cookie(&headers, CSRF_COOKIE_NAME);
     let clear_cookie = csrf_clear_cookie();
 
@@ -155,10 +120,7 @@ async fn callback(
         oauth::handle_callback(&config, &code, &request_state, csrf_cookie_value.as_deref())
             .await?;
 
-    // The deployment's actual embedding model and width, the same source `setup.rs` stamps a
-    // freshly bootstrapped workspace with, not a guessed default: this branch's
-    // `content_entities.embedding` index is a fixed width, and a workspace stamped with the
-    // wrong one fails every entity write's dimension check.
+    // The deployment's actual embedding model and width, the same source `setup.rs` stamps a freshly bootstrapped workspace with, not a guessed default: `content_entities.embedding`'s index is a fixed width, and a workspace stamped with the wrong one fails every entity write's dimension check.
     let embedding_provider = ctx
         .shared_store
         .get::<std::sync::Arc<dyn yorishiro_core::services::embedding::EmbeddingProvider>>()
@@ -194,9 +156,7 @@ async fn callback(
 }
 
 fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
-    // `api_key` is a value this process just generated (`ysr_<hex>_<hex>`, see
-    // `yorishiro_core::services::auth::create_api_key`), not provider- or user-supplied input,
-    // so no additional encoding is needed for it to appear safely in a URL fragment.
+    // `api_key` is a value this process just generated (`ysr_<hex>_<hex>`, see `yorishiro_core::services::auth::create_api_key`), not provider- or user-supplied input, so no additional encoding is needed for it to appear safely in a URL fragment.
     let location = format!("/#api_key={api_key}");
     (
         StatusCode::FOUND,

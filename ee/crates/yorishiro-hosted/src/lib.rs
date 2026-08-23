@@ -1,14 +1,9 @@
 //! The paid edition's composition seam.
 //!
-//! `HostedApp` is a second `loco_rs::app::Hooks` implementation, distinct from
-//! `yorishiro_core::app::App`, so `cli::main::<HostedApp, Migrator>()` boots the same
-//! application with `ee/`'s pieces layered on. Every method delegates to `App`'s associated fn
-//! for the base behaviour first; `ee/`-only wiring (the licence gate, and later the paid
-//! routes/tasks/SPA) is added around that call rather than duplicating it, so a change to base's
-//! boot sequence only needs updating here if this crate actually diverges from it.
+//! `HostedApp` is a second `loco_rs::app::Hooks` implementation, distinct from `yorishiro_core::app::App`.
+//! Every method delegates to `App`'s associated fn for the base behaviour first; `ee/`-only wiring is added around that call rather than duplicating it.
 //!
-//! `yorishiro-core` must never depend on this crate; this crate depends on it. See CLAUDE.md's
-//! "Editions and the `ee/` boundary" for the standing rule this file exists to satisfy.
+//! `yorishiro-core` must never depend on this crate; this crate depends on it.
 
 pub mod controllers;
 pub mod models;
@@ -57,7 +52,6 @@ impl Hooks for HostedApp {
         App::initializers(ctx).await
     }
 
-    /// Runs base's `after_context`, then stores the licence state and swaps in `TenantScopedAuthenticator`.
     /// An absent or invalid licence key does not fail boot.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         let ctx = App::after_context(ctx).await?;
@@ -70,7 +64,6 @@ impl Hooks for HostedApp {
         Ok(ctx)
     }
 
-    /// Adds this crate's own routes onto base's own `AppRoutes`.
     /// `dashboard` and the Stripe webhook are always mounted (not licence-gated); `marketplace` 404s without a licence.
     /// `inference`'s `/hosted` prefix is an unchecked deviation from `origin`/`entity_columns`, which mount at master's own paths after confirming no collision: reconcile before the PR.
     fn routes(ctx: &AppContext) -> AppRoutes {
@@ -84,9 +77,7 @@ impl Hooks for HostedApp {
             .add_route(controllers::stripe::routes())
     }
 
-    /// Delegates unchanged: base's `after_routes` mounts `/mcp` and its middleware layers.
-    /// Master's `HostedMcpServer` MCP-tool seam is not ported: `controllers::mcp::mount` hardcodes a concrete `ServerHandler` type, so adding it means re-implementing `mount` and its layers here.
-    /// Revisit when this crate needs its first MCP-only tool.
+    /// `controllers::mcp::mount` hardcodes a concrete `ServerHandler` type, so an ee-only MCP tool would mean re-implementing `mount` and its layers here.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
         App::after_routes(router, ctx).await
     }
@@ -95,7 +86,6 @@ impl Hooks for HostedApp {
         App::connect_workers(ctx, queue).await
     }
 
-    /// Adds this crate's own tasks onto base's own.
     fn register_tasks(tasks: &mut Tasks) {
         App::register_tasks(tasks);
         tasks.register(tasks::seed_official_templates::SeedOfficialTemplates);
@@ -106,7 +96,6 @@ impl Hooks for HostedApp {
         App::truncate(ctx).await
     }
 
-    /// Creates the official-templates publisher tenant.
     /// Publishing the templates themselves stays `seed_official_templates`'s own job.
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         App::seed(ctx, base).await?;

@@ -1,10 +1,7 @@
 //! Billing state stored in this crate's own `identity_tenant_billing` table.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/models/billing.rs`.
 //!
-//! `yorishiro-core` owns `identity_tenants` and knows nothing about subscriptions or payment
-//! processors, so the plan and the Stripe customer id live here instead, keyed by tenant id. A
-//! tenant with no row is unbilled (the state every self-hosted deployment is permanently in),
-//! which is why every read returns an `Option` rather than treating a missing row as an error.
+//! `yorishiro-core` owns `identity_tenants` and knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
+//! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use uuid::Uuid;
@@ -54,9 +51,8 @@ pub async fn get_by_stripe_customer(
     .internal()
 }
 
-/// Records the Stripe customer id created for a tenant at checkout, so later webhook events can
-/// be routed back to it via [`get_by_stripe_customer`]. Upserts, because checkout can be
-/// completed for a tenant that already has a billing row (a resubscribe after cancellation).
+/// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via [`get_by_stripe_customer`].
+/// Upserts, because checkout can be completed for a tenant that already has a billing row (a resubscribe after cancellation).
 pub async fn link_stripe_customer(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -75,11 +71,9 @@ pub async fn link_stripe_customer(
 }
 
 /// Sets a tenant's plan.
-/// Upserts for the same reason as [`link_stripe_customer`]: a plan can be assigned before or
-/// after the customer id is linked, depending on which webhook lands first.
+/// Upserts for the same reason as [`link_stripe_customer`]: a plan can be assigned before or after the customer id is linked, depending on which webhook lands first.
 ///
-/// The workspace cap that comes with the plan is not written here: it lives on
-/// `identity_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
+/// The workspace cap that comes with the plan is not written here: it lives on `identity_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
 /// The caller applies both.
 pub async fn set_plan(
     conn: &impl ConnectionTrait,

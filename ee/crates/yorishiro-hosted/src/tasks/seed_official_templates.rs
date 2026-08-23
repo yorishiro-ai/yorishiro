@@ -5,8 +5,8 @@ use crate::services::official_templates;
 
 /// `cargo loco task seed_official_templates`
 ///
-/// Publishes the community edition's built-in templates as official, community-visible
-/// marketplace listings. Idempotent: safe to run on every deployment, including every restart.
+/// Publishes the community edition's built-in templates as official, community-visible marketplace listings.
+/// Idempotent: safe to run on every deployment, including every restart.
 pub struct SeedOfficialTemplates;
 
 #[async_trait]

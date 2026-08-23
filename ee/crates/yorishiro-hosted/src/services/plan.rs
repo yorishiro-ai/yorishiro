@@ -1,9 +1,6 @@
 //! Subscription tiers for the hosted offering.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/plan.rs`.
 //!
-//! Self-hosted deployments never assign a plan (`identity_tenants.plan` stays absent, since base
-//! never writes `identity_tenant_billing`); this type is only ever produced by this crate's
-//! Stripe integration.
+//! Self-hosted deployments never assign a plan (`identity_tenants.plan` stays absent, since base never writes `identity_tenant_billing`); this type is only ever produced by this crate's Stripe integration.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,11 +13,8 @@ pub enum Plan {
 }
 
 /// Caps applied when a tenant is on a given plan.
-/// `max_workspaces` is written straight onto `identity_tenants` (see
-/// `yorishiro_core::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the
-/// cap a caller should pass to `tenancy::create_workspace` for any workspace created while this
-/// plan is active: existing workspaces keep whatever cap they were created with, since
-/// retroactively shrinking a cap could put an existing workspace over its own limit.
+/// `max_workspaces` is written straight onto `identity_tenants` (see `yorishiro_core::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
+/// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
 #[derive(Debug, Clone, Copy)]
 pub struct PlanCaps {
     pub max_workspaces: Option<i32>,
@@ -37,8 +31,7 @@ impl Plan {
     }
 
     /// Maps a Stripe Price id to the plan it represents.
-    /// The mapping is configured via env vars rather than hardcoded, since Stripe price ids are
-    /// specific to each Stripe account.
+    /// The mapping is configured via env vars rather than hardcoded, since Stripe price ids are specific to each Stripe account.
     pub fn from_stripe_price_id(price_id: &str, mapping: &StripePriceMapping) -> Option<Self> {
         if mapping.pro_price_id.as_deref() == Some(price_id) {
             Some(Plan::Pro)
@@ -67,8 +60,7 @@ impl Plan {
     }
 }
 
-/// Which Stripe Price id corresponds to which plan, read from
-/// `YORISHIRO_STRIPE_PRICE_PRO`/`YORISHIRO_STRIPE_PRICE_TEAM`.
+/// Which Stripe Price id corresponds to which plan, read from `YORISHIRO_STRIPE_PRICE_PRO`/`YORISHIRO_STRIPE_PRICE_TEAM`.
 /// Both are `None` (no mapping) until an operator configures real Stripe price ids.
 #[derive(Debug, Clone, Default)]
 pub struct StripePriceMapping {

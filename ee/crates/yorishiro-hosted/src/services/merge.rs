@@ -1,17 +1,9 @@
 //! Three-way comparison of metaschema definitions.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/merge.rs`.
 //!
 //! A workspace's schema is a copy of a template, and both sides can move after the copy is taken.
-//! Deciding what to do about that needs three definitions, not two: the template as it stood when
-//! copied (base), the template now (upstream), and the workspace's own (local).
+//! Comparing against the base (the template as it stood when copied), not just upstream vs. local, is what tells an upstream addition apart from a local one: with only two sides both look like "present there, absent here", and following the template would silently delete the workspace's own fields.
 //!
-//! With only two, an upstream addition and a local one look identical (both are "present there,
-//! absent here"), and following the template would silently delete the workspace's own fields.
-//! The base is what tells them apart.
-//!
-//! This module classifies. It does not apply anything: a conflict is a question for a person, and
-//! answering it by picking a side would invalidate whichever entities were written against the
-//! losing definition.
+//! This module classifies. It does not apply anything: a conflict is a question for a person, and answering it by picking a side would invalidate whichever entities were written against the losing definition.
 
 use std::collections::BTreeSet;
 
@@ -25,8 +17,7 @@ use yorishiro_core::metaschema::{EntityTypeDef, FieldDef, MetaSchemaDefinition};
 #[serde(rename_all = "snake_case")]
 pub enum MergeVerdict {
     /// Upstream added it and the workspace has nothing by that name.
-    /// Safe to take: it is new structure, and adding an optional field invalidates nothing
-    /// already stored.
+    /// Safe to take: it is new structure, and adding an optional field invalidates nothing already stored.
     AutoAdd,
     /// Upstream changed it and the workspace did not.
     /// Taking the change loses no local work, since there is none to lose.
@@ -184,23 +175,13 @@ fn classify(
 }
 
 /// Whether two optional field definitions are the same.
-/// Compared by their serialised form: `FieldDef` carries unknown `x-` attributes in a flattened
-/// map, and a comparison that only looked at the named fields would call two definitions equal
-/// while an extension differed.
+/// Compared by their serialised form: `FieldDef` carries unknown `x-` attributes in a flattened map, and a comparison that only looked at the named fields would call two definitions equal while an extension differed.
 fn same(a: Option<&FieldDef>, b: Option<&FieldDef>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => match (serde_json::to_value(a), serde_json::to_value(b)) {
             (Ok(a), Ok(b)) => a == b,
-            // Not `.ok() == .ok()`, which maps two *failures* to `None == None` and calls them
-            // equal, and "equal" here means the field never enters the plan, so a genuine
-            // upstream change would be neither reported nor applied.
-            //
-            // No input reaches this arm today: every `FieldDef` member serialises, and even a
-            // non-finite `minimum`/`maximum` yields `Ok(Null)` from `serde_json` rather than an
-            // error (measured, not assumed). It is written this way because an error is evidence
-            // of nothing, and a silently dropped field is the worst possible way to find that out
-            // later. Deliberately untested: there is no way to construct the input.
+            // Not `.ok() == .ok()`, which maps two *failures* to `None == None` and calls them equal, and "equal" here means the field never enters the plan, so a genuine upstream change would be neither reported nor applied.
             _ => false,
         },
         _ => false,
@@ -228,15 +209,13 @@ fn type_name(field: &FieldDef) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Produces the definition a plan describes: upstream's version of everything it changed alone,
-/// the workspace's version of everything it changed alone.
+/// Produces the definition a plan describes: upstream's version of everything it changed alone, the workspace's version of everything it changed alone.
 ///
-/// Refuses a plan with conflicts. There is no answer to apply for those (that is what a conflict
-/// means), and applying the rest would leave a definition that is neither what the merge produced
-/// nor what was there before, with no record of which fields were skipped.
+/// Refuses a plan with conflicts.
+/// There is no answer to apply for those (that is what a conflict means), and applying the rest would leave a definition that is neither what the merge produced nor what was there before, with no record of which fields were skipped.
 ///
-/// The result is a definition, not a stored schema. Whether writing it mints a new version is a
-/// separate decision, and one this function deliberately does not make.
+/// The result is a definition, not a stored schema.
+/// Whether writing it mints a new version is a separate decision, and one this function deliberately does not make.
 pub fn apply_plan(
     plan: &MergePlan,
     upstream: &MetaSchemaDefinition,
@@ -264,10 +243,8 @@ pub fn apply_plan(
         });
     }
 
-    // Start from the workspace's own definition: everything it holds stays unless the plan says
-    // upstream changed that field alone.
-    // Starting from upstream instead would silently drop every local addition, which is the
-    // failure the base exists to prevent.
+    // Start from the workspace's own definition: everything it holds stays unless the plan says upstream changed that field alone.
+    // Starting from upstream instead would silently drop every local addition, which is the failure the base exists to prevent.
     let mut merged = local.clone();
 
     for field in &plan.fields {
@@ -363,8 +340,7 @@ mod tests {
     }
 
     /// The workspace's own field.
-    /// Following the template must not delete it: this is the case the two-way comparison could
-    /// not express, since "absent upstream" looked the same as "removed upstream".
+    /// Following the template must not delete it: "absent upstream" and "removed upstream" must not be treated the same.
     #[test]
     fn a_field_only_the_workspace_added_is_kept() {
         let base = def(json!({ "title": { "type": "string" } }));
@@ -396,8 +372,7 @@ mod tests {
     }
 
     /// Both sides changed the same field differently.
-    /// Nothing here picks a side: whichever lost would leave the entities written against it
-    /// failing validation.
+    /// Nothing here picks a side: whichever lost would leave the entities written against it failing validation.
     #[test]
     fn a_field_both_sides_changed_is_a_conflict() {
         let base = def(json!({ "priority": { "type": "string" } }));
@@ -417,8 +392,7 @@ mod tests {
     }
 
     /// Both added the same field the same way.
-    /// That is agreement, not a conflict: reporting it would make an operator adjudicate a
-    /// decision already shared.
+    /// That is agreement, not a conflict: reporting it would make an operator adjudicate a decision already shared.
     #[test]
     fn the_same_change_on_both_sides_is_not_a_conflict() {
         let base = def(json!({ "title": { "type": "string" } }));
@@ -433,8 +407,7 @@ mod tests {
         assert_eq!(verdict_for(&plan, "due"), None);
     }
 
-    /// An entity type present only upstream is as much a difference as a field, and each of its
-    /// fields is reported.
+    /// An entity type present only upstream is as much a difference as a field, and each of its fields is reported.
     #[test]
     fn a_new_entity_type_upstream_is_reported_field_by_field() {
         let base = def(json!({ "title": { "type": "string" } }));
@@ -459,8 +432,7 @@ mod tests {
     }
 
     /// Fields differing only in an unknown `x-` extension still differ.
-    /// `FieldDef` keeps those in a flattened map, so a comparison over the named fields alone
-    /// would call these equal.
+    /// `FieldDef` keeps those in a flattened map, so a comparison over the named fields alone would call these equal.
     #[test]
     fn an_extension_attribute_is_part_of_the_comparison() {
         let base = def(json!({ "title": { "type": "string" } }));
@@ -482,8 +454,7 @@ mod tests {
         assert!(!plan.has_conflicts());
     }
 
-    /// The whole point of three-way: upstream's addition arrives and the workspace's own
-    /// survives. A two-way merge could not do both.
+    /// Upstream's addition arrives and the workspace's own survives, in the same merge.
     #[test]
     fn applying_takes_upstream_additions_and_keeps_local_ones() {
         let base = def(json!({ "title": { "type": "string" } }));
@@ -528,8 +499,7 @@ mod tests {
     }
 
     /// A conflicting plan is refused whole.
-    /// Applying the rest would leave a definition neither side asked for, with nothing recording
-    /// which fields were skipped.
+    /// Applying the rest would leave a definition neither side asked for, with nothing recording which fields were skipped.
     #[test]
     fn applying_refuses_a_plan_with_conflicts() {
         let base = def(json!({ "priority": { "type": "string" } }));
@@ -553,8 +523,7 @@ mod tests {
         }
     }
 
-    /// A whole entity type added upstream arrives, even though the workspace has no such type to
-    /// merge into.
+    /// A whole entity type added upstream arrives, even though the workspace has no such type to merge into.
     #[test]
     fn applying_adds_an_entity_type_the_workspace_does_not_have() {
         let base = def(json!({ "title": { "type": "string" } }));
@@ -578,8 +547,7 @@ mod tests {
         assert!(merged.entity_types["project"].fields.contains_key("name"));
     }
 
-    /// Nothing to merge produces the workspace's definition unchanged, rather than a rebuild of
-    /// it.
+    /// Nothing to merge produces the workspace's definition unchanged, rather than a rebuild of it.
     #[test]
     fn applying_an_empty_plan_changes_nothing() {
         let d = def(json!({ "title": { "type": "string" } }));
@@ -591,10 +559,8 @@ mod tests {
         );
     }
 
-    /// Only the workspace changed the field's type (base and upstream agree), so the workspace's
-    /// own definition is kept rather than reported as a conflict.
-    /// A conflict needs *both* sides to have moved, which `a_field_both_sides_changed_is_a_conflict`
-    /// covers.
+    /// Only the workspace changed the field's type (base and upstream agree), so the workspace's own definition is kept rather than reported as a conflict.
+    /// A conflict needs *both* sides to have moved, which `a_field_both_sides_changed_is_a_conflict` covers.
     #[test]
     fn a_type_changed_only_locally_is_kept() {
         let upstream: MetaSchemaDefinition = serde_json::from_value(json!({

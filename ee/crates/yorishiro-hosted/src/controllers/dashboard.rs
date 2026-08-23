@@ -1,6 +1,4 @@
-//! `GET /hosted/tenant/overview`: the sole read the admin dashboard's landing page needs, plan,
-//! cap, usage counters and the member list, in one round trip.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/http/controllers/dashboard.rs`.
+//! `GET /hosted/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
 
 use axum::Json;
 use axum::extract::State;
@@ -23,8 +21,7 @@ use yorishiro_core::controllers::ApiError;
 #[derive(Debug, Serialize)]
 pub struct TenantOverview {
     pub tenant_id: Uuid,
-    /// `null` until a Stripe subscription event has set one: a tenant that has never
-    /// subscribed has no plan and no cap.
+    /// `null` until a Stripe subscription event has set one: a tenant that has never subscribed has no plan and no cap.
     pub plan: Option<String>,
     pub max_workspaces: Option<i32>,
     pub usage: TenantUsage,
@@ -35,8 +32,7 @@ async fn tenant_overview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
 ) -> Result<Json<TenantOverview>, ApiError> {
-    // Logged so an operator can see a rejected dashboard request (bad key, or a non-admin
-    // member trying to read billing data); it otherwise surfaces only as an anonymous 401/403.
+    // Logged so an operator can see a rejected dashboard request (bad key, or a non-admin member trying to read billing data); it otherwise surfaces only as an anonymous 401/403.
     let tenant_id = authenticate_tenant_admin(&ctx, &headers)
         .await
         .inspect_err(|err| {

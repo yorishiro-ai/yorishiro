@@ -1,5 +1,4 @@
 //! The single public HTTP entry point for Stripe webhooks.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/http/controllers/stripe.rs`.
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -25,8 +24,7 @@ use crate::services::{hmac_sign, non_empty_env};
 const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
 /// Configuration for the Stripe integration.
-/// Both fields are absent by default: a deployment with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set
-/// gets a 501 from the webhook endpoint instead of silently accepting unverifiable requests.
+/// Both fields are absent by default: a deployment with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of silently accepting unverifiable requests.
 #[derive(Debug, Clone, Default)]
 pub struct StripeConfig {
     pub webhook_secret: Option<String>,
@@ -42,11 +40,8 @@ impl StripeConfig {
     }
 }
 
-/// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`),
-/// checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches
-/// the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret.
-/// Both checks are required: the timestamp check alone doesn't authenticate anything, and the
-/// signature check alone doesn't prevent a captured request from being replayed indefinitely.
+/// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`), checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret.
+/// Both checks are required: the timestamp check alone doesn't authenticate anything, and the signature check alone doesn't prevent a captured request from being replayed indefinitely.
 fn verify_stripe_signature(
     payload: &[u8],
     signature_header: &str,
@@ -87,8 +82,7 @@ struct StripeEvent {
     id: String,
     #[serde(rename = "type")]
     event_type: String,
-    /// Unix timestamp of when Stripe created this event: used to detect a delayed/retried
-    /// delivery that arrives after a newer event for the same customer has already landed.
+    /// Unix timestamp of when Stripe created this event: used to detect a delayed/retried delivery that arrives after a newer event for the same customer has already landed.
     created: i64,
     data: StripeEventData,
 }
@@ -98,12 +92,9 @@ struct StripeEventData {
     object: serde_json::Value,
 }
 
-/// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed
-/// body, and 200 once the event has been applied (or was simply not one we act on).
+/// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
-/// Intentionally returns `impl IntoResponse` with raw status codes rather than going through
-/// `ApiError`: Stripe expects plain-text error bodies from webhooks, not the JSON
-/// `{"error": {...}}` envelope the rest of this API uses.
+/// Returns `impl IntoResponse` with raw status codes rather than going through `ApiError`: Stripe expects plain-text error bodies from webhooks, not the JSON `{"error": {...}}` envelope the rest of this API uses.
 async fn stripe_webhook(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -151,9 +142,7 @@ async fn stripe_webhook(
     }
 }
 
-/// The tenant a subscription event's `customer` field resolves to, or `None` (logged by the
-/// caller as appropriate) when the object has no `customer` field or that customer isn't linked
-/// to any tenant yet.
+/// The tenant a subscription event's `customer` field resolves to, or `None` (logged by the caller as appropriate) when the object has no `customer` field or that customer isn't linked to any tenant yet.
 async fn resolve_tenant_by_customer(
     conn: &impl ConnectionTrait,
     object: &serde_json::Value,
@@ -167,30 +156,12 @@ async fn resolve_tenant_by_customer(
 }
 
 /// Applies a verified Stripe event to the tenant model.
-/// Only the handful of event types needed to keep a tenant's plan/cap in sync are handled;
-/// anything else (e.g. invoice events used only for record-keeping on Stripe's side) is accepted
-/// but ignored.
 ///
-/// The Stripe object's linkage to a tenant is intentionally simple for this skeleton: the
-/// checkout session that starts a subscription is expected to have been created with
-/// `client_reference_id` set to the tenant id, which is recorded (`link_stripe_customer`) so
-/// later subscription events (keyed only by Stripe customer id) can be traced back to it.
+/// The checkout session that starts a subscription is expected to have `client_reference_id` set to the tenant id, which is recorded (`link_stripe_customer`) so later subscription events (keyed only by Stripe customer id) can be traced back to it.
 ///
-/// Idempotency and ordering are enforced inside one transaction (see
-/// `identity_stripe_processed_events`, `is_event_processed`/`is_stale_for_customer`): a
-/// duplicate delivery of an event already applied, or a delayed delivery of an event older than
-/// one already applied for the same customer, is accepted (so Stripe doesn't retry it forever)
-/// but not re-applied.
+/// Idempotency and ordering are enforced inside one transaction (see `identity_stripe_processed_events`, `is_event_processed`/`is_stale_for_customer`): a duplicate delivery, or a delayed delivery older than one already applied for the same customer, is accepted (so Stripe doesn't retry it forever) but not re-applied.
 ///
-/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly.
-/// `db::SessionLock` (a held connection, separate from the pool everything else draws from)
-/// deadlocked under a small `max_connections` (`config/test.yaml`'s default of 1), since the
-/// lock held the pool's only connection while every subsequent query waited for one.
-/// It also protected nothing: two concurrent deliveries would still write on different
-/// connections outside any shared transaction.
-/// `db::lock_for_update(&txn, ...)` is what `POST /setup` already uses for the same shape, a
-/// transaction-scoped advisory lock that releases on commit or rollback with no separate
-/// connection to leak.
+/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly: `db::lock_for_update(&txn, ...)` is a transaction-scoped advisory lock that releases on commit or rollback with no separate connection to leak, unlike `db::SessionLock`.
 async fn apply_stripe_event(
     ctx: &AppContext,
     config: &StripeConfig,
@@ -215,11 +186,7 @@ async fn apply_stripe_event(
         return Ok(());
     };
     // Only the subscription events are ordered per customer.
-    // `checkout.session.completed` also carries a `customer` field, but it's a one-time link
-    // event with no ordering relationship to the subscription stream: recording it here would
-    // set a staleness floor that can reject a `customer.subscription.created` for the same
-    // purchase if it happens to arrive first with an earlier `created` (Stripe does not
-    // guarantee delivery order between the two).
+    // `checkout.session.completed` also carries a `customer` field but is a one-time link event with no ordering relationship to the subscription stream, so it's excluded here.
     let customer_id = matches!(
         event.event_type.as_str(),
         "customer.subscription.created"
@@ -236,10 +203,7 @@ async fn apply_stripe_event(
     })
     .flatten();
 
-    // Serializes concurrent deliveries for the same customer, inside the transaction that also
-    // does the ordering check and the writes: the second caller's `is_stale_for_customer` re-read
-    // sees the first caller's write only after it commits. Events with no customer (the one-time
-    // checkout link) need no ordering and take no lock.
+    // Serializes concurrent deliveries for the same customer: the second caller's `is_stale_for_customer` re-read sees the first caller's write only after it commits.
     if let Some(customer_id) = customer_id.as_deref() {
         db::lock_for_update(&txn, &format!("stripe-customer:{customer_id}"))
             .await
