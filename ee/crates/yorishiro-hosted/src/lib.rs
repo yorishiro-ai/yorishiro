@@ -13,6 +13,7 @@
 pub mod controllers;
 pub mod models;
 pub mod services;
+pub mod tasks;
 
 use async_trait::async_trait;
 use loco_rs::{
@@ -140,6 +141,23 @@ impl Hooks for HostedApp {
             .add_route(controllers::stripe::routes())
     }
 
+    /// Delegates unchanged: base's `after_routes` mounts `/mcp` and layers the rate limiter and
+    /// maintenance guard over everything, REST and MCP alike (see its own doc comment).
+    ///
+    /// Master's `HostedMcpServer` (`http::mcp` there) wraps `YorishiroMcpServer` so this crate
+    /// can add its own MCP tools alongside base's, the same shape `routes()` uses for REST. It
+    /// is deliberately not ported: `controllers::mcp::mount` (base) hardcodes
+    /// `YorishiroMcpServer` as `StreamableHttpService`'s concrete type parameter (`rmcp`'s
+    /// `ServerHandler` bound there is not object-safe, so this cannot be swapped via
+    /// `shared_store` the way `TenantScopedAuthenticator` replaces the default authenticator),
+    /// so swapping the server means re-implementing `mount` plus both middleware layers here,
+    /// and a re-implementation that silently drops the rate limiter or the maintenance guard is
+    /// exactly the "gate that was never made to fire" failure shape recorded elsewhere. Not
+    /// worth that risk for what master's own wrapper actually does today: nothing. Its
+    /// `list_tools`/`call_tool`/`get_tool` all delegate to an empty tool router, so `tools/list`
+    /// answers exactly base's own tool set either way. Revisit when this crate's first MCP-only
+    /// tool needs the seam, which is also when the actual composition shape becomes clear rather
+    /// than guessed at for a currently-empty router.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
         App::after_routes(router, ctx).await
     }
@@ -148,8 +166,12 @@ impl Hooks for HostedApp {
         App::connect_workers(ctx, queue).await
     }
 
+    /// Adds this crate's own tasks onto base's own. `Tasks::register` is purely additive, unlike
+    /// `after_routes`'s MCP mount (see this method's own doc comment for why the MCP seam,
+    /// `HostedMcpServer` on master, is deliberately not ported here yet).
     fn register_tasks(tasks: &mut Tasks) {
         App::register_tasks(tasks);
+        tasks.register(tasks::seed_official_templates::SeedOfficialTemplates);
     }
 
     async fn truncate(ctx: &AppContext) -> Result<()> {

@@ -323,10 +323,18 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             std::env::remove_var("YORISHIRO_MAX_TENANTS");
         }
 
-        assert!(
-            result.is_err(),
-            "a new identity must not get a fresh tenant past the cap: {result:?}"
-        );
+        match result {
+            Err(yorishiro_core::YorishiroError::ScopeInsufficient { message, .. }) => {
+                assert!(
+                    message.contains("tenant limit"),
+                    "wrong ScopeInsufficient message: {message}"
+                );
+            }
+            other => panic!(
+                "a new identity past the cap must be refused with ScopeInsufficient naming the \
+                 tenant limit, got: {other:?}"
+            ),
+        }
 
         super::close_app_pools(&ctx).await;
     })
