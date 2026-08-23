@@ -11,7 +11,7 @@
 use axum::http::header;
 use hmac::{Hmac, Mac};
 use loco_rs::testing::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::{ActiveValue, EntityTrait};
 use serial_test::serial;
 use sha2::Sha256;
 use yorishiro_core::models::_entities::identity_tenants;
@@ -335,6 +335,56 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
                  tenant limit, got: {other:?}"
             ),
         }
+
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// A first login must not leave the auto-provisioned workspace `schema_pending`: there is no
+/// admin present afterward to choose a starting schema for it, unlike
+/// `controllers::setup::setup`'s own bootstrap workspace. The workspace is provisioned with a
+/// schema from the built-in `general-notes` template and left `active`.
+#[tokio::test]
+#[serial]
+async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
+    request_with_create_db::<HostedApp, _, _>(|_request, ctx| async move {
+        let provisioned = oauth::find_or_create(
+            &ctx.db,
+            "oidc",
+            "a-first-login-subject",
+            Some("firstlogin@example.com"),
+            None,
+            ("test-model", 768),
+        )
+        .await
+        .expect("first login provisioning");
+
+        let workspace =
+            yorishiro_core::models::_entities::identity_workspaces::Entity::find_by_id(
+                provisioned.workspace_id,
+            )
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("the provisioned workspace must exist");
+
+        assert_eq!(
+            workspace.status,
+            yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE,
+            "an auto-provisioned workspace must not be left schema_pending"
+        );
+        let schema_id = workspace
+            .schema_id
+            .expect("the workspace must have a schema linked");
+
+        let schema =
+            yorishiro_core::models::_entities::content_schemas::Entity::find_by_id(schema_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("the linked schema must exist");
+        assert_eq!(schema.name, "general-notes");
 
         super::close_app_pools(&ctx).await;
     })

@@ -14,10 +14,13 @@
 //! This module owns the decision: which of the two branches a login takes, and how a first
 //! login wires a fresh tenant/workspace/membership together.
 
-use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, PaginatorTrait};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::_entities::identity_tenants;
+use yorishiro_core::models::_entities::identity_workspaces as identity_workspaces_entity;
+use yorishiro_core::models::content_schemas;
+use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro_core::models::tenancy::{self, MembershipRole};
 
 use crate::models::oauth_users::{
@@ -47,9 +50,11 @@ pub struct ProvisionedLogin {
 /// An admin can rename either afterward through the existing dashboard/API.
 /// The new member's role is always `member`; an existing identity keeps whatever role it
 /// already holds.
-/// The new workspace is left `schema_pending` (no `schema_id`), matching
-/// `controllers::setup::setup`'s own bootstrap-from-nothing precedent: there is no admin present
-/// to have chosen a starting schema for it. `embedding` is the deployment's actual model and
+/// The new workspace gets a schema from the built-in `general-notes` template, unlike
+/// `controllers::setup::setup`'s own bootstrap-from-nothing workspace, which is left
+/// `schema_pending`: `setup` has an admin present to choose a starting schema afterward, an
+/// auto-provisioned SSO login has nobody, so it would otherwise land the new user on a
+/// workspace with nowhere to write anything. `embedding` is the deployment's actual model and
 /// width (the caller reads it from `shared_store`'s `EmbeddingProvider`, the same source
 /// `setup.rs` uses via `embedding_provider(&ctx)`), not a guessed default: this branch's
 /// `content_entities.embedding` index is a fixed width, so a workspace stamped with the wrong
@@ -146,6 +151,23 @@ pub async fn find_or_create(
         Some(embedding),
     )
     .await?;
+
+    // `content_schemas::create_schema` requires an existing `workspace_id` (a schema belongs to
+    // a workspace), so the schema can only be created once the workspace above exists; the
+    // workspace is then updated to point at it, rather than passing `schema_id` at creation
+    // time, which is what moves its `status` from `schema_pending` to `active`.
+    let definition = yorishiro_core::templates::get_template("general-notes")?;
+    let (schema, _diff) =
+        content_schemas::create_schema(conn, tenant.id, workspace.id, definition, None, None)
+            .await?;
+
+    let workspace_active = identity_workspaces_entity::ActiveModel {
+        id: ActiveValue::Unchanged(workspace.id),
+        schema_id: ActiveValue::Set(Some(schema.id)),
+        status: ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+        ..Default::default()
+    };
+    let workspace = workspace_active.update(conn).await.internal()?;
 
     tenancy::add_member(conn, tenant.id, user.id, MembershipRole::Member).await?;
 
