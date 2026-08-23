@@ -182,15 +182,15 @@ async fn resolve_tenant_by_customer(
 /// one already applied for the same customer, is accepted (so Stripe doesn't retry it forever)
 /// but not re-applied.
 ///
-/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly: `db::SessionLock`
-/// (a held connection, separate from the pool everything else draws from) deadlocked under a
-/// small `max_connections` (`config/test.yaml`'s default of 1), since the lock held the pool's
-/// only connection while every subsequent query waited for one. It also protected nothing: two
-/// concurrent deliveries would still write on different connections outside any shared
-/// transaction. `db::lock_for_update(&txn, ...)` is what `POST /setup` already uses for the same
-/// shape (a transaction-scoped advisory lock, releasing on commit/rollback, no separate
-/// connection to leak) — see the checklist's own #191 note on `SessionLock`'s "held connection
-/// only" scope.
+/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly.
+/// `db::SessionLock` (a held connection, separate from the pool everything else draws from)
+/// deadlocked under a small `max_connections` (`config/test.yaml`'s default of 1), since the
+/// lock held the pool's only connection while every subsequent query waited for one.
+/// It also protected nothing: two concurrent deliveries would still write on different
+/// connections outside any shared transaction.
+/// `db::lock_for_update(&txn, ...)` is what `POST /setup` already uses for the same shape, a
+/// transaction-scoped advisory lock that releases on commit or rollback with no separate
+/// connection to leak.
 async fn apply_stripe_event(
     ctx: &AppContext,
     config: &StripeConfig,
