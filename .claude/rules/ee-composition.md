@@ -3,6 +3,7 @@
 **Decided (2026-08-22): base stays flat, `ee/crates/yorishiro-hosted` is the one added workspace member.**
 Master's `crates/yorishiro-core`/`crates/yorishiro-server` split does not exist on this branch, and `ee/crates/yorishiro-hosted` there depended on both, so neither `git merge master` nor copying `ee/` wholesale produces something that compiles against the rebuilt layout.
 The root `Cargo.toml`'s `[workspace] members` lists `"."` (the root package is `yorishiro-core` itself) and `"ee/crates/yorishiro-hosted"`.
+This is an architectural call made without the user's sign-off in the moment; it does not block work, but it is vetoable, and if overturned the alternative is restoring the `crates/` split master used.
 
 **The seam is Loco's own `Hooks` trait, not the five sqlx-era contracts that died with the sqlx layer.**
 `ee/crates/yorishiro-hosted/src/lib.rs` defines `HostedApp`, a second `Hooks` impl distinct from `yorishiro_core::app::App`.

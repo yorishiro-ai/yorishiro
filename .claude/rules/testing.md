@@ -4,6 +4,7 @@
 `src/db.rs`'s production path (`TenantDb::connect`) runs `SET ROLE yorishiro_app` unconditionally in `after_connect`, so a test helper needs no special access to exercise RLS.
 It just calls `TenantDb::connect(url, max_connections)` against a real test database the same way `Hooks::after_context` does.
 `config/test.yaml`'s `database.uri` already reads `DATABASE_URL` with `auto_migrate: true`, so `cargo test` against a scratch Postgres runs converge and gets a role-and-RLS-correct connection with no bridge, no `#[path]`, no `autotests = false`.
+`TenantDb::new(pool)` still exists (it bypasses `after_connect`, so it skips `SET ROLE`) but nothing calls it and nothing should: `connect` is the only path a test needs.
 In `ee/`, shared test helpers (`tests/test_helpers.rs`) are declared **once**, in `tests/lib.rs`, and reached elsewhere with `use crate::tests::test_helpers;`.
 Declaring `mod test_helpers;` in several files trips `clippy::duplicate_mod`.
 
@@ -13,6 +14,7 @@ Declaring `mod test_helpers;` in several files trips `clippy::duplicate_mod`.
 
 **Loco's request-test harness creates each throwaway database with `CREATE DATABASE`, which copies `template1`.**
 A fresh Postgres volume needs `vector`/`pg_trgm` installed into `template1` itself (not just the deployment's main database), or every throwaway test database inherits a `template1` with neither, and `converge` fails on `content_entities.embedding` inside every request test for exactly the boot-failure-looks-like-cleanup-panic reason above.
+Check this at its own layer (`psql -d template1 -c '\dx'`), not assumed: a fresh volume missing the fix shows `template1` holding only `plpgsql`.
 
 **A request test that boots through `request_with_create_db` must call `close_app_pools` before its closure returns, or teardown panics even on a passing test.**
 `after_context` opens two pools Loco's harness doesn't know about (identity, eager; tenant, lazy), and `config/test.yaml`'s `min_connections: 1` keeps one connection open on `ctx.db` itself; none of the three close on their own when the closure returns.

@@ -24,6 +24,7 @@ A route registered on both sides is therefore a startup crash rather than a comp
 - `yorishiro-core`'s only consumer outside itself is `ee/crates/yorishiro-hosted`.
   A workspace-wide grep therefore does settle whether a `pub` item is called, but it has to include `ee/`, which is a member of this workspace and the only caller of much of what this crate exports.
   The five published contracts (`build_app`, `apply_observability_layers`, `into_http_parts()`, `hex_decode`, `bearer_credential`) stay regardless: they are the seam `ee/` composes against.
+  **`build_app`/`apply_observability_layers` don't exist yet** (`grep -rn "fn build_app\|apply_observability_layers" src/ ee/` finds nothing), since no router exists on this branch: this list is aspirational for those two until the controller/routing port lands.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
 - `Authenticator` (`services/auth`) is meant to be a seam, not an internal detail, once every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`Verified<R>` extractors, both MCP entry points): a new authenticated entry point must resolve through that seam rather than call `authenticate` directly, or a REST route and an MCP tool could end up disagreeing about who the caller is.
 

@@ -1,6 +1,6 @@
 # Rust coding rules for yorishiro
 
-**Sections in `.claude/rules/loco-architecture.md` still describing the old `crates/yorishiro-core`/`crates/yorishiro-server` split, `sea-query` column-list helpers, or the `Engine` trait are stale and are being replaced section by section as the Loco port reaches each area** (see `yotsunagi/yorishiro#221`); treat a stale section as describing what used to be true, not a live rule, until it is removed.
+This repository is mid-port from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to [Loco](https://loco.rs); see `yotsunagi/yorishiro#221` for the rationale.
 Open state for the rebuild (what's ported, what's next, what's never been raced) lives in the Yorishiro task list, not here: see `yorishiro-specs/.claude/rules/dogfooding.md` for how to reach it.
 
 ## No internal-planning references in this repository
