@@ -19,6 +19,8 @@ mod m20260822_101200_authenticate_api_key;
 mod m20260823_100000_tenant_billing;
 mod m20260823_100100_stripe_processed_events;
 mod m20260823_100200_marketplace;
+mod m20260823_100300_workspace_llm_keys;
+mod m20260823_100400_fill_proposals;
 
 pub struct Migrator;
 
@@ -42,6 +44,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260823_100000_tenant_billing::Migration),
             Box::new(m20260823_100100_stripe_processed_events::Migration),
             Box::new(m20260823_100200_marketplace::Migration),
+            Box::new(m20260823_100300_workspace_llm_keys::Migration),
+            Box::new(m20260823_100400_fill_proposals::Migration),
             // inject-above (do not remove this comment)
         ]
     }

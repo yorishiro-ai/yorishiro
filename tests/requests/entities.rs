@@ -133,7 +133,12 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(response.status_code(), 200, "response: {:?}", response.text());
+        assert_eq!(
+            response.status_code(),
+            200,
+            "response: {:?}",
+            response.text()
+        );
         let body: serde_json::Value = response.json();
         assert_eq!(body["restored"], 1, "body: {body}");
         assert_eq!(body["missing"], 1, "body: {body}");
@@ -161,7 +166,12 @@ async fn undo_an_unknown_job_is_refused() {
             .post(&format!("/api/migration-jobs/{}/undo", Uuid::new_v4()))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(response.status_code(), 404, "response: {:?}", response.text());
+        assert_eq!(
+            response.status_code(),
+            404,
+            "response: {:?}",
+            response.text()
+        );
 
         super::close_app_pools(&ctx).await;
     })

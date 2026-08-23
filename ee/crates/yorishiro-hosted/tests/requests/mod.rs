@@ -1,4 +1,5 @@
 mod dashboard;
+mod inference;
 mod marketplace;
 mod origin;
 mod stripe;

@@ -109,6 +109,7 @@ impl Hooks for HostedApp {
     fn routes(ctx: &AppContext) -> AppRoutes {
         App::routes(ctx)
             .add_route(controllers::dashboard::routes())
+            .add_route(controllers::inference::routes())
             .add_route(controllers::marketplace::routes())
             .add_route(controllers::origin::routes())
             .add_route(controllers::stripe::routes())
