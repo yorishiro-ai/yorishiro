@@ -72,7 +72,12 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
 async fn tenant_overview_requires_authentication() {
     request_with_create_db::<HostedApp, _, _>(|request, ctx| async move {
         let response = request.get("/hosted/tenant/overview").await;
-        assert_eq!(response.status_code(), 401, "response: {:?}", response.text());
+        assert_eq!(
+            response.status_code(),
+            401,
+            "response: {:?}",
+            response.text()
+        );
 
         super::close_app_pools(&ctx).await;
     })

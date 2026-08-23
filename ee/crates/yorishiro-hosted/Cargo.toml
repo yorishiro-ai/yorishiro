@@ -35,6 +35,7 @@ sea-orm = { version = "2.0", features = [
   "macros",
 ] }
 uuid = { version = "1.6", features = ["v4"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 
 [dev-dependencies]
 base64 = { version = "0.22" }

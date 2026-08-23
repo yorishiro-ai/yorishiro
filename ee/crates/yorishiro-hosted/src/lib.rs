@@ -30,6 +30,7 @@ use std::path::Path;
 use yorishiro_core::app::App;
 
 use services::licence::LicenceState;
+use services::tenant_auth::TenantScopedAuthenticator;
 
 pub struct HostedApp;
 
@@ -59,9 +60,23 @@ impl Hooks for HostedApp {
     /// resolves the licence key and stores it in `shared_store` for gated paid handlers to read.
     /// An absent or invalid key does not fail boot: the free half must keep working with no
     /// licence configured, per `services::licence`'s own doc comment.
+    ///
+    /// Also replaces base's `default_authenticator()` with `TenantScopedAuthenticator`.
+    /// `shared_store.insert` is keyed by `TypeId`, so this later insert wins over the one
+    /// `App::after_context` already made: every authenticated path in the process (REST
+    /// extractors and MCP handlers alike) resolves through the one authenticator the store
+    /// carries, so a key is read the same way whichever door it arrives at. Leaving the default
+    /// in place would silently accept only workspace-scoped keys. Installed unconditionally,
+    /// not gated on licence state: a tenant-scoped key is a structural capability, not a paid
+    /// feature, matching master's own `bin/yorishiro_server.rs`.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         let ctx = App::after_context(ctx).await?;
         ctx.shared_store.insert(LicenceState::from_env());
+        ctx.shared_store
+            .insert(std::sync::Arc::new(TenantScopedAuthenticator)
+                as std::sync::Arc<
+                    dyn yorishiro_core::services::auth::Authenticator,
+                >);
         Ok(ctx)
     }
 
