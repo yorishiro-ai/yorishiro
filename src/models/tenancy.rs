@@ -21,18 +21,11 @@ use crate::models::_entities::{
 };
 use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
 
-/// The nil UUID, reserved for infrastructure tenants that own no members and no data of their
-/// own (currently `ee/`'s official-templates publisher). Excluded from every count this module
-/// takes against `YORISHIRO_MAX_TENANTS`, so a deployment that has run `cargo loco db seed`
-/// does not read as already at its tenant cap. `ee/` references this constant rather than base
-/// referencing an `ee/`-defined one, per the one-way dependency rule in CLAUDE.md's "Editions
-/// and the `ee/` boundary": the nil UUID itself is not a marketplace concept, so it belongs here.
+/// The nil UUID, reserved for infrastructure tenants that own no members and no data of their own (currently `ee/`'s official-templates publisher).
+/// Excluded from every count this module takes against `YORISHIRO_MAX_TENANTS`.
 pub const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 
 /// Counts real (non-infrastructure) tenants: every row except `INFRASTRUCTURE_TENANT_ID`.
-/// This is the number `YORISHIRO_MAX_TENANTS` and the setup wizard's "has this deployment been
-/// set up yet" check both mean, and the two must stay the same query or they will disagree
-/// about whether a fresh, seeded deployment is empty.
 pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
     identity_tenants::Entity::find()
         .filter(identity_tenants::Column::Id.ne(INFRASTRUCTURE_TENANT_ID))
@@ -42,14 +35,7 @@ pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yorishiro
 }
 
 /// Creates a tenant, enforcing `YORISHIRO_MAX_TENANTS` against `count_tenants`.
-/// The official-templates publisher tenant (`ee/`'s `ensure_official_tenant`) deliberately does
-/// not go through this: it is infrastructure, not a customer, and a deployment sitting at its
-/// tenant cap still needs its official templates to exist.
-///
-/// `conn` must be a transaction (`DatabaseTransaction`, not bare `ctx.db`): this takes a
-/// `pg_advisory_xact_lock` (`db::lock_for_update`, transaction-scoped) before counting, the same
-/// TOCTOU guard `/setup` takes with its own key. Without it, N concurrent callers all pass the
-/// count check and all insert, and `YORISHIRO_MAX_TENANTS` is not actually a cap.
+/// `conn` must be a transaction: this takes `db::lock_for_update` before counting, to close the TOCTOU gap a bare count-then-insert would leave.
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,

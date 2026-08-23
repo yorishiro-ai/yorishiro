@@ -6,16 +6,7 @@ use crate::models::tenancy;
 
 /// `cargo loco task create_workspace tenant_id:<uuid> name:acme-prod`
 ///
-/// The operator-assisted second step of invite-less signup (`POST /auth/signup` without
-/// `invite_token` creates a tenant but no workspace, since a workspace needs a schema/embedding
-/// decision signup has no basis to make on the new owner's behalf): run this, then
-/// `create_api_key`, to hand the new owner a working key.
-///
-/// Wraps `tenancy::create_workspace` with this deployment's configured embedding model
-/// (`services::embedding::model_name_from_env`/`build_embedding_provider`), same as the REST
-/// handler (`controllers::workspaces::create_workspace`) and `/setup` both do: a workspace's
-/// embedding model is a deployment-wide setting, not a per-call choice, on every path that
-/// creates one.
+/// The operator-assisted second step of invite-less signup: run this, then `create_api_key`.
 pub struct CreateWorkspace;
 
 #[async_trait]

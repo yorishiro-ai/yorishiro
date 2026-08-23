@@ -1,13 +1,5 @@
 //! Publishes the community edition's built-in templates as official marketplace listings.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/official_templates.rs`, onto
-//! this branch's `AppContext`/SeaORM composition seam and raw-SQL-plus-`find_by_statement` idiom
-//! (`models::marketplace`'s own convention) rather than master's `sqlx::PgPool` queries. Bypasses
-//! `services::marketplace::publish_version`'s ownership check rather than routing through it:
-//! that check assumes an authenticated tenant publishing its own template, and the seed both has
-//! no request context and, on a first run, no template row yet to check ownership of. Reuses its
-//! `models::marketplace::insert_next_version` for the version insert itself, in its own
-//! transaction per template, matching `publish_version`'s own `lock_for_update` shape.
-//!
+//! Bypasses `services::marketplace::publish_version`'s ownership check, since the seed has no authenticated tenant to check ownership against.
 //! Invoked from a Loco task (`register_tasks`), not a request path.
 
 use loco_rs::app::AppContext;
@@ -22,12 +14,7 @@ use yorishiro_core::models::_entities::identity_tenants;
 use yorishiro_core::models::tenancy::INFRASTRUCTURE_TENANT_ID;
 
 /// The tenant that owns the officially published templates.
-///
-/// The same id `tenancy::count_tenants` excludes from `YORISHIRO_MAX_TENANTS`: this has to stay
-/// one constant, defined in base rather than here, or the two could drift and a seeded
-/// deployment would read as already at its tenant cap. A fixed id rather than a lookup by name,
-/// so re-running the seed finds the same row and a deployment that renames it does not end up
-/// with two publishers.
+/// A fixed id, so re-running the seed finds the same row rather than creating a second publisher.
 pub const OFFICIAL_TENANT_ID: Uuid = INFRASTRUCTURE_TENANT_ID;
 
 /// Shown as the listing's author.
@@ -45,22 +32,9 @@ pub struct SeedOutcome {
     pub unchanged: Vec<String>,
 }
 
-/// Publishes every built-in template (`yorishiro_core::templates::list_templates`) as an
-/// official, community-visible marketplace listing.
-///
-/// The publisher is a tenant row with **no members and no workspaces**: `identity_templates`
-/// requires a `tenant_id`, and the marketplace scopes ownership by it, so a listing has to
-/// belong to some tenant. Nobody can log into this one (there is no membership to log in
-/// through) and it holds no data of its own. It exists to satisfy the foreign key and to give
-/// official listings a stable owner, not to be used.
-///
-/// Idempotent, and safe to run on every deployment: a template is matched by `(tenant_id,
-/// name)`, and a new version is published only when the built-in definition differs from the
-/// latest one already published. Re-running with unchanged built-ins writes nothing.
-///
-/// Calls `ensure_official_tenant` itself so this still works standalone (`cargo loco task
-/// seed_official_templates` on a deployment that never ran `Hooks::seed`), even though
-/// `HostedApp::seed` also calls it: the tenant's existence must not depend on task run order.
+/// Publishes every built-in template as an official, community-visible marketplace listing.
+/// Idempotent: a new version is published only when the built-in definition differs from the latest one already published.
+/// Calls `ensure_official_tenant` itself, so this still works standalone.
 pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, YorishiroError> {
     ensure_official_tenant(&ctx.db).await?;
 
@@ -100,18 +74,7 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
             None => outcome.published.push(summary.id.clone()),
         }
 
-        // Same read-then-write race `models::marketplace::insert_next_version`'s own doc
-        // comment describes, and the same remedy: the version is read by `max(version) + 1`
-        // inside the inserting statement, which locks no range at READ COMMITTED. Two
-        // deployments seeding at once (a rolling restart is enough) would otherwise both
-        // compute the same number and one would fail on `UNIQUE (template_id, version)`.
-        // `lock_for_update` is transaction-scoped (see its own doc comment), so this needs its
-        // own transaction rather than running against `ctx.db` directly, matching
-        // `services::marketplace::publish_version`'s identical shape.
-        //
-        // `stable` rather than `draft`: a draft is visible only to its owning tenant, and this
-        // tenant has no members to view it. An official template nobody can see is the same as
-        // not publishing it.
+        // `stable`, not `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
         let request = crate::models::marketplace::PublishVersionRequest {
             definition: definition_json,
             changelog: Some(format!("Built-in template '{}'", summary.id)),
@@ -135,15 +98,10 @@ struct LatestVersion {
     definition: serde_json::Value,
 }
 
-/// Creates the official-templates publisher tenant if it does not already exist. Idempotent
-/// (`ON CONFLICT DO NOTHING` on the fixed id), and safe to call from both `Hooks::seed` (so the
-/// tenant exists even on a deployment that never runs `seed_official_templates`) and
-/// `seed_official_templates` itself (so the task keeps working standalone).
+/// Creates the official-templates publisher tenant if it does not already exist.
+/// Idempotent (`ON CONFLICT DO NOTHING` on the fixed id).
 pub async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
-    // Written directly rather than through `tenancy::create_tenant` (base has no such function
-    // on this branch; tenants are created ad hoc per call site), which would also enforce
-    // `YORISHIRO_MAX_TENANTS`. The publisher is infrastructure, not a customer, and a
-    // deployment sitting at its tenant cap still needs its official templates.
+    // Bypasses tenancy::create_tenant: the publisher is infrastructure, not subject to YORISHIRO_MAX_TENANTS.
     let active = identity_tenants::ActiveModel {
         id: ActiveValue::Set(OFFICIAL_TENANT_ID),
         name: ActiveValue::Set(OFFICIAL_TENANT_NAME.to_string()),

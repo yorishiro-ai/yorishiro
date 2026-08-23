@@ -56,9 +56,7 @@ impl YorishiroError {
     }
 
     /// A machine-readable identifier for this variant, stable across releases.
-    /// Every variant must have one: a new variant with no arm here fails to compile, which is
-    /// the point, since `ValidationFailed` and `RelationTypeMismatch` otherwise collide on the
-    /// same 422 status with no way for a client to tell them apart.
+    /// Every variant must have one: a new variant with no arm here fails to compile.
     pub fn code(&self) -> &'static str {
         match self {
             Self::ValidationFailed { .. } => "validation_failed",
@@ -163,13 +161,8 @@ impl YorishiroError {
     }
 }
 
-/// Lets a `YorishiroError` cross into a Loco-owned path (a `Hooks` method, a task, a worker)
-/// that returns `loco_rs::Result` rather than an axum handler's `Result<_, ApiError>`.
-/// `loco_rs::Error::CustomError`'s `ErrorDetail` has no field for `hint`, so this folds the
-/// whole `into_http_parts()` body into `ErrorDetail::errors` (a free-form `serde_json::Value`)
-/// rather than dropping it: a caller reading the wrapped error still gets `code`/`hint`, just
-/// not through a dedicated field. `YorishiroError` itself is not being replaced by this: see
-/// CLAUDE.md's "Error handling" section for why it stays the primary type on the HTTP path.
+/// Lets a `YorishiroError` cross into a Loco-owned path (a `Hooks` method, a task, a worker) that returns `loco_rs::Result`.
+/// Folds the whole `into_http_parts()` body into `ErrorDetail::errors`, since `ErrorDetail` has no dedicated `hint` field.
 impl From<YorishiroError> for loco_rs::Error {
     fn from(err: YorishiroError) -> Self {
         let (status, body) = err.into_http_parts();

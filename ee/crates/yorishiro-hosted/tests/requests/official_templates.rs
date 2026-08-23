@@ -11,9 +11,7 @@ use yorishiro_core::models::_entities::identity_tenants;
 use yorishiro_hosted::HostedApp;
 use yorishiro_hosted::services::official_templates::{self, OFFICIAL_TENANT_ID};
 
-/// A first run publishes every built-in template and creates the official tenant; a second run
-/// with nothing changed republishes nothing, which is what makes it safe to run on every
-/// deployment restart rather than once ever.
+/// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.
 #[tokio::test]
 #[serial]
 async fn seeding_is_idempotent_and_creates_the_official_tenant() {
@@ -53,11 +51,7 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
     .await;
 }
 
-/// The official tenant must exist after `cargo loco db seed` even on a deployment that has
-/// never run the separate `seed_official_templates` task: the two used to be coupled through
-/// `seed_official_templates` calling `ensure_official_tenant` as an internal step, which meant
-/// the tenant (and therefore the marketplace's foreign key target) did not exist until someone
-/// remembered to run that specific task.
+/// The official tenant must exist after `Hooks::seed` even without running `seed_official_templates`.
 #[tokio::test]
 #[serial]
 async fn hooks_seed_creates_the_official_tenant_without_publishing_templates() {

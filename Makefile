@@ -1,6 +1,4 @@
-# Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's
-# directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always
-# resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
+# Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
 
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:25433/yorishiro
 

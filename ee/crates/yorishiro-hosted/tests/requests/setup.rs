@@ -1,17 +1,11 @@
-//! Verifies `HostedApp::seed` (which creates `ee/`'s official-templates publisher tenant) does
-//! not make base's `/setup` wizard read as "this deployment has already been set up": the two
-//! used to share one unfiltered tenant count, so a seeded deployment could never be set up, and
-//! a deployment sitting at `YORISHIRO_MAX_TENANTS = 1` could never gain a real tenant either.
+//! Verifies `HostedApp::seed`'s official-templates publisher tenant does not make base's `/setup` wizard read as already set up.
 
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use yorishiro_hosted::HostedApp;
 
-/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there
-/// before. Every test in this suite is `#[serial]` (the default, unnamed key), so this is safe
-/// against every other test in the binary, not just this file's: `serial_test`'s bare `#[serial]`
-/// shares one global lock unless a key is given.
+/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there before.
 async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
     let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
     // SAFETY: serialized by every test in this binary being #[serial] on the default key.

@@ -64,11 +64,7 @@ async fn signup_then_login_round_trip() {
         assert!(login_body["api_key"].as_str().unwrap().starts_with("ysr_"));
         assert_eq!(login_body["scope"], "migration");
 
-        // The invite is single-use: redeeming the same token again must fail rather than
-        // silently creating a second account. This is a sequential replay, not a concurrent
-        // one: it does not exercise redeem_invite's race-safety claim (two redemptions racing
-        // on the same UPDATE ... WHERE used_at IS NULL), only that a used invite is rejected on
-        // a later, separate request.
+        // The invite is single-use: redeeming the same token again must fail.
         let replay_response = request
             .post("/auth/signup")
             .json(&serde_json::json!({
@@ -95,11 +91,8 @@ async fn signup_then_login_round_trip() {
     .await;
 }
 
-/// Omitting `invite_token` creates a fresh tenant and joins the caller as `Owner`, rather than
-/// 422-ing for lack of one. `email` is required in this mode since there is no invite to source
-/// it from. No workspace is created: that needs a schema decision signup has no basis to make,
-/// so the new owner creates one explicitly afterward (`POST /workspaces`) before they can log
-/// in at all.
+/// Omitting `invite_token` creates a fresh tenant and joins the caller as `Owner`.
+/// No workspace is created, so this account cannot log in until an operator runs `create_workspace` then `create_api_key`.
 #[tokio::test]
 #[serial]
 async fn signup_without_invite_creates_its_own_tenant() {
@@ -123,7 +116,6 @@ async fn signup_without_invite_creates_its_own_tenant() {
         assert_eq!(signup_body["role"], "owner");
         assert_eq!(signup_body["workspaces"].as_array().unwrap().len(), 0);
 
-        // No workspace exists yet, so there is nothing to issue an API key for.
         let login_response = request
             .post("/auth/login")
             .json(&serde_json::json!({
@@ -143,9 +135,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
     .await;
 }
 
-/// `email` alongside `invite_token` is rejected rather than silently ignored: the invite
-/// already carries the email it was issued to, and a caller-supplied one could disagree with it
-/// unnoticed.
+/// `email` alongside `invite_token` is rejected rather than silently ignored: the invite already carries the email it was issued to, and a caller-supplied one could disagree with it unnoticed.
 #[tokio::test]
 #[serial]
 async fn signup_rejects_email_alongside_invite_token() {
@@ -225,12 +215,7 @@ async fn signup_without_invite_respects_the_tenant_cap() {
     .await;
 }
 
-/// Sets `DB_MAX_CONNECTIONS` for the duration of the future, restoring whatever was there
-/// before, same shape as `with_max_tenants`. `config/test.yaml`'s pool defaults to
-/// `max_connections: 1`, which is too narrow for a test that deliberately holds one connection
-/// while a second one tries to acquire a connection of its own: with a pool of 1, a second
-/// `begin()` fails on `ConnectionAcquire(Timeout)` before it ever reaches the advisory lock,
-/// which is a pool-exhaustion failure, not the lock-contention failure the test means to check.
+/// Widens `DB_MAX_CONNECTIONS` past `config/test.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
     let previous = std::env::var("DB_MAX_CONNECTIONS").ok();
     // SAFETY: serialized by every test in this binary being #[serial] on the default key.
@@ -247,19 +232,7 @@ async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<O
     result
 }
 
-/// `tenancy::create_tenant`'s cap check must actually serialize concurrent callers, not just
-/// refuse a sequential second call: a bare `SELECT count(*)` inside READ COMMITTED does not
-/// serialize on its own, so without `db::lock_for_update` two racing callers can both pass the
-/// count check before either commits.
-///
-/// Tested deterministically rather than by racing N callers and hoping for an unlucky
-/// interleaving (an earlier version of this test raced 8 callers behind a barrier and passed
-/// whether or not the lock was even present: `config/test.yaml`'s default `max_connections: 1`
-/// pool serialized every racer on its own, catching nothing): hold the `create_tenant` advisory
-/// lock by hand on one connection, then assert a second `create_tenant` call blocks on it
-/// (`tokio::time::timeout` against an otherwise-generous wait), then assert it proceeds once the
-/// first lock is released. This fails immediately if the lock is removed, with no dependence on
-/// scheduler timing.
+/// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
 #[tokio::test]
 #[serial]
 async fn create_tenant_serializes_on_its_advisory_lock() {

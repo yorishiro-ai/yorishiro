@@ -22,14 +22,10 @@ use crate::services::auth::ApiKeyScope;
 
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
-    /// The plaintext token from an `admin create-invite`-issued invitation. Omit it to create a
-    /// fresh tenant and join it as `Owner` instead, the same shape `POST /setup` uses for a
-    /// deployment's first tenant, just reachable more than once (subject to
-    /// `YORISHIRO_MAX_TENANTS`, via `tenancy::create_tenant`).
+    /// The plaintext token from an `admin create-invite`-issued invitation.
+    /// Omit it to create a fresh tenant and join it as `Owner` instead.
     pub invite_token: Option<String>,
-    /// Required when `invite_token` is omitted: an invite already carries the email it was
-    /// issued to, so specifying one here as well would just be a second, possibly conflicting
-    /// source of truth for the same field. Rejected with `invite_token` present.
+    /// Required when `invite_token` is omitted, rejected when it is present.
     pub email: Option<String>,
     pub password: String,
     pub display_name: Option<String>,
@@ -106,17 +102,7 @@ async fn signup_with_invite(
 
 /// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
 ///
-/// **This account cannot obtain an API key on its own.** Every key is issued for a specific
-/// workspace (`/auth/login` needs one to resolve to, and `POST /workspaces` itself needs a key
-/// to call), so a tenant with zero workspaces has no self-service way to get one: an operator
-/// must run `cargo loco task create_workspace tenant_id:<id> name:...` followed by
-/// `create_api_key` to hand the new owner a working key. This is deliberate rather than an
-/// oversight: a workspace needs a schema/embedding decision signup has no basis to make on the
-/// new owner's behalf, so this stays a bootstrap step, not a fully automated one. Unlike
-/// `/setup` (which is gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap, and refuses
-/// once one tenant exists), this stays reachable for as long as `tenancy::create_tenant`'s own
-/// cap check allows: it reserves a tenant name on the ongoing "anyone can sign up" path, not a
-/// one-time deployment wizard.
+/// This account cannot obtain an API key on its own: an operator must run `cargo loco task create_workspace tenant_id:<id> name:...` followed by `create_api_key`.
 async fn signup_without_invite(
     ctx: &AppContext,
     body: &SignupRequest,
@@ -130,9 +116,7 @@ async fn signup_without_invite(
             hint: "either provide invite_token, or provide email to create a new tenant".into(),
         })?;
 
-    // tenant + user + membership run in one transaction, same reasoning as
-    // signup_with_invite's create_user + add_member: a request that dies part-way must not
-    // leave rows nothing can finish or undo.
+    // tenant + user + membership run in one transaction, same reasoning as signup_with_invite's create_user + add_member: a request that dies part-way must not leave rows nothing can finish or undo.
     let tenant_name = body.display_name.as_deref().unwrap_or(email);
     let txn = ctx.db.begin().await.internal()?;
     let tenant = tenancy::create_tenant(&txn, tenant_name).await?;

@@ -22,8 +22,8 @@ server:
   host: http://localhost
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
-    # Stamps every request/response with an `x-request-id` header, generating one if the
-    # caller sent none. This is the correlation ID that ties a log line to a response.
+    # Stamps every request/response with an `x-request-id` header, generating one if the caller sent none.
+    # This is the correlation ID that ties a log line to a response.
     request_id:
       enable: true
     # Access logging: method, URI, status, latency, and the request ID above.
