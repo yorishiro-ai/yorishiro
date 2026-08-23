@@ -1,0 +1,214 @@
+//! Find-or-create for OAuth-provisioned users, plus the tenant/workspace auto-provisioning that
+//! happens the first time a given identity logs in.
+//! Ported from master's `ee/crates/yorishiro-hosted/src/services/oauth/users.rs`, restructured
+//! onto this branch's one-transaction pattern (`controllers::setup::setup` is the closest
+//! analog: tenant, workspace, user and membership all committed together, guarded by
+//! `yorishiro_core::db::lock_for_update` rather than master's separate `pg_try_advisory_xact_lock`
+//! polling loop, since every write here already goes through `&impl ConnectionTrait` and can
+//! share one transaction end to end).
+//!
+//! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh
+//! OAuth-provisioned row) live in `models::oauth_users`, since `oauth_provider`/
+//! `oauth_subject_id` are columns this repo's own migration adds and `yorishiro_core`'s
+//! `identity_users` model knows nothing about the OAuth-specific lookups over them.
+//! This module owns the decision: which of the two branches a login takes, and how a first
+//! login wires a fresh tenant/workspace/membership together.
+
+use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
+use uuid::Uuid;
+use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::identity_tenants;
+use yorishiro_core::models::tenancy::{self, MembershipRole};
+
+use crate::models::oauth_users::{
+    CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_identity,
+};
+
+/// The workspace an OAuth login should issue its API key for, alongside the tenant/membership
+/// role that key's scope is derived from: everything the callback controller needs to call
+/// `yorishiro_core::models::identity_api_keys::IdentityApiKeys::create_api_key` exactly the way
+/// `POST /auth/login` does.
+#[derive(Debug)]
+pub struct ProvisionedLogin {
+    pub user_id: Uuid,
+    pub email: String,
+    pub workspace_id: Uuid,
+    pub role: MembershipRole,
+}
+
+/// Finds the user for `(provider, subject_id)`, creating both the user and a fresh
+/// tenant/workspace/membership if this is the identity's first login.
+/// `email` is required (the design's whole point is looking users up by the ID token's `email`
+/// claim); a provider that omits it fails with `ValidationFailed` rather than silently
+/// provisioning an unusable account.
+///
+/// New tenants/workspaces are named after the email's local part (e.g. `alice` from
+/// `alice@example.com`) since there is no signup form here to ask for a name.
+/// An admin can rename either afterward through the existing dashboard/API.
+/// The new member's role is always `member`; an existing identity keeps whatever role it
+/// already holds.
+/// The new workspace is left `schema_pending` (no `schema_id`), matching
+/// `controllers::setup::setup`'s own bootstrap-from-nothing precedent: there is no admin present
+/// to have chosen a starting schema for it. `embedding` is the deployment's actual model and
+/// width (the caller reads it from `shared_store`'s `EmbeddingProvider`, the same source
+/// `setup.rs` uses via `embedding_provider(&ctx)`), not a guessed default: this branch's
+/// `content_entities.embedding` index is a fixed width, so a workspace stamped with the wrong
+/// one would fail every entity write's dimension check.
+///
+/// The whole first-login path (user row, tenant, workspace, membership) runs in one
+/// transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`, so a crash
+/// partway through rolls the entire thing back rather than leaving an orphaned user row with no
+/// tenant membership, which every later login for that identity would otherwise resolve to a
+/// permanent `ScopeInsufficient`. The lock also serializes concurrent first logins for the exact
+/// same identity: without it, two callers racing a brand-new identity (e.g. a double-submitted
+/// callback) could both pass the existence check and both attempt to provision.
+///
+/// `YORISHIRO_MAX_TENANTS` is enforced the same way `tenancy::create_tenant`-style paths enforce
+/// it elsewhere: auto-provisioning through SSO must not be a backdoor around a deployment's
+/// tenant cap. The check is not itself race-free against a *different* identity's first login
+/// landing between the count and the insert (this function's lock is keyed per-identity, not
+/// globally), the same residual window `controllers::setup::setup`'s own fast-path check accepts
+/// before its stricter re-check under its own lock; closing it fully is not worth a global lock
+/// on every OAuth login for a race window this narrow.
+pub async fn find_or_create(
+    conn: &impl ConnectionTrait,
+    provider: &str,
+    subject_id: &str,
+    email: Option<&str>,
+    display_name: Option<&str>,
+    embedding: (&str, i32),
+) -> Result<ProvisionedLogin, YorishiroError> {
+    yorishiro_core::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
+        .await
+        .internal()?;
+
+    if let Some(existing) = find_by_oauth_identity(conn, provider, subject_id).await? {
+        return resolve_existing_login(conn, existing).await;
+    }
+
+    let email = email.ok_or_else(|| YorishiroError::ValidationFailed {
+        message: "the identity provider did not return an email claim".into(),
+        details: vec![],
+        hint: "this OAuth provider/app registration must be configured to release the 'email' \
+               claim"
+            .into(),
+    })?;
+
+    let user = match create_oauth_user(conn, email, display_name, provider, subject_id).await {
+        Ok(user) => user,
+        // The lookup above (under this same lock) confirmed no row exists for this
+        // (provider, subject_id) yet, so this can only be a genuine email collision with an
+        // unrelated account: no other caller can be concurrently inserting the same identity
+        // while this one holds the lock.
+        Err(CreateOauthUserError::UniqueViolation) => {
+            return Err(YorishiroError::Conflict {
+                message: format!(
+                    "a user with email '{email}' already exists (sign in with password, or ask \
+                     a tenant admin to link this SSO identity)"
+                ),
+            });
+        }
+        Err(CreateOauthUserError::Other(err)) => return Err(err),
+    };
+
+    if let Some(max) = tenancy::max_tenants_from_env()? {
+        let count = identity_tenants::Entity::find()
+            .count(conn)
+            .await
+            .internal()?;
+        if count >= max as u64 {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "this deployment has reached its tenant limit".into(),
+                hint: "ask the operator to raise YORISHIRO_MAX_TENANTS, or sign in to an \
+                       existing tenant with password instead"
+                    .into(),
+            });
+        }
+    }
+
+    let tenant_name = tenant_name_from_email(email);
+    let tenant_active = identity_tenants::ActiveModel {
+        name: sea_orm::ActiveValue::Set(tenant_name),
+        ..Default::default()
+    };
+    let tenant = sea_orm::ActiveModelTrait::insert(tenant_active, conn)
+        .await
+        .internal()?;
+
+    let workspace = tenancy::create_workspace(
+        conn,
+        tenant.id,
+        "default",
+        crate::services::plan::Plan::Free
+            .caps()
+            .default_max_entities,
+        None,
+        Some(embedding),
+    )
+    .await?;
+
+    tenancy::add_member(conn, tenant.id, user.id, MembershipRole::Member).await?;
+
+    Ok(ProvisionedLogin {
+        user_id: user.id,
+        email: user.email,
+        workspace_id: workspace.id,
+        role: MembershipRole::Member,
+    })
+}
+
+/// A deterministic key for `lock_for_update`, one per `(provider, subject_id)` pair.
+fn identity_lock_key(provider: &str, subject_id: &str) -> String {
+    format!("oauth:{provider}:{subject_id}")
+}
+
+/// Resolves a previously-provisioned OAuth identity to the workspace/role its login should use.
+/// Called by `find_or_create` for its one identity lookup, whether that finds a returning user
+/// or a first-login race's winner (this call is always made under the identity's advisory lock,
+/// so a row found here is guaranteed to have finished provisioning its tenant, workspace and
+/// membership).
+///
+/// Mirrors `controllers::auth::login`'s own workspace resolution: an account reaching more than
+/// one workspace must be refused rather than silently resolved to an arbitrary one, since a
+/// silent choice could hand a login to the wrong tenant's workspace.
+async fn resolve_existing_login(
+    conn: &impl ConnectionTrait,
+    user: OAuthUser,
+) -> Result<ProvisionedLogin, YorishiroError> {
+    let mut workspaces = tenancy::list_workspaces_for_user(conn, user.id).await?;
+    let workspace = match workspaces.len() {
+        1 => workspaces.pop().expect("len() == 1 checked above"),
+        0 => {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "this account is not a member of any tenant".into(),
+                hint: "ask a tenant admin to add you as a member first".into(),
+            });
+        }
+        _ => {
+            return Err(YorishiroError::ValidationFailed {
+                message: "this account has access to more than one workspace".into(),
+                details: vec![],
+                hint: "sign in with password and specify workspace_id explicitly".into(),
+            });
+        }
+    };
+
+    let tenant_id = tenancy::get_workspace_tenant(conn, workspace.id).await?;
+    let role = tenancy::get_membership_role(conn, tenant_id, user.id)
+        .await?
+        .ok_or_else(|| YorishiroError::ScopeInsufficient {
+            message: "this account is not a member of the tenant that owns its workspace".into(),
+            hint: "ask a tenant admin to add you as a member first".into(),
+        })?;
+
+    Ok(ProvisionedLogin {
+        user_id: user.id,
+        email: user.email,
+        workspace_id: workspace.id,
+        role,
+    })
+}
+
+fn tenant_name_from_email(email: &str) -> String {
+    email.split('@').next().unwrap_or(email).to_string()
+}

@@ -77,9 +77,13 @@ async fn set_columns(
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
         .await
         .internal()?;
-    let stored =
-        entity_columns::set(&schema_txn, auth_ctx.workspace_id, &entity_type, &body.columns)
-            .await?;
+    let stored = entity_columns::set(
+        &schema_txn,
+        auth_ctx.workspace_id,
+        &entity_type,
+        &body.columns,
+    )
+    .await?;
     schema_txn.commit().await.internal()?;
     Ok(Json(stored))
 }

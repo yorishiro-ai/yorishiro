@@ -2,6 +2,7 @@ mod dashboard;
 mod entity_columns;
 mod inference;
 mod marketplace;
+mod oauth;
 mod origin;
 mod stripe;
 mod tenant_auth;

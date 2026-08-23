@@ -115,7 +115,10 @@ pub async fn confirm(
     // restore an intermediate state depending on which row it read last.
     let mut by_entity: std::collections::BTreeMap<Uuid, Vec<&FillProposal>> = Default::default();
     for proposal in &proposals {
-        by_entity.entry(proposal.entity_id).or_default().push(proposal);
+        by_entity
+            .entry(proposal.entity_id)
+            .or_default()
+            .push(proposal);
     }
 
     for (entity_id, fields) in by_entity {

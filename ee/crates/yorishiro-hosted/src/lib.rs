@@ -118,12 +118,24 @@ impl Hooks for HostedApp {
     /// base's own routes forced the `/hosted` prefix. Recorded alongside `marketplace`'s own
     /// unchecked `/hosted/marketplace` deviation as an API-contract question to reconcile before
     /// the PR, not fixed here mid-slice.
+    ///
+    /// `controllers::oauth` mounts at master's own paths (`/auth/oauth/status|authorize|callback`):
+    /// no empirical check was needed here, since base's own `controllers::auth` owns `/auth`
+    /// but defines nothing under `/auth/oauth`, so there is no path to collide with in the first
+    /// place. Not licence-gated, the same reasoning as the Stripe webhook: an unconfigured
+    /// `OAuthConfig` (no `YORISHIRO_OAUTH_ISSUER_URL`) is what the routes gate on instead.
+    /// `OAuthConfig::from_env()` is read fresh on every `authorize`/`callback`/`status` request,
+    /// matching `StripeConfig::from_env()`'s own per-request read, rather than cached in
+    /// `shared_store` at boot: this crate has no DI seam for either, so a test configures either
+    /// the same way production does, by setting the process environment for the request's
+    /// duration.
     fn routes(ctx: &AppContext) -> AppRoutes {
         App::routes(ctx)
             .add_route(controllers::dashboard::routes())
             .add_route(controllers::entity_columns::routes())
             .add_route(controllers::inference::routes())
             .add_route(controllers::marketplace::routes())
+            .add_route(controllers::oauth::routes())
             .add_route(controllers::origin::routes())
             .add_route(controllers::stripe::routes())
     }

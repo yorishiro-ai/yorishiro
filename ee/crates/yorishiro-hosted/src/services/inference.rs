@@ -119,7 +119,9 @@ impl InferenceClient {
             // or a caller comparing two runs cannot tell a model's uncertainty from a change in
             // the data.
             temperature: 0.0,
-            response_format: ResponseFormat { kind: "json_object" },
+            response_format: ResponseFormat {
+                kind: "json_object",
+            },
         };
 
         let response = self

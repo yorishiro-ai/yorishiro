@@ -117,13 +117,13 @@ async fn infer_fill(
 
     // Refuse before doing any work: a caller with no key gets one clear error rather than a
     // scan that reports zero proposals and reads as "nothing to infer".
-    let config = llm_keys::get(&ctx.db, workspace_id)
-        .await?
-        .ok_or_else(|| YorishiroError::ValidationFailed {
+    let config = llm_keys::get(&ctx.db, workspace_id).await?.ok_or_else(|| {
+        YorishiroError::ValidationFailed {
             message: "this workspace has no LLM credentials configured".into(),
             details: vec![],
             hint: "PUT /hosted/workspace/llm-key".into(),
-        })?;
+        }
+    })?;
 
     let db = ctx
         .shared_store
@@ -135,9 +135,12 @@ async fn infer_fill(
         .await
         .internal()?;
 
-    let active =
-        yorishiro_core::models::content_schemas::get_active_schema(&schema_txn, workspace_id, &name)
-            .await?;
+    let active = yorishiro_core::models::content_schemas::get_active_schema(
+        &schema_txn,
+        workspace_id,
+        &name,
+    )
+    .await?;
     let job_id = Uuid::new_v4();
     let client = InferenceClient::new(config);
 

@@ -68,7 +68,10 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .await;
         assert_eq!(put.status_code(), 200, "response: {:?}", put.text());
         let body: serde_json::Value = put.json();
-        assert_eq!(body["columns"], serde_json::json!(["priority", "title", "done"]));
+        assert_eq!(
+            body["columns"],
+            serde_json::json!(["priority", "title", "done"])
+        );
 
         let after = request
             .get("/api/workspace/entity-columns")
@@ -77,7 +80,10 @@ async fn set_get_and_reset_round_trip_in_display_order() {
         let stored: Vec<serde_json::Value> = after.json();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0]["entity_type"], "task");
-        assert_eq!(stored[0]["columns"], serde_json::json!(["priority", "title", "done"]));
+        assert_eq!(
+            stored[0]["columns"],
+            serde_json::json!(["priority", "title", "done"])
+        );
 
         // Saving again replaces rather than appending: one row, the new order.
         let put_again = request
@@ -91,8 +97,15 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         let stored_again: Vec<serde_json::Value> = after_again.json();
-        assert_eq!(stored_again.len(), 1, "must replace, not append: {stored_again:?}");
-        assert_eq!(stored_again[0]["columns"], serde_json::json!(["done", "title"]));
+        assert_eq!(
+            stored_again.len(),
+            1,
+            "must replace, not append: {stored_again:?}"
+        );
+        assert_eq!(
+            stored_again[0]["columns"],
+            serde_json::json!(["done", "title"])
+        );
 
         let reset = request
             .delete("/api/workspace/entity-columns/task")
@@ -125,9 +138,15 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "columns": ["title", "title"] }))
             .await;
-        assert_eq!(duplicate.status_code(), 422, "response: {:?}", duplicate.text());
+        assert_eq!(
+            duplicate.status_code(),
+            422,
+            "response: {:?}",
+            duplicate.text()
+        );
 
-        let over_limit: Vec<String> = (0..yorishiro_hosted::models::entity_columns::MAX_VISIBLE_COLUMNS + 1)
+        let over_limit: Vec<String> = (0
+            ..yorishiro_hosted::models::entity_columns::MAX_VISIBLE_COLUMNS + 1)
             .map(|i| format!("f{i}"))
             .collect();
         let too_many = request
@@ -135,7 +154,12 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "columns": over_limit }))
             .await;
-        assert_eq!(too_many.status_code(), 422, "response: {:?}", too_many.text());
+        assert_eq!(
+            too_many.status_code(),
+            422,
+            "response: {:?}",
+            too_many.text()
+        );
 
         let after = request
             .get("/api/workspace/entity-columns")
@@ -171,7 +195,11 @@ async fn an_empty_selection_is_stored_as_a_choice() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         let stored: Vec<serde_json::Value> = after.json();
-        assert_eq!(stored.len(), 1, "an empty choice must still be a row: {stored:?}");
+        assert_eq!(
+            stored.len(),
+            1,
+            "an empty choice must still be a row: {stored:?}"
+        );
         assert!(stored[0]["columns"].as_array().unwrap().is_empty());
 
         super::close_app_pools(&ctx).await;

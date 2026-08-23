@@ -4,6 +4,7 @@ pub mod inference;
 pub mod licence;
 pub mod marketplace;
 pub mod merge;
+pub mod oauth;
 pub mod origin;
 pub mod plan;
 pub mod tenant_auth;

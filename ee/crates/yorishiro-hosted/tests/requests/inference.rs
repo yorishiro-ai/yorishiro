@@ -12,11 +12,12 @@ use yorishiro_hosted::services::licence::{LicenceClaims, LicenceState};
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()`
 /// the test process booted with. See `marketplace.rs`'s own copy of this helper.
 fn licence(ctx: &loco_rs::app::AppContext) {
-    ctx.shared_store.insert(LicenceState::licensed(LicenceClaims {
-        sub: "acme-corp".into(),
-        plan: "enterprise".into(),
-        exp: Utc::now().timestamp() + 60 * 60,
-    }));
+    ctx.shared_store
+        .insert(LicenceState::licensed(LicenceClaims {
+            sub: "acme-corp".into(),
+            plan: "enterprise".into(),
+            exp: Utc::now().timestamp() + 60 * 60,
+        }));
 }
 
 struct Setup {
@@ -124,7 +125,11 @@ async fn a_non_http_base_url_is_refused() {
     request_with_create_db::<HostedApp, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
-        for bad_url in ["file:///etc/passwd", "gopher://example.com", "api.example.com/v1"] {
+        for bad_url in [
+            "file:///etc/passwd",
+            "gopher://example.com",
+            "api.example.com/v1",
+        ] {
             let put = request
                 .put("/hosted/workspace/llm-key")
                 .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -166,7 +171,12 @@ async fn infer_fill_without_a_configured_key_is_refused() {
                 }
             }))
             .await;
-        assert_eq!(create_schema.status_code(), 201, "response: {:?}", create_schema.text());
+        assert_eq!(
+            create_schema.status_code(),
+            201,
+            "response: {:?}",
+            create_schema.text()
+        );
 
         let infer = request
             .post("/hosted/schemas/active/note/infer-fill")
@@ -192,9 +202,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
             .post("/hosted/schemas/active/note/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        let without_key = request
-            .post("/hosted/schemas/active/note/infer-fill")
-            .await;
+        let without_key = request.post("/hosted/schemas/active/note/infer-fill").await;
 
         assert_eq!(with_key.status_code(), without_key.status_code());
         assert_eq!(with_key.status_code(), 404);
@@ -213,7 +221,10 @@ async fn confirming_an_unknown_job_is_refused() {
         let setup = setup(&ctx).await;
 
         let confirm = request
-            .post(&format!("/hosted/migration-jobs/{}/confirm", Uuid::new_v4()))
+            .post(&format!(
+                "/hosted/migration-jobs/{}/confirm",
+                Uuid::new_v4()
+            ))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(confirm.status_code(), 404, "response: {:?}", confirm.text());
