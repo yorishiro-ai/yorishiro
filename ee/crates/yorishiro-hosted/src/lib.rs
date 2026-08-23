@@ -84,12 +84,19 @@ impl Hooks for HostedApp {
     ///
     /// `/hosted/tenant/overview` carries no licence check of its own: it is authenticated the
     /// same way master's dashboard was (tenant owner/admin membership), not licence-gated, since
-    /// a self-hosted tenant's own overview is not a paid feature. A route that IS a paid feature
-    /// (Stripe, OAuth, marketplace) gates by not being configured/added at all without a licence,
-    /// matching master's own pattern, rather than a per-handler `require_active` check on an
-    /// always-mounted route.
+    /// a self-hosted tenant's own overview is not a paid feature.
+    ///
+    /// `/hosted/stripe/webhook` is also always mounted, matching master: the gate is
+    /// `StripeConfig::from_env().webhook_secret` being absent, which the handler itself turns
+    /// into a 501, the same shape as an unconfigured `oauth_config`/`stripe_config` being `None`
+    /// on master. There is no licence check here either: master's own gate is "Stripe is
+    /// configured but no active licence" logged as a warning at boot, not a route omission (see
+    /// its `bin/yorishiro_server.rs`); this branch has no equivalent boot-time warning yet,
+    /// tracked as a follow-up rather than blocking the route.
     fn routes(ctx: &AppContext) -> AppRoutes {
-        App::routes(ctx).add_route(controllers::dashboard::routes())
+        App::routes(ctx)
+            .add_route(controllers::dashboard::routes())
+            .add_route(controllers::stripe::routes())
     }
 
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {

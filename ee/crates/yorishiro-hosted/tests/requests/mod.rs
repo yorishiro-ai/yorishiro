@@ -1,4 +1,5 @@
 mod dashboard;
+mod stripe;
 mod tenant_auth;
 
 /// `after_context` opens two pools Loco's own request-test harness knows nothing about (the

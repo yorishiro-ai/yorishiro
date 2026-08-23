@@ -492,6 +492,30 @@ pub async fn create_workspace(
     active.insert(conn).await.internal()
 }
 
+/// Sets a tenant's `max_workspaces` cap.
+///
+/// A self-hosted deployment never calls this (its tenants keep whatever cap they were created
+/// with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap
+/// that comes with a plan change.
+pub async fn set_tenant_max_workspaces(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    max_workspaces: Option<i32>,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::identity_tenants;
+
+    let tenant = identity_tenants::Entity::find_by_id(tenant_id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
+
+    let mut active: identity_tenants::ActiveModel = tenant.into();
+    active.max_workspaces = ActiveValue::Set(max_workspaces);
+    active.update(conn).await.internal()?;
+    Ok(())
+}
+
 /// Fetches a workspace by id.
 pub async fn get_workspace(
     conn: &impl ConnectionTrait,
