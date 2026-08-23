@@ -2,75 +2,40 @@
 
 ## Loco rebuild in progress
 
-This repository moved from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to
-[Loco](https://loco.rs) (SeaORM `DatabaseConnection` for query execution, `sea-orm-migration`
-for schema). See `yotsunagi/yorishiro#221` for the rationale. **Sections below still describing
-the old `crates/yorishiro-core`/`crates/yorishiro-server` split, `sea-query` column-list
-helpers, or the `Engine` trait are stale and are being replaced section by section as the port
-reaches each area**; treat a stale section as describing what used to be true, not a live rule,
-until this note is removed.
+This repository moved from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to [Loco](https://loco.rs) (SeaORM `DatabaseConnection` for query execution, `sea-orm-migration` for schema).
+See `yotsunagi/yorishiro#221` for the rationale.
+**Sections below still describing the old `crates/yorishiro-core`/`crates/yorishiro-server` split, `sea-query` column-list helpers, or the `Engine` trait are stale and are being replaced section by section as the port reaches each area**; treat a stale section as describing what used to be true, not a live rule, until this note is removed.
 
-**`yorishiro-specs`' `Yorishiro_v1_technical_spec*.md` documents are not being updated slice by
-slice during this rebuild**, a deliberate deferral rather than drift: they describe the shipped
-v0.50.0 behavior, which is still what a reader of those documents needs until `develop` actually
-merges and replaces it. They get brought current as part of that merge, not each commit here.
+**`yorishiro-specs`' `Yorishiro_v1_technical_spec*.md` documents are not being updated slice by slice during this rebuild**, a deliberate deferral rather than drift: they describe the shipped v0.50.0 behavior, which is still what a reader of those documents needs until `develop` actually merges and replaces it.
+They get brought current as part of that merge, not each commit here.
 
-**`import_jsonl` attributes every imported entity to the importing key's own `user_id`, never to
-the exported `created_by`.** The old code passed `entity.created_by` straight through
-unremapped, which only ever worked because every restore it ran happened to target the same
-deployment that minted that user; a restore into a different tenant (this rebuild's fresh
-database has no `identity_users` rows at all, since signup isn't ported yet) hits
-`fk_content_entities_created_by` immediately, and `yorishiro_app` has no grant to even check
-`identity_users` for existence first. Attributing to the importer is always FK-safe, and for the
-common case (an owner restoring their own backup into the same deployment) still names the right
-person. `updated_by` was never populated by import either way (`content_entities::create`
-doesn't take one).
+**`import_jsonl` attributes every imported entity to the importing key's own `user_id`, never to the exported `created_by`.**
+The old code passed `entity.created_by` straight through unremapped, which only ever worked because every restore it ran happened to target the same deployment that minted that user.
+A restore into a different tenant hits `fk_content_entities_created_by` immediately, and `yorishiro_app` has no grant to even check `identity_users` for existence first.
+Attributing to the importer is always FK-safe, and for the common case (an owner restoring their own backup into the same deployment) still names the right person.
+`updated_by` was never populated by import either way (`content_entities::create` doesn't take one).
 
-**Before writing any Loco/SeaORM code, check the actual behavior against Loco's own
-documentation or source (`https://loco.rs/docs/`, DeepWiki on `loco-rs/loco` and
-`SeaQL/sea-orm`) rather than assuming from a general Rails/ActiveRecord mental model.** Several
-assumptions turned out wrong when checked: `ColType` has no primary-key-with-custom-default
-variant (`uuidv7()` on a UUID PK needs raw `sea_query::ColumnDef`, not a `ColType` helper);
-`sea-orm-cli`'s pgvector support is a compile-time feature of the *installed binary*, not
-something the app's own `Cargo.toml` features reach; the schema builder has no PostgreSQL
-schema-namespace, RLS, or GRANT support at all (raw SQL via `execute_unprepared` is loco's own
-documented answer, not a workaround).
+**Before writing any Loco/SeaORM code, check the actual behavior against Loco's own documentation or source (`https://loco.rs/docs/`, DeepWiki on `loco-rs/loco` and `SeaQL/sea-orm`) rather than assuming from a general Rails/ActiveRecord mental model.**
+Several assumptions turned out wrong when checked: `ColType` has no primary-key-with-custom-default variant (`uuidv7()` on a UUID PK needs raw `sea_query::ColumnDef`, not a `ColType` helper); `sea-orm-cli`'s pgvector support is a compile-time feature of the installed binary, not something the app's own `Cargo.toml` features reach; the schema builder has no PostgreSQL schema-namespace, RLS, or GRANT support at all (raw SQL via `execute_unprepared` is loco's own documented answer, not a workaround).
 
-**Repository layout**: a single Loco app crate at the repository root (package name
-`yorishiro-core`, binary `yorishiro_core-cli`), not `crates/yorishiro-core` +
-`crates/yorishiro-server`. Migrations live in the `migration/` crate. `ee/` still composes on
-top per the edition rules below; how it re-joins this structure is not yet ported.
+**Repository layout**: a single Loco app crate at the repository root (package name `yorishiro-core`, binary `yorishiro_core-cli`), not `crates/yorishiro-core` + `crates/yorishiro-server`.
+Migrations live in the `migration/` crate.
+`ee/` still composes on top per the edition rules below; how it re-joins this structure is not yet ported.
 
-**`yorishiro-specs/test/docker-compose.yml` still mounts `target/debug/yorishiro-server`**, the
-pre-rebuild binary name: it will not find `target/debug/yorishiro_core-cli` and needs updating
-before dogfooding against this rebuild through that compose file, the same "nothing builds it
-until the integration step discovers it" shape as v0.47.0's renamed-binary release failure
-(`yorishiro-specs/.claude/rules/workspace-checklist.md`). Not yet fixed as of this note; a slice
-that touches packaging/dogfooding should update the mount rather than rediscover this cold.
+**`yorishiro-specs/test/docker-compose.yml` still mounts `target/debug/yorishiro-server`**, the pre-rebuild binary name: it will not find `target/debug/yorishiro_core-cli` and needs updating before dogfooding against this rebuild through that compose file.
+Not yet fixed as of this note; a slice that touches packaging/dogfooding should update the mount rather than rediscover this cold.
 
-**Schema namespace**: the old two-schema split (`identity.*`, `content.*`) is retired. Every
-table lives in `public`, with the old schema name kept as a table-name *prefix*
-(`identity_workspaces`, `content_entities`), since Loco's schema builder has no PostgreSQL
-schema-namespace support. **GRANT is always per-table, never schema-wide** —
-`migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant
-structurally awkward to write, because unifying the schema means a wildcard grant would now
-also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`,
-`identity_tenant_memberships`, `identity_invites`, `identity_templates`,
-`identity_workspace_llm_keys`). Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
+**Schema namespace**: the old two-schema split (`identity.*`, `content.*`) is retired.
+Every table lives in `public`, with the old schema name kept as a table-name prefix (`identity_workspaces`, `content_entities`), since Loco's schema builder has no PostgreSQL schema-namespace support.
+**GRANT is always per-table, never schema-wide**: `migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant structurally awkward to write, because unifying the schema means a wildcard grant would now also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`).
+Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 
-**Migrations**: one file per table under `migration/src/`, generated via `cargo loco generate
-migration Create<Name>` then hand-edited. Column definitions use `loco_rs::schema`'s `ColType`
-helpers where they fit; drop to raw `sea_query::ColumnDef` (see `migration/src/helpers.rs`'s
-`uuidv7_pk()`) for anything `ColType` can't express, rather than fighting the abstraction. RLS,
-GRANT, `CREATE SCHEMA`, extensions, triggers, and `SECURITY DEFINER` functions go through
-`manager.get_connection().execute_unprepared(...)` — this is Loco's own documented pattern for
-these, not an escape hatch to avoid.
+**Migrations**: one file per table under `migration/src/`, generated via `cargo loco generate migration Create<Name>` then hand-edited.
+Column definitions use `loco_rs::schema`'s `ColType` helpers where they fit; drop to raw `sea_query::ColumnDef` (see `migration/src/helpers.rs`'s `uuidv7_pk()`) for anything `ColType` can't express, rather than fighting the abstraction.
+RLS, GRANT, `CREATE SCHEMA`, extensions, triggers, and `SECURITY DEFINER` functions go through `manager.get_connection().execute_unprepared(...)`: this is Loco's own documented pattern for these, not an escape hatch to avoid.
 
-**Models**: `src/models/_entities/` is generated by `cargo loco db entities` and never hand-edited
-(a diff there means the migration changed and entities need regenerating, not that the file itself
-was wrong). Business logic goes in `src/models/<table>.rs`, which wraps the generated `Entity`/
-`Model`/`ActiveModel`: reads on `impl Model`, writes on `impl ActiveModel`, everything else
-(custom finders, multi-step operations like key issuance) on `impl Entity`.
+**Models**: `src/models/_entities/` is generated by `cargo loco db entities` and never hand-edited (a diff there means the migration changed and entities need regenerating, not that the file itself was wrong).
+Business logic goes in `src/models/<table>.rs`, which wraps the generated `Entity`/`Model`/`ActiveModel`: reads on `impl Model`, writes on `impl ActiveModel`, everything else (custom finders, multi-step operations like key issuance) on `impl Entity`.
 
 **The SeaORM entity API is the default on every path, control-plane and RLS-scoped tenant CRUD alike.**
 An earlier version of this section said the RLS-scoped path had to stay on raw `sqlx` because Loco's own `ctx.db` can't carry the `SET ROLE`/`set_config(...)` session-state lifecycle RLS depends on.
@@ -99,10 +64,8 @@ See <https://github.com/yotsunagi/yorishiro/issues/221> for the design history, 
   Everything outside `ee/` is BUSL-1.1; `ee/` is the paid edition under `ee/LICENSE`, which adds a Competing Use restriction and requires a licence key for production use.
 - **The root `yorishiro-core` app crate must not depend on `ee/`. `ee/` depends on it.**
   One binary composes both.
-  A `use` or a path dependency pointing from the root crate into `ee/` inverts this and is the
-  one import direction that is always wrong.
-  (Pre-Loco-rebuild, this was stated as `crates/yorishiro-{core,server}`; the split into two
-  crates under `crates/` no longer exists, but the direction of the rule is unchanged.)
+  A `use` or a path dependency pointing from the root crate into `ee/` inverts this and is the one import direction that is always wrong.
+  (Pre-Loco-rebuild, this was stated as `crates/yorishiro-{core,server}`; the split into two crates under `crates/` no longer exists, but the direction of the rule is unchanged.)
 - Which side a feature belongs on is decided by what the feature *is*, never by what it needs.
   **The server calling an LLM**, billing, external SaaS and rich UI are `ee/` by character.
   "The user brings their own key" does not move a feature out of `ee/`, because it changes who pays rather than what the server does.
@@ -123,7 +86,8 @@ Every method delegates to the matching associated fn on `App` first (`App::route
 The bin `ee/crates/yorishiro-hosted/src/bin/yorishiro_server.rs` calls `cli::main::<HostedApp, Migrator>()`, mirroring `yorishiro-core`'s own `bin/main.rs` with `HostedApp` in place of `App`.
 `yorishiro_core::error::YorishiroError` is now re-exported at the crate root (`pub use error::YorishiroError;` in `src/lib.rs`), restoring the pre-rebuild short path `ee/` code (and anything else outside the crate) needs it at.
 
-**Bin naming is deferred to the packaging slice.** The ee bin is named `yorishiro-server` (matching master and the shipping convention `.claude/rules/workspace-checklist.md` in `yorishiro-specs` records), but nothing in this repository or `test-loco/` has been renamed to it yet: `test-loco/docker-compose.yml` still mounts `yorishiro_core-cli` by name, deliberately, since renaming it now would be renaming ahead of the slice that actually needs the distinction.
+**Bin naming is deferred to the packaging slice.**
+The ee bin is named `yorishiro-server` (matching master and the shipping convention `.claude/rules/workspace-checklist.md` in `yorishiro-specs` records), but nothing in this repository or `test-loco/` has been renamed to it yet: `test-loco/docker-compose.yml` still mounts `yorishiro_core-cli` by name, deliberately, since renaming it now would be renaming ahead of the slice that actually needs the distinction.
 
 **First slice landed: the seam plus the licence gate, nothing else.**
 `ee/crates/yorishiro-hosted/src/services/licence.rs` is `services/licence.rs` from `master:ee/crates/yorishiro-hosted`, ported with no logic changes (only the internal `YorishiroError` import path, unchanged in content), since it depended on nothing else in the old `ee/` tree.
@@ -133,7 +97,8 @@ Tests: `ee/crates/yorishiro-hosted/tests/licence.rs`, 7 cases covering verificat
 The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, not a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
 The edition boundary was checked at its own layer, not assumed: `grep -ac YORISHIRO_LICENSE_KEY target/debug/yorishiro_core-cli` answers 0 and the same grep against `target/debug/yorishiro-server` answers 1, confirming the licence string exists only in the binary that should carry it.
 
-**The config-file fallback (`licence_key_from_config` in `licence.rs`) is stale, ported unchanged from master but currently dead.** It reads `config.yml`/`YORISHIRO_CONFIG_PATH`, master's pre-rebuild server config convention; the Loco rebuild resolves `config/{environment}.yaml` instead and defines no `license_key:` field there, so this function always returns `None` until a Loco config field is wired up for it, and only the `YORISHIRO_LICENSE_KEY` environment variable is live.
+**The config-file fallback (`licence_key_from_config` in `licence.rs`) is stale, ported unchanged from master but currently dead.**
+It reads `config.yml`/`YORISHIRO_CONFIG_PATH`, master's pre-rebuild server config convention; the Loco rebuild resolves `config/{environment}.yaml` instead and defines no `license_key:` field there, so this function always returns `None` until a Loco config field is wired up for it, and only the `YORISHIRO_LICENSE_KEY` environment variable is live.
 
 **Inventory of what master's `ee/` held, not yet ported** (`git ls-tree -r --name-only master ee/crates/yorishiro-hosted/src`, so this list is read from the tree, not recalled): identity/OAuth (`services/oauth/*`, `http/controllers/oauth.rs`, `models/oauth_users.rs`), billing (`services/plan.rs`, `models/billing.rs`, `models/usage.rs`, `http/controllers/stripe.rs`, `models/stripe_events.rs`), marketplace (`services/marketplace.rs`, `models/marketplace.rs`, `http/controllers/marketplace.rs`), the origin/merge chain (`services/origin.rs`, `services/merge.rs`, `models/origin.rs`, `http/controllers/origin.rs`), inference / fill mode B (`services/inference.rs`, `http/controllers/inference.rs`, `models/llm_keys.rs`), the tenant dashboard (`http/controllers/dashboard.rs`), entity columns (`models/entity_columns.rs`, `http/controllers/entity_columns.rs`), `services/authz.rs`, `services/hmac_sign.rs`, `services/official_templates.rs`, `services/tenant_auth.rs`, and the SPA embed (`web/mod.rs`, `state.rs`).
 Every one of these still depends on the old sqlx-era `AppState`/`state.rs` shape in the master source and needs re-deriving against `AppContext`/`TenantDb`, the same way `licence.rs` did not.
@@ -189,50 +154,27 @@ Every one of these still depends on the old sqlx-era `AppState`/`state.rs` shape
 
 ## Model column lists (yorishiro-core)
 
-**Stale, pending removal once the model-layer port reaches this concern**: the old `Engine`
-generics and hand-built `sea-query` column lists this section described no longer exist. A
-SeaORM entity's `Column` enum already is the one place a column list lives; there is no
-`<table>_columns()` helper to write or maintain going forward.
+**Stale, pending removal once the model-layer port reaches this concern**: the old `Engine` generics and hand-built `sea-query` column lists this section described no longer exist.
+A SeaORM entity's `Column` enum already is the one place a column list lives; there is no `<table>_columns()` helper to write or maintain going forward.
 
 ## Visibility and dead code (yorishiro-core)
 
-- `yorishiro-core`'s only consumer outside itself is `ee/crates/yorishiro-hosted` now (the
-  `yorishiro-server` crate this used to name no longer exists as a separate crate; its
-  responsibilities are being ported into the root app crate).
-  A workspace-wide grep therefore does settle whether a `pub` item is called, but it has to
-  include `ee/`, which is a member of this workspace and the only caller of much of what this
-  crate exports.
-  The five published contracts (`build_app`, `apply_observability_layers`, `into_http_parts()`,
-  `hex_decode`, `bearer_credential`) stay regardless: they are the seam `ee/` composes against.
-  **Not yet re-established post-rebuild: `build_app`/`apply_observability_layers` (no router
-  exists yet), so this list is aspirational for those two until the controller/routing port
-  lands.**
+- `yorishiro-core`'s only consumer outside itself is `ee/crates/yorishiro-hosted` now (the `yorishiro-server` crate this used to name no longer exists as a separate crate; its responsibilities are being ported into the root app crate).
+  A workspace-wide grep therefore does settle whether a `pub` item is called, but it has to include `ee/`, which is a member of this workspace and the only caller of much of what this crate exports.
+  The five published contracts (`build_app`, `apply_observability_layers`, `into_http_parts()`, `hex_decode`, `bearer_credential`) stay regardless: they are the seam `ee/` composes against.
+  **Not yet re-established post-rebuild: `build_app`/`apply_observability_layers` (no router exists yet), so this list is aspirational for those two until the controller/routing port lands.**
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
-- `Authenticator` (`services/auth`) is meant to be a seam, not an internal detail, once it
-  exists: **not yet ported**.
-  The pre-rebuild design had every authenticated path resolve through one
-  `AppState::authenticator` (`AuthContext`/`Authorized<R>`/`Verified<R>` extractors, both MCP
-  entry points); the current port only has bare `authenticate()` in
-  `services/auth/authenticate.rs`, with no seam/extractor wrapping it yet.
-  **A new authenticated entry point must resolve through the eventual seam, not call
-  `authenticate` directly**, once it's rebuilt: otherwise a REST route and an MCP tool could end
-  up disagreeing about who the caller is.
+- `Authenticator` (`services/auth`) is meant to be a seam, not an internal detail, once it exists: **not yet ported**.
+  The pre-rebuild design had every authenticated path resolve through one `AppState::authenticator` (`AuthContext`/`Authorized<R>`/`Verified<R>` extractors, both MCP entry points); the current port only has bare `authenticate()` in `services/auth/authenticate.rs`, with no seam/extractor wrapping it yet.
+  **A new authenticated entry point must resolve through the eventual seam, not call `authenticate` directly**, once it's rebuilt: otherwise a REST route and an MCP tool could end up disagreeing about who the caller is.
 
 ## Module structure
 
-Loco's own layout, not the pre-rebuild `http/*`: controllers in `src/controllers/`, models
-(entity extensions) in `src/models/`, services in `src/services/`, background workers in
-`src/workers/`, admin/one-off commands in `src/tasks/` (via `cargo loco task`).
+Loco's own layout, not the pre-rebuild `http/*`: controllers in `src/controllers/`, models (entity extensions) in `src/models/`, services in `src/services/`, background workers in `src/workers/`, admin/one-off commands in `src/tasks/` (via `cargo loco task`).
 
-**MCP**: the server type (`YorishiroMcpServer`) and per-domain `#[tool_router]` implementations
-live in `src/services/mcp/`, since it's a thing `ee/` composes against (the sixth seam,
-alongside the five published contracts) rather than route logic. Route *mounting* is a one-line
-`src/controllers/mcp.rs::mount()`, called from `Hooks::after_routes` in `app.rs`: `rmcp`'s
-`StreamableHttpService` is a plain `tower::Service`, not something `Routes`/`AppRoutes` can
-carry, and `after_routes` is Loco's own documented hook for exactly this (custom Axum logic
-after Loco's own routes are built). MCP middleware (rate limiting, request-body limits on the
-`/mcp` route specifically) hasn't come up yet; decide when it does, don't assume `http/middleware/`
-still applies.
+**MCP**: the server type (`YorishiroMcpServer`) and per-domain `#[tool_router]` implementations live in `src/services/mcp/`, since it's a thing `ee/` composes against (the sixth seam, alongside the five published contracts) rather than route logic.
+Route mounting is a one-line `src/controllers/mcp.rs::mount()`, called from `Hooks::after_routes` in `app.rs`: `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not something `Routes`/`AppRoutes` can carry, and `after_routes` is Loco's own documented hook for exactly this (custom Axum logic after Loco's own routes are built).
+MCP middleware (rate limiting, request-body limits on the `/mcp` route specifically) hasn't come up yet; decide when it does, don't assume `http/middleware/` still applies.
 
 ## Tests
 
@@ -251,7 +193,7 @@ Three pitfalls this uncovered, each fixed rather than worked around:
 
 **A boot failure inside `request_with_create_db` surfaces as a `DROP DATABASE` panic during `loco_rs`'s own cleanup, not as the actual boot error.**
 `after_context` opens the identity pool eagerly, before `db::converge` runs; if `converge` then fails, that pool still holds a session on the throwaway test database, and `loco_rs::testing::db::PostgresTest::cleanup_db`'s `DROP DATABASE` fails with "being accessed by other users", panics, and the real `H::boot` error is swallowed (`loco_rs-1.1.0/src/testing/request.rs:218`, inside the `Err(err)` arm).
-**Read that as "why did boot fail", not "find the leaked pool"**: a significant amount of time went into closing every pool this app opens (`close_app_pools` in `tests/requests/auth.rs`, still correct and still required) before the actual cause turned out to be `converge` itself failing, for the reason below.
+**Read that as "why did boot fail", not "find the leaked pool"**: a significant amount of time went into closing every pool this app opens (`close_app_pools` in `tests/requests/mod.rs`, still correct and still required) before the actual cause turned out to be `converge` itself failing, for the reason below.
 
 **Loco's request-test harness creates each throwaway database with `CREATE DATABASE`, which copies `template1`, not the database `init-extensions.sql` installs `vector`/`pg_trgm` into.**
 `test-loco/init-extensions.sql` in `yorishiro-specs` ran those `CREATE EXTENSION`s against `POSTGRES_DB` only; every throwaway test database inherited a `template1` with neither, so `converge` failed on `content_entities.embedding` inside every request test, for exactly the boot-failure-looks-like-cleanup-panic reason above.
@@ -260,7 +202,7 @@ Fixed in `yorishiro-specs` (`\c template1` plus the same two `CREATE EXTENSION`s
 
 **A request test that boots through `request_with_create_db` must call a pool-closing helper before its closure returns, or teardown panics even on a passing test.**
 `after_context` opens two pools Loco's harness doesn't know about (identity, eager; tenant, lazy), and `config/test.yaml`'s `min_connections: 1` keeps one connection open on `ctx.db` itself; none of the three close on their own when the closure returns.
-`close_app_pools` in `tests/requests/auth.rs` is the pattern every future request test copies.
+`close_app_pools` in `tests/requests/mod.rs` is the pattern every future request test copies.
 The Postgres queue provider (`config/test.yaml`'s `queue:` block) is a fourth pool this same way, and it has no public close path at all (`shutdown()` only cancels its polling loop, confirmed by reading `bgworker/pg.rs`), so `queue:` is **omitted entirely from `config/test.yaml`**: nothing in this codebase enqueues a job yet (`connect_workers` is a no-op), so no test needs one, and there is no fix on the closing side for a pool with no closing method.
 
 **`redeem_invite`'s race-safety claim (two concurrent redemptions of the same token can't both succeed) is documented but not tested.**
@@ -268,48 +210,26 @@ The Postgres queue provider (`config/test.yaml`'s `queue:` block) is a fourth po
 Confirmed by deliberately breaking the `WHERE` guard (removing the `used_at IS NULL`/`expires_at > now()` filters from the `UPDATE`) and rerunning: the existing test still passed, because the upfront `SELECT` still filters correctly on a sequential replay.
 A real regression test needs two racing redemption calls behind a barrier, per the checklist's gate-is-not-a-gate-until-raced rule, same shape as the two never-raced advisory locks below.
 
-**`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against
-`loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs
-`db::converge` only after `create_context` returns). Nothing in `after_context` may assume a
-migration-created object exists yet. `TenantDb::connect`'s `after_connect` hook requires the
-`yorishiro_app` role, which a migration creates, so the pool it builds there is `connect_lazy`
-rather than `connect`: opening no physical connection at construction time defers `SET ROLE`
-until first use, by which point migrations have already run. This surfaced only when this
-deployment first booted against a genuinely fresh, unmigrated database (`test-loco/` in
-`yorishiro-specs`, 2026-08-22); every earlier boot this session reused an already-migrated
-container, which masked it exactly the way the checklist's recurring-mistakes section describes.
+**`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against `loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs `db::converge` only after `create_context` returns).
+Nothing in `after_context` may assume a migration-created object exists yet.
+`TenantDb::connect`'s `after_connect` hook requires the `yorishiro_app` role, which a migration creates, so the pool it builds there is `connect_lazy` rather than `connect`: opening no physical connection at construction time defers `SET ROLE` until first use, by which point migrations have already run.
+This surfaced only when this deployment first booted against a genuinely fresh, unmigrated database (`test-loco/` in `yorishiro-specs`, 2026-08-22); every earlier boot this session reused an already-migrated container, which masked it exactly the way the checklist's recurring-mistakes section describes.
 
-**A fresh database also needs a `CREATE ROLE yorishiro_app` step, which no migration ran until
-`m20260822_100000_tenants` gained one.** Every migration file's `helpers::grant` assumes the
-role already exists; none of them created it, unlike the pre-rebuild
-`20260814000000_initial.sql`, which did (idempotently, plus `GRANT yorishiro_app TO
-CURRENT_USER`, required on PostgreSQL 16+ per `Yorishiro_v1_technical_spec.md` §2.1 in
-`yorishiro-specs`, since even a role's creator can't `SET ROLE` to it without that grant). This
-too went unnoticed because the migrating role in every prior run was a superuser, which can `SET
-ROLE` regardless of membership.
+**A fresh database also needs a `CREATE ROLE yorishiro_app` step, which no migration ran until `m20260822_100000_tenants` gained one.**
+Every migration file's `helpers::grant` assumes the role already exists; none of them created it, unlike the pre-rebuild `20260814000000_initial.sql`, which did (idempotently, plus `GRANT yorishiro_app TO CURRENT_USER`, required on PostgreSQL 16+ per `Yorishiro_v1_technical_spec.md` §2.1 in `yorishiro-specs`, since even a role's creator can't `SET ROLE` to it without that grant).
+This too went unnoticed because the migrating role in every prior run was a superuser, which can `SET ROLE` regardless of membership.
 
 **`m20260822_100000_tenants`'s `GRANT yorishiro_app TO CURRENT_USER` has only ever run as a superuser**, `test-loco/`'s migrating role, which can `SET ROLE` regardless of grant membership.
 That proves the statement executes, not that it's sufficient.
 Per the checklist's verify-on-a-non-superuser-role decision (`.claude/rules/workspace-checklist.md` in `yorishiro-specs`, the pre-rebuild `create_schema` 500 and the `FORCE ROW LEVEL SECURITY` break both hid behind exactly this gap), the real check is migrating a fresh volume as a `ph1user`-style non-superuser role and confirming `SET ROLE yorishiro_app` then succeeds without it.
 Needs a non-superuser migration role and a fresh `test-loco/` volume, which the test slice above will need regardless, so verify it there rather than as a one-off.
 
-**Two advisory-lock gates have never been raced**, `entities::create`'s quota lock and
-`create_schema`'s version-serialization lock (the latter's 409 branch has never executed).
-Whichever test strategy lands needs a widened-race test for both (multiple concurrent callers
-behind a barrier, per `.claude/rules/workspace-checklist.md`'s gate-is-not-a-gate-until-raced
-rule in `yorishiro-specs`), not just a happy-path unit test.
-`content_relations::create`'s foreign-key-violation branch (source/target deleted between the
-existence check and the insert, mapped to 404) belongs on the same list: it can't be triggered
-without a similar race, and has only ever been read, never executed.
+**Two advisory-lock gates have never been raced**, `entities::create`'s quota lock and `create_schema`'s version-serialization lock (the latter's 409 branch has never executed).
+Whichever test strategy lands needs a widened-race test for both (multiple concurrent callers behind a barrier, per `.claude/rules/workspace-checklist.md`'s gate-is-not-a-gate-until-raced rule in `yorishiro-specs`), not just a happy-path unit test.
+`content_relations::create`'s foreign-key-violation branch (source/target deleted between the existence check and the insert, mapped to 404) belongs on the same list: it can't be triggered without a similar race, and has only ever been read, never executed.
 
-**Adding or removing an MCP tool breaks three places** (`.claude/rules/workspace-checklist.md`
-in `yorishiro-specs`, carried over from the pre-rebuild code): the tool-count assertion, whatever
-test builds dummy arguments per tool name (`dummy_arguments_for_tool` in the old suite), and the
-count stated in prose in `docs/{,ja/}api.md` (covered here by the recorded specs-doc deferral
-above, so only the first two need a fix on this side once tests exist). No test lands with the
-MCP slice itself (`services/mcp/`, 14 tools: entities create/get/update/delete/list, relations
-create/get/list/delete/set_relation_status, schemas create/get_active/get_by_id, import_jsonl),
-so this note exists precisely because the first two traps don't yet have a test to trip on them.
+**Adding or removing an MCP tool breaks three places** (`.claude/rules/workspace-checklist.md` in `yorishiro-specs`, carried over from the pre-rebuild code): the tool-count assertion, whatever test builds dummy arguments per tool name (`dummy_arguments_for_tool` in the old suite), and the count stated in prose in `docs/{,ja/}api.md` (covered here by the recorded specs-doc deferral above, so only the first two need a fix on this side once tests exist).
+No test lands with the MCP slice itself (`services/mcp/`, 14 tools: entities create/get/update/delete/list, relations create/get/list/delete/set_relation_status, schemas create/get_active/get_by_id, import_jsonl), so this note exists precisely because the first two traps don't yet have a test to trip on them.
 
 ## Imports
 
@@ -327,9 +247,8 @@ so this note exists precisely because the first two traps don't yet have a test 
 
 ## Git workflow
 
-**`develop` is the mainline and GitHub default branch as of 2026-08-22** (the Loco rebuild's
-home; `master` holds the released v0.50.0 line and is frozen pending a later decision on its
-fate). Everywhere below that said `master`, read `develop`.
+**`develop` is the mainline and GitHub default branch as of 2026-08-22** (the Loco rebuild's home; `master` holds the released v0.50.0 line and is frozen pending a later decision on its fate).
+Everywhere below that said `master`, read `develop`.
 
 - **Never push directly to develop.**
   All changes go through a PR.
@@ -345,9 +264,7 @@ fate). Everywhere below that said `master`, read `develop`.
   1. Verify all CI checks have passed on the latest commit
   2. If the branch is behind develop, rebase first: `git fetch origin develop && git rebase origin/develop`
 - Every PR must pass CI (check + security) before merge.
-  **CI workflows still trigger on `branches: [master]` only as of this writing** (`ci.yml`,
-  `security.yml`, `cache-cleanup.yml`, `doc-check.yml`) — a `develop`-based PR runs zero checks
-  until these triggers are updated, which is part of the rebuild PR itself.
+  **CI workflows still trigger on `branches: [master]` only as of this writing** (`ci.yml`, `security.yml`, `cache-cleanup.yml`, `doc-check.yml`): a `develop`-based PR runs zero checks until these triggers are updated, which is part of the rebuild PR itself.
 - Squash merge is the default merge strategy.
 - Every PR that changes source code must also update docs (English + Japanese).
   The `doc-check` workflow warns automatically if this is missing.
