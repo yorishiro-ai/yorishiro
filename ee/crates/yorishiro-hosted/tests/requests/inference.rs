@@ -117,8 +117,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
     .await;
 }
 
-/// A scheme that could never be a chat-completions endpoint is refused before anything is
-/// stored, and a URL with no scheme at all is refused too rather than becoming a relative path.
+/// A scheme that could never be a chat-completions endpoint is refused before anything is stored, and a URL with no scheme at all is refused too rather than becoming a relative path.
 #[tokio::test]
 #[serial]
 async fn a_non_http_base_url_is_refused() {
@@ -152,8 +151,7 @@ async fn a_non_http_base_url_is_refused() {
     .await;
 }
 
-/// A workspace with no credentials configured is refused with one clear error before any entity
-/// is scanned, rather than reporting zero proposals in a way that reads as "nothing to infer".
+/// A workspace with no credentials configured is refused with one clear error before any entity is scanned, rather than reporting zero proposals in a way that reads as "nothing to infer".
 #[tokio::test]
 #[serial]
 async fn infer_fill_without_a_configured_key_is_refused() {

@@ -1,8 +1,6 @@
 use yorishiro_hosted::services::licence::{LicenceClaims, LicenceState, licence_key_in, verify};
 
-/// A keypair generated fresh per test process rather than checked into the repository: it signs
-/// only throwaway JWTs this suite mints and verifies itself, so committing it would be a private
-/// key in source control for no reason a scanner can tell apart from a real one.
+/// A keypair generated fresh per test process rather than checked into the repository: it signs only throwaway JWTs this suite mints and verifies itself, so committing it would be a private key in source control for no reason a scanner can tell apart from a real one.
 struct TestKeypair {
     private_key_path: std::path::PathBuf,
     public_key_pem: Vec<u8>,

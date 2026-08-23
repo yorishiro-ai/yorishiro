@@ -2,10 +2,7 @@ use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use yorishiro_hosted::HostedApp;
 
-/// `YORISHIRO_MAX_TENANTS` unset means the setup wizard is disabled by default (same guard
-/// `tests/requests/setup.rs` in the base crate exercises): this test sets it for its own
-/// duration, matching that file's `with_max_tenants` convention, kept local since this crate has
-/// no shared helper for it yet and one test doesn't earn one.
+/// `YORISHIRO_MAX_TENANTS` unset means the setup wizard is disabled by default (same guard `tests/requests/setup.rs` in the base crate exercises): this test sets it for its own duration, matching that file's `with_max_tenants` convention, kept local since this crate has no shared helper for it yet and one test doesn't earn one.
 async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
     let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
     // SAFETY: serialized by every test in this binary being #[serial] on the default key.

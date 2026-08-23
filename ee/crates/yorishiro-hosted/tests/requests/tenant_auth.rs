@@ -4,8 +4,7 @@ use yorishiro_core::db::DbHandle;
 use yorishiro_hosted::HostedApp;
 use yorishiro_hosted::services::tenant_auth::{WORKSPACE_HEADER, create_tenant_api_key};
 
-/// `YORISHIRO_MAX_TENANTS` unset means the setup wizard is disabled by default. See
-/// `tests/requests/dashboard.rs`'s copy of this helper for why it's local rather than shared.
+/// `YORISHIRO_MAX_TENANTS` unset means the setup wizard is disabled by default.
 async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
     let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
     // SAFETY: serialized by every test in this binary being #[serial] on the default key.
@@ -23,8 +22,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 }
 
 /// Installing `TenantScopedAuthenticator` (`HostedApp::after_context`) must not break a
-/// workspace-scoped key on a route base itself defines: this is the regression case the
-/// process-wide authenticator swap could get wrong.
+/// workspace-scoped key on a route base itself defines.
 #[tokio::test]
 #[serial]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
@@ -62,8 +60,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
 }
 
 /// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with
-/// `X-Workspace-Id`, and is rejected without one: this is what `TenantScopedAuthenticator` adds
-/// over base's own single-workspace keys.
+/// `X-Workspace-Id`, and is rejected without one.
 #[tokio::test]
 #[serial]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
@@ -86,20 +83,13 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 .unwrap();
             let user_id: uuid::Uuid = setup_body["user_id"].as_str().unwrap().parse().unwrap();
 
-            // create_tenant_api_key reads identity_tenants and identity_tenant_memberships,
-            // neither granted to yorishiro_app (see identity_tenants's migration doc comment),
-            // so it runs on the identity pool (the migration/admin role), not the RLS-scoped
-            // tenant pool: matching how master's own bin/yorishiro_server.rs calls it.
+            // create_tenant_api_key reads identity_tenants and identity_tenant_memberships, neither granted to yorishiro_app (see identity_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
             let db = ctx.shared_store.get::<DbHandle>().unwrap();
             let tenant_key = create_tenant_api_key(&db.identity, tenant_id, "read", Some(user_id))
                 .await
                 .expect("issuing a tenant-scoped key");
 
-            // Without the header: `authenticate_api_key(hash, NULL)` finds no workspace to
-            // resolve a NULL-workspace key against (the migration's own WHERE clause requires
-            // either a key-bound workspace or a matched requested one), so the DB-level lookup
-            // returns no row and this reaches the caller as an ordinary authentication failure,
-            // not a validation error naming the header.
+            // Without the header, `authenticate_api_key(hash, NULL)` finds no workspace to resolve against, so this reaches the caller as an ordinary authentication failure, not a validation error naming the header.
             let no_header = request
                 .get("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -111,8 +101,6 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 no_header.text()
             );
 
-            // With the header: resolves to the named workspace and behaves like any other
-            // authenticated read.
             let with_header = request
                 .get("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))

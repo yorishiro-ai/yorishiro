@@ -10,11 +10,8 @@ use yorishiro_core::services::auth::ApiKeyScope;
 use yorishiro_hosted::HostedApp;
 use yorishiro_hosted::services::licence::{LicenceClaims, LicenceState};
 
-/// `shared_store.insert` is keyed by `TypeId` (see `HostedApp::after_context`'s own doc comment),
-/// so this overwrites the `LicenceState::from_env()` the test process booted with, the same way
-/// production code layers a later insert over an earlier one. Simpler than round-tripping a real
-/// RSA-signed token through `YORISHIRO_LICENSE_KEY`, which `services::licence`'s own tests already
-/// cover.
+/// `shared_store.insert` is keyed by `TypeId` (see `HostedApp::after_context`'s own doc comment), so this overwrites the `LicenceState::from_env()` the test process booted with, the same way production code layers a later insert over an earlier one.
+/// Simpler than round-tripping a real RSA-signed token through `YORISHIRO_LICENSE_KEY`, which `services::licence`'s own tests already cover.
 fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
         .insert(LicenceState::licensed(LicenceClaims {
@@ -29,11 +26,7 @@ struct Setup {
     owner_key: String,
 }
 
-/// Builds a tenant, its one workspace, and an owner with a migration-scope key, directly on
-/// `ctx.db`: same shape as base's own `tests/requests/template_library.rs`, and needed here
-/// because `POST /setup` refuses a second call once any tenant exists
-/// (`setup_bootstraps_once_and_refuses_a_second_call`), which every test below that needs two
-/// tenants would otherwise hit.
+/// Builds a tenant, its one workspace, and an owner with a migration-scope key, directly on `ctx.db`: same shape as base's own `tests/requests/template_library.rs`, and needed here because `POST /setup` refuses a second call once any tenant exists (`setup_bootstraps_once_and_refuses_a_second_call`), which every test below that needs two tenants would otherwise hit.
 async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
     let tenant = identity_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set(name.to_string()),
@@ -112,8 +105,7 @@ async fn without_a_licence_the_marketplace_is_not_served() {
     .await;
 }
 
-/// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or
-/// not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
+/// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
 #[tokio::test]
 #[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
@@ -158,9 +150,7 @@ async fn a_licence_does_not_replace_authentication() {
     .await;
 }
 
-/// The full publish -> list -> fork -> review round trip, and the decisions along the way: a
-/// draft never appears in the public listing, version numbers are assigned server-side, and a
-/// fork is a private ('tenant') copy of a forker's own, distinct from the original.
+/// The full publish -> list -> fork -> review round trip, and the decisions along the way: a draft never appears in the public listing, version numbers are assigned server-side, and a fork is a private ('tenant') copy of a forker's own, distinct from the original.
 #[tokio::test]
 #[serial]
 async fn publish_list_fork_and_review_round_trip() {
@@ -336,9 +326,7 @@ async fn publish_list_fork_and_review_round_trip() {
     .await;
 }
 
-/// A tenant may not set another tenant's template's visibility, or publish a version onto it:
-/// ownership is enforced by the service, not the role, and is reported as 404 rather than 403 so
-/// a caller that cannot act on a template does not learn it exists from the difference.
+/// A tenant may not set another tenant's template's visibility, or publish a version onto it: ownership is enforced by the service, not the role, and is reported as 404 rather than 403 so a caller that cannot act on a template does not learn it exists from the difference.
 #[tokio::test]
 #[serial]
 async fn another_tenant_cannot_manage_a_template_it_does_not_own() {

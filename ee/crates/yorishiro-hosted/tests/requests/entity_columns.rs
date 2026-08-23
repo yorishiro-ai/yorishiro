@@ -45,9 +45,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     Setup { key }
 }
 
-/// A workspace that never chose reads as absent (an empty list, not a 404, since `list` is
-/// "every stored preference" and there being none is not an error); setting, then resetting,
-/// round-trips through the exact stored order and back to absence.
+/// A workspace that never chose reads as absent (an empty list, not a 404, since `list` is "every stored preference" and there being none is not an error); setting, then resetting, round-trips through the exact stored order and back to absence.
 #[tokio::test]
 #[serial]
 async fn set_get_and_reset_round_trip_in_display_order() {
@@ -124,9 +122,8 @@ async fn set_get_and_reset_round_trip_in_display_order() {
     .await;
 }
 
-/// A duplicate field would render twice and make reordering ambiguous, so it is refused rather
-/// than silently deduplicated; more than the maximum is refused for the same "the table stays a
-/// table" reason. Neither refusal leaves a row behind.
+/// A duplicate field would render twice and make reordering ambiguous, so it is refused rather than silently deduplicated; more than the maximum is refused for the same "the table stays a table" reason.
+/// Neither refusal leaves a row behind.
 #[tokio::test]
 #[serial]
 async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {

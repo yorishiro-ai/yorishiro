@@ -80,9 +80,7 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
-/// A schema with no origin template reports nothing to follow, and merge-preview/merge both
-/// refuse it: the whole point of the origin/merge chain only applies to a schema copied from a
-/// template.
+/// A schema with no origin template reports nothing to follow, and merge-preview/merge both refuse it: the whole point of the origin/merge chain only applies to a schema copied from a template.
 #[tokio::test]
 #[serial]
 async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
@@ -122,9 +120,7 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
     .await;
 }
 
-/// The full round trip: a schema copied from a template, the template edited afterward, the
-/// change surfacing in the upstream-changes listing and the merge preview, and merge writing a
-/// new version that both takes upstream's addition and keeps the workspace's own field.
+/// The full round trip: a schema copied from a template, the template edited afterward, the change surfacing in the upstream-changes listing and the merge preview, and merge writing a new version that both takes upstream's addition and keeps the workspace's own field.
 #[tokio::test]
 #[serial]
 async fn upstream_changes_preview_and_merge_round_trip() {
