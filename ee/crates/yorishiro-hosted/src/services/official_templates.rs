@@ -80,6 +80,7 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
             changelog: Some(format!("Built-in template '{}'", summary.id)),
             status: "stable".to_string(),
         };
+        // lock_for_update is transaction-scoped, so this needs its own txn rather than ctx.db.
         let txn = ctx.db.begin().await.internal()?;
         db::lock_for_update(&txn, &format!("template-version:{template_id}"))
             .await
