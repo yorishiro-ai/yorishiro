@@ -163,6 +163,29 @@ impl YorishiroError {
     }
 }
 
+/// Lets a `YorishiroError` cross into a Loco-owned path (a `Hooks` method, a task, a worker)
+/// that returns `loco_rs::Result` rather than an axum handler's `Result<_, ApiError>`.
+/// `loco_rs::Error::CustomError`'s `ErrorDetail` has no field for `hint`, so this folds the
+/// whole `into_http_parts()` body into `ErrorDetail::errors` (a free-form `serde_json::Value`)
+/// rather than dropping it: a caller reading the wrapped error still gets `code`/`hint`, just
+/// not through a dedicated field. `YorishiroError` itself is not being replaced by this: see
+/// CLAUDE.md's "Error handling" section for why it stays the primary type on the HTTP path.
+impl From<YorishiroError> for loco_rs::Error {
+    fn from(err: YorishiroError) -> Self {
+        let (status, body) = err.into_http_parts();
+        let status_code = axum::http::StatusCode::from_u16(status)
+            .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        loco_rs::Error::CustomError(
+            status_code,
+            loco_rs::controller::ErrorDetail {
+                error: Some(status_code.to_string()),
+                description: None,
+                errors: Some(body),
+            },
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidationDetail {
     pub field: String,

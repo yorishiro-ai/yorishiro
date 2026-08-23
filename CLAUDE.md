@@ -168,6 +168,9 @@ Every one of these still depends on the old sqlx-era `AppState`/`state.rs` shape
 - Every `YorishiroError` variant has a machine-readable `code()` (`yorishiro_core::error`), emitted as `error.code` in the JSON body by `into_http_parts()`.
   A new variant with no arm in `code()`'s match fails to compile, which is what makes `ValidationFailed` and `RelationTypeMismatch` distinguishable on the wire even though both answer 422.
   Do not add a variant without adding its code.
+- `YorishiroError` stays the primary error type; it is not being replaced by `loco_rs::Error`.
+  A `From<YorishiroError> for loco_rs::Error` impl (`yorishiro_core::error`) exists for the few paths that must return `loco_rs::Result` instead of an axum handler's `Result<_, ApiError>` (a `Hooks` method, a task, a worker): use `?` there rather than hand-rolling a `map_err`.
+  `loco_rs::Error::CustomError`'s `ErrorDetail` has no `hint` field, so the conversion folds the whole `into_http_parts()` body into `ErrorDetail::errors` rather than dropping it.
 
 ## Router integration (`ee/`)
 

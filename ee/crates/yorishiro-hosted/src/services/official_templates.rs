@@ -23,8 +23,10 @@ use yorishiro_core::models::_entities::identity_tenants;
 /// The tenant that owns the officially published templates.
 ///
 /// A fixed id rather than a lookup by name, so re-running the seed finds the same row and a
-/// deployment that renames it does not end up with two publishers.
-pub const OFFICIAL_TENANT_ID: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0001);
+/// deployment that renames it does not end up with two publishers. All-zeros, since this is
+/// infrastructure rather than a customer tenant and there is no `uuidv7()` timestamp for it to
+/// meaningfully carry.
+pub const OFFICIAL_TENANT_ID: Uuid = Uuid::nil();
 
 /// Shown as the listing's author.
 /// `identity_templates.author` is free text, so this does not require a user account.
@@ -53,6 +55,10 @@ pub struct SeedOutcome {
 /// Idempotent, and safe to run on every deployment: a template is matched by `(tenant_id,
 /// name)`, and a new version is published only when the built-in definition differs from the
 /// latest one already published. Re-running with unchanged built-ins writes nothing.
+///
+/// Calls `ensure_official_tenant` itself so this still works standalone (`cargo loco task
+/// seed_official_templates` on a deployment that never ran `Hooks::seed`), even though
+/// `HostedApp::seed` also calls it: the tenant's existence must not depend on task run order.
 pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, YorishiroError> {
     ensure_official_tenant(&ctx.db).await?;
 
@@ -127,7 +133,11 @@ struct LatestVersion {
     definition: serde_json::Value,
 }
 
-async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
+/// Creates the official-templates publisher tenant if it does not already exist. Idempotent
+/// (`ON CONFLICT DO NOTHING` on the fixed id), and safe to call from both `Hooks::seed` (so the
+/// tenant exists even on a deployment that never runs `seed_official_templates`) and
+/// `seed_official_templates` itself (so the task keeps working standalone).
+pub async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
     // Written directly rather than through `tenancy::create_tenant` (base has no such function
     // on this branch; tenants are created ad hoc per call site), which would also enforce
     // `YORISHIRO_MAX_TENANTS`. The publisher is infrastructure, not a customer, and a

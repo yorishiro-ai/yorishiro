@@ -179,7 +179,13 @@ impl Hooks for HostedApp {
         App::truncate(ctx).await
     }
 
+    /// Creates the official-templates publisher tenant, so it exists on any deployment that has
+    /// run `cargo loco db seed` even if `seed_official_templates` (a separate, opt-in task) has
+    /// not. Publishing the templates themselves stays that task's own job: seeding is "the
+    /// database's foundation is in place", not "the marketplace has content".
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
-        App::seed(ctx, base).await
+        App::seed(ctx, base).await?;
+        services::official_templates::ensure_official_tenant(&ctx.db).await?;
+        Ok(())
     }
 }
