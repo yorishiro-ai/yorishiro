@@ -91,6 +91,19 @@ pub(crate) fn embedding_provider(
         })
 }
 
+/// See `db_handle`'s doc comment: also used by `services::mcp`.
+pub(crate) fn search_token_limiter(
+    ctx: &AppContext,
+) -> Result<Arc<crate::services::rate_limit::RateLimiter>, ApiError> {
+    ctx.shared_store
+        .get::<Arc<crate::services::rate_limit::RateLimiter>>()
+        .ok_or_else(|| {
+            ApiError(YorishiroError::Internal(anyhow::anyhow!(
+                "search token RateLimiter missing"
+            )))
+        })
+}
+
 /// The sole entry point for authenticated requests with no scope requirement and no DB
 /// connection. Requiring this type as a handler argument is itself a declaration that "this
 /// route requires authentication."

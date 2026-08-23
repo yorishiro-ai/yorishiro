@@ -5,9 +5,12 @@ use loco_rs::controller::Routes;
 use serde::Deserialize;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{ReadScope, Verified, db_handle, embedding_provider};
+use crate::controllers::extractors::{
+    ReadScope, Verified, db_handle, embedding_provider, search_token_limiter,
+};
 use crate::error::YorishiroError;
 use crate::models::search::{self, SearchHit};
+use crate::services::rate_limit::charge_search_tokens;
 
 #[derive(Debug, Deserialize)]
 pub struct SearchEntitiesParams {
@@ -32,6 +35,13 @@ pub async fn search_entities(
     };
 
     let provider = embedding_provider(&ctx)?;
+    let limiter = search_token_limiter(&ctx)?;
+    charge_search_tokens(
+        &limiter,
+        provider.as_ref(),
+        verified.ctx.workspace_id,
+        &params.query_text,
+    )?;
 
     // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
     let vector = search::embed_query(provider.as_ref(), &params.query_text).await?;

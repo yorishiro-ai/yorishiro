@@ -78,6 +78,12 @@ impl Hooks for App {
                 loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
             })?;
         ctx.shared_store.insert(embedding_provider);
+        // Per-workspace search token budget: a request scope, so it belongs in shared_store
+        // rather than being built fresh in after_routes like the (per-IP, request-scoped-only)
+        // auth rate limiter is.
+        ctx.shared_store.insert(std::sync::Arc::new(
+            crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
+        ));
         Ok(ctx)
     }
 

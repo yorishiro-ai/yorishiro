@@ -1,8 +1,6 @@
 //! Embedding provider abstraction.
-//!
-//! No local ONNX provider: it needs model files not bundled here.
-//! Add one back if a deployment needs to run with no external embedding service at all.
 
+pub mod onnx;
 pub mod openai;
 pub mod sync;
 
@@ -31,6 +29,15 @@ pub enum EmbedKind {
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;
+
+    /// How many tokens `text` costs this provider, for quota purposes.
+    ///
+    /// The default is a byte-length estimate, and deliberately so: a provider without a tokenizer in the process (an external API, where the model runs elsewhere) cannot count exactly, and loading one purely to meter would mean shipping a tokenizer to a deployment that chose not to run embeddings locally.
+    ///
+    /// Four bytes per token is the usual English rule of thumb and overestimates Japanese text, which suits a quota: overcharging throttles a heavy caller early, while undercharging lets it past the limit it was supposed to hit.
+    fn count_tokens(&self, text: &str) -> u32 {
+        u32::try_from(text.len().div_ceil(4)).unwrap_or(u32::MAX)
+    }
 
     /// Must return vectors in the same order and count as the input.
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError>;
@@ -87,12 +94,17 @@ pub fn model_name_from_env() -> String {
 
 /// Builds the embedding provider from environment variables.
 ///
-/// `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with [`UnconfiguredEmbeddingProvider`] rather than failing.
+/// `YORISHIRO_EMBEDDING_PROVIDER=local` selects the local ONNX provider (needs `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH`, no external service).
+/// Otherwise, `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with [`UnconfiguredEmbeddingProvider`] rather than failing.
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 pub fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "768".into())
         .parse()?;
+
+    if std::env::var("YORISHIRO_EMBEDDING_PROVIDER").as_deref() == Ok("local") {
+        return build_local_onnx_provider(dimensions);
+    }
 
     let base_url = std::env::var("YORISHIRO_EMBEDDING_BASE_URL").ok();
     let model = std::env::var("YORISHIRO_EMBEDDING_MODEL").ok();
@@ -118,5 +130,47 @@ pub fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Embedding
             .unwrap_or(false),
     });
     tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
+    Ok(std::sync::Arc::new(provider))
+}
+
+/// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
+/// `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH` default to `models/model.onnx`/`models/tokenizer.json`; `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` defaults to 512.
+/// `YORISHIRO_ONNX_POOLING` is rejected rather than defaulted on an unknown value: reading a model with the wrong pooling does not fail, it just returns worse vectors.
+/// `YORISHIRO_ONNX_QUERY_INSTRUCTION` empty is treated as unset: an operator clearing the variable means "no prefix", not "prefix with nothing".
+fn build_local_onnx_provider(
+    dimensions: usize,
+) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
+    let max_sequence_length: usize = std::env::var("YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH")
+        .unwrap_or_else(|_| "512".into())
+        .parse()?;
+    let model_path =
+        std::env::var("YORISHIRO_ONNX_MODEL_PATH").unwrap_or_else(|_| "models/model.onnx".into());
+    let tokenizer_path = std::env::var("YORISHIRO_ONNX_TOKENIZER_PATH")
+        .unwrap_or_else(|_| "models/tokenizer.json".into());
+    let pooling = match std::env::var("YORISHIRO_ONNX_POOLING") {
+        Ok(value) => onnx::Pooling::parse(&value)?,
+        Err(_) => onnx::Pooling::default(),
+    };
+    let query_instruction = std::env::var("YORISHIRO_ONNX_QUERY_INSTRUCTION")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+
+    let provider = onnx::LocalOnnxProvider::load(onnx::LocalOnnxConfig {
+        model_path: model_path.clone().into(),
+        tokenizer_path: tokenizer_path.clone().into(),
+        dimensions,
+        max_sequence_length,
+        pooling,
+        query_instruction,
+    })
+    .map_err(|err| {
+        anyhow::anyhow!(
+            "{err}\n\nthe local ONNX embedding provider needs '{model_path}' and \
+             '{tokenizer_path}': these are not bundled in the repository, and must be fetched \
+             separately, or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an OpenAI-compatible \
+             endpoint instead"
+        )
+    })?;
+    tracing::info!(provider = "local", %model_path, dimensions, ?pooling, "embedding provider configured");
     Ok(std::sync::Arc::new(provider))
 }

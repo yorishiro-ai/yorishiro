@@ -51,10 +51,32 @@ impl RateLimiter {
         Self::new(max_requests, Duration::from_secs(window_secs))
     }
 
+    /// `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` (default 100000) tokens per minute, per workspace.
+    ///
+    /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is known and is the thing whose consumption matters.
+    /// The default is high enough that ordinary use never reaches it: it is there to bound a runaway agent, not to ration.
+    pub fn search_tokens_from_env() -> Self {
+        let max_tokens = std::env::var("YORISHIRO_SEARCH_TOKENS_PER_MINUTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100_000);
+        Self::new(max_tokens, Duration::from_secs(60))
+    }
+
     /// Returns `true` if this call is within the limit, `false` if `key` has exhausted its quota
     /// for the current window. The window resets lazily on the first call after it elapses,
     /// rather than on a background timer.
     pub fn allow(&self, key: &str) -> bool {
+        self.allow_cost(key, 1)
+    }
+
+    /// As [`Self::allow`], charging `cost` against the window instead of one.
+    ///
+    /// A quota counted in requests treats a one-word query and a paragraph alike, though the second costs the embedding model proportionally more.
+    /// Charging the token count instead bounds the work rather than the call count.
+    ///
+    /// A single request larger than the whole window is still admitted, once: rejecting it would make that query permanently impossible rather than merely expensive, and the bucket is left exhausted so the next one waits.
+    pub fn allow_cost(&self, key: &str, cost: u32) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
 
@@ -71,9 +93,32 @@ impl RateLimiter {
             *entry = (now, 0);
         }
         let was_empty = entry.1 == 0;
-        entry.1 = entry.1.saturating_add(1);
+        entry.1 = entry.1.saturating_add(cost);
         entry.1 <= self.max_requests || was_empty
     }
+}
+
+/// Charges a search query against its workspace's token budget, refusing when the budget is spent.
+///
+/// Charged before embedding, since embedding is the work the budget protects, and counting is cheap (a query is short), which is why search is metered in tokens while writes stay on request counts.
+/// A free function taking both `ctx` values rather than a method on either, so a check written for only one caller can't leave the other able to spend the budget it's meant to protect: both the REST and MCP search handlers call this same function.
+pub fn charge_search_tokens(
+    limiter: &RateLimiter,
+    provider: &dyn crate::services::embedding::EmbeddingProvider,
+    workspace_id: uuid::Uuid,
+    query_text: &str,
+) -> Result<(), crate::error::YorishiroError> {
+    let tokens = provider.count_tokens(query_text);
+    if limiter.allow_cost(&workspace_id.to_string(), tokens) {
+        return Ok(());
+    }
+
+    tracing::warn!(%workspace_id, tokens, "search token budget exhausted");
+    Err(crate::error::YorishiroError::ValidationFailed {
+        message: "this workspace has spent its search token budget for the minute".to_string(),
+        details: vec![],
+        hint: "retry shortly, or raise YORISHIRO_SEARCH_TOKENS_PER_MINUTE".to_string(),
+    })
 }
 
 pub async fn enforce(
@@ -103,7 +148,14 @@ pub async fn enforce(
 
 #[cfg(test)]
 mod tests {
-    use super::is_guarded;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use uuid::Uuid;
+
+    use super::{RateLimiter, charge_search_tokens, is_guarded};
+    use crate::error::YorishiroError;
+    use crate::services::embedding::EmbeddingProvider;
 
     #[test]
     fn guards_base_and_ee_credential_issuing_routes() {
@@ -118,5 +170,47 @@ mod tests {
         assert!(!is_guarded("/auth/oauth/status"));
         assert!(!is_guarded("/api/workspaces"));
         assert!(!is_guarded("/setup"));
+    }
+
+    /// Counts tokens as the byte length exactly, so a test can pick a query whose cost is known
+    /// up front rather than depending on the default estimate's rounding.
+    struct FixedCostProvider;
+
+    #[async_trait]
+    impl EmbeddingProvider for FixedCostProvider {
+        fn dimensions(&self) -> usize {
+            1
+        }
+        fn count_tokens(&self, text: &str) -> u32 {
+            text.len() as u32
+        }
+        async fn embed_batch(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+            unimplemented!("not exercised by these tests")
+        }
+    }
+
+    #[test]
+    fn charge_search_tokens_exhausts_the_budget_and_then_rejects() {
+        let limiter = RateLimiter::new(10, Duration::from_secs(60));
+        let provider = FixedCostProvider;
+        let workspace = Uuid::new_v4();
+
+        // "0123456789" costs 10 tokens: exactly the budget, so this call is admitted.
+        charge_search_tokens(&limiter, &provider, workspace, "0123456789").unwrap();
+        // The budget is now spent; the same workspace's next call is rejected.
+        assert!(charge_search_tokens(&limiter, &provider, workspace, "x").is_err());
+    }
+
+    #[test]
+    fn charge_search_tokens_is_keyed_per_workspace() {
+        let limiter = RateLimiter::new(10, Duration::from_secs(60));
+        let provider = FixedCostProvider;
+        let workspace = Uuid::new_v4();
+        let other = Uuid::new_v4();
+
+        charge_search_tokens(&limiter, &provider, workspace, "0123456789").unwrap();
+        assert!(charge_search_tokens(&limiter, &provider, workspace, "x").is_err());
+        // A different workspace has its own, untouched budget.
+        charge_search_tokens(&limiter, &provider, other, "0123456789").unwrap();
     }
 }

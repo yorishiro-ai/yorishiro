@@ -10,9 +10,10 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{YorishiroMcpServer, mcp_try, ok_json, verified};
-use crate::controllers::extractors::{db_handle, embedding_provider};
+use crate::controllers::extractors::{db_handle, embedding_provider, search_token_limiter};
 use crate::models::search;
 use crate::services::auth::ApiKeyScope;
+use crate::services::rate_limit::charge_search_tokens;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {
@@ -46,8 +47,17 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
         let provider = mcp_try!(embedding_provider(&self.ctx).map_err(|err| err.0));
+        let limiter = mcp_try!(search_token_limiter(&self.ctx).map_err(|err| err.0));
+        // Charged before embedding, same as the REST adapter: the budget bounds embedding work, and this tool does exactly as much of it as `GET /api/search`.
+        mcp_try!(charge_search_tokens(
+            &limiter,
+            provider.as_ref(),
+            auth_ctx.workspace_id,
+            &args.query_text,
+        ));
+
+        // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
         let vector = mcp_try!(search::embed_query(provider.as_ref(), &args.query_text).await);
 
         let workspace_id = auth_ctx.workspace_id;

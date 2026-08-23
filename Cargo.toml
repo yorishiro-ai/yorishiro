@@ -61,6 +61,12 @@ schemars = { version = "1", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
 # vLLM/real OpenAI over HTTP.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Local ONNX embedding provider (services::embedding::onnx). Note: `ort`'s default
+# download-binaries feature makes `cargo check`/`cargo build` fetch an onnxruntime binary from
+# cdn.pyke.io; point ORT_LIB_LOCATION at a pre-provisioned onnxruntime if the build environment
+# must be closed off.
+ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 # `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature
 # (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so
 # `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter
