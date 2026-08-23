@@ -224,3 +224,83 @@ async fn signup_without_invite_respects_the_tenant_cap() {
     })
     .await;
 }
+
+/// Sets `DB_MAX_CONNECTIONS` for the duration of the future, restoring whatever was there
+/// before, same shape as `with_max_tenants`. `config/test.yaml`'s pool defaults to
+/// `max_connections: 1`, which is too narrow for a test that deliberately holds one connection
+/// while a second one tries to acquire a connection of its own: with a pool of 1, a second
+/// `begin()` fails on `ConnectionAcquire(Timeout)` before it ever reaches the advisory lock,
+/// which is a pool-exhaustion failure, not the lock-contention failure the test means to check.
+async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
+    let previous = std::env::var("DB_MAX_CONNECTIONS").ok();
+    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
+    unsafe {
+        std::env::set_var("DB_MAX_CONNECTIONS", value);
+    }
+    let result = fut.await;
+    unsafe {
+        match &previous {
+            Some(v) => std::env::set_var("DB_MAX_CONNECTIONS", v),
+            None => std::env::remove_var("DB_MAX_CONNECTIONS"),
+        }
+    }
+    result
+}
+
+/// `tenancy::create_tenant`'s cap check must actually serialize concurrent callers, not just
+/// refuse a sequential second call: a bare `SELECT count(*)` inside READ COMMITTED does not
+/// serialize on its own, so without `db::lock_for_update` two racing callers can both pass the
+/// count check before either commits.
+///
+/// Tested deterministically rather than by racing N callers and hoping for an unlucky
+/// interleaving (an earlier version of this test raced 8 callers behind a barrier and passed
+/// whether or not the lock was even present: `config/test.yaml`'s default `max_connections: 1`
+/// pool serialized every racer on its own, catching nothing): hold the `create_tenant` advisory
+/// lock by hand on one connection, then assert a second `create_tenant` call blocks on it
+/// (`tokio::time::timeout` against an otherwise-generous wait), then assert it proceeds once the
+/// first lock is released. This fails immediately if the lock is removed, with no dependence on
+/// scheduler timing.
+#[tokio::test]
+#[serial]
+async fn create_tenant_serializes_on_its_advisory_lock() {
+    with_max_tenants("100", async move {
+        with_db_max_connections("4", async move {
+            request_with_create_db::<App, _, _>(|_request, ctx| async move {
+                let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+                yorishiro_core::db::lock_for_update(&holder, "create_tenant")
+                    .await
+                    .unwrap();
+
+                // A second caller must block behind the held lock, not proceed concurrently.
+                let db = ctx.db.clone();
+                let blocked =
+                    tokio::time::timeout(std::time::Duration::from_millis(500), async move {
+                        let txn = sea_orm::TransactionTrait::begin(&db).await.unwrap();
+                        let result = tenancy::create_tenant(&txn, "blocked-racer").await;
+                        match &result {
+                            Ok(_) => txn.commit().await.unwrap(),
+                            Err(_) => txn.rollback().await.unwrap(),
+                        }
+                        result
+                    })
+                    .await;
+                assert!(
+                    blocked.is_err(),
+                    "a second create_tenant call must block on the held lock, not proceed: {blocked:?}"
+                );
+
+                // Releasing the lock lets the next caller through.
+                holder.rollback().await.unwrap();
+                let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+                let result = tenancy::create_tenant(&txn, "unblocked-racer").await;
+                assert!(result.is_ok(), "result: {result:?}");
+                txn.commit().await.unwrap();
+
+                super::close_app_pools(&ctx).await;
+            })
+            .await;
+        })
+        .await;
+    })
+    .await;
+}

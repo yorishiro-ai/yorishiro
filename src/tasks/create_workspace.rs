@@ -2,13 +2,20 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
-use crate::models::_entities::identity_workspaces::ActiveModel;
+use crate::models::tenancy;
 
 /// `cargo loco task create_workspace tenant_id:<uuid> name:acme-prod`
 ///
-/// Runs on `ctx.db`, same reasoning as `create_tenant`. Leaves `status` unset so the column's
-/// own default (`'schema_pending'`) applies; a workspace only moves to `active` once
-/// `content_schemas::create_schema` gives it its first schema.
+/// The operator-assisted second step of invite-less signup (`POST /auth/signup` without
+/// `invite_token` creates a tenant but no workspace, since a workspace needs a schema/embedding
+/// decision signup has no basis to make on the new owner's behalf): run this, then
+/// `create_api_key`, to hand the new owner a working key.
+///
+/// Wraps `tenancy::create_workspace` with this deployment's configured embedding model
+/// (`services::embedding::model_name_from_env`/`build_embedding_provider`), same as the REST
+/// handler (`controllers::workspaces::create_workspace`) and `/setup` both do: a workspace's
+/// embedding model is a deployment-wide setting, not a per-call choice, on every path that
+/// creates one.
 pub struct CreateWorkspace;
 
 #[async_trait]
@@ -26,16 +33,22 @@ impl Task for CreateWorkspace {
             .parse()
             .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
         let name = vars.cli_arg("name")?;
+        let embedding_model = crate::services::embedding::model_name_from_env();
 
-        let active = ActiveModel {
-            tenant_id: ActiveValue::Set(tenant_id),
-            name: ActiveValue::Set(name.to_string()),
-            ..Default::default()
-        };
-        let workspace = active
-            .insert(&app_context.db)
-            .await
+        let provider = crate::services::embedding::build_embedding_provider()
             .map_err(|err| Error::Message(err.to_string()))?;
+        let dimensions = provider.dimensions() as i32;
+
+        let workspace = tenancy::create_workspace(
+            &app_context.db,
+            tenant_id,
+            name,
+            None,
+            None,
+            Some((&embedding_model, dimensions)),
+        )
+        .await
+        .map_err(|err| Error::Message(err.to_string()))?;
 
         println!("workspace id: {}", workspace.id);
         Ok(())

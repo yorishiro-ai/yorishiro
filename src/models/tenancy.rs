@@ -45,11 +45,19 @@ pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yorishiro
 /// The official-templates publisher tenant (`ee/`'s `ensure_official_tenant`) deliberately does
 /// not go through this: it is infrastructure, not a customer, and a deployment sitting at its
 /// tenant cap still needs its official templates to exist.
+///
+/// `conn` must be a transaction (`DatabaseTransaction`, not bare `ctx.db`): this takes a
+/// `pg_advisory_xact_lock` (`db::lock_for_update`, transaction-scoped) before counting, the same
+/// TOCTOU guard `/setup` takes with its own key. Without it, N concurrent callers all pass the
+/// count check and all insert, and `YORISHIRO_MAX_TENANTS` is not actually a cap.
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,
 ) -> Result<identity_tenants::Model, YorishiroError> {
     if let Some(max) = max_tenants_from_env()? {
+        crate::db::lock_for_update(conn, "create_tenant")
+            .await
+            .internal()?;
         let count = count_tenants(conn).await?;
         if count >= max as u64 {
             return Err(YorishiroError::Conflict {

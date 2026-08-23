@@ -105,13 +105,18 @@ async fn signup_with_invite(
 }
 
 /// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
-/// A workspace needs a schema decision (`create_workspace`'s `schema_id`) and an embedding
-/// model that signup has no basis to choose on the new owner's behalf; `POST /workspaces`
-/// (tenant-admin scoped, which `Owner` already is) creates one explicitly afterward. Unlike
+///
+/// **This account cannot obtain an API key on its own.** Every key is issued for a specific
+/// workspace (`/auth/login` needs one to resolve to, and `POST /workspaces` itself needs a key
+/// to call), so a tenant with zero workspaces has no self-service way to get one: an operator
+/// must run `cargo loco task create_workspace tenant_id:<id> name:...` followed by
+/// `create_api_key` to hand the new owner a working key. This is deliberate rather than an
+/// oversight: a workspace needs a schema/embedding decision signup has no basis to make on the
+/// new owner's behalf, so this stays a bootstrap step, not a fully automated one. Unlike
 /// `/setup` (which is gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap, and refuses
 /// once one tenant exists), this stays reachable for as long as `tenancy::create_tenant`'s own
-/// cap check allows: it is the ongoing "anyone can sign up and get their own tenant" path, not
-/// a one-time bootstrap wizard.
+/// cap check allows: it reserves a tenant name on the ongoing "anyone can sign up" path, not a
+/// one-time deployment wizard.
 async fn signup_without_invite(
     ctx: &AppContext,
     body: &SignupRequest,
