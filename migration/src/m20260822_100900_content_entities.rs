@@ -64,10 +64,8 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
 
         // sea_query has no pgvector column type, so the embedding column is added with raw SQL.
-        // The width is declared here only so the HNSW index below can be built against it: an
-        // unconstrained `vector` column cannot carry an HNSW index. The width is dropped again
-        // after the index exists (old file lines 255-258), and PostgreSQL keeps the index across
-        // that type change, so one index suffices because a workspace's vectors are all one width.
+        // The width is declared here only so the HNSW index below can be built against it: an unconstrained `vector` column cannot carry an HNSW index.
+        // The width is dropped again after the index exists, and PostgreSQL keeps the index across that type change, so one index suffices because a workspace's vectors are all one width.
         db.execute_unprepared("ALTER TABLE content_entities ADD COLUMN embedding vector(768)")
             .await?;
 

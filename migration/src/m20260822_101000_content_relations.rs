@@ -79,10 +79,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // `status` is in both indexes because every traversal filters on it (ported comment).
-        // Three-column composite indexes: execute_unprepared is used for both since create_index's
-        // builder offers nothing over the raw form here and this keeps the pair visually identical
-        // to the old DDL.
+        // `status` is in both indexes because every traversal filters on it.
+        // Three-column composite indexes: execute_unprepared is used for both since create_index's builder offers nothing over the raw form here.
         db.execute_unprepared(
             "CREATE INDEX relations_source_idx ON content_relations (workspace_id, source_id, status);",
         )
@@ -92,11 +90,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Strict, not lenient: `yorishiro_app` sets both GUCs on every connection, so reaching
-        // this table without a workspace set is a bug, and raising surfaces it where matching
-        // zero rows would look like an empty workspace (ported reasoning from the old DDL's RLS
-        // section, which states this once and applies it to content.entities and
-        // content.relations specifically).
+        // Strict, not lenient: `yorishiro_app` sets both GUCs on every connection, so reaching this table without a workspace set is a bug, and raising surfaces it where matching zero rows would look like an empty workspace.
         helpers::enable_rls_with_policy(
             db,
             "content_relations",
@@ -107,10 +101,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Old DDL granted this table via a schema-wide
-        // `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA content`. Individualized
-        // per helpers::grant()'s own rule against wildcard grants now that every table shares one
-        // schema.
+        // Individualized per helpers::grant()'s own rule against wildcard grants now that every table shares one schema.
         helpers::grant(db, "SELECT, INSERT, UPDATE, DELETE", "content_relations").await?;
 
         Ok(())

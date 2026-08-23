@@ -59,10 +59,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // role CHECK (role IN ('owner', 'admin', 'member', 'viewer')): sea_query's table-level
-        // .check() is available on Table::create() but the reference migration for this
-        // workspace does not exercise it yet, so following rule 6's raw-SQL fallback keeps this
-        // migration consistent with a plain, easily-greppable ALTER TABLE.
+        // role CHECK (role IN ('owner', 'admin', 'member', 'viewer')), added as a raw ALTER TABLE rather than sea_query's table-level .check() to stay a plain, easily-greppable statement.
         db.execute_unprepared(
             "ALTER TABLE identity_tenant_memberships \
              ADD CONSTRAINT tenant_memberships_role_check \
@@ -70,10 +67,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Strict policy, matching the old DDL's tenant_isolation policy on this table exactly
-        // (line 359-360 of the initial migration): current_setting('app.current_tenant')::uuid
-        // with no `true` (lenient) argument, so a missing setting raises rather than matching
-        // nothing.
+        // Strict policy: current_setting('app.current_tenant')::uuid with no `true` (lenient)
+        // argument, so a missing setting raises rather than matching nothing.
         helpers::enable_rls_with_policy(
             db,
             "identity_tenant_memberships",
@@ -84,10 +79,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No GRANT: identity_tenant_memberships is control-plane data, reached only through the
-        // migration-role identity pool (see src/db.rs), never a tenant-scoped request
-        // connection, same reasoning as identity_tenants and identity_users. The old DDL's
-        // grants section (lines 398-419 of the initial migration) never names this table.
+        // No GRANT: identity_tenant_memberships is control-plane data, reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, same reasoning as identity_tenants and identity_users.
         Ok(())
     }
 

@@ -35,8 +35,8 @@ impl MigrationTrait for Migration {
                             .default(300),
                     )
                     .col(ColumnDef::new(Alias::new("reason")).text())
-                    // The old DDL has only `updated_at` here, no `created_at`: this is a
-                    // singleton row that exists from migration time, not a created record.
+                    // No `created_at`: this is a singleton row that exists from migration time,
+                    // not a created record.
                     .col(
                         ColumnDef::new(Alias::new("updated_at"))
                             .timestamp_with_time_zone()
@@ -63,8 +63,7 @@ impl MigrationTrait for Migration {
         db.execute_unprepared("INSERT INTO identity_maintenance (id) VALUES (TRUE);")
             .await?;
 
-        // No RLS on this table: it is a global singleton, not tenant- or workspace-scoped data,
-        // and the old DDL's RLS section never mentions it.
+        // No RLS on this table: it is a global singleton, not tenant- or workspace-scoped data.
         //
         // GRANT is SELECT only: yorishiro_app reads the maintenance flag on every request but
         // never writes it (writes go through the migration-role/admin path instead).

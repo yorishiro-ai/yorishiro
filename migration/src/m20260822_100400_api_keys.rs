@@ -24,9 +24,6 @@ impl MigrationTrait for Migration {
                             .to(Alias::new("identity_workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
-                    // NOT NULL from birth: this is a fresh migration, not a historical replay of
-                    // the ALTER/backfill/trigger dance the old file used to add this column onto
-                    // existing rows.
                     .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     .foreign_key(
                         ForeignKey::create()
@@ -67,10 +64,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // The old DDL also added `CHECK (workspace_id IS NULL OR tenant_id IS NOT NULL)`
-        // (api_keys_workspace_matches_tenant). Omitted here: tenant_id is NOT NULL from birth
-        // in this fresh version, so the check can never fail and is vacuous.
-
         manager
             .create_index(
                 Index::create()
@@ -86,12 +79,8 @@ impl MigrationTrait for Migration {
         // RLS policy is an OR of two lenient conditions, not the single-column equality
         // helpers::enable_rls_with_policy expresses, so it is written directly here.
         //
-        // A workspace-scoped key is visible when its workspace_id matches the session's. A
-        // tenant-scoped key (workspace_id NULL) is instead visible to any session in its
-        // tenant, since NULL = <uuid> is NULL rather than true and would otherwise make such a
-        // key's own row invisible to the very session authenticated by it (last_used_at would
-        // then never be recorded for exactly the keys that span workspaces, and an
-        // admin key listing could not show them at all).
+        // A workspace-scoped key is visible when its workspace_id matches the session's.
+        // A tenant-scoped key (workspace_id NULL) is instead visible to any session in its tenant, since NULL = <uuid> is NULL rather than true and would otherwise make such a key's own row invisible to the very session authenticated by it.
         //
         // Both reads use NULLIF(current_setting(..., true), '') rather than the strict form:
         // this table is also reached by the control-plane pool, where neither

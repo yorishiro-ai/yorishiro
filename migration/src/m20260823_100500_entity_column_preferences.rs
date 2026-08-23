@@ -17,10 +17,8 @@ impl MigrationTrait for Migration {
                     .col(helpers::uuidv7_pk())
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("entity_type")).text().not_null())
-                    // Field names, in display order. sea_query's ColumnDef has no
-                    // default-expression-plus-json_binary combination that reads well here, so
-                    // the DEFAULT '[]'::jsonb goes on as raw SQL right after create_table,
-                    // matching templates.rs's TEXT[] precedent.
+                    // Field names, in display order.
+                    // sea_query's ColumnDef has no default-expression-plus-json_binary combination that reads well here, so the DEFAULT '[]'::jsonb goes on as raw SQL right after create_table.
                     .col(
                         ColumnDef::new(Alias::new("columns"))
                             .json_binary()
@@ -28,8 +26,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(created_at)
                     .col(updated_at)
-                    // The upsert target: without it, two tabs saving at once leave two rows and
-                    // the reader picks one arbitrarily.
+                    // The upsert target: without it, two tabs saving at once leave two rows and the reader picks one arbitrarily.
                     .index(
                         Index::create()
                             .name("entity_column_preferences_workspace_entity_type_key")
@@ -65,9 +62,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Lenient, matching content_fill_proposals: the control-plane pool also reaches this
-        // table over a connection that has not named a workspace, and must match nothing
-        // rather than raise.
+        // Lenient: the control-plane pool also reaches this table over a connection that has not named a workspace, and must match nothing rather than raise.
         helpers::enable_rls_with_policy(
             db,
             "content_entity_column_preferences",

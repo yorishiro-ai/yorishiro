@@ -9,13 +9,9 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
-        // Idempotent (`duplicate_object` swallowed): every `GRANT ... TO yorishiro_app` in a
-        // later migration, and every RLS-scoped connection's `after_connect` (`src/db.rs`),
-        // requires this role to already exist. PostgreSQL 16+ doesn't let even the role's
-        // creator `SET ROLE` to it automatically, so the migration also grants membership to
-        // itself right after creating it; a superuser migration role never notices the missing
-        // grant (a superuser can `SET ROLE` regardless of membership), which is why this was
-        // dropped without symptom when the port ran under one.
+        // Idempotent (`duplicate_object` swallowed): every `GRANT ... TO yorishiro_app` in a later migration, and every RLS-scoped connection's `after_connect` (`src/db.rs`), requires this role to already exist.
+        // PostgreSQL 16+ doesn't let even the role's creator `SET ROLE` to it automatically, so the migration also grants membership to itself right after creating it.
+        // A superuser migration role masks a missing grant here (it can `SET ROLE` regardless of membership), so verify this on a non-superuser role.
         db.execute_unprepared(
             "DO $$ BEGIN \
              CREATE ROLE yorishiro_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION \

@@ -1,10 +1,6 @@
 //! Reusable column/statement builders shared across migration files.
 //!
-//! `loco_rs::schema::ColType` has no variant that is both a primary key and carries a custom
-//! default expression, so every table's `id` column goes through `sea_query::ColumnDef`
-//! directly. Defined once here rather than repeated in each migration file (the documented
-//! extension pattern: `loco_rs::schema` re-exports the underlying `sea_query`/`sea_orm_migration`
-//! primitives for exactly this case).
+//! `loco_rs::schema::ColType` has no variant that is both a primary key and carries a custom default expression, so every table's `id` column goes through `sea_query::ColumnDef` directly.
 use sea_orm_migration::prelude::*;
 
 /// `id UUID PRIMARY KEY DEFAULT uuidv7()`.
@@ -40,10 +36,7 @@ pub fn timestamps() -> [ColumnDef; 2] {
 
 /// Enables RLS and installs a single-column-equality policy in one raw-SQL round trip.
 ///
-/// `column = current_setting(setting)::uuid`, either strict (missing setting raises) or lenient
-/// (`local => true`, missing setting reads as NULL, matching nothing) per the original design's
-/// two deliberate forms: strict for tables `yorishiro_app` always reaches with both GUCs set,
-/// lenient for tables the control-plane pool also reaches without naming a workspace.
+/// `column = current_setting(setting)::uuid`, either strict (missing setting raises) or lenient (`lenient => true`, missing setting reads as NULL, matching nothing): strict for tables `yorishiro_app` always reaches with both GUCs set, lenient for tables the control-plane pool also reaches without naming a workspace.
 pub async fn enable_rls_with_policy(
     db: &SchemaManagerConnection<'_>,
     table: &str,
@@ -67,13 +60,8 @@ pub async fn enable_rls_with_policy(
 
 /// A single explicit per-table GRANT to `yorishiro_app`.
 ///
-/// Deliberately never a schema-wide `GRANT ... ON ALL TABLES IN SCHEMA public`: with every
-/// table sharing one schema after the public-schema unification, a wholesale grant would sweep
-/// in the tables that must stay ungranted (`identity_tenants`, `identity_users`,
-/// `identity_tenant_memberships`, `identity_invites`, `identity_templates`,
-/// `identity_workspace_llm_keys`) and silently destroy that asymmetry. Every grant is named
-/// here, one call per table, so an ungranted table is ungranted because no call exists for it,
-/// not because a wildcard happened to miss it.
+/// Deliberately never a schema-wide `GRANT ... ON ALL TABLES IN SCHEMA public`: that would sweep in the tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`).
+/// Every grant is named here, one call per table, so an ungranted table is ungranted because no call exists for it, not because a wildcard missed it.
 pub async fn grant(
     db: &SchemaManagerConnection<'_>,
     privileges: &str,

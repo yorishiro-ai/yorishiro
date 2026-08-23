@@ -43,10 +43,9 @@ impl MigrationTrait for Migration {
                             .col(Alias::new("tenant_id"))
                             .col(Alias::new("name")),
                     )
-                    // No ON DELETE action on this particular FK (line 136 of the old DDL),
-                    // unlike every other tenant_id FK in this schema: RESTRICT/NO ACTION is
-                    // the default, so deleting a tenant with templates fails loudly instead
-                    // of cascading them away.
+                    // No ON DELETE action on this FK, unlike every other tenant_id FK in this
+                    // schema: RESTRICT/NO ACTION is the default, so deleting a tenant with
+                    // templates fails loudly instead of cascading them away.
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_tenant_id")

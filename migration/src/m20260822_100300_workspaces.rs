@@ -30,13 +30,9 @@ impl MigrationTrait for Migration {
                     // can be told from one provisioned under a different one.
                     .col(ColumnDef::new(Alias::new("embedding_model")).text())
                     .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
-                    // `schema_id` is added after `content.schemas` exists in the old DDL: the
-                    // reference is circular, since a schema also names its workspace. Folded into
-                    // this same create_table call as a plain nullable column with NO foreign_key
-                    // constraint, since content_schemas is ported by a different, concurrent
-                    // migration and may not exist yet when this one runs. The FK constraint
-                    // should be added in a later migration once content_schemas is guaranteed to
-                    // exist.
+                    // Circular reference: a schema also names its workspace. No foreign_key
+                    // constraint here since content_schemas may not exist yet when this migration
+                    // runs; the FK should be added later once it is guaranteed to exist.
                     .col(ColumnDef::new(Alias::new("schema_id")).uuid())
                     .col(helpers::created_at())
                     .foreign_key(
@@ -53,8 +49,7 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
 
         // CHECK constraints: sea_query's Table::create().check() did not compile cleanly here,
-        // so both are added via raw ALTER TABLE right after create_table, matching the old DDL's
-        // two check clauses verbatim (lines 97-98 and 103).
+        // so both are added via raw ALTER TABLE right after create_table.
         db.execute_unprepared(
             "ALTER TABLE identity_workspaces \
              ADD CONSTRAINT identity_workspaces_status_check \
@@ -82,7 +77,7 @@ impl MigrationTrait for Migration {
 
         // Strict form: `yorishiro_app` sets both GUCs on every connection, so reaching this
         // table without a tenant is a bug, and raising surfaces it rather than reading as an
-        // empty tenant (old DDL lines 378-382, 362-363).
+        // empty tenant.
         helpers::enable_rls_with_policy(
             db,
             "identity_workspaces",
@@ -93,13 +88,12 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Whole-table SELECT (old DDL line 405).
         helpers::grant(db, "SELECT", "identity_workspaces").await?;
 
-        // Column-level GRANT UPDATE, because these two are the whole of what a request writes
-        // here. `max_entities`, `name` and the embedding stamp are provisioning decisions, and a
-        // request that could rewrite its own quota is a different system (old DDL lines 407-410).
-        // Issued raw since helpers::grant()'s signature only expresses whole-table grants.
+        // Column-level GRANT UPDATE: `status` and `schema_id` are the whole of what a request
+        // writes here. `max_entities`, `name` and the embedding stamp are provisioning decisions;
+        // a request that could rewrite its own quota is a different system. Issued raw since
+        // helpers::grant()'s signature only expresses whole-table grants.
         db.execute_unprepared(
             "GRANT UPDATE (status, schema_id) ON identity_workspaces TO yorishiro_app;",
         )
