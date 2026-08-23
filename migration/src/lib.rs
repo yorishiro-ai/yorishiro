@@ -21,6 +21,7 @@ mod m20260823_100100_stripe_processed_events;
 mod m20260823_100200_marketplace;
 mod m20260823_100300_workspace_llm_keys;
 mod m20260823_100400_fill_proposals;
+mod m20260823_100500_entity_column_preferences;
 
 pub struct Migrator;
 
@@ -46,6 +47,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260823_100200_marketplace::Migration),
             Box::new(m20260823_100300_workspace_llm_keys::Migration),
             Box::new(m20260823_100400_fill_proposals::Migration),
+            Box::new(m20260823_100500_entity_column_preferences::Migration),
             // inject-above (do not remove this comment)
         ]
     }

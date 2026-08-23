@@ -106,9 +106,22 @@ impl Hooks for HostedApp {
     /// what lets `/upstream-changes` coexist with `/{schema_id}`), so unlike marketplace and the
     /// dashboard this one is not under `/hosted`: merging a schema is a schema operation from the
     /// client's side, not an administrative one.
+    ///
+    /// `controllers::entity_columns` is the same case: master's own `/api/workspace/entity-columns`
+    /// paths, kept as-is, since base's own workspace routes are `api/workspaces` (plural) and
+    /// there is no collision to route around.
+    ///
+    /// `controllers::inference` mounts under `/hosted` (`workspace/llm-key`,
+    /// `schemas/active/{name}/infer-fill`, `migration-jobs/{job_id}/{proposals,confirm}`) rather
+    /// than at master's own paths, an unchecked deviation from the empirical-check method
+    /// `origin` and `entity_columns` both used: nothing here confirmed a real conflict with
+    /// base's own routes forced the `/hosted` prefix. Recorded alongside `marketplace`'s own
+    /// unchecked `/hosted/marketplace` deviation as an API-contract question to reconcile before
+    /// the PR, not fixed here mid-slice.
     fn routes(ctx: &AppContext) -> AppRoutes {
         App::routes(ctx)
             .add_route(controllers::dashboard::routes())
+            .add_route(controllers::entity_columns::routes())
             .add_route(controllers::inference::routes())
             .add_route(controllers::marketplace::routes())
             .add_route(controllers::origin::routes())

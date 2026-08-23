@@ -7,6 +7,7 @@
 //! serves is enterprise regardless of which tables it happens to read.
 
 pub mod billing;
+pub mod entity_columns;
 pub mod fill_proposals;
 pub mod llm_keys;
 pub mod marketplace;
