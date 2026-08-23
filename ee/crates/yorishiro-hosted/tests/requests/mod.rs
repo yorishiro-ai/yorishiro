@@ -1,5 +1,6 @@
 mod dashboard;
 mod marketplace;
+mod origin;
 mod stripe;
 mod tenant_auth;
 

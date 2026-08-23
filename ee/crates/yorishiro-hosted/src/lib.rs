@@ -98,10 +98,19 @@ impl Hooks for HostedApp {
     /// `shared_store`: an unlicensed deployment gets a 404 from every marketplace route, matching
     /// master's `licensed_tenant` (the marketplace is cross-tenant distribution, not part of the
     /// free floor the dashboard and Stripe webhook stay open under).
+    ///
+    /// `controllers::origin` overlays base's own `/api/schemas` namespace at the same paths
+    /// master uses (`/upstream-changes`, `/{schema_id}/merge-preview`, `/{schema_id}/merge`):
+    /// none of the three collides with base's own `/api/schemas`, `/api/schemas/{schema_id}` (a
+    /// static segment always resolves ahead of a path parameter in the same position, which is
+    /// what lets `/upstream-changes` coexist with `/{schema_id}`), so unlike marketplace and the
+    /// dashboard this one is not under `/hosted`: merging a schema is a schema operation from the
+    /// client's side, not an administrative one.
     fn routes(ctx: &AppContext) -> AppRoutes {
         App::routes(ctx)
             .add_route(controllers::dashboard::routes())
             .add_route(controllers::marketplace::routes())
+            .add_route(controllers::origin::routes())
             .add_route(controllers::stripe::routes())
     }
 

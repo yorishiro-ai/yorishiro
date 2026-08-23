@@ -172,6 +172,28 @@ pub async fn get_by_id(
     }
 }
 
+/// A schema whose origin template has been edited since the copy was taken.
+///
+/// The signal only (what changed and where), with no diff and no application. Whether to follow
+/// the upstream edit is the workspace's call, since applying it could invalidate entities already
+/// stored against the current definition.
+///
+/// Lives here rather than in `ee/` because it names `content_schemas` fields (`schema_id`,
+/// `version`) this module already owns; the endpoint that produces one (`ee/`'s
+/// `GET /api/schemas/upstream-changes`) is what makes following it enterprise, not the shape of
+/// the value itself.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpstreamChange {
+    pub schema_id: Uuid,
+    pub schema_name: String,
+    /// The version of the schema currently in use here.
+    pub version: i32,
+    pub template_id: Uuid,
+    pub template_name: String,
+    /// When the template was last edited.
+    pub changed_at: DateTime<Utc>,
+}
+
 /// A row in a schema listing. A lightweight summary that omits the `definition` body, used as
 /// the entry point for MCP clients (LLMs) to discover what schemas exist for a workspace.
 #[derive(Debug, Clone, Serialize)]

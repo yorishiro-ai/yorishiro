@@ -1,9 +1,5 @@
 //! Role-based authorization for this crate's own routes, orthogonal to `ApiKeyScope`.
 //! Ported from master's `ee/crates/yorishiro-hosted/src/services/authz.rs`.
-//! `authenticate_workspace` is not ported here: it goes through
-//! `tenant_auth::TenantScopedAuthenticator`, the same seam every authenticated path in the
-//! process resolves through, and no route on this branch yet needs a workspace (rather than a
-//! tenant) from authentication alone.
 
 use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
@@ -13,6 +9,7 @@ use yorishiro_core::YorishiroError;
 use yorishiro_core::db::DbHandle;
 use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth;
+use yorishiro_core::services::auth::Authenticator;
 
 /// The prefix-stripping and the empty-credential check both live in
 /// [`auth::bearer_credential`], so this path and the ones upstream cannot disagree about what
@@ -26,6 +23,37 @@ fn db_handle(ctx: &AppContext) -> Result<DbHandle, YorishiroError> {
     ctx.shared_store
         .get::<DbHandle>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))
+}
+
+/// Authenticates the bearer API key and returns the full context, **workspace included**.
+///
+/// Goes through [`crate::services::tenant_auth::TenantScopedAuthenticator`], the same seam every
+/// authenticated path in this process resolves through, so both key kinds work on these routes: a
+/// workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with
+/// `X-Workspace-Id`. Resolving it any other way here would make a REST route and an MCP tool
+/// disagree about who the caller is.
+///
+/// [`authenticate_tenant`] is the weaker form for routes that need only the tenant. Use this one
+/// whenever the work touches a workspace's own content, since that is what the RLS-scoped
+/// connection has to be opened against.
+pub(crate) async fn authenticate_workspace(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+) -> Result<auth::AuthContext, YorishiroError> {
+    let token = bearer_token(headers)?;
+    let db = db_handle(ctx)?;
+    let forwarded: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect();
+    crate::services::tenant_auth::TenantScopedAuthenticator
+        .authenticate(&db, token, &forwarded)
+        .await
 }
 
 /// Authenticates the bearer API key and returns the tenant it belongs to, with **no role
