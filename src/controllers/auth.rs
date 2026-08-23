@@ -7,7 +7,6 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::routing::post;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -23,8 +22,15 @@ use crate::services::auth::ApiKeyScope;
 
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
-    /// The plaintext token from an `admin create-invite`-issued invitation.
-    pub invite_token: String,
+    /// The plaintext token from an `admin create-invite`-issued invitation. Omit it to create a
+    /// fresh tenant and join it as `Owner` instead, the same shape `POST /setup` uses for a
+    /// deployment's first tenant, just reachable more than once (subject to
+    /// `YORISHIRO_MAX_TENANTS`, via `tenancy::create_tenant`).
+    pub invite_token: Option<String>,
+    /// Required when `invite_token` is omitted: an invite already carries the email it was
+    /// issued to, so specifying one here as well would just be a second, possibly conflicting
+    /// source of truth for the same field. Rejected with `invite_token` present.
+    pub email: Option<String>,
     pub password: String,
     pub display_name: Option<String>,
 }
@@ -43,8 +49,28 @@ pub struct SignupResponse {
 pub async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    let invite = tenancy::redeem_invite(&ctx.db, &body.invite_token)
+) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
+    match body.invite_token {
+        Some(ref token) => signup_with_invite(&ctx, token, &body).await,
+        None => signup_without_invite(&ctx, &body).await,
+    }
+}
+
+async fn signup_with_invite(
+    ctx: &AppContext,
+    token: &str,
+    body: &SignupRequest,
+) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
+    if body.email.is_some() {
+        return Err(YorishiroError::ValidationFailed {
+            message: "email must not be given alongside invite_token".into(),
+            details: vec![],
+            hint: "an invite already specifies the email it was issued to".into(),
+        }
+        .into());
+    }
+
+    let invite = tenancy::redeem_invite(&ctx.db, token)
         .await?
         .ok_or_else(|| YorishiroError::ValidationFailed {
             message: "invite token is invalid, expired, or already used".into(),
@@ -74,6 +100,50 @@ pub async fn signup(
             tenant_id: invite.tenant_id,
             role: invite.role,
             workspaces,
+        }),
+    ))
+}
+
+/// No invite: creates a brand-new tenant and joins the caller as `Owner`, but no workspace.
+/// A workspace needs a schema decision (`create_workspace`'s `schema_id`) and an embedding
+/// model that signup has no basis to choose on the new owner's behalf; `POST /workspaces`
+/// (tenant-admin scoped, which `Owner` already is) creates one explicitly afterward. Unlike
+/// `/setup` (which is gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap, and refuses
+/// once one tenant exists), this stays reachable for as long as `tenancy::create_tenant`'s own
+/// cap check allows: it is the ongoing "anyone can sign up and get their own tenant" path, not
+/// a one-time bootstrap wizard.
+async fn signup_without_invite(
+    ctx: &AppContext,
+    body: &SignupRequest,
+) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
+    let email = body
+        .email
+        .as_deref()
+        .ok_or_else(|| YorishiroError::ValidationFailed {
+            message: "email is required when invite_token is omitted".into(),
+            details: vec![],
+            hint: "either provide invite_token, or provide email to create a new tenant".into(),
+        })?;
+
+    // tenant + user + membership run in one transaction, same reasoning as
+    // signup_with_invite's create_user + add_member: a request that dies part-way must not
+    // leave rows nothing can finish or undo.
+    let tenant_name = body.display_name.as_deref().unwrap_or(email);
+    let txn = ctx.db.begin().await.internal()?;
+    let tenant = tenancy::create_tenant(&txn, tenant_name).await?;
+    let user =
+        tenancy::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
+    tenancy::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
+    txn.commit().await.internal()?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(SignupResponse {
+            user_id: user.id,
+            email: user.email,
+            tenant_id: tenant.id,
+            role: MembershipRole::Owner,
+            workspaces: vec![],
         }),
     ))
 }

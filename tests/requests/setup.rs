@@ -2,25 +2,7 @@ use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use yorishiro_core::app::App;
 
-/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there
-/// before. Every test in this suite is `#[serial]` (the default, unnamed key), so this is safe
-/// against every other test in the binary, not just this file's: `serial_test`'s bare `#[serial]`
-/// shares one global lock unless a key is given.
-async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_MAX_TENANTS", value);
-    }
-    let result = fut.await;
-    unsafe {
-        match &previous {
-            Some(v) => std::env::set_var("YORISHIRO_MAX_TENANTS", v),
-            None => std::env::remove_var("YORISHIRO_MAX_TENANTS"),
-        }
-    }
-    result
-}
+use super::with_max_tenants;
 
 /// `config/test.yaml` sets no `YORISHIRO_MAX_TENANTS`, so the wizard is disabled by default
 /// (`max_tenants_from_env()` returns `Ok(None)` when unset): both endpoints must answer as if

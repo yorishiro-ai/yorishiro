@@ -5,6 +5,7 @@ mod marketplace;
 mod oauth;
 mod official_templates;
 mod origin;
+mod setup;
 mod stripe;
 mod tenant_auth;
 

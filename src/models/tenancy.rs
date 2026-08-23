@@ -16,9 +16,58 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
-    identity_invites, identity_tenant_memberships, identity_users, identity_workspaces,
+    identity_invites, identity_tenant_memberships, identity_tenants, identity_users,
+    identity_workspaces,
 };
 use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
+
+/// The nil UUID, reserved for infrastructure tenants that own no members and no data of their
+/// own (currently `ee/`'s official-templates publisher). Excluded from every count this module
+/// takes against `YORISHIRO_MAX_TENANTS`, so a deployment that has run `cargo loco db seed`
+/// does not read as already at its tenant cap. `ee/` references this constant rather than base
+/// referencing an `ee/`-defined one, per the one-way dependency rule in CLAUDE.md's "Editions
+/// and the `ee/` boundary": the nil UUID itself is not a marketplace concept, so it belongs here.
+pub const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
+
+/// Counts real (non-infrastructure) tenants: every row except `INFRASTRUCTURE_TENANT_ID`.
+/// This is the number `YORISHIRO_MAX_TENANTS` and the setup wizard's "has this deployment been
+/// set up yet" check both mean, and the two must stay the same query or they will disagree
+/// about whether a fresh, seeded deployment is empty.
+pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
+    identity_tenants::Entity::find()
+        .filter(identity_tenants::Column::Id.ne(INFRASTRUCTURE_TENANT_ID))
+        .count(conn)
+        .await
+        .internal()
+}
+
+/// Creates a tenant, enforcing `YORISHIRO_MAX_TENANTS` against `count_tenants`.
+/// The official-templates publisher tenant (`ee/`'s `ensure_official_tenant`) deliberately does
+/// not go through this: it is infrastructure, not a customer, and a deployment sitting at its
+/// tenant cap still needs its official templates to exist.
+pub async fn create_tenant(
+    conn: &impl ConnectionTrait,
+    name: &str,
+) -> Result<identity_tenants::Model, YorishiroError> {
+    if let Some(max) = max_tenants_from_env()? {
+        let count = count_tenants(conn).await?;
+        if count >= max as u64 {
+            return Err(YorishiroError::Conflict {
+                message: format!(
+                    "this deployment has reached its tenant limit ({max}); \
+                     raise YORISHIRO_MAX_TENANTS or delete an existing tenant"
+                ),
+            });
+        }
+    }
+
+    let active = identity_tenants::ActiveModel {
+        name: ActiveValue::Set(name.to_string()),
+        max_workspaces: ActiveValue::Set(None),
+        ..Default::default()
+    };
+    active.insert(conn).await.internal()
+}
 
 /// Reads and parses `YORISHIRO_MAX_TENANTS`.
 /// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and

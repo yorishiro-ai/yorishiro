@@ -19,14 +19,16 @@ use uuid::Uuid;
 use yorishiro_core::db;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::_entities::identity_tenants;
+use yorishiro_core::models::tenancy::INFRASTRUCTURE_TENANT_ID;
 
 /// The tenant that owns the officially published templates.
 ///
-/// A fixed id rather than a lookup by name, so re-running the seed finds the same row and a
-/// deployment that renames it does not end up with two publishers. All-zeros, since this is
-/// infrastructure rather than a customer tenant and there is no `uuidv7()` timestamp for it to
-/// meaningfully carry.
-pub const OFFICIAL_TENANT_ID: Uuid = Uuid::nil();
+/// The same id `tenancy::count_tenants` excludes from `YORISHIRO_MAX_TENANTS`: this has to stay
+/// one constant, defined in base rather than here, or the two could drift and a seeded
+/// deployment would read as already at its tenant cap. A fixed id rather than a lookup by name,
+/// so re-running the seed finds the same row and a deployment that renames it does not end up
+/// with two publishers.
+pub const OFFICIAL_TENANT_ID: Uuid = INFRASTRUCTURE_TENANT_ID;
 
 /// Shown as the listing's author.
 /// `identity_templates.author` is free text, so this does not require a user account.

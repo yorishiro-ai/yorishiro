@@ -3,6 +3,8 @@ use serial_test::serial;
 use yorishiro_core::app::App;
 use yorishiro_core::models::tenancy::{self, MembershipRole};
 
+use super::with_max_tenants;
+
 #[tokio::test]
 #[serial]
 async fn signup_then_login_round_trip() {
@@ -89,6 +91,136 @@ async fn signup_then_login_round_trip() {
         assert_eq!(bad_password_response.status_code(), 401);
 
         super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// Omitting `invite_token` creates a fresh tenant and joins the caller as `Owner`, rather than
+/// 422-ing for lack of one. `email` is required in this mode since there is no invite to source
+/// it from. No workspace is created: that needs a schema decision signup has no basis to make,
+/// so the new owner creates one explicitly afterward (`POST /workspaces`) before they can log
+/// in at all.
+#[tokio::test]
+#[serial]
+async fn signup_without_invite_creates_its_own_tenant() {
+    request_with_create_db::<App, _, _>(|request, ctx| async move {
+        let signup_response = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({
+                "email": "no-invite@example.com",
+                "password": "correct-horse-battery-staple",
+                "display_name": "No Invite",
+            }))
+            .await;
+        assert_eq!(
+            signup_response.status_code(),
+            201,
+            "response: {:?}",
+            signup_response.text()
+        );
+        let signup_body: serde_json::Value = signup_response.json();
+        assert_eq!(signup_body["email"], "no-invite@example.com");
+        assert_eq!(signup_body["role"], "owner");
+        assert_eq!(signup_body["workspaces"].as_array().unwrap().len(), 0);
+
+        // No workspace exists yet, so there is nothing to issue an API key for.
+        let login_response = request
+            .post("/auth/login")
+            .json(&serde_json::json!({
+                "email": "no-invite@example.com",
+                "password": "correct-horse-battery-staple",
+            }))
+            .await;
+        assert_eq!(
+            login_response.status_code(),
+            403,
+            "response: {:?}",
+            login_response.text()
+        );
+
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// `email` alongside `invite_token` is rejected rather than silently ignored: the invite
+/// already carries the email it was issued to, and a caller-supplied one could disagree with it
+/// unnoticed.
+#[tokio::test]
+#[serial]
+async fn signup_rejects_email_alongside_invite_token() {
+    request_with_create_db::<App, _, _>(|request, ctx| async move {
+        let response = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({
+                "invite_token": "irrelevant-since-this-should-422-first",
+                "email": "should-not-be-here@example.com",
+                "password": "correct-horse-battery-staple",
+            }))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            422,
+            "response: {:?}",
+            response.text()
+        );
+
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// No `invite_token` and no `email` has nothing to create a tenant or an account for.
+#[tokio::test]
+#[serial]
+async fn signup_rejects_neither_invite_token_nor_email() {
+    request_with_create_db::<App, _, _>(|request, ctx| async move {
+        let response = request
+            .post("/auth/signup")
+            .json(&serde_json::json!({
+                "password": "correct-horse-battery-staple",
+            }))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            422,
+            "response: {:?}",
+            response.text()
+        );
+
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// `YORISHIRO_MAX_TENANTS` bounds invite-less signup the same way it bounds `/setup`: once the
+/// cap is reached, further signups are refused rather than growing the tenant count unbounded.
+#[tokio::test]
+#[serial]
+async fn signup_without_invite_respects_the_tenant_cap() {
+    with_max_tenants("1", async move {
+        request_with_create_db::<App, _, _>(|request, ctx| async move {
+            let first = request
+                .post("/auth/signup")
+                .json(&serde_json::json!({
+                    "email": "first@example.com",
+                    "password": "correct-horse-battery-staple",
+                }))
+                .await;
+            assert_eq!(first.status_code(), 201, "response: {:?}", first.text());
+
+            let second = request
+                .post("/auth/signup")
+                .json(&serde_json::json!({
+                    "email": "second@example.com",
+                    "password": "correct-horse-battery-staple",
+                }))
+                .await;
+            assert_eq!(second.status_code(), 409, "response: {:?}", second.text());
+
+            super::close_app_pools(&ctx).await;
+        })
+        .await;
     })
     .await;
 }

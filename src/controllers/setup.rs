@@ -15,26 +15,18 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::{EntityTrait, PaginatorTrait, TransactionTrait};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::embedding_provider;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_tenants;
 use crate::models::identity_api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole};
 
 fn wizard_enabled() -> bool {
     matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
-}
-
-async fn tenant_count(conn: &impl sea_orm::ConnectionTrait) -> Result<u64, YorishiroError> {
-    identity_tenants::Entity::find()
-        .count(conn)
-        .await
-        .internal()
 }
 
 #[derive(Debug, Serialize)]
@@ -46,7 +38,7 @@ pub struct SetupStatusResponse {
 
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if wizard_enabled() {
-        tenant_count(&ctx.db).await? == 0
+        tenancy::count_tenants(&ctx.db).await? == 0
     } else {
         false
     };
@@ -85,7 +77,7 @@ pub async fn setup(
     // A fast-path check before doing any work; not the guarantee. Two concurrent POST /setup
     // calls could both pass this and both proceed, so the real check runs again after the
     // advisory lock below, inside the transaction that also does the writes.
-    if tenant_count(&ctx.db).await? > 0 {
+    if tenancy::count_tenants(&ctx.db).await? > 0 {
         return Err(YorishiroError::Conflict {
             message: "this deployment has already been set up".into(),
         }
@@ -105,21 +97,14 @@ pub async fn setup(
     // commit before it decides whether to proceed.
     let txn = ctx.db.begin().await.internal()?;
     crate::db::lock_for_update(&txn, "setup").await.internal()?;
-    if tenant_count(&txn).await? > 0 {
+    if tenancy::count_tenants(&txn).await? > 0 {
         return Err(YorishiroError::Conflict {
             message: "this deployment has already been set up".into(),
         }
         .into());
     }
 
-    let tenant_active = identity_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("default".into()),
-        max_workspaces: sea_orm::ActiveValue::Set(None),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant_active, &txn)
-        .await
-        .internal()?;
+    let tenant = tenancy::create_tenant(&txn, "default").await?;
 
     let workspace = tenancy::create_workspace(
         &txn,
