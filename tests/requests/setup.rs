@@ -4,10 +4,7 @@ use yorishiro_core::app::App;
 
 use super::with_max_tenants;
 
-/// `config/test.yaml` sets no `YORISHIRO_MAX_TENANTS`, so the wizard is disabled by default
-/// (`max_tenants_from_env()` returns `Ok(None)` when unset): both endpoints must answer as if
-/// setup does not exist, rather than leaking whether a tenant exists on a deployment that never
-/// opted into the wizard at all.
+/// `config/test.yaml` sets no `YORISHIRO_MAX_TENANTS`, so the wizard is disabled by default (`max_tenants_from_env()` returns `Ok(None)` when unset): both endpoints must answer as if setup does not exist, rather than leaking whether a tenant exists on a deployment that never opted into the wizard at all.
 #[tokio::test]
 #[serial]
 async fn setup_is_unreachable_when_the_wizard_is_not_enabled() {
@@ -36,10 +33,8 @@ async fn setup_is_unreachable_when_the_wizard_is_not_enabled() {
     .await;
 }
 
-/// With the wizard enabled and no tenant yet, `POST /setup` creates the deployment's first
-/// tenant/workspace/owner and returns a working API key; a second call must be refused with 409
-/// rather than creating a second tenant, and `GET /setup/status` must report `setup_required:
-/// false` once the first call has landed.
+/// With the wizard enabled and no tenant yet, `POST /setup` creates the deployment's first tenant/workspace/owner and returns a working API key.
+/// A second call must be refused with 409 rather than creating a second tenant, and `GET /setup/status` must report `setup_required: false` once the first call has landed.
 #[tokio::test]
 #[serial]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {

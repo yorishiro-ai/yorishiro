@@ -62,8 +62,7 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
     .await;
 }
 
-/// `revoke` deletes the row so authentication (a lookup on every request) can no longer find it,
-/// and a second revoke of the same id must report not-found rather than succeeding silently.
+/// `revoke` deletes the row so authentication (a lookup on every request) can no longer find it, and a second revoke of the same id must report not-found rather than succeeding silently.
 #[tokio::test]
 #[serial]
 async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {

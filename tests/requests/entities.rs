@@ -54,9 +54,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     }
 }
 
-/// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots
-/// restore the entities they cover, and one deleted since the snapshot is counted rather than
-/// failing the rest.
+/// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
 #[serial]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
@@ -114,8 +112,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .await
             .expect("snapshot doomed");
 
-        // Overwrite the survivor, matching what a batch job (fill-defaults, fill-proposal
-        // confirmation) does between taking the snapshot and the undo that might follow it.
+        // Overwrite the survivor, matching what a batch job (fill-defaults, fill-proposal confirmation) does between taking the snapshot and the undo that might follow it.
         content_entities::update(
             &ctx.db,
             setup.workspace_id,
@@ -154,8 +151,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
     .await;
 }
 
-/// A job with no snapshots (an unknown or already-undone job id) is refused rather than reporting
-/// zero restored, so a caller can tell "nothing to undo" from "already undone".
+/// A job with no snapshots (an unknown or already-undone job id) is refused rather than reporting zero restored, so a caller can tell "nothing to undo" from "already undone".
 #[tokio::test]
 #[serial]
 async fn undo_an_unknown_job_is_refused() {

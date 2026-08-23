@@ -163,9 +163,7 @@ async fn member_role_cannot_manage_the_template_library() {
     .await;
 }
 
-/// Community visibility makes a template *readable* across tenants, not writable: only the
-/// owning tenant may update, delete, or fork-source-then-own it under its own name (fork
-/// creates a new row owned by the caller, so it doesn't need this guard, but update/delete do).
+/// Community visibility makes a template *readable* across tenants, not writable: only the owning tenant may update or delete it (fork creates a new row owned by the caller, so it doesn't need this guard, but update/delete do).
 #[tokio::test]
 #[serial]
 async fn another_tenant_cannot_update_or_delete_a_community_template() {

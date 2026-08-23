@@ -183,8 +183,7 @@ async fn signup_rejects_neither_invite_token_nor_email() {
     .await;
 }
 
-/// `YORISHIRO_MAX_TENANTS` bounds invite-less signup the same way it bounds `/setup`: once the
-/// cap is reached, further signups are refused rather than growing the tenant count unbounded.
+/// `YORISHIRO_MAX_TENANTS` bounds invite-less signup the same way it bounds `/setup`: once the cap is reached, further signups are refused rather than growing the tenant count unbounded.
 #[tokio::test]
 #[serial]
 async fn signup_without_invite_respects_the_tenant_cap() {

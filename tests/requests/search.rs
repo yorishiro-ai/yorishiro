@@ -45,12 +45,8 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     Setup { read_key }
 }
 
-/// No `YORISHIRO_EMBEDDING_BASE_URL`/`_MODEL` is set in the test environment
-/// (`config/test.yaml` carries none, matching production's own "boot with no provider
-/// configured" fallback), so the deployment boots with `UnconfiguredEmbeddingProvider` and any
-/// actual search attempt surfaces as 502, not a panic or a silent empty result. This is the
-/// correctness the fallback exists for: search fails loudly and namedly rather than the boot
-/// process itself failing for every deployment that hasn't configured embeddings yet.
+/// No `YORISHIRO_EMBEDDING_BASE_URL`/`_MODEL` is set in the test environment, so the deployment boots with `UnconfiguredEmbeddingProvider` and any actual search attempt surfaces as 502, not a panic or a silent empty result.
+/// Search fails loudly and namedly rather than the boot process itself failing for every deployment that hasn't configured embeddings yet.
 #[tokio::test]
 #[serial]
 async fn search_with_no_embedding_provider_configured_returns_502() {
@@ -73,10 +69,8 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
     .await;
 }
 
-/// The auth check (`Verified`) runs before the embedding call: no key at all must be rejected
-/// with 401, not 502, proving authentication is checked first regardless of what the embedding
-/// provider would have done. `Read` is the lowest scope (`ApiKeyScope`'s `Ord`), so there's no
-/// "too-low scope" case to test against a read-gated endpoint beyond this.
+/// The auth check (`Verified`) runs before the embedding call: no key at all must be rejected with 401, not 502.
+/// `Read` is the lowest scope, so there's no "too-low scope" case to test against a read-gated endpoint beyond this.
 #[tokio::test]
 #[serial]
 async fn search_requires_authentication() {

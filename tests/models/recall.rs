@@ -17,9 +17,7 @@ fn chain_definition() -> serde_json::Value {
     })
 }
 
-/// `recall_context` at `depth: 2` must reach a neighbor-of-neighbor (root -> mid -> leaf) but not
-/// go further, and a diamond back to an already-visited node must not be reported twice or
-/// re-expanded.
+/// `recall_context` at `depth: 2` must reach a neighbor-of-neighbor (root -> mid -> leaf) but not go further, and a diamond back to an already-visited node must not be reported twice or re-expanded.
 #[tokio::test]
 #[serial]
 async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {

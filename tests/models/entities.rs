@@ -5,11 +5,9 @@ use yorishiro_core::models::_entities::{identity_tenants, identity_workspaces};
 use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro_core::models::{content_entities, content_schemas};
 
-/// `migration_dry_run`'s SeaORM rewrite moved a hand-built sea-query GROUP BY with an explicit
-/// JOIN alias to `select_only().group_by(...).into_model::<GroupedCount>()`. A single-version
-/// workspace can't tell whether that mapping is correct: every entity lands in the `current`
-/// bucket and the per-old-version loop body never runs. This test forces a second version so the
-/// loop actually executes.
+/// `migration_dry_run` uses `select_only().group_by(...).into_model::<GroupedCount>()`.
+/// A single-version workspace can't tell whether that mapping is correct: every entity lands in the `current` bucket and the per-old-version loop body never runs.
+/// This test forces a second version so the loop actually executes.
 #[tokio::test]
 #[serial]
 async fn drift_and_migration_dry_run_see_a_second_version() {

@@ -108,9 +108,7 @@ async fn maintenance_is_readable_and_settable_over_rest() {
         let body: serde_json::Value = response.json();
         assert_eq!(body["mode"], "read_only", "the write is what the read sees");
 
-        // Restore off so a leaked mutex-held row doesn't affect an unrelated test running
-        // against the same throwaway database (each #[tokio::test] gets its own, but this
-        // leaves the state clean regardless).
+        // Restore off so a leaked mutex-held row doesn't affect an unrelated test running against the same throwaway database.
         request
             .put("/api/system/maintenance")
             .add_header("Authorization", format!("Bearer {key}"))
@@ -122,9 +120,8 @@ async fn maintenance_is_readable_and_settable_over_rest() {
     .await;
 }
 
-/// The point of the endpoint. Behind the maintenance guard, a full lock entered over REST could
-/// only be left over the CLI, which makes the switch a one-way door for anyone without shell
-/// access. This test fails if the route ever moves behind the guard.
+/// Behind the maintenance guard, a full lock entered over REST could only be left over the CLI, which makes the switch a one-way door for anyone without shell access.
+/// This test fails if the route ever moves behind the guard.
 #[tokio::test]
 #[serial]
 async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
@@ -170,8 +167,8 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
     .await;
 }
 
-/// `migration` is the scope that guards batch migration and the maintenance switch alike. A
-/// `write`-scoped key stopping every caller would be an escalation.
+/// `migration` is the scope that guards batch migration and the maintenance switch alike.
+/// A `write`-scoped key stopping every caller would be an escalation.
 #[tokio::test]
 #[serial]
 async fn a_member_key_cannot_touch_maintenance() {

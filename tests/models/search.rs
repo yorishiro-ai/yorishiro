@@ -19,9 +19,7 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
-/// Writes a raw vector directly onto an entity's `embedding` column, bypassing the embedding
-/// provider entirely: `search_by_vector` only needs a stored vector, and a test has no business
-/// calling out to a real embedding service.
+/// Writes a raw vector directly onto an entity's `embedding` column, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
 async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vector: Vec<f32>) {
     conn.execute_raw(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
@@ -164,10 +162,7 @@ impl EmbeddingProvider for FixedWidthProvider {
     }
 }
 
-/// A workspace stamped with a dimension count (`identity_workspaces.embedding_dimensions`) must
-/// refuse a sync whose provider produces a different width, rather than writing a vector that
-/// would silently break every future search over that workspace with a dimension-mismatch error
-/// naming neither the entity nor the write that caused it.
+/// A workspace stamped with a dimension count (`identity_workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
