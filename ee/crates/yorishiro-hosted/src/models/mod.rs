@@ -5,5 +5,6 @@
 //! tables this crate's own migrations add.
 
 pub mod billing;
+pub mod marketplace;
 pub mod stripe_events;
 pub mod usage;

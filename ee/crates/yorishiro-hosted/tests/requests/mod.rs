@@ -1,4 +1,5 @@
 mod dashboard;
+mod marketplace;
 mod stripe;
 mod tenant_auth;
 

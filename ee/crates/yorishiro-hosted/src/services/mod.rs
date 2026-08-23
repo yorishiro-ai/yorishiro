@@ -1,6 +1,7 @@
 pub(crate) mod authz;
 pub(crate) mod hmac_sign;
 pub mod licence;
+pub mod marketplace;
 pub mod plan;
 pub mod tenant_auth;
 

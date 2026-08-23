@@ -93,9 +93,15 @@ impl Hooks for HostedApp {
     /// configured but no active licence" logged as a warning at boot, not a route omission (see
     /// its `bin/yorishiro_server.rs`); this branch has no equivalent boot-time warning yet,
     /// tracked as a follow-up rather than blocking the route.
+    ///
+    /// `/hosted/marketplace/**` is the first route in this crate to read `LicenceState` from
+    /// `shared_store`: an unlicensed deployment gets a 404 from every marketplace route, matching
+    /// master's `licensed_tenant` (the marketplace is cross-tenant distribution, not part of the
+    /// free floor the dashboard and Stripe webhook stay open under).
     fn routes(ctx: &AppContext) -> AppRoutes {
         App::routes(ctx)
             .add_route(controllers::dashboard::routes())
+            .add_route(controllers::marketplace::routes())
             .add_route(controllers::stripe::routes())
     }
 

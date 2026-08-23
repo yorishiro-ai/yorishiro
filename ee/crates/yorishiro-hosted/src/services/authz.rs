@@ -1,8 +1,9 @@
 //! Role-based authorization for this crate's own routes, orthogonal to `ApiKeyScope`.
-//! Ported from master's `ee/crates/yorishiro-hosted/src/services/authz.rs`, narrowed to the
-//! tenant-admin path: `tenant_auth::TenantScopedAuthenticator` and its `authenticate_workspace`/
-//! `authenticate_tenant` counterparts are a separate slice (they replace the process-wide
-//! `Arc<dyn Authenticator>` in `shared_store`, affecting every REST route and MCP tool at once).
+//! Ported from master's `ee/crates/yorishiro-hosted/src/services/authz.rs`.
+//! `authenticate_workspace` is not ported here: it goes through
+//! `tenant_auth::TenantScopedAuthenticator`, the same seam every authenticated path in the
+//! process resolves through, and no route on this branch yet needs a workspace (rather than a
+//! tenant) from authentication alone.
 
 use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
@@ -25,6 +26,29 @@ fn db_handle(ctx: &AppContext) -> Result<DbHandle, YorishiroError> {
     ctx.shared_store
         .get::<DbHandle>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))
+}
+
+/// Authenticates the bearer API key and returns the tenant it belongs to, with **no role
+/// requirement**.
+///
+/// The marketplace is the caller: publishing a version, reviewing and forking are all per-tenant
+/// acts that any valid key for that tenant may perform. Requiring Owner/Admin here would silently
+/// narrow the feature rather than relocate it.
+///
+/// Ownership is still enforced downstream: the service scopes every write by this `tenant_id`,
+/// and acting on another tenant's template answers `404` rather than `403`.
+///
+/// Returns the attributed `user_id` alongside it, which is `None` for a service-only key.
+/// Publishing a version, reviewing and forking all record an author, and a key with no user
+/// behind it records none.
+pub(crate) async fn authenticate_tenant(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+) -> Result<(Uuid, Option<Uuid>), YorishiroError> {
+    let token = bearer_token(headers)?;
+    let db = db_handle(ctx)?;
+    let auth_ctx = auth::authenticate(&db, token).await?;
+    Ok((auth_ctx.tenant_id, auth_ctx.user_id))
 }
 
 /// Authenticates the bearer API key and requires the attributed user to hold an Owner/Admin
