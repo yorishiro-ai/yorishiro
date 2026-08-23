@@ -360,14 +360,13 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         .await
         .expect("first login provisioning");
 
-        let workspace =
-            yorishiro_core::models::_entities::identity_workspaces::Entity::find_by_id(
-                provisioned.workspace_id,
-            )
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .expect("the provisioned workspace must exist");
+        let workspace = yorishiro_core::models::_entities::identity_workspaces::Entity::find_by_id(
+            provisioned.workspace_id,
+        )
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .expect("the provisioned workspace must exist");
 
         assert_eq!(
             workspace.status,

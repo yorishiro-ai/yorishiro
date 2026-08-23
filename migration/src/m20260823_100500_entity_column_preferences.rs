@@ -21,7 +21,11 @@ impl MigrationTrait for Migration {
                     // default-expression-plus-json_binary combination that reads well here, so
                     // the DEFAULT '[]'::jsonb goes on as raw SQL right after create_table,
                     // matching templates.rs's TEXT[] precedent.
-                    .col(ColumnDef::new(Alias::new("columns")).json_binary().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("columns"))
+                            .json_binary()
+                            .not_null(),
+                    )
                     .col(created_at)
                     .col(updated_at)
                     // The upsert target: without it, two tabs saving at once leave two rows and

@@ -22,7 +22,11 @@ impl MigrationTrait for Migration {
                     // confirmation, per the old DDL having no REFERENCES clause here either.
                     .col(ColumnDef::new(Alias::new("entity_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("field_name")).text().not_null())
-                    .col(ColumnDef::new(Alias::new("proposed")).json_binary().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("proposed"))
+                            .json_binary()
+                            .not_null(),
+                    )
                     .col(helpers::created_at())
                     .index(
                         Index::create()
