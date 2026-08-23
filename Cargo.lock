@@ -7130,12 +7130,15 @@ dependencies = [
  "jsonwebtoken 9.3.1",
  "loco-rs",
  "migration",
+ "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "serial_test",
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
  "yorishiro-core",
 ]
 

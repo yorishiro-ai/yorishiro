@@ -17,12 +17,7 @@ fn test_keypair() -> TestKeypair {
     let public_key_path = dir.path().join("public.pem");
 
     let status = Command::new("openssl")
-        .args([
-            "genrsa",
-            "-out",
-            private_key_path.to_str().unwrap(),
-            "2048",
-        ])
+        .args(["genrsa", "-out", private_key_path.to_str().unwrap(), "2048"])
         .status()
         .expect("openssl must be on PATH to generate the test keypair");
     assert!(status.success(), "openssl genrsa failed");
@@ -50,15 +45,20 @@ fn test_keypair() -> TestKeypair {
 }
 
 fn sign(private_key_path: &std::path::Path, claims: &LicenceClaims) -> String {
-    use std::process::{Command, Stdio};
     use std::io::Write;
+    use std::process::{Command, Stdio};
 
     let header = base64_url(br#"{"alg":"RS256","typ":"JWT"}"#);
     let payload = base64_url(serde_json::to_string(claims).unwrap().as_bytes());
     let signing_input = format!("{header}.{payload}");
 
     let mut child = Command::new("openssl")
-        .args(["dgst", "-sha256", "-sign", private_key_path.to_str().unwrap()])
+        .args([
+            "dgst",
+            "-sha256",
+            "-sign",
+            private_key_path.to_str().unwrap(),
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

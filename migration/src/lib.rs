@@ -16,6 +16,7 @@ mod m20260822_100900_content_entities;
 mod m20260822_101000_content_relations;
 mod m20260822_101100_content_entity_snapshots;
 mod m20260822_101200_authenticate_api_key;
+mod m20260823_100000_tenant_billing;
 
 pub struct Migrator;
 
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260822_101000_content_relations::Migration),
             Box::new(m20260822_101100_content_entity_snapshots::Migration),
             Box::new(m20260822_101200_authenticate_api_key::Migration),
+            Box::new(m20260823_100000_tenant_billing::Migration),
             // inject-above (do not remove this comment)
         ]
     }

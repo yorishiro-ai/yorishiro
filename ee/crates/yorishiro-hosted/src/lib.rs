@@ -10,6 +10,8 @@
 //! `yorishiro-core` must never depend on this crate; this crate depends on it. See CLAUDE.md's
 //! "Editions and the `ee/` boundary" for the standing rule this file exists to satisfy.
 
+pub mod controllers;
+pub mod models;
 pub mod services;
 
 use async_trait::async_trait;
@@ -63,8 +65,16 @@ impl Hooks for HostedApp {
         Ok(ctx)
     }
 
+    /// Adds this crate's own routes onto base's own `AppRoutes`.
+    ///
+    /// `/hosted/tenant/overview` carries no licence check of its own: it is authenticated the
+    /// same way master's dashboard was (tenant owner/admin membership), not licence-gated, since
+    /// a self-hosted tenant's own overview is not a paid feature. A route that IS a paid feature
+    /// (Stripe, OAuth, marketplace) gates by not being configured/added at all without a licence,
+    /// matching master's own pattern, rather than a per-handler `require_active` check on an
+    /// always-mounted route.
     fn routes(ctx: &AppContext) -> AppRoutes {
-        App::routes(ctx)
+        App::routes(ctx).add_route(controllers::dashboard::routes())
     }
 
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
