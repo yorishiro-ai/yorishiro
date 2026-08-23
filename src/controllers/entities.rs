@@ -10,8 +10,10 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, WriteScope, embedding_provider};
-use crate::models::content_entities::{self, EntityRecord};
+use crate::controllers::extractors::{
+    Authorized, MigrationScope, ReadScope, WriteScope, embedding_provider,
+};
+use crate::models::content_entities::{self, EntityRecord, UndoReport};
 
 /// Fires embedding sync in the background after the caller's own transaction has committed:
 /// generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this
@@ -132,6 +134,21 @@ pub async fn list_entities(
     Ok(Json(records))
 }
 
+/// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
+///
+/// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope
+/// that would gate the job that produced the snapshots, e.g. `ee/`'s fill-proposal confirmation),
+/// not an ordinary entity write.
+pub async fn undo_migration_job(
+    authorized: Authorized<MigrationScope>,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<UndoReport>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    let report = content_entities::undo_job(authorized.txn(), workspace_id, job_id).await?;
+    authorized.commit().await?;
+    Ok(Json(report))
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/entities")
@@ -140,4 +157,10 @@ pub fn routes() -> Routes {
         .add("/{id}", get(get_entity))
         .add("/{id}", put(update_entity))
         .add("/{id}", delete(delete_entity))
+}
+
+pub fn migration_routes() -> Routes {
+    Routes::new()
+        .prefix("api/migration-jobs")
+        .add("/{job_id}/undo", post(undo_migration_job))
 }

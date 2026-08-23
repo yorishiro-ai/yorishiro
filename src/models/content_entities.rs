@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -626,5 +626,135 @@ pub async fn migration_dry_run(
         behind_but_valid: behind_valid,
         needs_values,
         by_entity_type: by_type.into_values().collect(),
+    })
+}
+
+/// An entity's data as it stood before something overwrote it.
+#[derive(Debug, Clone, Serialize, sea_orm::FromQueryResult)]
+pub struct EntitySnapshot {
+    pub id: Uuid,
+    /// Groups the snapshots taken by one operation, so a batch is undone as a batch.
+    pub job_id: Uuid,
+    pub entity_id: Uuid,
+    pub schema_id: Uuid,
+    pub schema_version: i32,
+    pub data: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// What undoing a job put back.
+#[derive(Debug, Clone, Serialize)]
+pub struct UndoReport {
+    pub job_id: Uuid,
+    /// Entities restored to the data they held before.
+    pub restored: i64,
+    /// Snapshots whose entity no longer exists. Counted rather than treated as an error: a batch
+    /// partially undone leaves a workspace in a state nobody chose, and an entity deleted since
+    /// is not a reason to refuse the rest.
+    pub missing: i64,
+}
+
+/// Records what `entity_id` holds now, tagged with `job_id`.
+///
+/// Called before an overwrite. One statement (`INSERT ... SELECT`), not a read followed by a
+/// write: even inside the caller's own transaction, two statements under READ COMMITTED can see
+/// different committed data, so a separate read could snapshot an image the row no longer holds
+/// by the time the insert runs. Taking the image from the row this way means it is what the
+/// database actually holds, not what the caller believed it held.
+///
+/// `content_entity_snapshots`'s RLS policy is the lenient variant (matches nothing rather than
+/// raising when no workspace is named), so a wrong `workspace_id` or a missing entity silently
+/// inserts zero rows: `rows_affected == 0` is the only signal that catches it.
+pub async fn snapshot(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let result = conn
+        .execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "INSERT INTO content_entity_snapshots \
+                (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
+             SELECT $1, workspace_id, id, schema_id, schema_version, data \
+               FROM content_entities \
+              WHERE workspace_id = $2 AND id = $3",
+            [job_id.into(), workspace_id.into(), entity_id.into()],
+        ))
+        .await
+        .internal()?;
+
+    if result.rows_affected() == 0 {
+        return Err(YorishiroError::not_found(format!(
+            "entity '{entity_id}' was not found"
+        )));
+    }
+    Ok(())
+}
+
+/// Puts every entity in `job_id` back to what it held before.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, which is
+/// what gives this its atomicity: a half-undone batch is a state nobody asked for, and worse
+/// than either end of it. An entity deleted since the snapshot is counted rather than failed:
+/// refusing the whole undo because one row is gone would leave the rest wrong.
+///
+/// Restores `schema_id` and `schema_version` alongside `data`, not just `data`: an undo that put
+/// the data back but left the entity claiming a newer version would leave it validating against
+/// a definition its data no longer matches. This is why it builds the `ActiveModel` directly
+/// rather than calling `update()`, which cannot set those two columns and would also re-validate
+/// and re-stamp `updated_by` for a restore that isn't a user edit.
+pub async fn undo_job(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<UndoReport, YorishiroError> {
+    use super::_entities::content_entity_snapshots;
+
+    let snapshots: Vec<EntitySnapshot> = content_entity_snapshots::Entity::find()
+        .filter(content_entity_snapshots::Column::WorkspaceId.eq(workspace_id))
+        .filter(content_entity_snapshots::Column::JobId.eq(job_id))
+        // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the
+        // same tick. Both are uuidv7 / time-ordered, so this is a second sort key rather than a
+        // different one.
+        .order_by_asc(content_entity_snapshots::Column::CreatedAt)
+        .order_by_asc(content_entity_snapshots::Column::Id)
+        .into_model::<EntitySnapshot>()
+        .all(conn)
+        .await
+        .internal()?;
+
+    if snapshots.is_empty() {
+        return Err(YorishiroError::not_found(format!(
+            "no snapshots for job '{job_id}'"
+        )));
+    }
+
+    let mut restored = 0i64;
+    let mut missing = 0i64;
+
+    for snap in &snapshots {
+        // Each `snap.entity_id` is already workspace-scoped: the query above filtered snapshots
+        // by `workspace_id`, so an entity_id here can only belong to this workspace. No extra
+        // filter needed on the write, matching `update()`'s own reliance on RLS for the plain
+        // `.update(conn)` call once existence/ownership is established.
+        let active = ActiveModel {
+            id: ActiveValue::Unchanged(snap.entity_id),
+            data: ActiveValue::Set(snap.data.clone()),
+            schema_id: ActiveValue::Set(snap.schema_id),
+            schema_version: ActiveValue::Set(snap.schema_version),
+            ..Default::default()
+        };
+        match active.update(conn).await {
+            Ok(_) => restored += 1,
+            Err(DbErr::RecordNotUpdated) => missing += 1,
+            Err(err) => return Err(err).internal(),
+        }
+    }
+
+    Ok(UndoReport {
+        job_id,
+        restored,
+        missing,
     })
 }

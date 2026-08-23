@@ -91,6 +91,7 @@ impl Hooks for App {
         AppRoutes::with_default_routes()
             .add_route(controllers::auth::routes())
             .add_route(controllers::entities::routes())
+            .add_route(controllers::entities::migration_routes())
             .add_route(controllers::export::routes())
             .add_route(controllers::import::routes())
             .add_route(controllers::members::routes())

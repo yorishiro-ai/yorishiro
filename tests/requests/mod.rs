@@ -1,4 +1,5 @@
 mod auth;
+mod entities;
 mod members;
 mod schemas;
 mod search;
