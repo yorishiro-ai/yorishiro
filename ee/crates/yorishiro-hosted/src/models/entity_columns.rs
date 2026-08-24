@@ -3,10 +3,14 @@
 //! Scoped to the workspace rather than the user, so everyone looking at a workspace sees the same table.
 //! A per-user override belongs in this table as a second nullable column, not in a second table.
 
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::content_entity_column_preferences::{
+    ActiveModel, Column, Entity,
+};
 
 /// How many columns a workspace may turn on at once.
 ///
@@ -108,16 +112,22 @@ pub async fn set(
 
     let encoded = serde_json::to_value(columns).internal()?;
 
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO content_entity_column_preferences (workspace_id, entity_type, columns) \
-         VALUES ($1, $2, $3) \
-         ON CONFLICT (workspace_id, entity_type) DO UPDATE \
-         SET columns = EXCLUDED.columns, updated_at = now()",
-        [workspace_id.into(), entity_type.into(), encoded.into()],
-    ))
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        workspace_id: ActiveValue::Set(workspace_id),
+        entity_type: ActiveValue::Set(entity_type.to_string()),
+        columns: ActiveValue::Set(encoded),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    Entity::insert(active)
+        .on_conflict(
+            OnConflict::columns([Column::WorkspaceId, Column::EntityType])
+                .update_columns([Column::Columns, Column::UpdatedAt])
+                .to_owned(),
+        )
+        .exec(conn)
+        .await
+        .internal()?;
 
     Ok(ColumnPreference {
         entity_type: entity_type.to_string(),

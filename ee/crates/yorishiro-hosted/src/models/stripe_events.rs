@@ -4,8 +4,9 @@
 //! These three functions are what makes applying an event idempotent and monotonic; the controller decides what an event means, and asks here whether it should be applied at all.
 
 use chrono::{DateTime, Utc};
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::identity_stripe_processed_events::{ActiveModel, Entity};
 
 /// Whether `event_id` has already been applied.
 /// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `identity_stripe_processed_events`, so this is a plain existence check.
@@ -68,19 +69,17 @@ pub async fn record_processed_event(
     customer_id: Option<&str>,
     created: DateTime<Utc>,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_stripe_processed_events \
-         (event_id, event_type, customer_id, stripe_created) \
-         VALUES ($1, $2, $3, $4) ON CONFLICT (event_id) DO NOTHING",
-        [
-            event_id.into(),
-            event_type.into(),
-            customer_id.into(),
-            created.into(),
-        ],
-    ))
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        event_id: ActiveValue::Set(event_id.to_string()),
+        event_type: ActiveValue::Set(event_type.to_string()),
+        customer_id: ActiveValue::Set(customer_id.map(str::to_string)),
+        stripe_created: ActiveValue::Set(created.into()),
+        ..Default::default()
+    };
+    Entity::insert(active)
+        .on_conflict_do_nothing()
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }

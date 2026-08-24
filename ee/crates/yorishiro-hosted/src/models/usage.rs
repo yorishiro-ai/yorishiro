@@ -1,9 +1,12 @@
 //! Usage counters for invoicing/dashboard display.
 
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::{
+    content_entities, identity_tenant_memberships, identity_workspaces,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TenantUsage {
@@ -13,60 +16,38 @@ pub struct TenantUsage {
     pub entity_count: i64,
 }
 
-#[derive(FromQueryResult)]
-struct Count {
-    count: i64,
-}
-
-async fn fetch_count(
-    conn: &impl ConnectionTrait,
-    sql: &str,
-    tenant_id: Uuid,
-) -> Result<i64, YorishiroError> {
-    let row = Count::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        sql,
-        [tenant_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.map(|r| r.count).unwrap_or(0))
-}
-
 /// Computes usage counters for invoicing/dashboard display.
 /// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every workspace in a tenant and `content_entities` only has a workspace-level RLS policy, not a tenant-wide one.
 pub async fn compute_tenant_usage(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<TenantUsage, YorishiroError> {
-    let workspace_count = fetch_count(
-        conn,
-        "SELECT COUNT(*) AS count FROM identity_workspaces WHERE tenant_id = $1",
-        tenant_id,
-    )
-    .await?;
+    let workspace_count = identity_workspaces::Entity::find()
+        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
 
-    let member_count = fetch_count(
-        conn,
-        "SELECT COUNT(*) AS count FROM identity_tenant_memberships WHERE tenant_id = $1",
-        tenant_id,
-    )
-    .await?;
+    let member_count = identity_tenant_memberships::Entity::find()
+        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
 
-    let entity_count = fetch_count(
-        conn,
-        "SELECT COUNT(*) AS count FROM content_entities e \
-         JOIN identity_workspaces w ON w.id = e.workspace_id \
-         WHERE w.tenant_id = $1",
-        tenant_id,
-    )
-    .await?;
+    // Filters on identity_workspaces.tenant_id, a column content_entities does not itself carry,
+    // via the belongs_to relation content_entities::Relation::IdentityWorkspaces already defines
+    // (content_entities.workspace_id -> identity_workspaces.id).
+    let entity_count = content_entities::Entity::find()
+        .inner_join(identity_workspaces::Entity)
+        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
 
     Ok(TenantUsage {
         tenant_id,
-        workspace_count,
-        member_count,
-        entity_count,
+        workspace_count: workspace_count as i64,
+        member_count: member_count as i64,
+        entity_count: entity_count as i64,
     })
 }

@@ -5,11 +5,13 @@
 //!
 //! Confirming reuses `content_entity_snapshots`: the same `job_id` groups the before-images, so `content_entities::undo_job` reverses a confirmation with no machinery of its own.
 
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::content_fill_proposals::{ActiveModel, Column, Entity};
 use yorishiro_core::models::content_entities;
 
 /// One field's proposed value, as a caller reviews it.
@@ -41,22 +43,28 @@ pub async fn record(
     field_name: &str,
     proposed: &Value,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO content_fill_proposals (job_id, workspace_id, entity_id, field_name, proposed) \
-         VALUES ($1, $2, $3, $4, $5) \
-         ON CONFLICT (workspace_id, job_id, entity_id, field_name) DO UPDATE \
-         SET proposed = EXCLUDED.proposed",
-        [
-            job_id.into(),
-            workspace_id.into(),
-            entity_id.into(),
-            field_name.into(),
-            proposed.clone().into(),
-        ],
-    ))
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        job_id: ActiveValue::Set(job_id),
+        workspace_id: ActiveValue::Set(workspace_id),
+        entity_id: ActiveValue::Set(entity_id),
+        field_name: ActiveValue::Set(field_name.to_string()),
+        proposed: ActiveValue::Set(proposed.clone()),
+        ..Default::default()
+    };
+    Entity::insert(active)
+        .on_conflict(
+            OnConflict::columns([
+                Column::WorkspaceId,
+                Column::JobId,
+                Column::EntityId,
+                Column::FieldName,
+            ])
+            .update_column(Column::Proposed)
+            .to_owned(),
+        )
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 

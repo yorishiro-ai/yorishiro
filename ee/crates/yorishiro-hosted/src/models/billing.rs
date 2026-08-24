@@ -3,9 +3,11 @@
 //! `yorishiro-core` owns `identity_tenants` and knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
 //! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::identity_tenant_billing::{ActiveModel, Column, Entity};
 
 /// A tenant's billing state. Absent for any tenant that has never been through checkout.
 #[derive(Debug, Clone, FromQueryResult)]
@@ -56,15 +58,26 @@ pub async fn link_stripe_customer(
     tenant_id: Uuid,
     stripe_customer_id: &str,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_tenant_billing (tenant_id, stripe_customer_id) VALUES ($1, $2) \
-         ON CONFLICT (tenant_id) DO UPDATE \
-         SET stripe_customer_id = EXCLUDED.stripe_customer_id, updated_at = now()",
-        [tenant_id.into(), stripe_customer_id.into()],
-    ))
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        stripe_customer_id: ActiveValue::Set(Some(stripe_customer_id.to_string())),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    // updated_at is set explicitly here rather than left to ActiveModelBehavior::before_save:
+    // Entity::insert(...).on_conflict(...) builds and executes a raw INSERT ... ON CONFLICT
+    // statement directly, bypassing before_save entirely (it only runs on the
+    // ActiveModelTrait::insert/update/save path), for both the insert and the conflict-update
+    // branch.
+    Entity::insert(active)
+        .on_conflict(
+            OnConflict::column(Column::TenantId)
+                .update_columns([Column::StripeCustomerId, Column::UpdatedAt])
+                .to_owned(),
+        )
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 
@@ -78,13 +91,20 @@ pub async fn set_plan(
     tenant_id: Uuid,
     plan: &str,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_tenant_billing (tenant_id, plan) VALUES ($1, $2) \
-         ON CONFLICT (tenant_id) DO UPDATE SET plan = EXCLUDED.plan, updated_at = now()",
-        [tenant_id.into(), plan.into()],
-    ))
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        plan: ActiveValue::Set(Some(plan.to_string())),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    Entity::insert(active)
+        .on_conflict(
+            OnConflict::column(Column::TenantId)
+                .update_columns([Column::Plan, Column::UpdatedAt])
+                .to_owned(),
+        )
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }

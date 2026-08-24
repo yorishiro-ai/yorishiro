@@ -126,35 +126,33 @@ async fn upsert_template(
     description: Option<&str>,
     definition: &serde_json::Value,
 ) -> Result<Uuid, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct Row {
-        id: Uuid,
-    }
+    use yorishiro_core::models::_entities::identity_templates::{ActiveModel, Column, Entity};
 
-    let row = Row::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_templates \
-                (tenant_id, name, description, definition, visibility, author) \
-         VALUES ($1, $2, $3, $4, 'community', $5) \
-         ON CONFLICT (tenant_id, name) DO UPDATE \
-            SET description = EXCLUDED.description, \
-                definition  = EXCLUDED.definition, \
-                visibility  = 'community', \
-                author      = EXCLUDED.author, \
-                updated_at  = now() \
-         RETURNING id",
-        [
-            OFFICIAL_TENANT_ID.into(),
-            name.into(),
-            description.into(),
-            definition.clone().into(),
-            OFFICIAL_AUTHOR.into(),
-        ],
-    ))
-    .one(conn)
-    .await
-    .internal()?
-    .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("upsert did not return a row")))?;
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(OFFICIAL_TENANT_ID),
+        name: ActiveValue::Set(name.to_string()),
+        description: ActiveValue::Set(description.map(str::to_string)),
+        definition: ActiveValue::Set(definition.clone()),
+        visibility: ActiveValue::Set("community".to_string()),
+        author: ActiveValue::Set(Some(OFFICIAL_AUTHOR.to_string())),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    let row = Entity::insert(active)
+        .on_conflict(
+            OnConflict::columns([Column::TenantId, Column::Name])
+                .update_columns([
+                    Column::Description,
+                    Column::Definition,
+                    Column::Visibility,
+                    Column::Author,
+                    Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec_with_returning(conn)
+        .await
+        .internal()?;
 
     Ok(row.id)
 }

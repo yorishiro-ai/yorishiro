@@ -5,10 +5,12 @@
 //! [`get`] returns the key so the inference client can send it.
 //! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
 
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::Serialize;
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::identity_workspace_llm_keys::{ActiveModel, Column, Entity};
 
 use crate::services::inference::InferenceConfig;
 
@@ -74,22 +76,28 @@ pub async fn set(
     let base_url = base_url.trim().trim_end_matches('/');
     check_scheme(base_url)?;
 
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_workspace_llm_keys (workspace_id, base_url, model, api_key) \
-         VALUES ($1, $2, $3, $4) \
-         ON CONFLICT (workspace_id) DO UPDATE \
-         SET base_url = EXCLUDED.base_url, model = EXCLUDED.model, api_key = EXCLUDED.api_key, \
-             updated_at = now()",
-        [
-            workspace_id.into(),
-            base_url.into(),
-            model.into(),
-            api_key.into(),
-        ],
-    ))
-    .await
-    .internal()?;
+    let active = ActiveModel {
+        workspace_id: ActiveValue::Set(workspace_id),
+        base_url: ActiveValue::Set(base_url.to_string()),
+        model: ActiveValue::Set(model.to_string()),
+        api_key: ActiveValue::Set(api_key.to_string()),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    Entity::insert(active)
+        .on_conflict(
+            OnConflict::column(Column::WorkspaceId)
+                .update_columns([
+                    Column::BaseUrl,
+                    Column::Model,
+                    Column::ApiKey,
+                    Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 

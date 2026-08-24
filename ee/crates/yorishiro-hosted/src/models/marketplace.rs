@@ -4,7 +4,8 @@
 //! A write that is a genuine decision (ownership, status validation, version numbering under lock, a rating range) stays in `services::marketplace`, which calls into this module for the insert/update itself.
 
 use chrono::{DateTime, Utc};
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -242,28 +243,38 @@ pub(crate) async fn upsert_review(
     user_id: Option<Uuid>,
     request: &SubmitReviewRequest,
 ) -> Result<TemplateReviewRecord, YorishiroError> {
-    TemplateReviewRecord::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_template_reviews \
-                (template_id, tenant_id, rating, comment, created_by) \
-         VALUES ($1, $2, $3, $4, $5) \
-         ON CONFLICT (template_id, tenant_id) DO UPDATE \
-             SET rating = EXCLUDED.rating, \
-                 comment = EXCLUDED.comment, \
-                 updated_at = now() \
-         RETURNING id, template_id, tenant_id, rating, comment, created_at, updated_at",
-        [
-            template_id.into(),
-            tenant_id.into(),
-            request.rating.into(),
-            request.comment.clone().into(),
-            user_id.into(),
-        ],
-    ))
-    .one(conn)
-    .await
-    .internal()?
-    .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("upsert did not return a row")))
+    use yorishiro_core::models::_entities::identity_template_reviews::{
+        ActiveModel, Column, Entity,
+    };
+
+    let active = ActiveModel {
+        template_id: sea_orm::ActiveValue::Set(template_id),
+        tenant_id: sea_orm::ActiveValue::Set(tenant_id),
+        rating: sea_orm::ActiveValue::Set(request.rating),
+        comment: sea_orm::ActiveValue::Set(request.comment.clone()),
+        created_by: sea_orm::ActiveValue::Set(user_id),
+        updated_at: sea_orm::ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    let row = Entity::insert(active)
+        .on_conflict(
+            OnConflict::columns([Column::TemplateId, Column::TenantId])
+                .update_columns([Column::Rating, Column::Comment, Column::UpdatedAt])
+                .to_owned(),
+        )
+        .exec_with_returning(conn)
+        .await
+        .internal()?;
+
+    Ok(TemplateReviewRecord {
+        id: row.id,
+        template_id: row.template_id,
+        tenant_id: row.tenant_id,
+        rating: row.rating,
+        comment: row.comment,
+        created_at: row.created_at.into(),
+        updated_at: row.updated_at.into(),
+    })
 }
 
 /// The source template's copyable columns, if `tenant_id` may see it.
