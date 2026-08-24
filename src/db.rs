@@ -155,7 +155,16 @@ pub struct DbHandle {
 ///
 /// The lock is transaction-scoped, so it releases on commit or rollback without an unlock call to forget.
 /// Takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice), since every caller already holds one via `Authorized::txn()`.
+///
+/// A no-op on SQLite, not `pg_advisory_xact_lock`'s SQLite equivalent, because SQLite has none: `sea_orm::DatabaseBackend::Sqlite` in `execute_raw` would try to prepare `pg_advisory_xact_lock` as SQLite SQL and fail outright, and there is no comparable named-lock primitive to substitute.
+/// This is sound, not merely convenient, for every caller of `lock_for_update` in this codebase: each one locks, reads a count or existence check, then writes (one statement or several, all within the same transaction) gated on that read.
+/// SQLite allows only one write transaction to be in progress at a time; a transaction that read a value here and then tries to commit after a different transaction has since written and committed gets `SQLITE_BUSY` and the whole transaction fails, rather than being allowed to commit — one statement or all of them — against its now-stale read.
+/// The TOCTOU this lock closes on Postgres therefore surfaces as a retryable error on SQLite instead of as a silently-accepted inconsistent write, which is the property the lock exists to guarantee, not a weaker substitute for it; a multi-write caller is covered by the same argument because SQLite's transaction is all-or-nothing, not because each of its writes is individually re-checked.
+/// A caller that held the lock for a reason other than gating a commit on a prior read within the same transaction would not be covered by this reasoning and would need its own no-op justification; no caller in this codebase does that as of this writing.
 pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(), DbErr> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return Ok(());
+    }
     conn.execute_raw(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",

@@ -31,32 +31,51 @@ pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yorishiro
         .internal()
 }
 
-/// Creates a tenant, enforcing `YORISHIRO_MAX_TENANTS` against `count_tenants`.
-/// `conn` must be a transaction: this takes `db::lock_for_update` before counting, to close the TOCTOU gap a bare count-then-insert would leave.
+/// Creates a tenant, enforcing a tenant cap against `count_tenants`.
+/// On Postgres `conn` must be a transaction: this takes `db::lock_for_update` before counting, to close the TOCTOU gap a bare count-then-insert would leave.
+/// On SQLite the lock is a no-op (see `db::lock_for_update`'s doc comment for why that is still race-safe) and the cap is not `YORISHIRO_MAX_TENANTS` but a hardcoded 1.
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,
 ) -> Result<identity_tenants::Model, YorishiroError> {
-    if let Some(max) = max_tenants_from_env()? {
+    // SQLite has no database-enforced tenant isolation (no RLS, no roles), so a second tenant on that backend would be a silent isolation break rather than merely an unwanted one.
+    // The cap is hardcoded rather than read from YORISHIRO_MAX_TENANTS: an operator raising that variable must not be able to loosen a constraint that exists because the isolation mechanism itself is absent, not because of a configurable policy choice.
+    let effective_max = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        Some(1)
+    } else {
+        max_tenants_from_env()?
+    };
+
+    if let Some(max) = effective_max {
         crate::db::lock_for_update(conn, "create_tenant")
             .await
             .internal()?;
         let count = count_tenants(conn).await?;
         if count >= max as u64 {
+            let remedy = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                "SQLite deployments are limited to a single tenant, since this backend has no \
+                 database-enforced isolation between tenants; use PostgreSQL for more than one"
+                    .to_string()
+            } else {
+                "raise YORISHIRO_MAX_TENANTS or delete an existing tenant".to_string()
+            };
             return Err(YorishiroError::Conflict {
-                message: format!(
-                    "this deployment has reached its tenant limit ({max}); \
-                     raise YORISHIRO_MAX_TENANTS or delete an existing tenant"
-                ),
+                message: format!("this deployment has reached its tenant limit ({max}); {remedy}"),
             });
         }
     }
 
-    let active = identity_tenants::ActiveModel {
+    let mut active = identity_tenants::ActiveModel {
         name: ActiveValue::Set(name.to_string()),
         max_workspaces: ActiveValue::Set(None),
         ..Default::default()
     };
+    // `id` has a uuidv7() column default on Postgres and no default at all on SQLite (see migration/src/helpers.rs::uuidv7_pk), so this is the one column create_tenant must set itself on that backend.
+    // Postgres is left on its column default, not switched to this: generating ids in the database is the existing behavior and this function has no reason to change it.
+    // This is the only insert path this single-tenant guard needs to run on SQLite; every other ActiveModel insert in this codebase has the same gap and is unaddressed here.
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        active.id = ActiveValue::Set(Uuid::now_v7());
+    }
     active.insert(conn).await.internal()
 }
 
@@ -615,5 +634,72 @@ impl From<identity_users::Model> for UserRecord {
             display_name: m.display_name,
             created_at: m.created_at.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::Database;
+    use serial_test::serial;
+
+    use super::create_tenant;
+
+    /// A fresh in-memory SQLite database, migrated. Each test gets its own, so nothing but the process-wide `YORISHIRO_MAX_TENANTS` env var is shared between them.
+    async fn sqlite_db() -> sea_orm::DatabaseConnection {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("connect to in-memory sqlite");
+        Migrator::up(&db, None).await.expect("run migrations");
+        db
+    }
+
+    /// Sets `YORISHIRO_MAX_TENANTS` for the duration of `fut`, restoring whatever was there before.
+    /// Callers must be `#[serial]`: this mutates process-wide state, and `create_tenant`'s own SQLite path ignores it regardless, but the Postgres branch inside `create_tenant` still reads it, so a concurrent test observing an unexpected value would be a real (if here unlikely) source of flakiness.
+    async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
+        let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
+        // SAFETY: serialized by every test that touches this env var being #[serial] on the default key.
+        unsafe {
+            std::env::set_var("YORISHIRO_MAX_TENANTS", value);
+        }
+        let result = fut.await;
+        unsafe {
+            match &previous {
+                Some(v) => std::env::set_var("YORISHIRO_MAX_TENANTS", v),
+                None => std::env::remove_var("YORISHIRO_MAX_TENANTS"),
+            }
+        }
+        result
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_first_tenant_can_be_created_on_sqlite() {
+        let db = sqlite_db().await;
+        let tenant = create_tenant(&db, "first tenant")
+            .await
+            .expect("first tenant should be created");
+        assert_eq!(tenant.name, "first tenant");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
+        let db = sqlite_db().await;
+        // A generous limit: if SQLite's cap were reading this instead of being hardcoded to 1, the second create below would wrongly succeed.
+        with_max_tenants("1000", async {
+            create_tenant(&db, "first tenant")
+                .await
+                .expect("first tenant should be created");
+
+            let err = create_tenant(&db, "second tenant")
+                .await
+                .expect_err("a second tenant must be refused on sqlite");
+            assert!(
+                matches!(err, crate::error::YorishiroError::Conflict { .. }),
+                "expected Conflict, got {err:?}"
+            );
+        })
+        .await;
     }
 }

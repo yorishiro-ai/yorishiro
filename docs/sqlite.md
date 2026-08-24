@@ -5,11 +5,11 @@
 Yorishiro's migrations (`migration/`) produce a valid schema on SQLite as well as PostgreSQL.
 This document describes what that currently covers and what it does not.
 
-## Status: schema only
+## Status: schema, plus the single-tenant guard
 
-As of this writing, the migration set is the only part of the SQLite tier that exists.
-`src/db.rs` and `Hooks::after_context` (`src/app.rs`) still build a PostgreSQL-only connection (a raw `sqlx::PgPool` plus SeaORM's `DatabaseConnection` wrapping it), so the application itself does not yet run against a SQLite file.
-Running `Migrator::up` against a SQLite URL, which the migration crate's own test suite does, produces a correct and complete schema; wiring the application to actually connect to one is separate, later work.
+`src/db.rs` and `Hooks::after_context` (`src/app.rs`) still build a PostgreSQL-only connection (a raw `sqlx::PgPool` plus SeaORM's `DatabaseConnection` wrapping it), so the application itself does not yet run against a SQLite file end to end.
+What does exist and is exercised by tests: `Migrator::up` against a SQLite URL produces a correct and complete schema, and `tenancy::create_tenant` enforces a hardcoded single-tenant cap when called against a SQLite `DatabaseConnection`, independent of `YORISHIRO_MAX_TENANTS`.
+Wiring the running application (the two-pool architecture, RLS-scoped request handling) to actually connect to a SQLite file is separate, later work.
 
 ## What SQLite is for
 
@@ -17,13 +17,26 @@ SQLite is scoped to a single tenant.
 It has no database-enforced isolation between tenants the way PostgreSQL's row-level security does, so it is meant for trying Yorishiro out or for a single person's own use, not for hosting multiple tenants.
 The application-level filtering that would be needed to fake multi-tenant isolation on this engine is deliberately not implemented: a single missed filter in one query would be a silent isolation break, which is exactly what row-level security exists to make structurally impossible on PostgreSQL.
 
+## The single-tenant guard
+
+`tenancy::create_tenant` (`src/models/tenancy.rs`) enforces `YORISHIRO_MAX_TENANTS` against `count_tenants` on PostgreSQL, taking `db::lock_for_update` first to close the count-then-insert TOCTOU gap.
+On SQLite, the cap is not read from `YORISHIRO_MAX_TENANTS` at all: it is hardcoded to 1, and the environment variable has no effect on this backend, by design.
+Raising `YORISHIRO_MAX_TENANTS` is a way to loosen a configurable policy; on SQLite the limit exists because the isolation mechanism itself (RLS) is absent, not because of policy, so it cannot be configured away.
+
+`db::lock_for_update` (`src/db.rs`) is a no-op on SQLite rather than a substitute lock: SQLite has no equivalent to `pg_advisory_xact_lock`.
+This is still race-safe, not merely convenient: SQLite allows only one write transaction at a time, and a transaction that read a stale count and then tries to commit after a different transaction has since written and committed gets `SQLITE_BUSY`, failing the whole transaction rather than committing a second tenant.
+The TOCTOU the lock closes on PostgreSQL therefore surfaces as a retryable error on SQLite instead of a silently-accepted inconsistent write — see the doc comment on `lock_for_update` for the full reasoning, including why this also covers the codebase's other lock call sites that write more than one row per transaction.
+
+`identity_tenants::ActiveModel`'s `id` column has a `uuidv7()` default on PostgreSQL and no default at all on SQLite (see below), so `create_tenant` sets `id` itself (`Uuid::now_v7()`) only on the SQLite branch, leaving PostgreSQL on its column default unchanged.
+Every other `ActiveModel` insert path in this codebase has the same missing-default gap on SQLite and is not addressed by this guard; the general fix belongs with the SQLite connection path in `src/db.rs` when that lands.
+
 ## What differs from the PostgreSQL schema, and why
 
 PostgreSQL-only constructs have no SQLite equivalent and are simply absent from the SQLite schema, not replaced with an approximation:
 
 - **Roles, GRANT, row-level security.** A single-tenant, single-file database has no second tenant to isolate from, so there is nothing for a role or a policy to protect.
 - **The `authenticate_api_key` SECURITY DEFINER function.** It exists on PostgreSQL only to read rows RLS would otherwise hide from an unauthenticated caller. With no RLS on SQLite, there is nothing to bypass, so the application queries `identity_api_keys`/`identity_workspaces` directly there instead.
-- **`uuidv7()` as a column default.** SQLite has no such function, so the `id` column carries no default on that backend; every insert supplies its own id, which the application already does independent of the database default.
+- **`uuidv7()` as a column default.** SQLite has no such function, so the `id` column carries no default on that backend; every insert must supply its own id instead. `tenancy::create_tenant` is currently the only insert path that does (see "The single-tenant guard" below); every other `ActiveModel` insert in this codebase still relies on the Postgres-only column default and will fail the same way against SQLite until it is updated too.
 
 Some constructs SQLite can express, but not in the same syntax, so the same guarantee is written twice, once per backend:
 
