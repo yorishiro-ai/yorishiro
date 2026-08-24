@@ -36,8 +36,11 @@
 
 新しいテーブルのクエリは`models/`に置く。
 生SQLは、SeaORMのエンティティAPIで表現できないものに限る。
-具体的にはJSONBの包含判定(`data @> filter`)、pgvectorの類似検索、アドバイザリロックの3つである。
+具体的にはJSONBの包含判定(`data @> filter`)、pgvectorの類似検索、アドバイザリロック、どのエンティティも列を持たない値(同一クエリ内で計算する相関集計)、そして1つの文として実行されることに正しさが依存する書き込みである。
 それ以外は、呼び出し側が持っているコネクションまたはトランザクションの上で`Entity::find()`/`ActiveModel`/`Set(...)`を使う。
+最後の2つの現在の実例は`ee/crates/yorishiro-hosted/src/models/marketplace.rs`にある。
+`list_marketplace`は`identity_templates`自体の列に加えて3つの相関サブクエリを選択しており、これはどのエンティティ射影からも作れない。
+`insert_next_version`はテンプレートの次のバージョン番号を計算する`INSERT ... SELECT`を1つの文として実行しており、これによってアドバイザリロックが2つの同時公開を同じバージョン番号へ競合させないという保証が成り立っている。
 
 `models/`の外にある生SQLのうち、以下は正しいものとして残す。
 

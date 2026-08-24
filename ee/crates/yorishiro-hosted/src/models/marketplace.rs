@@ -41,6 +41,22 @@ pub struct TemplateVersionRecord {
     pub created_at: DateTime<Utc>,
 }
 
+impl From<yorishiro_core::models::_entities::identity_template_versions::Model>
+    for TemplateVersionRecord
+{
+    fn from(row: yorishiro_core::models::_entities::identity_template_versions::Model) -> Self {
+        Self {
+            id: row.id,
+            template_id: row.template_id,
+            version: row.version,
+            definition: row.definition,
+            changelog: row.changelog,
+            status: row.status,
+            created_at: row.created_at.into(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, FromQueryResult)]
 pub struct TemplateReviewRecord {
     pub id: Uuid,
@@ -50,6 +66,22 @@ pub struct TemplateReviewRecord {
     pub comment: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl From<yorishiro_core::models::_entities::identity_template_reviews::Model>
+    for TemplateReviewRecord
+{
+    fn from(row: yorishiro_core::models::_entities::identity_template_reviews::Model) -> Self {
+        Self {
+            id: row.id,
+            template_id: row.template_id,
+            tenant_id: row.tenant_id,
+            rating: row.rating,
+            comment: row.comment,
+            created_at: row.created_at.into(),
+            updated_at: row.updated_at.into(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +117,7 @@ pub(crate) struct ForkSource {
 /// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
 ///
 /// The three aggregates (latest stable version, review count, average rating) stay correlated subqueries rather than a `JOIN` + `GROUP BY`: with `limit` bounding the page to at most 200 rows, their cost is bounded by the page size, and nothing here has measured the join rewrite as faster.
+/// The hand-written column list stays raw SQL for the same reason: three of nine selected columns are the correlated subqueries above, which are not columns any entity has, so no SeaORM projection can generate them; splitting the six real `identity_templates` columns out onto the entity API while leaving the three aggregates hand-written would fragment one `SELECT` across two code paths for no gain in drift-safety, since the struct itself still has to list all nine fields either way.
 pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
@@ -126,32 +159,44 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
-    TemplateVersionRecord::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT v.id, v.template_id, v.version, v.definition, v.changelog, v.status, \
-                v.created_at \
-           FROM identity_template_versions v \
-           JOIN identity_templates t ON t.id = v.template_id \
-          WHERE v.template_id = $1 \
-            AND (t.tenant_id = $2 OR t.visibility = 'community') \
-            AND (v.status <> 'draft' OR t.tenant_id = $2) \
-          ORDER BY v.version DESC \
-          LIMIT $3 OFFSET $4",
-        [
-            template_id.into(),
-            tenant_id.into(),
-            page.limit().into(),
-            page.offset().into(),
-        ],
-    ))
-    .all(conn)
-    .await
-    .internal()
+    use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
+    use yorishiro_core::models::_entities::identity_template_versions::{Column, Entity, Relation};
+    use yorishiro_core::models::_entities::identity_templates::Column as TemplateColumn;
+
+    let rows = Entity::find()
+        .filter(Column::TemplateId.eq(template_id))
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            Relation::IdentityTemplates.def(),
+        )
+        .filter(
+            Condition::any()
+                .add(TemplateColumn::TenantId.eq(tenant_id))
+                .add(TemplateColumn::Visibility.eq("community")),
+        )
+        .filter(
+            Condition::any()
+                .add(Column::Status.ne("draft"))
+                .add(TemplateColumn::TenantId.eq(tenant_id)),
+        )
+        .order_by_desc(Column::Version)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(rows.into_iter().map(TemplateVersionRecord::from).collect())
 }
 
 /// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
 ///
 /// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`services::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
+///
+/// Stays a hand-written `INSERT ... SELECT`, not `ActiveModel::insert`: the version number itself
+/// is computed by the same statement that inserts it, which is the concurrency guarantee above.
+/// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would
+/// reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
@@ -189,26 +234,29 @@ pub async fn list_reviews(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateReviewRecord>, YorishiroError> {
-    TemplateReviewRecord::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT r.id, r.template_id, r.tenant_id, r.rating, r.comment, r.created_at, \
-                r.updated_at \
-           FROM identity_template_reviews r \
-           JOIN identity_templates t ON t.id = r.template_id \
-          WHERE r.template_id = $1 \
-            AND (t.tenant_id = $2 OR t.visibility = 'community') \
-          ORDER BY r.created_at DESC \
-          LIMIT $3 OFFSET $4",
-        [
-            template_id.into(),
-            tenant_id.into(),
-            page.limit().into(),
-            page.offset().into(),
-        ],
-    ))
-    .all(conn)
-    .await
-    .internal()
+    use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
+    use yorishiro_core::models::_entities::identity_template_reviews::{Column, Entity, Relation};
+    use yorishiro_core::models::_entities::identity_templates::Column as TemplateColumn;
+
+    let rows = Entity::find()
+        .filter(Column::TemplateId.eq(template_id))
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            Relation::IdentityTemplates.def(),
+        )
+        .filter(
+            Condition::any()
+                .add(TemplateColumn::TenantId.eq(tenant_id))
+                .add(TemplateColumn::Visibility.eq("community")),
+        )
+        .order_by_desc(Column::CreatedAt)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(rows.into_iter().map(TemplateReviewRecord::from).collect())
 }
 
 /// Whether a template visible to `tenant_id` exists, for `services::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
@@ -217,20 +265,20 @@ pub(crate) async fn is_visible(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct Exists {
-        exists: bool,
-    }
-    let row = Exists::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT EXISTS(SELECT 1 FROM identity_templates \
-          WHERE id = $1 AND (tenant_id = $2 OR visibility = 'community')) AS exists",
-        [template_id.into(), tenant_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.is_some_and(|r| r.exists))
+    use sea_orm::{ColumnTrait, Condition, PaginatorTrait, QueryFilter};
+    use yorishiro_core::models::_entities::identity_templates::{Column, Entity};
+
+    let count = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(
+            Condition::any()
+                .add(Column::TenantId.eq(tenant_id))
+                .add(Column::Visibility.eq("community")),
+        )
+        .count(conn)
+        .await
+        .internal()?;
+    Ok(count > 0)
 }
 
 /// Records this tenant's review, replacing its previous one if it had left one.
@@ -281,15 +329,25 @@ pub(crate) async fn find_fork_source(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<Option<ForkSource>, YorishiroError> {
-    ForkSource::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT name, description, tags, author FROM identity_templates \
-          WHERE id = $1 AND (tenant_id = $2 OR visibility = 'community')",
-        [template_id.into(), tenant_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()
+    use sea_orm::{ColumnTrait, Condition, QueryFilter, QuerySelect};
+    use yorishiro_core::models::_entities::identity_templates::{Column, Entity};
+
+    Entity::find()
+        .select_only()
+        .column(Column::Name)
+        .column(Column::Description)
+        .column(Column::Tags)
+        .column(Column::Author)
+        .filter(Column::Id.eq(template_id))
+        .filter(
+            Condition::any()
+                .add(Column::TenantId.eq(tenant_id))
+                .add(Column::Visibility.eq("community")),
+        )
+        .into_model::<ForkSource>()
+        .one(conn)
+        .await
+        .internal()
 }
 
 /// The definition to fork: the given version if published (never a draft, even by number), or the latest `stable` one when `version` is `None`.
@@ -298,32 +356,35 @@ pub(crate) async fn find_forkable_definition(
     template_id: Uuid,
     version: Option<i32>,
 ) -> Result<Option<Value>, YorishiroError> {
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
+    use yorishiro_core::models::_entities::identity_template_versions::{Column, Entity};
+
     #[derive(FromQueryResult)]
     struct Definition {
         definition: Value,
     }
 
+    let query = Entity::find()
+        .select_only()
+        .column(Column::Definition)
+        .filter(Column::TemplateId.eq(template_id));
+
     let row = match version {
         Some(version) => {
-            Definition::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT definition FROM identity_template_versions \
-                  WHERE template_id = $1 AND version = $2 AND status <> 'draft'",
-                [template_id.into(), version.into()],
-            ))
-            .one(conn)
-            .await
+            query
+                .filter(Column::Version.eq(version))
+                .filter(Column::Status.ne("draft"))
+                .into_model::<Definition>()
+                .one(conn)
+                .await
         }
         None => {
-            Definition::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT definition FROM identity_template_versions \
-                  WHERE template_id = $1 AND status = 'stable' \
-                  ORDER BY version DESC LIMIT 1",
-                [template_id.into()],
-            ))
-            .one(conn)
-            .await
+            query
+                .filter(Column::Status.eq("stable"))
+                .order_by_desc(Column::Version)
+                .into_model::<Definition>()
+                .one(conn)
+                .await
         }
     }
     .internal()?;
@@ -383,20 +444,16 @@ pub(crate) async fn is_owned_by(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct Exists {
-        exists: bool,
-    }
-    let row = Exists::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT EXISTS(SELECT 1 FROM identity_templates WHERE id = $1 AND tenant_id = $2) \
-         AS exists",
-        [template_id.into(), tenant_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.is_some_and(|r| r.exists))
+    use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
+    use yorishiro_core::models::_entities::identity_templates::{Column, Entity};
+
+    let count = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
+    Ok(count > 0)
 }
 
 /// Sets a template's marketplace visibility.
@@ -406,12 +463,16 @@ pub(crate) async fn update_visibility(
     template_id: Uuid,
     visibility: &str,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "UPDATE identity_templates SET visibility = $1, updated_at = now() WHERE id = $2",
-        [visibility.into(), template_id.into()],
-    ))
-    .await
-    .internal()?;
+    use yorishiro_core::models::_entities::identity_templates::ActiveModel;
+
+    // updated_at is not set here: identity_templates::ActiveModel's before_save stamps it on
+    // every update whose caller didn't already set it explicitly, so a hand-written `now()` would
+    // just duplicate what before_save already does.
+    let active = ActiveModel {
+        id: sea_orm::ActiveValue::Unchanged(template_id),
+        visibility: sea_orm::ActiveValue::Set(visibility.to_string()),
+        ..Default::default()
+    };
+    active.update(conn).await.internal()?;
     Ok(())
 }

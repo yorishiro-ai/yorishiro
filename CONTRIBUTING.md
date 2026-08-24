@@ -34,8 +34,9 @@ If you are adding a decision that reaches for a table, put the decision in `serv
 ### Where the queries are
 
 A new table's queries belong in `models/`.
-Raw SQL is for what the SeaORM entity API genuinely cannot express: JSONB containment (`data @> filter`), pgvector similarity search, and advisory locks.
+Raw SQL is for what the SeaORM entity API genuinely cannot express: JSONB containment (`data @> filter`), pgvector similarity search, advisory locks, a value no entity has a column for (a correlated aggregate computed in the same query), and a write whose correctness depends on running as one statement.
 Everything else uses `Entity::find()`/`ActiveModel`/`Set(...)`, on whichever connection or transaction the caller holds.
+`ee/crates/yorishiro-hosted/src/models/marketplace.rs` has the current instances of the last two: `list_marketplace` selects three correlated subqueries alongside `identity_templates`' own columns, which no entity projection can produce, and `insert_next_version` computes a template's next version number and inserts it in the same `INSERT ... SELECT`, which is what makes its advisory lock actually prevent two concurrent publishes from racing to the same version number.
 
 Some raw SQL outside `models/` is correct and stays:
 
