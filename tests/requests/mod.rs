@@ -1,6 +1,7 @@
 mod audit_log;
 mod auth;
 mod entities;
+mod import;
 mod members;
 mod schemas;
 mod search;
