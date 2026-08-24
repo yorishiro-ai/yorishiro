@@ -9,8 +9,8 @@ use yorishiro_core::services::auth::ApiKeyScope;
 use yorishiro_hosted::HostedApp;
 use yorishiro_hosted::services::licence::{LicenceClaims, LicenceState};
 
-/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()`
-/// the test process booted with. See `marketplace.rs`'s own copy of this helper.
+/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the test process booted with.
+/// See `marketplace.rs`'s own copy of this helper.
 fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
         .insert(LicenceState::licensed(LicenceClaims {
@@ -59,8 +59,8 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     Setup { key }
 }
 
-/// Setting, reading and clearing a workspace's LLM credentials over REST. The key itself never
-/// comes back from GET, only what it configured.
+/// Setting, reading and clearing a workspace's LLM credentials over REST.
+/// The key itself never comes back from GET, only what it configured.
 #[tokio::test]
 #[serial]
 async fn llm_key_set_get_and_clear_round_trip() {
@@ -187,9 +187,8 @@ async fn infer_fill_without_a_configured_key_is_refused() {
     .await;
 }
 
-/// An unlicensed deployment answers the same 404 whether or not a valid key is presented, so an
-/// anonymous prober cannot tell "does not exist" from "exists but locked". Matches
-/// `marketplace`'s and `dashboard`'s own tests for the same gate.
+/// An unlicensed deployment answers the same 404 whether or not a valid key is presented, so an anonymous prober cannot tell "does not exist" from "exists but locked".
+/// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
 #[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
@@ -210,8 +209,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     .await;
 }
 
-/// Confirming a job with no proposals is refused rather than reporting nothing applied, so a
-/// caller can tell "already confirmed" from "confirmed and changed nothing".
+/// Confirming a job with no proposals is refused rather than reporting nothing applied, so a caller can tell "already confirmed" from "confirmed and changed nothing".
 #[tokio::test]
 #[serial]
 async fn confirming_an_unknown_job_is_refused() {

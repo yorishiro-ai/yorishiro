@@ -67,10 +67,8 @@ impl InferenceClient {
 
     /// Asks the model for values for `missing_fields`, given what the entity already holds.
     ///
-    /// Returns only the fields the model answered with, and only those that were asked for: a
-    /// model that invents a key would otherwise write a field the schema does not define. A
-    /// field the model declines to guess is absent from the result rather than null, so the
-    /// caller can tell "no proposal" from "proposed nothing".
+    /// Returns only the fields the model answered with, and only those that were asked for: a model that invents a key would otherwise write a field the schema does not define.
+    /// A field the model declines to guess is absent from the result rather than null, so the caller can tell "no proposal" from "proposed nothing".
     pub async fn propose_fields(
         &self,
         entity_data: &Value,

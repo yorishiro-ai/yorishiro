@@ -143,9 +143,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
         assert!(before.json::<Vec<serde_json::Value>>().is_empty());
 
         // Add a field to the workspace's own copy, so the merge has something local to keep.
-        // This is a second version of the same name (create_schema archives the first and
-        // installs this as the new active row), so it has its own id: the origin/merge chain
-        // always acts on the currently active version, which is this one from here on.
+        // This is a second version of the same name (create_schema archives the first and installs this as the new active row), so it has its own id: the origin/merge chain always acts on the currently active version, which is this one from here on.
         let edit_local = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -245,8 +243,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
     .await;
 }
 
-/// Merging a schema whose two sides conflict on the same field is refused rather than picking
-/// one side silently.
+/// Merging a schema whose two sides conflict on the same field is refused rather than picking one side silently.
 #[tokio::test]
 #[serial]
 async fn merging_a_conflicting_field_is_refused() {

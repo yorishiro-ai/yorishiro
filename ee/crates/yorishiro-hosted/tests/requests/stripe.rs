@@ -110,8 +110,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 .and_then(|r| r.plan);
             assert_eq!(after_first.as_deref(), Some("pro"));
 
-            // Downgrade directly, bypassing the webhook, so a re-application of the duplicate
-            // delivery below would be observable as a plan flip back to `pro`.
+            // Downgrade directly, bypassing the webhook, so a re-application of the duplicate delivery below would be observable as a plan flip back to `pro`.
             billing::set_plan(&ctx.db, tenant_id, "free").await.unwrap();
 
             let retry = request
@@ -143,8 +142,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
     .await;
 }
 
-/// Cancelling a subscription must put the tenant back on Free: both the plan and the workspace
-/// cap that comes with it.
+/// Cancelling a subscription must put the tenant back on Free: both the plan and the workspace cap that comes with it.
 #[tokio::test]
 #[serial]
 async fn a_cancellation_returns_the_tenant_to_free() {
@@ -201,8 +199,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
     .await;
 }
 
-/// With no webhook secret configured there is no way to tell a genuine Stripe delivery from
-/// anything else, so the endpoint refuses rather than accepting unverifiable requests.
+/// With no webhook secret configured there is no way to tell a genuine Stripe delivery from anything else, so the endpoint refuses rather than accepting unverifiable requests.
 #[tokio::test]
 #[serial]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {

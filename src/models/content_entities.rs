@@ -416,9 +416,8 @@ pub async fn drift(
     let own = super::content_schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
     let active = super::content_schemas::get_active_schema(conn, workspace_id, &own.name).await?;
 
-    // The entity's own type definition may be absent from the active version: the type was
-    // dropped. Nothing is "missing" in that case; the whole type is, which the version numbers
-    // already say.
+    // The entity's own type definition may be absent from the active version: the type was dropped.
+    // Nothing is "missing" in that case; the whole type is, which the version numbers already say.
     let own_fields = own
         .definition
         .entity_types

@@ -16,8 +16,7 @@ pub struct TenantBillingRecord {
 }
 
 /// Reads a tenant's billing state.
-/// `None` means the tenant is unbilled, not that it is missing: the caller decides what an
-/// unbilled tenant looks like (the dashboard renders it as no plan and no cap).
+/// `None` means the tenant is unbilled, not that it is missing: the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
 pub async fn get_billing(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -34,8 +33,7 @@ pub async fn get_billing(
 }
 
 /// Resolves the tenant a Stripe webhook is about.
-/// Subscription updated/deleted events carry only the Stripe customer id, so this is the inbound
-/// lookup path.
+/// Subscription updated/deleted events carry only the Stripe customer id, so this is the inbound lookup path.
 pub async fn get_by_stripe_customer(
     conn: &impl ConnectionTrait,
     stripe_customer_id: &str,

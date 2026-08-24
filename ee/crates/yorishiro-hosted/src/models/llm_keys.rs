@@ -14,14 +14,13 @@ use crate::services::inference::InferenceConfig;
 
 /// What a workspace has configured, without the key itself.
 ///
-/// `api_key` is deliberately absent rather than masked: a masked value still travels through
-/// logs and proxies, and nothing a caller does needs it back.
+/// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
 #[derive(Debug, Clone, Serialize)]
 pub struct LlmKeyDescription {
     pub base_url: String,
     pub model: String,
-    /// Always true when present: the row cannot exist without a key. Callers use the absence of
-    /// the whole description to mean "not configured".
+    /// Always true when present: the row cannot exist without a key.
+    /// Callers use the absence of the whole description to mean "not configured".
     pub configured: bool,
 }
 
