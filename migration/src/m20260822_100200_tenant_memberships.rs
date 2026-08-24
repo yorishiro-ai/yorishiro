@@ -44,9 +44,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // UNIQUE (tenant_id, user_id): sea_query's Table::create() has no multi-column
-        // unique-key builder that also composes cleanly with the two foreign_key() calls above,
-        // so this is added as a separate index rather than a column modifier.
+        // UNIQUE (tenant_id, user_id): sea_query's Table::create() has no multi-column unique-key builder that also composes cleanly with the two foreign_key() calls above, so this is added as a separate index rather than a column modifier.
         manager
             .create_index(
                 Index::create()
@@ -67,8 +65,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Strict policy: current_setting('app.current_tenant')::uuid with no `true` (lenient)
-        // argument, so a missing setting raises rather than matching nothing.
+        // Strict policy: current_setting('app.current_tenant')::uuid with no `true` (lenient) argument, so a missing setting raises rather than matching nothing.
         helpers::enable_rls_with_policy(
             db,
             "identity_tenant_memberships",

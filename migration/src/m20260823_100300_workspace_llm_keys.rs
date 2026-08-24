@@ -39,10 +39,8 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // No RLS and no GRANT, deliberately, matching identity_templates: yorishiro_app is
-        // never the role that reaches this table. Reads and writes go through the
-        // migration-role pool (ctx.db), which is what keeps a workspace's credentials off the
-        // RLS-scoped request connection entirely rather than relying on a policy being right.
+        // No RLS and no GRANT, deliberately, matching identity_templates: yorishiro_app is never the role that reaches this table.
+        // Reads and writes go through the migration-role pool (ctx.db), which is what keeps a workspace's credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
         Ok(())
     }
 

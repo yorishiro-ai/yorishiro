@@ -34,10 +34,8 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // yorishiro_app gets no GRANT at all here: this table is reached only through the
-        // migration-role identity pool (see src/db.rs), never a tenant-scoped request
-        // connection. Enabling RLS anyway is defense in depth against a future grant added
-        // without re-deriving this reasoning.
+        // yorishiro_app gets no GRANT at all here: this table is reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection.
+        // Enabling RLS anyway is defense in depth against a future grant added without re-deriving this reasoning.
         helpers::enable_rls_with_policy(
             db,
             "identity_tenants",
