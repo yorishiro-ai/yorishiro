@@ -8,45 +8,43 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .create_table(
-                Table::create()
-                    .table(Alias::new("identity_invites"))
-                    .if_not_exists()
-                    .col(helpers::uuidv7_pk())
-                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("email")).text().not_null())
-                    .col(ColumnDef::new(Alias::new("role")).text().not_null())
-                    .col(
-                        ColumnDef::new(Alias::new("token_hash"))
-                            .blob()
-                            .not_null()
-                            .unique_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("expires_at"))
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
-                    .col(ColumnDef::new(Alias::new("used_at")).timestamp_with_time_zone())
-                    .col(helpers::created_at())
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_identity_invites_tenant_id")
-                            .from(Alias::new("identity_invites"), Alias::new("tenant_id"))
-                            .to(Alias::new("identity_tenants"), Alias::new("id"))
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .to_owned(),
+        let table = Table::create()
+            .table(Alias::new("identity_invites"))
+            .if_not_exists()
+            .col(helpers::uuidv7_pk(manager))
+            .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+            .col(ColumnDef::new(Alias::new("email")).text().not_null())
+            .col(ColumnDef::new(Alias::new("role")).text().not_null())
+            .col(
+                ColumnDef::new(Alias::new("token_hash"))
+                    .blob()
+                    .not_null()
+                    .unique_key(),
             )
-            .await?;
+            .col(
+                ColumnDef::new(Alias::new("expires_at"))
+                    .timestamp_with_time_zone()
+                    .not_null(),
+            )
+            .col(ColumnDef::new(Alias::new("used_at")).timestamp_with_time_zone())
+            .col(helpers::created_at())
+            .foreign_key(
+                ForeignKey::create()
+                    .name("fk_identity_invites_tenant_id")
+                    .from(Alias::new("identity_invites"), Alias::new("tenant_id"))
+                    .to(Alias::new("identity_tenants"), Alias::new("id"))
+                    .on_delete(ForeignKeyAction::Cascade),
+            )
+            .to_owned();
 
-        let db = manager.get_connection();
-
-        // sea_query's Table::create() has no table-level CHECK builder in use here, so this one goes through raw SQL right after create_table.
-        db.execute_unprepared(
-            "ALTER TABLE identity_invites ADD CONSTRAINT identity_invites_role_check \
-             CHECK (role IN ('owner', 'admin', 'member', 'viewer'));",
+        helpers::create_table_with_checks(
+            manager,
+            "identity_invites",
+            table,
+            &[(
+                "identity_invites_role_check",
+                "role IN ('owner', 'admin', 'member', 'viewer')",
+            )],
         )
         .await?;
 
@@ -62,7 +60,7 @@ impl MigrationTrait for Migration {
 
         // Strict policy: yorishiro_app sets app.current_tenant on every connection, so this table is reached only through the tenant-scoped identity pool, never a connection missing the GUC.
         helpers::enable_rls_with_policy(
-            db,
+            manager,
             "identity_invites",
             "tenant_isolation",
             "tenant_id",

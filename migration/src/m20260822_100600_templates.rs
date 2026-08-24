@@ -14,7 +14,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("identity_templates"))
                     .if_not_exists()
-                    .col(helpers::uuidv7_pk())
+                    .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(ColumnDef::new(Alias::new("description")).text())
@@ -68,11 +68,16 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        let db = manager.get_connection();
-
         // sea_query's ColumnDef has no TEXT[] helper, so this column is added as raw SQL right after create_table.
-        db.execute_unprepared(
+        // SQLite has no array type at all: the equivalent column there holds the same tag list JSON-encoded (a TEXT column of a JSON array), read/written as such by the application on that backend rather than as a native Postgres array.
+        helpers::pg_only(
+            manager,
             "ALTER TABLE identity_templates ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "ALTER TABLE identity_templates ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';",
         )
         .await?;
 
@@ -87,7 +92,9 @@ impl MigrationTrait for Migration {
             .await?;
 
         // GIN index over a TEXT[] column: create_index has no operator-class expression for this, so it goes through raw SQL.
-        db.execute_unprepared(
+        // No SQLite equivalent: `tags` is plain JSON-encoded TEXT there, not an indexable array type.
+        helpers::pg_only(
+            manager,
             "CREATE INDEX templates_tags_idx ON identity_templates USING gin(tags);",
         )
         .await?;

@@ -1,16 +1,19 @@
 use sea_orm_migration::prelude::*;
 
+use crate::helpers;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-
         // `RETURNS TABLE`'s column list can't be widened with ALTER FUNCTION, so both overloads are dropped and recreated with `audit` added, otherwise identical to `m20260822_101200_authenticate_api_key.rs`.
         // `authenticate` (services::auth) needs this column to populate `AuthContext`, which is what `require_audit` reads to decide whether a key may reach the audit-log read endpoint.
-        db.execute_unprepared(
+        //
+        // No-op on SQLite, matching m20260822_101200_authenticate_api_key: no stored function exists on that backend to widen.
+        helpers::pg_only(
+            manager,
             "DROP FUNCTION authenticate_api_key(bytea);
              DROP FUNCTION authenticate_api_key(bytea, uuid);
 
@@ -62,9 +65,8 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "DROP FUNCTION authenticate_api_key(bytea);
              DROP FUNCTION authenticate_api_key(bytea, uuid);
 

@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("content_fill_proposals"))
                     .if_not_exists()
-                    .col(helpers::uuidv7_pk())
+                    .col(helpers::uuidv7_pk(manager))
                     // Batch job identifier, not a row reference: no REFERENCES clause in the old DDL, matching content_entity_snapshots.job_id.
                     .col(ColumnDef::new(Alias::new("job_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
@@ -60,11 +60,9 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        let db = manager.get_connection();
-
         // Lenient, matching content_entity_snapshots: the control-plane pool also reaches this table over a connection that has not named a workspace, and must match nothing rather than raise.
         helpers::enable_rls_with_policy(
-            db,
+            manager,
             "content_fill_proposals",
             "workspace_isolation",
             "workspace_id",
@@ -74,7 +72,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         helpers::grant(
-            db,
+            manager,
             "SELECT, INSERT, UPDATE, DELETE",
             "content_fill_proposals",
         )

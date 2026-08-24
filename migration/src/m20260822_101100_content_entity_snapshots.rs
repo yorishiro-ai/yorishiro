@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("content_entity_snapshots"))
                     .if_not_exists()
-                    .col(helpers::uuidv7_pk())
+                    .col(helpers::uuidv7_pk(manager))
                     // Batch job identifier, not a row reference: no REFERENCES clause in the old DDL, so no foreign key here either.
                     .col(ColumnDef::new(Alias::new("job_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
@@ -65,7 +65,7 @@ impl MigrationTrait for Migration {
 
         // Lenient: grouped with content.schemas and content.fill_proposals in the old DDL's strict/lenient split, since the control-plane pool also reaches this table over a connection that has not named a workspace, and must match nothing rather than raise.
         helpers::enable_rls_with_policy(
-            db,
+            manager,
             "content_entity_snapshots",
             "workspace_isolation",
             "workspace_id",
@@ -76,7 +76,7 @@ impl MigrationTrait for Migration {
 
         // The old DDL granted this table via a schema-wide "GRANT ... ON ALL TABLES IN SCHEMA content", now individualized per-table since every table shares one schema after the public-schema unification.
         helpers::grant(
-            db,
+            manager,
             "SELECT, INSERT, UPDATE, DELETE",
             "content_entity_snapshots",
         )

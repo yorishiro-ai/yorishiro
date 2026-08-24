@@ -1,16 +1,19 @@
 use sea_orm_migration::prelude::*;
 
+use crate::helpers;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-
         // SECURITY DEFINER so the lookup can read rows RLS would hide: the caller has not been identified yet, so there is no workspace to scope to.
         // Two overloads: the one-argument form resolves a key bound to a single workspace (returns nothing for a key that carries none); the two-argument form additionally resolves a tenant-scoped key (workspace_id NULL) against a requested workspace, membership-checked so a tenant-scoped key cannot be pointed at a workspace outside its own tenant.
-        db.execute_unprepared(
+        //
+        // No-op on SQLite: there is no RLS on that backend for this function to bypass, so `services::auth::authenticate` queries identity_api_keys/identity_workspaces directly there instead of through a stored function.
+        helpers::pg_only(
+            manager,
             "CREATE FUNCTION authenticate_api_key(p_key_hash bytea)
              RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, scope text, user_id uuid)
              LANGUAGE sql
@@ -30,7 +33,8 @@ impl MigrationTrait for Migration {
 
         // No DEFAULT on the second argument, deliberately: with one, a single-argument call matches both overloads and Postgres refuses it as ambiguous ("function is not unique").
         // Requiring both makes the arity unambiguous, so the one-argument form above keeps resolving on its own.
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "CREATE FUNCTION authenticate_api_key(
                p_key_hash bytea,
                p_requested_workspace uuid
@@ -63,13 +67,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .get_connection()
-            .execute_unprepared(
-                "DROP FUNCTION IF EXISTS authenticate_api_key(bytea);
-                 DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid);",
-            )
-            .await?;
+        helpers::pg_only(
+            manager,
+            "DROP FUNCTION IF EXISTS authenticate_api_key(bytea);
+             DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid);",
+        )
+        .await?;
         Ok(())
     }
 }

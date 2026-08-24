@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("identity_template_versions"))
                     .if_not_exists()
-                    .col(helpers::uuidv7_pk())
+                    .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("template_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("version")).integer().not_null())
                     .col(
@@ -82,7 +82,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("identity_template_reviews"))
                     .if_not_exists()
-                    .col(helpers::uuidv7_pk())
+                    .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("template_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     .col(

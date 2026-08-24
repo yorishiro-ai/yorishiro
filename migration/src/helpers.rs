@@ -1,16 +1,23 @@
 //! Reusable column/statement builders shared across migration files.
 //!
 //! `loco_rs::schema::ColType` has no variant that is both a primary key and carries a custom default expression, so every table's `id` column goes through `sea_query::ColumnDef` directly.
+//!
+//! SQLite has no roles, RLS, or SECURITY DEFINER functions: a single-file database has no other tenant to isolate from.
+//! `enable_rls_with_policy`/`grant`/`pg_only` all no-op on that backend rather than each call site branching for itself, so a migration file's Postgres statements stay exactly as written.
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_orm::DbBackend;
 
 /// `id UUID PRIMARY KEY DEFAULT uuidv7()`.
-pub fn uuidv7_pk() -> ColumnDef {
-    ColumnDef::new(Alias::new("id"))
-        .uuid()
-        .not_null()
-        .primary_key()
-        .default(Expr::cust("uuidv7()"))
-        .to_owned()
+///
+/// SQLite has no `uuidv7()` to default to, so on that backend the column carries no default at all: every insert must supply its own id.
+/// This matches how the application already has to generate ids client-side there (SeaORM's `ActiveModel` defaults run in the client, not the database), so an omitted default is simply never exercised rather than silently wrong.
+pub fn uuidv7_pk(manager: &SchemaManager<'_>) -> ColumnDef {
+    let mut col = ColumnDef::new(Alias::new("id"));
+    col.uuid().not_null().primary_key();
+    if manager.get_database_backend() != DbBackend::Sqlite {
+        col.default(Expr::cust("uuidv7()"));
+    }
+    col.to_owned()
 }
 
 /// `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
@@ -37,24 +44,31 @@ pub fn timestamps() -> [ColumnDef; 2] {
 /// Enables RLS and installs a single-column-equality policy in one raw-SQL round trip.
 ///
 /// `column = current_setting(setting)::uuid`, either strict (missing setting raises) or lenient (`lenient => true`, missing setting reads as NULL, matching nothing): strict for tables `yorishiro_app` always reaches with both GUCs set, lenient for tables the control-plane pool also reaches without naming a workspace.
+///
+/// No-ops on SQLite: a single-tenant, single-file database has no other tenant's rows to hide, so there is no policy to install.
 pub async fn enable_rls_with_policy(
-    db: &SchemaManagerConnection<'_>,
+    manager: &SchemaManager<'_>,
     table: &str,
     policy_name: &str,
     column: &str,
     setting: &str,
     lenient: bool,
 ) -> Result<(), DbErr> {
+    if manager.get_database_backend() == DbBackend::Sqlite {
+        return Ok(());
+    }
     let condition = if lenient {
         format!("{column} = NULLIF(current_setting('{setting}', true), '')::uuid")
     } else {
         format!("{column} = current_setting('{setting}')::uuid")
     };
-    db.execute_unprepared(&format!(
-        "ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+    manager
+        .get_connection()
+        .execute_unprepared(&format!(
+            "ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
          CREATE POLICY {policy_name} ON {table} USING ({condition});"
-    ))
-    .await?;
+        ))
+        .await?;
     Ok(())
 }
 
@@ -62,12 +76,70 @@ pub async fn enable_rls_with_policy(
 ///
 /// Deliberately never a schema-wide `GRANT ... ON ALL TABLES IN SCHEMA public`: that would sweep in the tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`).
 /// Every grant is named here, one call per table, so an ungranted table is ungranted because no call exists for it, not because a wildcard missed it.
+///
+/// No-ops on SQLite: there is no separate `yorishiro_app` role on that backend, since the process itself is the only tenant.
 pub async fn grant(
-    db: &SchemaManagerConnection<'_>,
+    manager: &SchemaManager<'_>,
     privileges: &str,
     table: &str,
 ) -> Result<(), DbErr> {
-    db.execute_unprepared(&format!("GRANT {privileges} ON {table} TO yorishiro_app;"))
+    if manager.get_database_backend() == DbBackend::Sqlite {
+        return Ok(());
+    }
+    manager
+        .get_connection()
+        .execute_unprepared(&format!("GRANT {privileges} ON {table} TO yorishiro_app;"))
         .await?;
+    Ok(())
+}
+
+/// Creates `table`, with each `(constraint_name, expr)` in `checks` applied as a table-level CHECK.
+///
+/// SQLite's `ALTER TABLE` supports only rename/add-column/drop-column, so a named `ADD CONSTRAINT` after the fact (Postgres's usual shape in this crate) doesn't work there: the checks go inline into the `CREATE TABLE` for SQLite instead, and as separate `ALTER TABLE ... ADD CONSTRAINT` statements for Postgres, matching every migration file's existing raw-SQL style on that backend byte-for-byte.
+pub async fn create_table_with_checks(
+    manager: &SchemaManager<'_>,
+    table_name: &str,
+    mut table: TableCreateStatement,
+    checks: &[(&str, &str)],
+) -> Result<(), DbErr> {
+    let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
+    if sqlite {
+        for (_, expr) in checks {
+            table = table.check(Expr::cust((*expr).to_owned())).to_owned();
+        }
+    }
+    manager.create_table(table).await?;
+    if !sqlite {
+        for (name, expr) in checks {
+            manager
+                .get_connection()
+                .execute_unprepared(&format!(
+                    "ALTER TABLE {table_name} ADD CONSTRAINT {name} CHECK ({expr});"
+                ))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Runs `sql` only on Postgres; a no-op on SQLite.
+///
+/// For raw statements with no SQLite equivalent at all (role creation, column-level GRANTs, `plpgsql` functions/triggers, GIN/HNSW/trigram indexes, pgvector DDL): a table-scoped CHECK that SQLite *can* express instead moves into that table's `Table::create()` for the SQLite backend rather than routing through here, since skipping it there would silently drop a real constraint rather than an engine-specific optimization.
+pub async fn pg_only(manager: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
+    if manager.get_database_backend() == DbBackend::Sqlite {
+        return Ok(());
+    }
+    manager.get_connection().execute_unprepared(sql).await?;
+    Ok(())
+}
+
+/// Runs `sql` only on SQLite; a no-op on Postgres.
+///
+/// For the SQLite-specific replacement half of a `pg_only` statement (a trigger written in SQLite's own trigger syntax rather than `plpgsql`, for example), kept as its own call at the same call site as the Postgres original rather than folded into one branching statement, so both versions stay independently greppable.
+pub async fn sqlite_only(manager: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
+    if manager.get_database_backend() != DbBackend::Sqlite {
+        return Ok(());
+    }
+    manager.get_connection().execute_unprepared(sql).await?;
     Ok(())
 }

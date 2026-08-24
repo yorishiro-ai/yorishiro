@@ -19,4 +19,10 @@ features = [
   # View the list of supported features at https://www.sea-ql.org/SeaORM/docs/install-and-config/database-and-async-runtime.
   # e.g.
   "runtime-tokio-rustls", # `ASYNC_RUNTIME` feature
+  "sqlx-postgres",
+  "sqlx-sqlite",
 ]
+
+[dev-dependencies]
+tokio = { version = "1.45", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"

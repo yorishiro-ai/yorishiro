@@ -1,4 +1,5 @@
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_orm::DbBackend;
 
 use crate::helpers;
 
@@ -8,54 +9,63 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .create_table(
-                Table::create()
-                    .table(Alias::new("identity_workspaces"))
-                    .if_not_exists()
-                    .col(helpers::uuidv7_pk())
-                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("name")).text().not_null())
-                    .col(ColumnDef::new(Alias::new("max_entities")).integer())
-                    // A workspace exists before its schema does: `admin create-workspace` leaves it pending, and creating the schema marks it active.
-                    .col(
-                        ColumnDef::new(Alias::new("status"))
-                            .text()
-                            .not_null()
-                            .default("schema_pending"),
-                    )
-                    // The model a workspace's vectors were produced by, and their width.
-                    // NULL means the deployment default, recorded so a workspace whose model changed can be told from one provisioned under a different one.
-                    .col(ColumnDef::new(Alias::new("embedding_model")).text())
-                    .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
-                    // Circular reference: a schema also names its workspace.
-                    // No foreign_key constraint here since content_schemas may not exist yet when this migration runs; the FK should be added later once it is guaranteed to exist.
-                    .col(ColumnDef::new(Alias::new("schema_id")).uuid())
-                    .col(helpers::created_at())
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_identity_workspaces_tenant_id")
-                            .from(Alias::new("identity_workspaces"), Alias::new("tenant_id"))
-                            .to(Alias::new("identity_tenants"), Alias::new("id"))
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .to_owned(),
+        let mut table = Table::create()
+            .table(Alias::new("identity_workspaces"))
+            .if_not_exists()
+            .col(helpers::uuidv7_pk(manager))
+            .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+            .col(ColumnDef::new(Alias::new("name")).text().not_null())
+            .col(ColumnDef::new(Alias::new("max_entities")).integer())
+            // A workspace exists before its schema does: `admin create-workspace` leaves it pending, and creating the schema marks it active.
+            .col(
+                ColumnDef::new(Alias::new("status"))
+                    .text()
+                    .not_null()
+                    .default("schema_pending"),
             )
-            .await?;
+            // The model a workspace's vectors were produced by, and their width.
+            // NULL means the deployment default, recorded so a workspace whose model changed can be told from one provisioned under a different one.
+            .col(ColumnDef::new(Alias::new("embedding_model")).text())
+            .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
+            // Circular reference: a schema also names its workspace.
+            // No foreign_key constraint here on Postgres since content_schemas may not exist yet when this migration runs; that FK is added later in m20260822_100800_content_schemas once it is guaranteed to exist.
+            .col(ColumnDef::new(Alias::new("schema_id")).uuid())
+            .col(helpers::created_at())
+            .foreign_key(
+                ForeignKey::create()
+                    .name("fk_identity_workspaces_tenant_id")
+                    .from(Alias::new("identity_workspaces"), Alias::new("tenant_id"))
+                    .to(Alias::new("identity_tenants"), Alias::new("id"))
+                    .on_delete(ForeignKeyAction::Cascade),
+            )
+            .to_owned();
 
-        let db = manager.get_connection();
+        // SQLite doesn't resolve FK targets at DDL time (no CREATE SCHEMA/dependency ordering to fight), so the schema_id FK can go in here directly instead of waiting for a later ALTER TABLE like Postgres does.
+        if manager.get_database_backend() == DbBackend::Sqlite {
+            table = table
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_identity_workspaces_schema_id")
+                        .from(Alias::new("identity_workspaces"), Alias::new("schema_id"))
+                        .to(Alias::new("content_schemas"), Alias::new("id")),
+                )
+                .to_owned();
+        }
 
-        // CHECK constraints: sea_query's Table::create().check() did not compile cleanly here, so both are added via raw ALTER TABLE right after create_table.
-        db.execute_unprepared(
-            "ALTER TABLE identity_workspaces \
-             ADD CONSTRAINT identity_workspaces_status_check \
-             CHECK (status IN ('schema_pending', 'active'));",
-        )
-        .await?;
-        db.execute_unprepared(
-            "ALTER TABLE identity_workspaces \
-             ADD CONSTRAINT identity_workspaces_embedding_dimensions_check \
-             CHECK (embedding_dimensions IS NULL OR embedding_dimensions > 0);",
+        helpers::create_table_with_checks(
+            manager,
+            "identity_workspaces",
+            table,
+            &[
+                (
+                    "identity_workspaces_status_check",
+                    "status IN ('schema_pending', 'active')",
+                ),
+                (
+                    "identity_workspaces_embedding_dimensions_check",
+                    "embedding_dimensions IS NULL OR embedding_dimensions > 0",
+                ),
+            ],
         )
         .await?;
 
@@ -73,7 +83,7 @@ impl MigrationTrait for Migration {
 
         // Strict form: `yorishiro_app` sets both GUCs on every connection, so reaching this table without a tenant is a bug, and raising surfaces it rather than reading as an empty tenant.
         helpers::enable_rls_with_policy(
-            db,
+            manager,
             "identity_workspaces",
             "tenant_isolation",
             "tenant_id",
@@ -82,12 +92,13 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        helpers::grant(db, "SELECT", "identity_workspaces").await?;
+        helpers::grant(manager, "SELECT", "identity_workspaces").await?;
 
         // Column-level GRANT UPDATE: `status` and `schema_id` are the whole of what a request writes here.
         // `max_entities`, `name` and the embedding stamp are provisioning decisions; a request that could rewrite its own quota is a different system.
         // Issued raw since helpers::grant()'s signature only expresses whole-table grants.
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "GRANT UPDATE (status, schema_id) ON identity_workspaces TO yorishiro_app;",
         )
         .await?;

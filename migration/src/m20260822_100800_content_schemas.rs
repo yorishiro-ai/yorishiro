@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("content_schemas"))
                     .if_not_exists()
-                    .col(helpers::uuidv7_pk())
+                    .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     // Schemas are scoped to a workspace, not a tenant: each workspace holds its own copy of a template, and editing one must not reach its siblings.
                     // `tenant_id` stays for the cross-tenant reads (community-visible templates, export).
@@ -78,11 +78,12 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        let db = manager.get_connection();
-
         // The circular half (old DDL lines 216-217): identity_workspaces.schema_id was added as a plain column with no FK by m20260822_110500_workspaces, since content_schemas did not exist yet at that point.
         // content_schemas exists now, so the FK it deferred is added here.
-        db.execute_unprepared(
+        //
+        // No-op on SQLite: that backend doesn't resolve FK targets at DDL time, so m20260822_100300_workspaces already declared this FK inline in its own CREATE TABLE instead of deferring it.
+        helpers::pg_only(
+            manager,
             "ALTER TABLE identity_workspaces \
              ADD CONSTRAINT fk_identity_workspaces_schema_id \
              FOREIGN KEY (schema_id) REFERENCES content_schemas(id);",
@@ -123,18 +124,22 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Partial index: create_index has no WHERE-clause support, so raw SQL per the porting instructions.
-        db.execute_unprepared(
-            "CREATE INDEX schemas_origin_template_idx \
+        // SQLite supports the same WHERE syntax on CREATE INDEX, so this runs unchanged on both backends.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE INDEX schemas_origin_template_idx \
              ON content_schemas (origin_template_id) \
              WHERE origin_template_id IS NOT NULL;",
-        )
-        .await?;
+            )
+            .await?;
 
         // Deleting a template must not destroy the copies made from it, and must stop them claiming to follow something that is gone.
         // A trigger rather than application code, so a delete arriving from the admin CLI or a migration is covered too.
         //
         // Defined here (alongside content_schemas, the table it writes to) even though it fires on identity_templates, matching the old DDL's own ordering choice of placing it next to content.schemas rather than next to identity.templates.
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "CREATE FUNCTION detach_orphaned_schema_origin() RETURNS TRIGGER AS $$
              BEGIN
                UPDATE content_schemas
@@ -147,17 +152,33 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "CREATE TRIGGER templates_detach_schema_origins
              BEFORE DELETE ON identity_templates
              FOR EACH ROW EXECUTE FUNCTION detach_orphaned_schema_origin();",
         )
         .await?;
 
+        // SQLite has no separate CREATE FUNCTION/CREATE TRIGGER split, but it can express the same guarantee directly: an AFTER DELETE trigger (BEFORE would still see the row on both engines, but SQLite's OLD is only valid inside the trigger body regardless of timing, and AFTER avoids racing the row's own deletion) that detaches any schema whose origin_template_id pointed at the deleted template.
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER templates_detach_schema_origins
+             AFTER DELETE ON identity_templates
+             FOR EACH ROW
+             BEGIN
+               UPDATE content_schemas
+                  SET origin_status = 'detached'
+                WHERE origin_template_id = OLD.id
+                  AND origin_status = 'linked';
+             END;",
+        )
+        .await?;
+
         // Lenient: the control-plane pool reaches content_schemas over a connection that sets neither GUC, so a connection that has not named a workspace must match nothing instead of raising.
         // See the old DDL's comment on the strict/lenient split, which groups content.schemas with entity_snapshots and fill_proposals as the lenient set.
         helpers::enable_rls_with_policy(
-            db,
+            manager,
             "content_schemas",
             "workspace_isolation",
             "workspace_id",
@@ -167,23 +188,32 @@ impl MigrationTrait for Migration {
         .await?;
 
         // The old DDL granted this table via a schema-wide "GRANT ... ON ALL TABLES IN SCHEMA content", now individualized per-table since every table shares one schema after the public-schema unification.
-        helpers::grant(db, "SELECT, INSERT, UPDATE, DELETE", "content_schemas").await?;
+        helpers::grant(manager, "SELECT, INSERT, UPDATE, DELETE", "content_schemas").await?;
 
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "ALTER TABLE identity_workspaces DROP CONSTRAINT IF EXISTS fk_identity_workspaces_schema_id;",
         )
         .await?;
-        db.execute_unprepared(
+        helpers::pg_only(
+            manager,
             "DROP TRIGGER IF EXISTS templates_detach_schema_origins ON identity_templates;",
         )
         .await?;
-        db.execute_unprepared("DROP FUNCTION IF EXISTS detach_orphaned_schema_origin();")
-            .await?;
+        helpers::pg_only(
+            manager,
+            "DROP FUNCTION IF EXISTS detach_orphaned_schema_origin();",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "DROP TRIGGER IF EXISTS templates_detach_schema_origins;",
+        )
+        .await?;
         manager
             .drop_table(
                 Table::drop()
