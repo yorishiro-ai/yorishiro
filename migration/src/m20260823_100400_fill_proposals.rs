@@ -14,12 +14,10 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("content_fill_proposals"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk())
-                    // Batch job identifier, not a row reference: no REFERENCES clause in the
-                    // old DDL, matching content_entity_snapshots.job_id.
+                    // Batch job identifier, not a row reference: no REFERENCES clause in the old DDL, matching content_entity_snapshots.job_id.
                     .col(ColumnDef::new(Alias::new("job_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
-                    // No foreign key: an entity can be deleted between a proposal and its
-                    // confirmation, per the old DDL having no REFERENCES clause here either.
+                    // No foreign key: an entity can be deleted between a proposal and its confirmation, per the old DDL having no REFERENCES clause here either.
                     .col(ColumnDef::new(Alias::new("entity_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("field_name")).text().not_null())
                     .col(
@@ -64,9 +62,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // Lenient, matching content_entity_snapshots: the control-plane pool also reaches this
-        // table over a connection that has not named a workspace, and must match nothing
-        // rather than raise.
+        // Lenient, matching content_entity_snapshots: the control-plane pool also reaches this table over a connection that has not named a workspace, and must match nothing rather than raise.
         helpers::enable_rls_with_policy(
             db,
             "content_fill_proposals",

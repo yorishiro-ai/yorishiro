@@ -32,9 +32,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // Every row is either password-authenticated (password_hash set, oauth_* both NULL) or
-        // OAuth-provisioned (oauth_provider + oauth_subject_id set, password_hash may be NULL),
-        // never a mix and never neither.
+        // Every row is either password-authenticated (password_hash set, oauth_* both NULL) or OAuth-provisioned (oauth_provider + oauth_subject_id set, password_hash may be NULL), never a mix and never neither.
         db.execute_unprepared(
             "ALTER TABLE identity_users \
              ADD CONSTRAINT users_auth_method_check CHECK ( \
@@ -53,9 +51,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No RLS and no GRANT for this table: identity_users is a control-plane table reached
-        // only through the migration-role identity pool (see src/db.rs), never a tenant-scoped
-        // request connection, so yorishiro_app has no business touching it directly.
+        // No RLS and no GRANT for this table: identity_users is a control-plane table reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, so yorishiro_app has no business touching it directly.
         Ok(())
     }
 

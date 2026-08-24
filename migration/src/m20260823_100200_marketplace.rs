@@ -22,8 +22,9 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(Alias::new("changelog")).text())
-                    // draft: visible only to the owning tenant. pre: published but announced
-                    // as unstable. stable: the version an installer gets by default.
+                    // draft: visible only to the owning tenant.
+                    // pre: published but announced as unstable.
+                    // stable: the version an installer gets by default.
                     .col(
                         ColumnDef::new(Alias::new("status"))
                             .text()
@@ -75,9 +76,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // One review per tenant per template: a tenant that used a template twice does not get
-        // two votes, and updating an opinion is an UPDATE (upsert_review's ON CONFLICT) rather
-        // than a second row.
+        // One review per tenant per template: a tenant that used a template twice does not get two votes, and updating an opinion is an UPDATE (upsert_review's ON CONFLICT) rather than a second row.
         manager
             .create_table(
                 Table::create()
@@ -152,9 +151,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // No RLS, no GRANT to yorishiro_app on either table, matching identity_templates itself:
-        // both are read in exactly the same paths (the repository layer, as the owner role,
-        // scoping by tenant in the query) and are never reached through the tenant pool.
+        // No RLS, no GRANT to yorishiro_app on either table, matching identity_templates itself: both are read in exactly the same paths (the repository layer, as the owner role, scoping by tenant in the query) and are never reached through the tenant pool.
         Ok(())
     }
 

@@ -43,8 +43,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // sea_query's Table::create() has no table-level CHECK builder in use here, so this one
-        // goes through raw SQL right after create_table.
+        // sea_query's Table::create() has no table-level CHECK builder in use here, so this one goes through raw SQL right after create_table.
         db.execute_unprepared(
             "ALTER TABLE identity_invites ADD CONSTRAINT identity_invites_role_check \
              CHECK (role IN ('owner', 'admin', 'member', 'viewer'));",
@@ -61,9 +60,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Strict policy: yorishiro_app sets app.current_tenant on every connection, so this
-        // table is reached only through the tenant-scoped identity pool, never a connection
-        // missing the GUC.
+        // Strict policy: yorishiro_app sets app.current_tenant on every connection, so this table is reached only through the tenant-scoped identity pool, never a connection missing the GUC.
         helpers::enable_rls_with_policy(
             db,
             "identity_invites",
@@ -74,10 +71,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No GRANT: identity_invites is control-plane, same as identity_tenants,
-        // identity_users and identity_tenant_memberships. The admin CLI creates invites as the
-        // schema owner during provisioning, before any request-scoped role needs to touch this
-        // table.
+        // No GRANT: identity_invites is control-plane, same as identity_tenants, identity_users and identity_tenant_memberships.
+        // The admin CLI creates invites as the schema owner during provisioning, before any request-scoped role needs to touch this table.
 
         Ok(())
     }

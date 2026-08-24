@@ -32,8 +32,7 @@ pub struct ConfirmReport {
 }
 
 /// Records what a model proposed.
-/// Replaces any earlier proposal for the same field in the same job, so re-running inference for
-/// a job does not leave two answers with no way to choose.
+/// Replaces any earlier proposal for the same field in the same job, so re-running inference for a job does not leave two answers with no way to choose.
 pub async fn record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -100,9 +99,8 @@ pub async fn confirm(
     let mut applied = 0i64;
     let mut skipped = 0i64;
 
-    // Grouped per entity: one entity with three proposed fields is one write and one snapshot,
-    // not three of each. Three snapshots of the same entity under one job would make undo
-    // restore an intermediate state depending on which row it read last.
+    // Grouped per entity: one entity with three proposed fields is one write and one snapshot, not three of each.
+    // Three snapshots of the same entity under one job would make undo restore an intermediate state depending on which row it read last.
     let mut by_entity: std::collections::BTreeMap<Uuid, Vec<&FillProposal>> = Default::default();
     for proposal in &proposals {
         by_entity
@@ -131,8 +129,8 @@ pub async fn confirm(
 
         match content_entities::update(conn, workspace_id, entity_id, data, None).await {
             Ok(_) => applied += fields.len() as i64,
-            // The schema rejected a guess. The other entities in this batch were reviewed too,
-            // so one bad guess does not discard them.
+            // The schema rejected a guess.
+            // The other entities in this batch were reviewed too, so one bad guess does not discard them.
             Err(_) => skipped += fields.len() as i64,
         }
     }

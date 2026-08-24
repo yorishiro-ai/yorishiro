@@ -23,9 +23,8 @@ pub struct TenantScopedAuthenticator;
 enum RequestedWorkspace {
     Absent,
     Present(Uuid),
-    /// Present but not a UUID. Distinct from `Absent` on purpose: treating an unparseable value
-    /// as "not sent" would send a request meant for one workspace to whichever one the key
-    /// happens to carry.
+    /// Present but not a UUID.
+    /// Distinct from `Absent` on purpose: treating an unparseable value as "not sent" would send a request meant for one workspace to whichever one the key happens to carry.
     Malformed,
 }
 
@@ -69,9 +68,7 @@ impl Authenticator for TenantScopedAuthenticator {
         let key_hash = yorishiro_core::services::auth::hash_key(presented_key);
 
         // The two-argument overload the identity migration adds (m20260822_101200).
-        // `p_requested_workspace` is only consulted for a key with no workspace of its own, and
-        // resolves only when the named workspace belongs to that key's tenant: the tenant
-        // isolation boundary for these keys.
+        // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
         let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
             "SELECT id, workspace_id, tenant_id, scope, user_id \
              FROM authenticate_api_key($1, $2)",
@@ -85,10 +82,8 @@ impl Authenticator for TenantScopedAuthenticator {
         let (api_key_id, workspace_id, tenant_id, scope_str, user_id) =
             row.ok_or(YorishiroError::Unauthenticated)?;
 
-        // A workspace-scoped key ignores the header, so a client that sends one naming a
-        // different workspace is asking for something it will not get. Rejecting says so;
-        // proceeding would act on the key's own workspace instead: a write landing where the
-        // client never named, answered with a 2xx.
+        // A workspace-scoped key ignores the header, so a client that sends one naming a different workspace is asking for something it will not get.
+        // Rejecting says so; proceeding would act on the key's own workspace instead: a write landing where the client never named, answered with a 2xx.
         if let Some(requested) = requested
             && requested != workspace_id
         {
@@ -155,8 +150,7 @@ pub async fn create_tenant_api_key(
     }
 
     if let Some(user_id) = user_id {
-        // `tenancy::get_membership_role` takes `&impl sea_orm::ConnectionTrait`, not a raw sqlx
-        // pool, so the role is read the same raw-SQL way as everything else here.
+        // `tenancy::get_membership_role` takes `&impl sea_orm::ConnectionTrait`, not a raw sqlx pool, so the role is read the same raw-SQL way as everything else here.
         let role_str: Option<(String,)> = sqlx::query_as(
             "SELECT role FROM identity_tenant_memberships WHERE tenant_id = $1 AND user_id = $2",
         )
@@ -183,9 +177,8 @@ pub async fn create_tenant_api_key(
         }
     }
 
-    // Same shape as base's own keys, so nothing downstream has to tell them apart by their
-    // text. The randomness is two v4 UUIDs: 122 bits each, from the same CSPRNG base's own
-    // generator draws on, and `uuid` is already a dependency here.
+    // Same shape as base's own keys, so nothing downstream has to tell them apart by their text.
+    // The randomness is two v4 UUIDs: 122 bits each, from the same CSPRNG base's own generator draws on, and `uuid` is already a dependency here.
     let prefix = format!("ysr_{}", &Uuid::new_v4().simple().to_string()[..12]);
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let plaintext = format!("{prefix}_{secret}");

@@ -17,22 +17,19 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(ColumnDef::new(Alias::new("max_entities")).integer())
-                    // A workspace exists before its schema does: `admin create-workspace` leaves
-                    // it pending, and creating the schema marks it active.
+                    // A workspace exists before its schema does: `admin create-workspace` leaves it pending, and creating the schema marks it active.
                     .col(
                         ColumnDef::new(Alias::new("status"))
                             .text()
                             .not_null()
                             .default("schema_pending"),
                     )
-                    // The model a workspace's vectors were produced by, and their width. NULL
-                    // means the deployment default, recorded so a workspace whose model changed
-                    // can be told from one provisioned under a different one.
+                    // The model a workspace's vectors were produced by, and their width.
+                    // NULL means the deployment default, recorded so a workspace whose model changed can be told from one provisioned under a different one.
                     .col(ColumnDef::new(Alias::new("embedding_model")).text())
                     .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
-                    // Circular reference: a schema also names its workspace. No foreign_key
-                    // constraint here since content_schemas may not exist yet when this migration
-                    // runs; the FK should be added later once it is guaranteed to exist.
+                    // Circular reference: a schema also names its workspace.
+                    // No foreign_key constraint here since content_schemas may not exist yet when this migration runs; the FK should be added later once it is guaranteed to exist.
                     .col(ColumnDef::new(Alias::new("schema_id")).uuid())
                     .col(helpers::created_at())
                     .foreign_key(
@@ -48,8 +45,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // CHECK constraints: sea_query's Table::create().check() did not compile cleanly here,
-        // so both are added via raw ALTER TABLE right after create_table.
+        // CHECK constraints: sea_query's Table::create().check() did not compile cleanly here, so both are added via raw ALTER TABLE right after create_table.
         db.execute_unprepared(
             "ALTER TABLE identity_workspaces \
              ADD CONSTRAINT identity_workspaces_status_check \
@@ -75,9 +71,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Strict form: `yorishiro_app` sets both GUCs on every connection, so reaching this
-        // table without a tenant is a bug, and raising surfaces it rather than reading as an
-        // empty tenant.
+        // Strict form: `yorishiro_app` sets both GUCs on every connection, so reaching this table without a tenant is a bug, and raising surfaces it rather than reading as an empty tenant.
         helpers::enable_rls_with_policy(
             db,
             "identity_workspaces",
@@ -90,10 +84,9 @@ impl MigrationTrait for Migration {
 
         helpers::grant(db, "SELECT", "identity_workspaces").await?;
 
-        // Column-level GRANT UPDATE: `status` and `schema_id` are the whole of what a request
-        // writes here. `max_entities`, `name` and the embedding stamp are provisioning decisions;
-        // a request that could rewrite its own quota is a different system. Issued raw since
-        // helpers::grant()'s signature only expresses whole-table grants.
+        // Column-level GRANT UPDATE: `status` and `schema_id` are the whole of what a request writes here.
+        // `max_entities`, `name` and the embedding stamp are provisioning decisions; a request that could rewrite its own quota is a different system.
+        // Issued raw since helpers::grant()'s signature only expresses whole-table grants.
         db.execute_unprepared(
             "GRANT UPDATE (status, schema_id) ON identity_workspaces TO yorishiro_app;",
         )

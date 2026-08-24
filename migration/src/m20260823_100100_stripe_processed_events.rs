@@ -43,12 +43,8 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // yorishiro_app gets no GRANT at all here, matching identity_tenants/
-        // identity_tenant_billing: this table is reached only through ctx.db (the migration-role
-        // connection, the Stripe webhook handler's only DB access), never a tenant-scoped
-        // request connection. No RLS either: unlike tenant_billing this table has no tenant_id
-        // column to scope a policy on (it's keyed by Stripe's own event id), and it is never
-        // reached by anything but ctx.db regardless.
+        // yorishiro_app gets no GRANT at all here, matching identity_tenants/identity_tenant_billing: this table is reached only through ctx.db (the migration-role connection, the Stripe webhook handler's only DB access), never a tenant-scoped request connection.
+        // No RLS either: unlike tenant_billing this table has no tenant_id column to scope a policy on (it's keyed by Stripe's own event id), and it is never reached by anything but ctx.db regardless.
         Ok(())
     }
 

@@ -14,8 +14,7 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("identity_api_keys"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk())
-                    // Nullable: a tenant-scoped key (one that spans every workspace in its
-                    // tenant) carries no workspace_id at all.
+                    // Nullable: a tenant-scoped key (one that spans every workspace in its tenant) carries no workspace_id at all.
                     .col(ColumnDef::new(Alias::new("workspace_id")).uuid())
                     .foreign_key(
                         ForeignKey::create()
@@ -47,9 +46,7 @@ impl MigrationTrait for Migration {
                             .unique_key(),
                     )
                     .col(ColumnDef::new(Alias::new("key_prefix")).text().not_null())
-                    // `migration` ranks above `schema`: registering a schema adds a version
-                    // nothing has been written against yet, while a batch migration rewrites
-                    // stored rows.
+                    // `migration` ranks above `schema`: registering a schema adds a version nothing has been written against yet, while a batch migration rewrites stored rows.
                     .col(
                         ColumnDef::new(Alias::new("scope"))
                             .text()
@@ -76,16 +73,12 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // RLS policy is an OR of two lenient conditions, not the single-column equality
-        // helpers::enable_rls_with_policy expresses, so it is written directly here.
+        // RLS policy is an OR of two lenient conditions, not the single-column equality helpers::enable_rls_with_policy expresses, so it is written directly here.
         //
         // A workspace-scoped key is visible when its workspace_id matches the session's.
         // A tenant-scoped key (workspace_id NULL) is instead visible to any session in its tenant, since NULL = <uuid> is NULL rather than true and would otherwise make such a key's own row invisible to the very session authenticated by it.
         //
-        // Both reads use NULLIF(current_setting(..., true), '') rather than the strict form:
-        // this table is also reached by the control-plane pool, where neither
-        // app.current_workspace nor app.current_tenant is set, and an unguarded read there
-        // would fail the query outright rather than matching no rows.
+        // Both reads use NULLIF(current_setting(..., true), '') rather than the strict form: this table is also reached by the control-plane pool, where neither app.current_workspace nor app.current_tenant is set, and an unguarded read there would fail the query outright rather than matching no rows.
         db.execute_unprepared(
             "ALTER TABLE identity_api_keys ENABLE ROW LEVEL SECURITY;
              CREATE POLICY workspace_isolation ON identity_api_keys

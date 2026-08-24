@@ -8,12 +8,8 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
 
-        // SECURITY DEFINER so the lookup can read rows RLS would hide: the caller has not been
-        // identified yet, so there is no workspace to scope to. Two overloads: the one-argument
-        // form resolves a key bound to a single workspace (returns nothing for a key that
-        // carries none); the two-argument form additionally resolves a tenant-scoped key
-        // (workspace_id NULL) against a requested workspace, membership-checked so a
-        // tenant-scoped key cannot be pointed at a workspace outside its own tenant.
+        // SECURITY DEFINER so the lookup can read rows RLS would hide: the caller has not been identified yet, so there is no workspace to scope to.
+        // Two overloads: the one-argument form resolves a key bound to a single workspace (returns nothing for a key that carries none); the two-argument form additionally resolves a tenant-scoped key (workspace_id NULL) against a requested workspace, membership-checked so a tenant-scoped key cannot be pointed at a workspace outside its own tenant.
         db.execute_unprepared(
             "CREATE FUNCTION authenticate_api_key(p_key_hash bytea)
              RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, scope text, user_id uuid)
@@ -32,10 +28,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No DEFAULT on the second argument, deliberately: with one, a single-argument call
-        // matches both overloads and Postgres refuses it as ambiguous ("function is not
-        // unique"). Requiring both makes the arity unambiguous, so the one-argument form above
-        // keeps resolving on its own.
+        // No DEFAULT on the second argument, deliberately: with one, a single-argument call matches both overloads and Postgres refuses it as ambiguous ("function is not unique").
+        // Requiring both makes the arity unambiguous, so the one-argument form above keeps resolving on its own.
         db.execute_unprepared(
             "CREATE FUNCTION authenticate_api_key(
                p_key_hash bytea,

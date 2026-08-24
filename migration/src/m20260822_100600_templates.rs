@@ -43,17 +43,14 @@ impl MigrationTrait for Migration {
                             .col(Alias::new("tenant_id"))
                             .col(Alias::new("name")),
                     )
-                    // No ON DELETE action on this FK, unlike every other tenant_id FK in this
-                    // schema: RESTRICT/NO ACTION is the default, so deleting a tenant with
-                    // templates fails loudly instead of cascading them away.
+                    // No ON DELETE action on this FK, unlike every other tenant_id FK in this schema: RESTRICT/NO ACTION is the default, so deleting a tenant with templates fails loudly instead of cascading them away.
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_tenant_id")
                             .from(Alias::new("identity_templates"), Alias::new("tenant_id"))
                             .to(Alias::new("identity_tenants"), Alias::new("id")),
                     )
-                    // Self-referential: deleting a template others were forked from must
-                    // leave the forks usable, losing only the pointer back.
+                    // Self-referential: deleting a template others were forked from must leave the forks usable, losing only the pointer back.
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_fork_of")
@@ -73,8 +70,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // sea_query's ColumnDef has no TEXT[] helper, so this column is added as raw SQL
-        // right after create_table.
+        // sea_query's ColumnDef has no TEXT[] helper, so this column is added as raw SQL right after create_table.
         db.execute_unprepared(
             "ALTER TABLE identity_templates ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';",
         )
@@ -90,20 +86,15 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // GIN index over a TEXT[] column: create_index has no operator-class expression for
-        // this, so it goes through raw SQL.
+        // GIN index over a TEXT[] column: create_index has no operator-class expression for this, so it goes through raw SQL.
         db.execute_unprepared(
             "CREATE INDEX templates_tags_idx ON identity_templates USING gin(tags);",
         )
         .await?;
 
-        // No RLS on this table, deliberately: template queries run as the owner through the
-        // repository layer, which scopes by tenant in the query itself, because a policy
-        // would have to read the table the app role holds no grant on, and a policy the role
-        // cannot evaluate fails the query rather than filtering it.
+        // No RLS on this table, deliberately: template queries run as the owner through the repository layer, which scopes by tenant in the query itself, because a policy would have to read the table the app role holds no grant on, and a policy the role cannot evaluate fails the query rather than filtering it.
         //
-        // No GRANT either, for the same reason: yorishiro_app is never the role that reaches
-        // this table, so there is nothing to grant it.
+        // No GRANT either, for the same reason: yorishiro_app is never the role that reaches this table, so there is nothing to grant it.
         Ok(())
     }
 

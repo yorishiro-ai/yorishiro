@@ -69,8 +69,7 @@ impl MigrationTrait for Migration {
         db.execute_unprepared("ALTER TABLE content_entities ADD COLUMN embedding vector(768)")
             .await?;
 
-        // None of these are expressible through create_index: a multi-column composite, a GIN
-        // index with jsonb_path_ops, an HNSW index, and a trigram index over an expression.
+        // None of these are expressible through create_index: a multi-column composite, a GIN index with jsonb_path_ops, an HNSW index, and a trigram index over an expression.
         db.execute_unprepared(
             "CREATE INDEX entities_workspace_type_idx ON content_entities (workspace_id, entity_type, created_at)",
         )
@@ -92,10 +91,9 @@ impl MigrationTrait for Migration {
         db.execute_unprepared("ALTER TABLE content_entities ALTER COLUMN embedding TYPE vector")
             .await?;
 
-        // Strict form, on purpose (old file lines 378-382, 386-387). yorishiro_app sets both
-        // app.current_tenant and app.current_workspace on every connection, so reaching this
-        // table without a workspace set is a bug. Raising surfaces that bug; a lenient policy
-        // would instead read it as an empty workspace and hide it.
+        // Strict form, on purpose (old file lines 378-382, 386-387).
+        // yorishiro_app sets both app.current_tenant and app.current_workspace on every connection, so reaching this table without a workspace set is a bug.
+        // Raising surfaces that bug; a lenient policy would instead read it as an empty workspace and hide it.
         helpers::enable_rls_with_policy(
             db,
             "content_entities",
@@ -106,9 +104,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Old file granted this schema-wide (line 415: GRANT ... ON ALL TABLES IN SCHEMA
-        // content). One schema no longer separates content tables from identity tables, so the
-        // grant is individualized per table here instead.
+        // Old file granted this schema-wide (line 415: GRANT ... ON ALL TABLES IN SCHEMA content).
+        // One schema no longer separates content tables from identity tables, so the grant is individualized per table here instead.
         helpers::grant(db, "SELECT, INSERT, UPDATE, DELETE", "content_entities").await?;
 
         Ok(())

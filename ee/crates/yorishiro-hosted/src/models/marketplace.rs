@@ -20,8 +20,7 @@ pub struct MarketplaceListing {
     pub tags: Vec<String>,
     pub author: Option<String>,
     /// The tenant that publishes it.
-    /// Present so a browser can tell two same-named templates apart, not for display of anything
-    /// tenant-private.
+    /// Present so a browser can tell two same-named templates apart, not for display of anything tenant-private.
     pub tenant_id: Uuid,
     /// Highest `stable` version, or `null` when only pre-releases have been published.
     pub latest_stable_version: Option<i32>,
@@ -71,8 +70,7 @@ pub struct SubmitReviewRequest {
     pub comment: Option<String>,
 }
 
-/// The template columns a fork copies across, minus the definition (which comes from the chosen
-/// version rather than the template row).
+/// The template columns a fork copies across, minus the definition (which comes from the chosen version rather than the template row).
 #[derive(FromQueryResult)]
 pub(crate) struct ForkSource {
     pub(crate) name: String,
@@ -135,9 +133,8 @@ pub async fn list_marketplace(
 
 /// Versions of a template that `tenant_id` is allowed to see.
 ///
-/// **Drafts are the caller's own only.** The database does not enforce this:
-/// `identity_template_versions` carries no RLS, matching `identity_templates`, so this WHERE
-/// clause is the enforcement, and dropping it publishes every tenant's unfinished work.
+/// **Drafts are the caller's own only.**
+/// The database does not enforce this: `identity_template_versions` carries no RLS, matching `identity_templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
 pub async fn list_versions(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -215,9 +212,7 @@ pub async fn list_reviews(
     .internal()
 }
 
-/// Whether a template visible to `tenant_id` exists, for
-/// `services::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless"
-/// guard.
+/// Whether a template visible to `tenant_id` exists, for `services::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
 pub(crate) async fn is_visible(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -335,8 +330,7 @@ pub(crate) enum InsertForkOutcome {
 }
 
 /// Inserts the caller's own private copy of a forked template.
-/// The forked copy starts `visibility = 'tenant'`: publishing someone else's work into the
-/// marketplace under your name is a decision, not a default.
+/// The forked copy starts `visibility = 'tenant'`: publishing someone else's work into the marketplace under your name is a decision, not a default.
 pub(crate) async fn insert_fork(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -388,8 +382,7 @@ pub(crate) async fn insert_fork(
     }
 }
 
-/// Whether a template exists and belongs to `tenant_id`, for
-/// `services::marketplace::require_ownership`.
+/// Whether a template exists and belongs to `tenant_id`, for `services::marketplace::require_ownership`.
 pub(crate) async fn is_owned_by(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -412,8 +405,7 @@ pub(crate) async fn is_owned_by(
 }
 
 /// Sets a template's marketplace visibility.
-/// `services::marketplace::set_visibility` has already checked ownership; this is the write
-/// alone.
+/// `services::marketplace::set_visibility` has already checked ownership; this is the write alone.
 pub(crate) async fn update_visibility(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
