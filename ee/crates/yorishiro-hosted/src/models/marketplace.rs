@@ -283,8 +283,7 @@ pub(crate) async fn find_fork_source(
     .internal()
 }
 
-/// The definition to fork: the given version if published (never a draft, even by number), or
-/// the latest `stable` one when `version` is `None`.
+/// The definition to fork: the given version if published (never a draft, even by number), or the latest `stable` one when `version` is `None`.
 pub(crate) async fn find_forkable_definition(
     conn: &impl ConnectionTrait,
     template_id: Uuid,

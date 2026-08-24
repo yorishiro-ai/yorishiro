@@ -48,8 +48,7 @@ pub struct MergePlan {
 
 impl MergePlan {
     /// Whether anything needs a person.
-    /// A plan with no conflicts can be applied whole; one with any cannot be applied at all, since
-    /// a partial merge would leave the schema in a state neither side asked for.
+    /// A plan with no conflicts can be applied whole; one with any cannot be applied at all, since a partial merge would leave the schema in a state neither side asked for.
     pub fn has_conflicts(&self) -> bool {
         self.fields
             .iter()
@@ -129,8 +128,7 @@ fn classify(
         (false, false) => None,
         (true, false) => {
             // Only upstream moved.
-            // Adding is distinguishable from changing, and the operator reads them differently
-            // even though both are taken automatically.
+            // Adding is distinguishable from changing, and the operator reads them differently even though both are taken automatically.
             if base.is_none() {
                 Some((
                     MergeVerdict::AutoAdd,
@@ -163,8 +161,7 @@ fn classify(
         }
         (true, true) => {
             // Both moved.
-            // Identical moves are not a conflict: two people adding the same field with the same
-            // type have agreed, not disagreed.
+            // Identical moves are not a conflict: two people adding the same field with the same type have agreed, not disagreed.
             if same(upstream, local) {
                 None
             } else {
