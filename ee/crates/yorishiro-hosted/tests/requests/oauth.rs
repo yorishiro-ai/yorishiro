@@ -49,9 +49,7 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     result
 }
 
-/// `GET /auth/oauth/status` always answers 200, whether or not OAuth is configured: a client
-/// deciding whether to show the "Sign in with SSO" button has no other way to tell "not
-/// configured" apart from "not present".
+/// `GET /auth/oauth/status` always answers 200, whether or not OAuth is configured: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
 #[tokio::test]
 #[serial]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
@@ -189,8 +187,7 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
     .await;
 }
 
-/// A callback missing `code` or `state` (hit directly, without ever having visited `authorize`)
-/// redirects to the same login-failure state rather than a raw validation error.
+/// A callback missing `code` or `state` (hit directly, without ever having visited `authorize`) redirects to the same login-failure state rather than a raw validation error.
 #[tokio::test]
 #[serial]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {

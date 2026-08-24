@@ -64,8 +64,7 @@ pub async fn find_or_create(
 
     let user = match create_oauth_user(conn, email, display_name, provider, subject_id).await {
         Ok(user) => user,
-        // The lookup above, under this same lock, confirmed no row exists for this identity
-        // yet, so this can only be a genuine email collision with an unrelated account.
+        // The lookup above, under this same lock, confirmed no row exists for this identity yet, so this can only be a genuine email collision with an unrelated account.
         Err(CreateOauthUserError::UniqueViolation) => {
             return Err(YorishiroError::Conflict {
                 message: format!(
@@ -113,8 +112,7 @@ pub async fn find_or_create(
     )
     .await?;
 
-    // A schema requires an existing `workspace_id`, so it is created after the workspace and
-    // the workspace is then updated to point at it, moving its `status` to `active`.
+    // A schema requires an existing `workspace_id`, so it is created after the workspace and the workspace is then updated to point at it, moving its `status` to `active`.
     let definition = yorishiro_core::templates::get_template("general-notes")?;
     let (schema, _diff) =
         content_schemas::create_schema(conn, tenant.id, workspace.id, definition, None, None)

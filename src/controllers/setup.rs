@@ -26,8 +26,7 @@ fn wizard_enabled() -> bool {
 
 #[derive(Debug, Serialize)]
 pub struct SetupStatusResponse {
-    /// True when the wizard is enabled and no tenant exists yet: the client should show the
-    /// setup form instead of the login form.
+    /// True when the wizard is enabled and no tenant exists yet: the client should show the setup form instead of the login form.
     pub setup_required: bool,
 }
 
@@ -53,8 +52,7 @@ pub struct SetupResponse {
     pub email: String,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
-    /// A freshly issued API key, scoped to the new owner account: shown only here, same as
-    /// `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
+    /// A freshly issued API key, scoped to the new owner account: shown only here, same as `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
     pub api_key: String,
 }
 

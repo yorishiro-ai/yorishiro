@@ -81,8 +81,7 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
-/// An unlicensed deployment answers 404, matching an unconfigured setup wizard: the deployment
-/// genuinely does not serve this, not 401/403, which would confirm the route exists.
+/// An unlicensed deployment answers 404, matching an unconfigured setup wizard: the deployment genuinely does not serve this, not 401/403, which would confirm the route exists.
 #[tokio::test]
 #[serial]
 async fn without_a_licence_the_marketplace_is_not_served() {
@@ -126,8 +125,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     .await;
 }
 
-/// A licensed deployment still authenticates: without this, "gated" and "open to anyone" would
-/// look the same as the previous test.
+/// A licensed deployment still authenticates: without this, "gated" and "open to anyone" would look the same as the previous test.
 #[tokio::test]
 #[serial]
 async fn a_licence_does_not_replace_authentication() {

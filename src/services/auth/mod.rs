@@ -24,8 +24,8 @@ pub enum ApiKeyScope {
     Read,
     Write,
     Schema,
-    /// Running a batch migration, and switching maintenance mode. Above `schema` because both
-    /// act on data already stored.
+    /// Running a batch migration, and switching maintenance mode.
+    /// Above `schema` because both act on data already stored.
     Migration,
 }
 
@@ -72,8 +72,8 @@ pub struct CreatedApiKey {
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
     pub user_id: Option<Uuid>,
-    /// The raw API key string. Only its hash is stored in the DB, so this return value is the
-    /// only place it can ever be obtained.
+    /// The raw API key string.
+    /// Only its hash is stored in the DB, so this return value is the only place it can ever be obtained.
     pub plaintext: String,
 }
 

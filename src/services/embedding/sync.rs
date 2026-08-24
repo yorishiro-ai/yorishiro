@@ -66,8 +66,7 @@ pub async fn sync_embedding(
         });
     }
 
-    // `updated_at` as a write condition prevents a vector computed from stale data from
-    // overwriting a newer one when concurrent syncs for the same entity finish out of order.
+    // `updated_at` as a write condition prevents a vector computed from stale data from overwriting a newer one when concurrent syncs for the same entity finish out of order.
     // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later sync.
     let result = conn
         .execute_raw(Statement::from_sql_and_values(
@@ -129,8 +128,7 @@ pub async fn sync_embedding_for_record(
     .await
 }
 
-/// The dimension count a workspace's vectors are expected to have, or `None` when it was created
-/// before the stamp existed and therefore takes the deployment's.
+/// The dimension count a workspace's vectors are expected to have, or `None` when it was created before the stamp existed and therefore takes the deployment's.
 async fn workspace_embedding_dimensions(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
