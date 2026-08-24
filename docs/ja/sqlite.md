@@ -48,6 +48,9 @@ SQLiteでも表現はできるが構文が異なるものは、バックエン�
 
 ## 現在のSQLite出力に関する2つの注意点
 
-SQLiteは既定では外部キーを強制しない。接続側が自分で`PRAGMA foreign_keys = ON`を実行する必要がある。マイグレーション後のスキーマに現れる`FOREIGN KEY`宣言はすべて存在してはいるが、接続先がこのプラグマを設定するまでは効力を持たない。
+SQLiteは既定では外部キーを強制しない。
+接続側が自分で`PRAGMA foreign_keys = ON`を実行する必要がある。
+マイグレーション後のスキーマに現れる`FOREIGN KEY`宣言はすべて存在してはいるが、接続先がこのプラグマを設定するまでは効力を持たない。
 
-SQLite上の`CURRENT_TIMESTAMP`は、sea_queryが`timestamp_with_timezone_text`と名付けたカラムに対して、`YYYY-MM-DD HH:MM:SS`(オフセット無し)という形式でレンダリングされる。このカラムはその名前とは裏腹に、実体はただのSQLiteの`TEXT`カラムであり、PostgreSQLの`timestamptz`のようなタイムゾーン対応のストレージはこのバックエンドには存在しない。
+SQLite上の`CURRENT_TIMESTAMP`は、sea_queryが`timestamp_with_timezone_text`と名付けたカラムに対して、`YYYY-MM-DD HH:MM:SS`(オフセット無し)という形式でレンダリングされる。
+このカラムはその名前とは裏腹に、実体はただのSQLiteの`TEXT`カラムであり、PostgreSQLの`timestamptz`のようなタイムゾーン対応のストレージはこのバックエンドには存在しない。
