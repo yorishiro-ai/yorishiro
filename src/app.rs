@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use loco_rs::{
     Result,
     app::{AppContext, Hooks, Initializer},
-    bgworker::Queue,
+    bgworker::{BackgroundWorker, Queue},
     boot::{BootResult, StartMode, create_app},
     config::Config,
     controller::AppRoutes,
@@ -123,8 +123,12 @@ impl Hooks for App {
         )))
     }
 
-    async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
-        Ok(())
+    async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
+        queue
+            .register(crate::workers::embedding_sync::EmbeddingSyncWorker::build(
+                ctx,
+            ))
+            .await
     }
 
     #[allow(unused_variables)]

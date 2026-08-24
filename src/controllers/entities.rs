@@ -4,36 +4,29 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use loco_rs::app::AppContext;
+use loco_rs::bgworker::BackgroundWorker;
 use loco_rs::controller::Routes;
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{
-    Authorized, MigrationScope, ReadScope, WriteScope, embedding_provider,
-};
+use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
 use crate::models::content_entities::{self, EntityRecord, UndoReport};
+use crate::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker};
 
-/// Fires embedding sync in the background after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
-/// Errors (provider unreachable, dimension mismatch) are logged, not surfaced: the entity write already succeeded and embedding is an auxiliary feature (see `sync_embedding`'s doc comment).
-/// Loco's queue backend isn't wired yet (`Hooks::connect_workers` is a no-op), so `tokio::spawn` is the lazy stand-in until it is.
-fn spawn_embedding_sync(ctx: AppContext, workspace_id: Uuid, record: EntityRecord) {
-    let Ok(provider) = embedding_provider(&ctx) else {
-        return;
+/// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
+/// `perform_later` in `BackgroundQueue` mode only inserts a row into `pg_loco_queue` and returns; the embedding provider round trip happens later, inside `EmbeddingSyncWorker::perform`, on a worker process, not on this request's task.
+/// Runs on Loco's own `BackgroundQueue` (`pg_loco_queue`), so a process restart, a forced kill, or a provider outage that exhausts its own retries no longer silently loses the sync: the job survives in the queue table for the next worker run.
+/// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
+async fn enqueue_embedding_sync(ctx: &AppContext, workspace_id: Uuid, record: &EntityRecord) {
+    let args = EmbeddingSyncArgs {
+        workspace_id,
+        entity_id: record.id,
     };
-    tokio::spawn(async move {
-        if let Err(err) = crate::services::embedding::sync::sync_embedding_for_record(
-            &ctx.db,
-            workspace_id,
-            &record,
-            provider.as_ref(),
-        )
-        .await
-        {
-            tracing::warn!(entity_id = %record.id, error = %err, "embedding sync failed");
-        }
-    });
+    if let Err(err) = EmbeddingSyncWorker::perform_later(ctx, args).await {
+        tracing::warn!(entity_id = %record.id, error = %err, "failed to enqueue embedding sync");
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,7 +67,7 @@ pub async fn create_entity(
     let record =
         content_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
     authorized.commit().await?;
-    spawn_embedding_sync(ctx, workspace_id, record.clone());
+    enqueue_embedding_sync(&ctx, workspace_id, &record).await;
     Ok((StatusCode::CREATED, Json(record)))
 }
 
@@ -98,7 +91,7 @@ pub async fn update_entity(
     let record =
         content_entities::update(authorized.txn(), workspace_id, id, body.data, updated_by).await?;
     authorized.commit().await?;
-    spawn_embedding_sync(ctx, workspace_id, record.clone());
+    enqueue_embedding_sync(&ctx, workspace_id, &record).await;
     Ok(Json(record))
 }
 

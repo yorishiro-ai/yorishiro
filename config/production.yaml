@@ -106,7 +106,7 @@ database:
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
   # Maximum number of connections for a pool. Serving real traffic on the
   # development default of 1 serializes every request behind one connection.
-  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="100") %>
   # Run migration up when application loaded.
   # Convenient for single-instance deploys. Turn it off if you run more than
   # one instance or migrate as a separate release step, so instances do not

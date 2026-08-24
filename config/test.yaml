@@ -33,7 +33,7 @@ server:
 # Worker Configuration
 workers:
   # specifies the worker mode. Options:
-  #   - BackgroundQueue - Workers operate asynchronously in the background, processing queued.
+  #   - BackgroundQueue - Workers operate asynchronously in the background, processing queued. Requires queue: below (Loco's own register_workers errors with QueueProviderMissing otherwise).
   #   - ForegroundBlocking - Workers operate in the foreground and block until tasks are completed.
   #   - BackgroundAsync - Workers operate asynchronously in the background, processing tasks with async capabilities.
   mode: ForegroundBlocking
@@ -41,10 +41,11 @@ workers:
 
 # Queue Configuration
 #
-# Omitted (falls back to Queue::empty(), a no-op) in this environment specifically: nothing in
-# this codebase enqueues a job yet (Hooks::connect_workers is a no-op), and the Postgres-backed
-# provider's shutdown() only cancels its polling loop, not its own PgPool, with no method that
-# does close it. See CLAUDE.md's Tests section.
+# Omitted (falls back to Queue::empty(), a no-op) in this environment specifically, even though development.yaml/production.yaml configure the Postgres-backed queue for EmbeddingSyncWorker: that provider's shutdown() only cancels its polling loop, not its own PgPool, with no method that does close it, and a test's close_app_pools has nothing to close it with.
+# See CLAUDE.md's Tests section.
+#
+# `mode: ForegroundBlocking` below is what makes this safe rather than a silent behavior change: with no queue provider, `EmbeddingSyncWorker::perform_later` under BackgroundQueue mode would log an error and skip the sync entirely (see BackgroundWorker::perform_later_with_priority in loco-rs).
+# ForegroundBlocking instead runs `perform` synchronously in the calling task, so a test asserting on `embedding IS NOT NULL` after creating an entity sees the real, awaited result.
 
 # Mailer Configuration.
 mailer:
@@ -83,7 +84,7 @@ database:
   # Minimum number of connections for a pool.
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
   # Maximum number of connections for a pool.
-  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="1") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
   # Run migration up when application loaded
   auto_migrate: true
   # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
