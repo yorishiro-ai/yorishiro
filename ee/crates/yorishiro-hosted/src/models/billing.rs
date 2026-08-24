@@ -4,22 +4,30 @@
 //! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::_entities::identity_tenant_billing::{ActiveModel, Column, Entity};
 
 /// A tenant's billing state. Absent for any tenant that has never been through checkout.
-#[derive(Debug, Clone, FromQueryResult)]
+#[derive(Debug, Clone)]
 pub struct TenantBillingRecord {
     pub tenant_id: Uuid,
     pub plan: Option<String>,
     pub stripe_customer_id: Option<String>,
 }
 
-/// The columns [`TenantBillingRecord`] needs, shared by both lookups below so they can't drift
-/// apart from each other (see `search.rs`'s `HIT_COLUMNS` for the same pattern).
-const BILLING_COLUMNS: &str = "tenant_id, plan, stripe_customer_id";
+impl From<yorishiro_core::models::_entities::identity_tenant_billing::Model>
+    for TenantBillingRecord
+{
+    fn from(model: yorishiro_core::models::_entities::identity_tenant_billing::Model) -> Self {
+        TenantBillingRecord {
+            tenant_id: model.tenant_id,
+            plan: model.plan,
+            stripe_customer_id: model.stripe_customer_id,
+        }
+    }
+}
 
 /// Reads a tenant's billing state.
 /// `None` means the tenant is unbilled, not that it is missing: the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
@@ -27,14 +35,12 @@ pub async fn get_billing(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {
-    TenantBillingRecord::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        format!("SELECT {BILLING_COLUMNS} FROM identity_tenant_billing WHERE tenant_id = $1"),
-        [tenant_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()
+    Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .one(conn)
+        .await
+        .internal()
+        .map(|row| row.map(TenantBillingRecord::from))
 }
 
 /// Resolves the tenant a Stripe webhook is about.
@@ -43,16 +49,12 @@ pub async fn get_by_stripe_customer(
     conn: &impl ConnectionTrait,
     stripe_customer_id: &str,
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {
-    TenantBillingRecord::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        format!(
-            "SELECT {BILLING_COLUMNS} FROM identity_tenant_billing WHERE stripe_customer_id = $1"
-        ),
-        [stripe_customer_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()
+    Entity::find()
+        .filter(Column::StripeCustomerId.eq(stripe_customer_id))
+        .one(conn)
+        .await
+        .internal()
+        .map(|row| row.map(TenantBillingRecord::from))
 }
 
 /// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via [`get_by_stripe_customer`].
