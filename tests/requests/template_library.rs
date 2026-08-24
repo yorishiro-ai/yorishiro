@@ -46,6 +46,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
         workspace.id,
         ApiKeyScope::Migration,
         Some(owner.id),
+        false,
     )
     .await
     .expect("issue owner key")
@@ -67,6 +68,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
         workspace.id,
         ApiKeyScope::Write,
         Some(member.id),
+        false,
     )
     .await
     .expect("issue member key")

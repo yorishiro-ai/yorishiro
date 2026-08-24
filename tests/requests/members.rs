@@ -39,6 +39,7 @@ async fn issue_key_for(
         workspace_id,
         ApiKeyScope::Migration,
         Some(user_id),
+        false,
     )
     .await
     .expect("issue key")

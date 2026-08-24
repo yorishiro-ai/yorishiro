@@ -29,11 +29,14 @@ impl ActiveModel {}
 impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
+    /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `services::auth::AuthContext::audit`'s doc comment describes.
+    /// Every caller except the `create_api_key` CLI task passes `false`: an audit-reading key is an explicit operator decision, never a side effect of signup, login, or OAuth provisioning a key for an ordinary user.
     pub async fn create_api_key(
         db: &sea_orm::DatabaseConnection,
         workspace_id: uuid::Uuid,
         scope: ApiKeyScope,
         user_id: Option<uuid::Uuid>,
+        audit: bool,
     ) -> Result<CreatedApiKey, YorishiroError> {
         use super::_entities::identity_workspaces;
 
@@ -57,6 +60,7 @@ impl Entity {
             key_hash: ActiveValue::Set(key_hash),
             key_prefix: ActiveValue::Set(prefix),
             scope: ActiveValue::Set(scope.as_db_str().to_string()),
+            audit: ActiveValue::Set(audit),
             ..Default::default()
         };
         let inserted = active.insert(&txn).await.internal()?;
@@ -67,6 +71,7 @@ impl Entity {
             workspace_id,
             scope,
             user_id,
+            audit,
             plaintext,
         })
     }

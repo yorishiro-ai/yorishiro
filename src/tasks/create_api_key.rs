@@ -9,6 +9,7 @@ use crate::services::auth::ApiKeyScope;
 ///
 /// `scope` is one of `read`/`write`/`schema`/`migration`.
 /// `user_id` is optional; omitted, the key is unattributed (a service/automation key, `user_id = NULL`), same meaning as elsewhere in this codebase.
+/// `audit` is optional (`audit:true` to set it, anything else or omitted is `false`): the independent grant that lets this key read `GET /api/audit-log`, regardless of `scope`.
 ///
 /// Wraps `identity_api_keys::Entity::create_api_key`, which does the actual insert (and the workspace-exists check) on `ctx.db`.
 pub struct CreateApiKey;
@@ -18,7 +19,7 @@ impl Task for CreateApiKey {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "create_api_key".to_string(),
-            detail: "Issues an API key: cargo loco task create_api_key workspace_id:<uuid> scope:write [user_id:<uuid>]".to_string(),
+            detail: "Issues an API key: cargo loco task create_api_key workspace_id:<uuid> scope:write [user_id:<uuid>] [audit:true]".to_string(),
         }
     }
 
@@ -37,13 +38,17 @@ impl Task for CreateApiKey {
             ),
             Err(_) => None,
         };
+        let audit = vars.cli_arg("audit").map(|v| v == "true").unwrap_or(false);
 
-        let created = ApiKeys::create_api_key(&app_context.db, workspace_id, scope, user_id)
+        let created = ApiKeys::create_api_key(&app_context.db, workspace_id, scope, user_id, audit)
             .await
             .map_err(|err| Error::Message(err.to_string()))?;
 
         println!("api key id: {}", created.id);
         println!("api key (shown once): {}", created.plaintext);
+        if audit {
+            println!("audit grant: enabled");
+        }
         Ok(())
     }
 }

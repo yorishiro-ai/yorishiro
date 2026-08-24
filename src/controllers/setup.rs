@@ -119,6 +119,7 @@ pub async fn setup(
         workspace.id,
         MembershipRole::Owner.max_scope(),
         Some(user.id),
+        false,
     )
     .await?;
 

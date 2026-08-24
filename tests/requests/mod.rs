@@ -1,3 +1,4 @@
+mod audit_log;
 mod auth;
 mod entities;
 mod members;

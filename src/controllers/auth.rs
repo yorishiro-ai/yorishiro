@@ -208,9 +208,14 @@ pub async fn login(
             hint: "ask a tenant admin to add you as a member first".into(),
         })?;
 
-    let created =
-        IdentityApiKeys::create_api_key(&ctx.db, workspace_id, role.max_scope(), Some(user.id))
-            .await?;
+    let created = IdentityApiKeys::create_api_key(
+        &ctx.db,
+        workspace_id,
+        role.max_scope(),
+        Some(user.id),
+        false,
+    )
+    .await?;
 
     Ok(Json(LoginResponse {
         api_key: created.plaintext,

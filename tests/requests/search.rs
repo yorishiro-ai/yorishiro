@@ -38,6 +38,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
         workspace.id,
         ApiKeyScope::Read,
         Some(owner.id),
+        false,
     )
     .await
     .expect("issue read key")

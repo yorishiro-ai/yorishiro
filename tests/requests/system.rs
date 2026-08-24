@@ -16,6 +16,7 @@ async fn issue_key_for(
         workspace_id,
         role.max_scope(),
         Some(user_id),
+        false,
     )
     .await
     .expect("issue key")

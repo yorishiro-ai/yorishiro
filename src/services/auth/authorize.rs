@@ -21,6 +21,20 @@ pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), Yor
     }
 }
 
+/// Enforces that an authenticated context holds the independent `audit` grant.
+/// Deliberately not folded into `require_scope`/`ApiKeyScope::satisfies`: `audit` is not one more rung above `Migration` on the read/write/schema/migration ladder, so it is never compared with `Ord`, only checked for `true`/`false`.
+pub fn require_audit(ctx: &AuthContext) -> Result<(), YorishiroError> {
+    if ctx.audit {
+        Ok(())
+    } else {
+        Err(YorishiroError::ScopeInsufficient {
+            message: "this operation requires the audit grant, which this API key does not hold"
+                .into(),
+            hint: "reissue an API key with audit:true".into(),
+        })
+    }
+}
+
 /// The single entry point for authorization: validates the presented raw key, confirms it satisfies the required scope, and returns a transaction with the RLS context already set (see `TenantDb::begin_for_workspace`).
 /// REST and MCP adapters have no other way to obtain a `DatabaseTransaction` on the tenant pool, so a scope check can't be forgotten.
 ///
@@ -38,6 +52,30 @@ pub async fn authorize(
         .authenticate(db, presented_key, headers)
         .await?;
     require_scope(&ctx, required)?;
+
+    let txn = db
+        .tenant
+        .begin_for_workspace(ctx.tenant_id, ctx.workspace_id)
+        .await
+        .internal()?;
+
+    touch_last_used_on(db, ctx.tenant_id, ctx.workspace_id, ctx.api_key_id).await;
+
+    Ok((ctx, txn))
+}
+
+/// As `authorize`, but checking `require_audit` instead of a scope.
+/// Kept as its own function rather than a parameter on `authorize`, since the two checks are different shapes (`ApiKeyScope` vs. a bare grant) and forcing them through one signature would mean threading an `Option<ApiKeyScope>`/enum through every existing `authorize` call site for the sake of the one caller that needs this.
+pub async fn authorize_audit(
+    db: &DbHandle,
+    authenticator: &dyn Authenticator,
+    presented_key: &str,
+    headers: &[(String, String)],
+) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
+    let ctx = authenticator
+        .authenticate(db, presented_key, headers)
+        .await?;
+    require_audit(&ctx)?;
 
     let txn = db
         .tenant

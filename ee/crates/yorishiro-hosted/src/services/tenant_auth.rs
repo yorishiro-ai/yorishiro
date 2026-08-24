@@ -69,8 +69,8 @@ impl Authenticator for TenantScopedAuthenticator {
 
         // The two-argument overload the identity migration adds (m20260822_101200).
         // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
-        let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
-            "SELECT id, workspace_id, tenant_id, scope, user_id \
+        let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
+            "SELECT id, workspace_id, tenant_id, scope, user_id, audit \
              FROM authenticate_api_key($1, $2)",
         )
         .bind(key_hash)
@@ -79,7 +79,7 @@ impl Authenticator for TenantScopedAuthenticator {
         .await
         .internal()?;
 
-        let (api_key_id, workspace_id, tenant_id, scope_str, user_id) =
+        let (api_key_id, workspace_id, tenant_id, scope_str, user_id, audit) =
             row.ok_or(YorishiroError::Unauthenticated)?;
 
         // A workspace-scoped key ignores the header, so a client that sends one naming a different workspace is asking for something it will not get.
@@ -108,6 +108,7 @@ impl Authenticator for TenantScopedAuthenticator {
             tenant_id,
             scope,
             user_id,
+            audit,
         })
     }
 }

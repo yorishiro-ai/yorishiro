@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope};
 use crate::error::YorishiroError;
+use crate::models::identity_api_key_audit_log;
 use crate::models::identity_maintenance::{self, MaintenanceMode, MaintenanceState};
 
 /// The state as the API reports it.
@@ -74,7 +75,7 @@ pub async fn get_maintenance(
 
 pub async fn set_maintenance(
     State(ctx): State<AppContext>,
-    _authorized: Authorized<MigrationScope>,
+    authorized: Authorized<MigrationScope>,
     Json(body): Json<SetMaintenanceRequest>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
     let mode = parse_mode(&body.mode).ok_or_else(|| YorishiroError::ValidationFailed {
@@ -88,6 +89,24 @@ pub async fn set_maintenance(
         mode,
         body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER),
         body.reason,
+    )
+    .await?;
+
+    // Recorded on ctx.db, the same migration-role connection the write itself just went through:
+    // authorized.txn() is an RLS-scoped transaction this handler never commits (get_maintenance's
+    // sibling extractor exists only to gate the scope check, not to hold a connection this
+    // deployment-wide write needs), so writing the audit row there would silently discard it the
+    // same way an uncommitted write anywhere else in this codebase does.
+    identity_api_key_audit_log::record(
+        &ctx.db,
+        identity_api_key_audit_log::AuditActor {
+            workspace_id: authorized.ctx.workspace_id,
+            tenant_id: authorized.ctx.tenant_id,
+            api_key_id: authorized.ctx.api_key_id,
+            user_id: authorized.ctx.user_id,
+        },
+        identity_api_key_audit_log::AuditAction::SetMaintenance,
+        serde_json::json!({ "mode": mode.as_db_str(), "reason": updated.reason }),
     )
     .await?;
 

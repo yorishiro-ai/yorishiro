@@ -14,6 +14,8 @@ pub struct WhoAmIResponse {
     scope: ApiKeyScope,
     /// The user this key was issued for, if it was created with `admin create-api-key --user`.
     user_id: Option<Uuid>,
+    /// Independent of `scope`: whether this key additionally holds the audit grant, checked separately by `GET /api/audit-log`.
+    audit: bool,
 }
 
 pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
@@ -22,6 +24,7 @@ pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
         tenant_id: ctx.tenant_id,
         scope: ctx.scope,
         user_id: ctx.user_id,
+        audit: ctx.audit,
     })
 }
 

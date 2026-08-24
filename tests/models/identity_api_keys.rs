@@ -34,15 +34,22 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
         let workspace_id = setup_workspace(&ctx).await;
         let other_workspace_id = setup_workspace(&ctx).await;
 
-        let first = ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None)
+        let first = ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
             .await
             .expect("create first key");
-        let second = ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Write, None)
-            .await
-            .expect("create second key");
-        ApiKeys::create_api_key(&ctx.db, other_workspace_id, ApiKeyScope::Migration, None)
-            .await
-            .expect("create key in other workspace");
+        let second =
+            ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Write, None, false)
+                .await
+                .expect("create second key");
+        ApiKeys::create_api_key(
+            &ctx.db,
+            other_workspace_id,
+            ApiKeyScope::Migration,
+            None,
+            false,
+        )
+        .await
+        .expect("create key in other workspace");
 
         let keys = ApiKeys::list_for_workspace(&ctx.db, workspace_id)
             .await
@@ -67,9 +74,10 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
 async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;
-        let created = ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None)
-            .await
-            .expect("create key");
+        let created =
+            ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
+                .await
+                .expect("create key");
 
         ApiKeys::revoke(&ctx.db, created.id)
             .await

@@ -65,6 +65,9 @@ pub struct AuthContext {
     pub scope: ApiKeyScope,
     /// The human user this key was issued for, if any.
     pub user_id: Option<Uuid>,
+    /// Independent of `scope`: not one more rung above `Migration` on the read/write/schema/migration ladder, but a separate grant a key holds alongside whatever `scope` it has.
+    /// Checked with `require_audit`, never through `ApiKeyScope`'s `Ord`/`satisfies`.
+    pub audit: bool,
 }
 
 pub struct CreatedApiKey {
@@ -72,6 +75,7 @@ pub struct CreatedApiKey {
     pub workspace_id: Uuid,
     pub scope: ApiKeyScope,
     pub user_id: Option<Uuid>,
+    pub audit: bool,
     /// The raw API key string.
     /// Only its hash is stored in the DB, so this return value is the only place it can ever be obtained.
     pub plaintext: String,

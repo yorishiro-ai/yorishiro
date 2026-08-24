@@ -14,16 +14,16 @@ pub async fn authenticate(
 ) -> Result<AuthContext, YorishiroError> {
     let key_hash = hash_key(presented_key);
 
-    // `authenticate_api_key` is SECURITY DEFINER, so this bypasses RLS on identity_api_keys/identity_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id (never key_hash itself).
-    let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT id, workspace_id, tenant_id, scope, user_id FROM authenticate_api_key($1)",
+    // `authenticate_api_key` is SECURITY DEFINER, so this bypasses RLS on identity_api_keys/identity_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id/audit (never key_hash itself).
+    let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
+        "SELECT id, workspace_id, tenant_id, scope, user_id, audit FROM authenticate_api_key($1)",
     )
     .bind(key_hash)
     .fetch_optional(db.tenant.pool())
     .await
     .internal()?;
 
-    let (api_key_id, workspace_id, tenant_id, scope_str, user_id) =
+    let (api_key_id, workspace_id, tenant_id, scope_str, user_id, audit) =
         row.ok_or(YorishiroError::Unauthenticated)?;
     let scope = ApiKeyScope::from_db_str(&scope_str).ok_or_else(|| {
         YorishiroError::Internal(anyhow::anyhow!(
@@ -37,6 +37,7 @@ pub async fn authenticate(
         tenant_id,
         scope,
         user_id,
+        audit,
     })
 }
 

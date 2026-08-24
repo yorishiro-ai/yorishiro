@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
 use crate::models::content_entities::{self, EntityRecord, UndoReport};
+use crate::models::identity_api_key_audit_log;
 use crate::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker};
 
 /// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
@@ -132,6 +133,21 @@ pub async fn undo_migration_job(
 ) -> Result<Json<UndoReport>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let report = content_entities::undo_job(authorized.txn(), workspace_id, job_id).await?;
+    // Recorded on the same transaction as the undo itself, before commit: a rollback of the undo
+    // must also roll back the record that it happened, or a failed request could still leave an
+    // audit trail claiming it succeeded.
+    identity_api_key_audit_log::record(
+        authorized.txn(),
+        identity_api_key_audit_log::AuditActor {
+            workspace_id,
+            tenant_id: authorized.ctx.tenant_id,
+            api_key_id: authorized.ctx.api_key_id,
+            user_id: authorized.ctx.user_id,
+        },
+        identity_api_key_audit_log::AuditAction::UndoMigrationJob,
+        serde_json::json!({ "job_id": job_id, "restored": report.restored, "missing": report.missing }),
+    )
+    .await?;
     authorized.commit().await?;
     Ok(Json(report))
 }

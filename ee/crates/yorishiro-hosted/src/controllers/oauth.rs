@@ -149,6 +149,7 @@ async fn callback(
         provisioned.workspace_id,
         provisioned.role.max_scope(),
         Some(provisioned.user_id),
+        false,
     )
     .await?;
 

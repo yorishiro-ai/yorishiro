@@ -83,6 +83,7 @@ impl Hooks for App {
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes()
+            .add_route(controllers::audit_log::routes())
             .add_route(controllers::auth::routes())
             .add_route(controllers::entities::routes())
             .add_route(controllers::entities::migration_routes())

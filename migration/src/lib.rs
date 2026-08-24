@@ -22,6 +22,9 @@ mod m20260823_100200_marketplace;
 mod m20260823_100300_workspace_llm_keys;
 mod m20260823_100400_fill_proposals;
 mod m20260823_100500_entity_column_preferences;
+mod m20260823_100600_api_key_audit_flag;
+mod m20260823_100700_api_key_audit_log;
+mod m20260823_100800_authenticate_api_key_audit_flag;
 
 pub struct Migrator;
 
@@ -48,6 +51,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260823_100300_workspace_llm_keys::Migration),
             Box::new(m20260823_100400_fill_proposals::Migration),
             Box::new(m20260823_100500_entity_column_preferences::Migration),
+            Box::new(m20260823_100600_api_key_audit_flag::Migration),
+            Box::new(m20260823_100700_api_key_audit_log::Migration),
+            Box::new(m20260823_100800_authenticate_api_key_audit_flag::Migration),
             // inject-above (do not remove this comment)
         ]
     }

@@ -210,6 +210,42 @@ where
     }
 }
 
+/// As `Authorized<R>`, but for the `audit` grant rather than a `RequiredScope`.
+/// Not generic over `R` the way `Authorized<R>` is: `audit` is one grant, not a family of scopes, so there is nothing for a type parameter to select between.
+pub struct AuditAuthorized {
+    pub ctx: auth::AuthContext,
+    txn: sea_orm::DatabaseTransaction,
+}
+
+impl AuditAuthorized {
+    pub fn txn(&self) -> &sea_orm::DatabaseTransaction {
+        &self.txn
+    }
+}
+
+impl<S> FromRequestParts<S> for AuditAuthorized
+where
+    AppContext: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let presented_key = extract_bearer_key(parts)?;
+        let headers = header_pairs(parts);
+
+        let app_ctx = AppContext::from_ref(state);
+        let db = db_handle(&app_ctx)?;
+        let auth_impl = authenticator(&app_ctx)?;
+
+        let (ctx, txn) = auth::authorize_audit(&db, auth_impl.as_ref(), presented_key, &headers)
+            .await
+            .inspect_err(|err| log_auth_rejection(parts, err))?;
+
+        Ok(AuditAuthorized { ctx, txn })
+    }
+}
+
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified<R> {

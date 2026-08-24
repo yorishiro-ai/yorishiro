@@ -33,9 +33,10 @@ impl Task for ListApiKeys {
         }
         for key in keys {
             println!(
-                "{}  {:<8} prefix={}  user={}  created={}  last_used={}",
+                "{}  {:<8} audit={}  prefix={}  user={}  created={}  last_used={}",
                 key.id,
                 key.scope,
+                key.audit,
                 key.key_prefix,
                 key.user_id
                     .map(|id| id.to_string())

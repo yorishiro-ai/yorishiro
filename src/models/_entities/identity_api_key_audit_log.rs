@@ -4,22 +4,19 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "identity_api_keys")]
+#[sea_orm(table_name = "identity_api_key_audit_log")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub workspace_id: Option<Uuid>,
+    pub workspace_id: Uuid,
     pub tenant_id: Uuid,
+    pub api_key_id: Option<Uuid>,
     pub user_id: Option<Uuid>,
-    #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
-    pub key_hash: Vec<u8>,
     #[sea_orm(column_type = "Text")]
-    pub key_prefix: String,
-    #[sea_orm(column_type = "Text")]
-    pub scope: String,
+    pub action: String,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub detail: Json,
     pub created_at: DateTimeWithTimeZone,
-    pub last_used_at: Option<DateTimeWithTimeZone>,
-    pub audit: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
