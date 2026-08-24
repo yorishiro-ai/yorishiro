@@ -1,12 +1,15 @@
 use chrono::Utc;
 use loco_rs::testing::prelude::*;
+use sea_orm::{ConnectionTrait, Statement};
 use serial_test::serial;
 use uuid::Uuid;
+use yorishiro_core::db::DbHandle;
 use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
 use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro_core::models::tenancy::{self, MembershipRole};
 use yorishiro_core::services::auth::ApiKeyScope;
 use yorishiro_hosted::HostedApp;
+use yorishiro_hosted::models::fill_proposals;
 use yorishiro_hosted::services::licence::{LicenceClaims, LicenceState};
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the test process booted with.
@@ -22,6 +25,8 @@ fn licence(ctx: &loco_rs::app::AppContext) {
 
 struct Setup {
     key: String,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
@@ -57,7 +62,11 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     .await
     .expect("issue key")
     .plaintext;
-    Setup { key }
+    Setup {
+        key,
+        tenant_id: tenant.id,
+        workspace_id: workspace.id,
+    }
 }
 
 /// Setting, reading and clearing a workspace's LLM credentials over REST.
@@ -225,6 +234,171 @@ async fn confirming_an_unknown_job_is_refused() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(confirm.status_code(), 404, "response: {:?}", confirm.text());
+
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// The enclosing transaction already guarantees proposals survive any genuine infrastructure
+/// failure, old code and new alike: a real Postgres error aborts the transaction, so the trailing
+/// `DELETE FROM content_fill_proposals` can never run either way. What the old code actually cost
+/// was the diagnosis, not the data: `Err(_) => skipped += ...` swallowed the lock timeout below
+/// into a plain `skipped` count, the loop moved on, and the next statement (that same `DELETE`)
+/// hit "current transaction is aborted" instead of ever running — so the caller received that
+/// masked, unrelated-looking error rather than the lock timeout that actually happened. The fix
+/// (`Err(err) => return Err(err)`) returns the real error immediately instead.
+///
+/// `content_entities` is locked `EXCLUSIVE`, not `ACCESS EXCLUSIVE`: `EXCLUSIVE` still admits the
+/// plain `SELECT` `content_entities::get` runs earlier in the same loop iteration, so the failure
+/// lands specifically on `update`'s write, exercising the `Err(err) => return Err(err)` arm this
+/// fix added there rather than the one on `get`.
+///
+/// Asserting on `"lock timeout"` in the error text matches Postgres's own (English) server
+/// message, which depends on the server's `lc_messages`; this suite's container runs
+/// `en_US.utf8`, so this is a real but currently-inert brittleness rather than one to engineer
+/// around here.
+#[tokio::test]
+#[serial]
+async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
+    request_with_create_db::<HostedApp, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+
+        let create_schema = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "name": "note",
+                "entity_types": {
+                    "note": { "fields": { "title": { "type": "string", "required": true } } }
+                }
+            }))
+            .await;
+        assert_eq!(
+            create_schema.status_code(),
+            201,
+            "response: {:?}",
+            create_schema.text()
+        );
+
+        let create_entity = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "schema_name": "note",
+                "entity_type": "note",
+                "data": { "title": "original" }
+            }))
+            .await;
+        assert_eq!(
+            create_entity.status_code(),
+            201,
+            "response: {:?}",
+            create_entity.text()
+        );
+        let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        let db = ctx.shared_store.get::<DbHandle>().unwrap();
+        let job_id = Uuid::new_v4();
+        {
+            let txn = db
+                .tenant
+                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+                .await
+                .expect("begin tenant txn");
+            fill_proposals::record(
+                &txn,
+                setup.workspace_id,
+                job_id,
+                entity_id,
+                "title",
+                &serde_json::json!("guessed"),
+            )
+            .await
+            .expect("record proposal");
+            txn.commit().await.expect("commit proposal");
+        }
+
+        // yorishiro_app is granted per-table (see loco-architecture.md), not the owner of any
+        // table, so it cannot DROP or REVOKE its own way into a failure. Locking the table from a
+        // second connection and giving confirm's transaction a short lock_timeout is a failure
+        // the update inside confirm's loop can genuinely hit, without needing privileges the RLS
+        // role does not have.
+        let mut blocker = db.identity.acquire().await.expect("acquire blocker conn");
+        sqlx::query("BEGIN")
+            .execute(&mut *blocker)
+            .await
+            .expect("begin blocker txn");
+        sqlx::query("LOCK TABLE content_entities IN EXCLUSIVE MODE")
+            .execute(&mut *blocker)
+            .await
+            .expect("lock content_entities");
+        {
+            let txn = db
+                .tenant
+                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+                .await
+                .expect("begin tenant txn");
+            txn.execute_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Postgres,
+                "SET LOCAL lock_timeout = '50ms'",
+            ))
+            .await
+            .expect("set lock_timeout");
+
+            let result = fill_proposals::confirm(&txn, setup.workspace_id, job_id).await;
+            // The observable difference between the old code and this fix: the old code let the
+            // lock timeout fall into `skipped`, then hit "current transaction is aborted" on the
+            // next statement and returned *that* instead. This fix returns the lock timeout
+            // itself, immediately, from the `update` call where it actually happened.
+            let message = result
+                .as_ref()
+                .expect_err(
+                    "confirm should fail once its update cannot acquire a lock on content_entities",
+                )
+                .to_string();
+            assert!(
+                message.contains("lock timeout"),
+                "expected the lock timeout itself, not a downstream error: {message}"
+            );
+            assert!(
+                !message.contains("transaction is aborted"),
+                "the old code's masked failure mode must not reappear: {message}"
+            );
+            // Rolls back on drop: the lock_timeout is transaction-local, and anything confirm did
+            // before failing is undone along with it.
+        }
+        sqlx::query("ROLLBACK")
+            .execute(&mut *blocker)
+            .await
+            .expect("release blocker lock");
+        // The pool does not consider this connection returned until it drops: the next
+        // begin_for_workspace call hangs until this one is, so it must go before that call.
+        drop(blocker);
+
+        // Proposals survive either way, old code and new: a real Postgres error aborts the whole
+        // transaction, so the trailing DELETE FROM content_fill_proposals never runs regardless.
+        // This is not itself evidence of the fix (see the doc comment above); it is checked here
+        // only so the fixture is confirmed sane.
+        let verify_txn = db
+            .tenant
+            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+            .await
+            .expect("begin tenant txn");
+        let remaining = fill_proposals::for_job(&verify_txn, setup.workspace_id, job_id)
+            .await
+            .expect("list proposals");
+        assert_eq!(
+            remaining.len(),
+            1,
+            "the fixture's one proposal should still be there"
+        );
+        verify_txn.rollback().await.expect("rollback verify txn");
 
         super::close_app_pools(&ctx).await;
     })
