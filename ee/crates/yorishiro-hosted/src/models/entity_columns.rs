@@ -4,7 +4,9 @@
 //! A per-user override belongs in this table as a second nullable column, not in a second table.
 
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
+use sea_orm::{
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
@@ -27,15 +29,14 @@ pub struct ColumnPreference {
     pub columns: Vec<String>,
 }
 
-#[derive(FromQueryResult)]
-struct Row {
-    entity_type: String,
-    columns: serde_json::Value,
+fn to_preference(
+    model: yorishiro_core::models::_entities::content_entity_column_preferences::Model,
+) -> ColumnPreference {
+    ColumnPreference {
+        entity_type: model.entity_type,
+        columns: serde_json::from_value(model.columns).unwrap_or_default(),
+    }
 }
-
-/// The columns [`Row`] needs, shared by both lookups below so they can't drift apart from each
-/// other (see `search.rs`'s `HIT_COLUMNS` for the same pattern).
-const ROW_COLUMNS: &str = "entity_type, columns";
 
 /// Reads the stored preference for one entity type.
 ///
@@ -45,22 +46,14 @@ pub async fn get(
     workspace_id: Uuid,
     entity_type: &str,
 ) -> Result<Option<ColumnPreference>, YorishiroError> {
-    let row = Row::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        format!(
-            "SELECT {ROW_COLUMNS} FROM content_entity_column_preferences \
-             WHERE workspace_id = $1 AND entity_type = $2"
-        ),
-        [workspace_id.into(), entity_type.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::EntityType.eq(entity_type))
+        .one(conn)
+        .await
+        .internal()?;
 
-    Ok(row.map(|row| ColumnPreference {
-        entity_type: row.entity_type,
-        columns: serde_json::from_value(row.columns).unwrap_or_default(),
-    }))
+    Ok(row.map(to_preference))
 }
 
 /// Every stored preference in the workspace, so a caller can switch entity types without a round trip each time.
@@ -69,30 +62,16 @@ pub async fn list(
     workspace_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<ColumnPreference>, YorishiroError> {
-    let rows = Row::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        format!(
-            "SELECT {ROW_COLUMNS} FROM content_entity_column_preferences \
-             WHERE workspace_id = $1 ORDER BY entity_type ASC \
-             LIMIT $2 OFFSET $3"
-        ),
-        [
-            workspace_id.into(),
-            page.limit().into(),
-            page.offset().into(),
-        ],
-    ))
-    .all(conn)
-    .await
-    .internal()?;
+    let rows = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::EntityType)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .all(conn)
+        .await
+        .internal()?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| ColumnPreference {
-            entity_type: row.entity_type,
-            columns: serde_json::from_value(row.columns).unwrap_or_default(),
-        })
-        .collect())
+    Ok(rows.into_iter().map(to_preference).collect())
 }
 
 /// Stores the choice, replacing whatever was there.
@@ -158,13 +137,11 @@ pub async fn clear(
     workspace_id: Uuid,
     entity_type: &str,
 ) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "DELETE FROM content_entity_column_preferences \
-         WHERE workspace_id = $1 AND entity_type = $2",
-        [workspace_id.into(), entity_type.into()],
-    ))
-    .await
-    .internal()?;
+    Entity::delete_many()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::EntityType.eq(entity_type))
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }

@@ -6,7 +6,7 @@
 //! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
 
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
@@ -24,19 +24,6 @@ pub struct LlmKeyDescription {
     /// Always true when present: the row cannot exist without a key.
     /// Callers use the absence of the whole description to mean "not configured".
     pub configured: bool,
-}
-
-#[derive(FromQueryResult)]
-struct DescribeRow {
-    base_url: String,
-    model: String,
-}
-
-#[derive(FromQueryResult)]
-struct GetRow {
-    base_url: String,
-    model: String,
-    api_key: String,
 }
 
 /// Refuses anything that is not `http://` or `https://`.
@@ -103,13 +90,11 @@ pub async fn set(
 
 /// Removes a workspace's credentials. Inference then refuses until one is configured again.
 pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "DELETE FROM identity_workspace_llm_keys WHERE workspace_id = $1",
-        [workspace_id.into()],
-    ))
-    .await
-    .internal()?;
+    Entity::delete_many()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 
@@ -118,14 +103,11 @@ pub async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
-    let row = DescribeRow::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT base_url, model FROM identity_workspace_llm_keys WHERE workspace_id = $1",
-        [workspace_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .one(conn)
+        .await
+        .internal()?;
 
     Ok(row.map(|row| LlmKeyDescription {
         base_url: row.base_url,
@@ -142,14 +124,11 @@ pub async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<InferenceConfig>, YorishiroError> {
-    let row = GetRow::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT base_url, model, api_key FROM identity_workspace_llm_keys WHERE workspace_id = $1",
-        [workspace_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .one(conn)
+        .await
+        .internal()?;
 
     Ok(row.map(|row| InferenceConfig {
         base_url: row.base_url,

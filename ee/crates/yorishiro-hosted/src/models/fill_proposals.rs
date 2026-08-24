@@ -6,9 +6,7 @@
 //! Confirming reuses `content_entity_snapshots`: the same `job_id` groups the before-images, so `content_entities::undo_job` reverses a confirmation with no machinery of its own.
 
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, QueryFilter, Statement,
-};
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -18,7 +16,7 @@ use yorishiro_core::models::_entities::content_fill_proposals::{ActiveModel, Col
 use yorishiro_core::models::content_entities;
 
 /// One field's proposed value, as a caller reviews it.
-#[derive(Debug, Clone, Serialize, FromQueryResult)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FillProposal {
     pub entity_id: Uuid,
     pub field_name: String,
@@ -110,16 +108,23 @@ pub async fn for_job(
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<Vec<FillProposal>, YorishiroError> {
-    FillProposal::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT entity_id, field_name, proposed FROM content_fill_proposals \
-         WHERE workspace_id = $1 AND job_id = $2 \
-         ORDER BY entity_id, field_name",
-        [workspace_id.into(), job_id.into()],
-    ))
-    .all(conn)
-    .await
-    .internal()
+    let rows = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::JobId.eq(job_id))
+        .order_by_asc(Column::EntityId)
+        .order_by_asc(Column::FieldName)
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| FillProposal {
+            entity_id: row.entity_id,
+            field_name: row.field_name,
+            proposed: row.proposed,
+        })
+        .collect())
 }
 
 /// Removes one entity's snapshot from `job_id`'s group.
@@ -227,13 +232,12 @@ pub async fn confirm(
         }
     }
 
-    conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "DELETE FROM content_fill_proposals WHERE workspace_id = $1 AND job_id = $2",
-        [workspace_id.into(), job_id.into()],
-    ))
-    .await
-    .internal()?;
+    Entity::delete_many()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::JobId.eq(job_id))
+        .exec(conn)
+        .await
+        .internal()?;
 
     Ok(ConfirmReport {
         job_id,

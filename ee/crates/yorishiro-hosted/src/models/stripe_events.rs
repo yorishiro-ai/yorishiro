@@ -4,9 +4,13 @@
 //! These three functions are what makes applying an event idempotent and monotonic; the controller decides what an event means, and asks here whether it should be applied at all.
 
 use chrono::{DateTime, Utc};
-use sea_orm::{ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
+use sea_orm::{
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+};
 use yorishiro_core::error::{ResultExt, YorishiroError};
-use yorishiro_core::models::_entities::identity_stripe_processed_events::{ActiveModel, Entity};
+use yorishiro_core::models::_entities::identity_stripe_processed_events::{
+    ActiveModel, Column, Entity,
+};
 
 /// Whether `event_id` has already been applied.
 /// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `identity_stripe_processed_events`, so this is a plain existence check.
@@ -14,21 +18,12 @@ pub async fn is_event_processed(
     conn: &impl ConnectionTrait,
     event_id: &str,
 ) -> Result<bool, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct Exists {
-        exists: bool,
-    }
-
-    let row = Exists::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT EXISTS(SELECT 1 FROM identity_stripe_processed_events WHERE event_id = $1) \
-         AS exists",
-        [event_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.is_some_and(|r| r.exists))
+    let count = Entity::find()
+        .filter(Column::EventId.eq(event_id))
+        .count(conn)
+        .await
+        .internal()?;
+    Ok(count > 0)
 }
 
 /// Whether `created` is older than the most recently applied event's `created` for the same `customer_id`.
@@ -38,21 +33,13 @@ pub async fn is_stale_for_customer(
     customer_id: &str,
     created: DateTime<Utc>,
 ) -> Result<bool, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct Latest {
-        stripe_created: DateTime<Utc>,
-    }
-
-    let row = Latest::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT stripe_created FROM identity_stripe_processed_events \
-         WHERE customer_id = $1 ORDER BY stripe_created DESC LIMIT 1",
-        [customer_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.is_some_and(|r| created < r.stripe_created))
+    let latest = Entity::find()
+        .filter(Column::CustomerId.eq(customer_id))
+        .order_by_desc(Column::StripeCreated)
+        .one(conn)
+        .await
+        .internal()?;
+    Ok(latest.is_some_and(|row| created < row.stripe_created))
 }
 
 /// Records that `event_id` has been applied, so a later retry or reorder of the same or an older event for `customer_id` is rejected by [`is_event_processed`]/[`is_stale_for_customer`].

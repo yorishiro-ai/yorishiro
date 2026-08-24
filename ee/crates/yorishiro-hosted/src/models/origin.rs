@@ -30,6 +30,8 @@ struct Row {
 ///
 /// A schema whose template was deleted is not reported: the trigger has already detached it, and there is no longer an update to take.
 /// `linked` is the whole population here.
+///
+/// Stays raw SQL: the filter compares `t.updated_at > s.created_at`, one table's column against the other's, which `ColumnTrait`'s filter methods can't express directly (they compare a column to a value, not to another column) and would need a hand-built `sea_query::Expr` to reach through the entity API for no real gain in drift-safety, since every other column here is already a plain 1:1 projection.
 pub async fn list_with_upstream_changes(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
