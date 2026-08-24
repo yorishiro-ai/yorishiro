@@ -30,8 +30,7 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
     .expect("set embedding");
 }
 
-/// Vector search must rank by cosine distance (closest first) and must not leak another
-/// workspace's entities into the results, even when that workspace's vector is a closer match.
+/// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
 #[serial]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
@@ -147,8 +146,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
     .await;
 }
 
-/// A provider that always returns a fixed-width vector of zeros, for testing the dimension-check
-/// path in `sync_embedding` without a real embedding backend.
+/// A provider that always returns a fixed-width vector of zeros, for testing the dimension-check path in `sync_embedding` without a real embedding backend.
 struct FixedWidthProvider(usize);
 
 #[async_trait]
@@ -178,9 +176,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-            // Stamped at 768, matching this deployment's migrated HNSW index; the provider below
-            // deliberately produces 1024, the actual measured width of
-            // text-embedding-qwen3-embedding-0.6b, the other model LM Studio serves.
+            // Stamped at 768, matching this deployment's migrated HNSW index; the provider below deliberately produces 1024, the actual measured width of text-embedding-qwen3-embedding-0.6b, the other model LM Studio serves.
             embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
             ..Default::default()
         };
@@ -241,8 +237,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
     .await;
 }
 
-/// The trigram fallback surfaces an entity with no embedding at all, when its data fuzzy-matches
-/// `query_text`; an entity with neither an embedding nor a fuzzy match must not appear.
+/// The trigram fallback surfaces an entity with no embedding at all, when its data fuzzy-matches `query_text`; an entity with neither an embedding nor a fuzzy match must not appear.
 #[tokio::test]
 #[serial]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {

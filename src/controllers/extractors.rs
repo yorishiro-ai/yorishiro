@@ -14,9 +14,8 @@ use crate::services::auth::{ApiKeyScope, Authenticator};
 
 use super::ApiError;
 
-/// Emits a `warn` for a request rejected before it reaches a handler (bad/missing key, or
-/// insufficient scope). The presented key is never logged: only the caller IP (when
-/// `ConnectInfo` is present), the path, and the reason.
+/// Emits a `warn` for a request rejected before it reaches a handler (bad/missing key, or insufficient scope).
+/// The presented key is never logged: only the caller IP (when `ConnectInfo` is present), the path, and the reason.
 fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
     let client = parts
         .extensions
@@ -56,9 +55,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
     })
 }
 
-/// Also used by the MCP adapter (`services::mcp`), which authorizes per-tool rather than through
-/// this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of
-/// `shared_store`.
+/// Also used by the MCP adapter (`services::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
 pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
     ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
         ApiError(YorishiroError::Internal(anyhow::anyhow!(
@@ -104,9 +101,8 @@ pub(crate) fn search_token_limiter(
         })
 }
 
-/// The sole entry point for authenticated requests with no scope requirement and no DB
-/// connection. Requiring this type as a handler argument is itself a declaration that "this
-/// route requires authentication."
+/// The sole entry point for authenticated requests with no scope requirement and no DB connection.
+/// Requiring this type as a handler argument is itself a declaration that "this route requires authentication."
 pub struct AuthContext(pub auth::AuthContext);
 
 impl<S> FromRequestParts<S> for AuthContext

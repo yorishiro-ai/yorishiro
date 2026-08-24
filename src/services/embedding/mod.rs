@@ -24,8 +24,8 @@ pub enum EmbedKind {
 }
 
 /// Provider that generates embedding vectors.
-/// The `content_entities.embedding` column is dimensionless (`vector`), so any model works. All
-/// vectors in a deployment must share the same dimension count.
+/// The `content_entities.embedding` column is dimensionless (`vector`), so any model works.
+/// All vectors in a deployment must share the same dimension count.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;
@@ -44,9 +44,8 @@ pub trait EmbeddingProvider: Send + Sync {
 
     /// Embeds `text` knowing what it is for.
     ///
-    /// The default ignores `kind` and delegates to [`Self::embed`], which is correct for every
-    /// symmetric model. A provider whose model treats queries and documents differently
-    /// overrides this.
+    /// The default ignores `kind` and delegates to [`Self::embed`], which is correct for every symmetric model.
+    /// A provider whose model treats queries and documents differently overrides this.
     async fn embed_as(&self, kind: EmbedKind, text: &str) -> Result<Vec<f32>, YorishiroError> {
         let _ = kind;
         self.embed(text).await
@@ -86,8 +85,7 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 }
 
 /// The model name this deployment is configured for, for stamping onto new workspaces.
-/// Read from the environment rather than the provider, to avoid adding a `model()` method to
-/// the trait for this one caller.
+/// Read from the environment rather than the provider, to avoid adding a `model()` method to the trait for this one caller.
 pub fn model_name_from_env() -> String {
     std::env::var("YORISHIRO_EMBEDDING_MODEL").unwrap_or_else(|_| "unconfigured".into())
 }
