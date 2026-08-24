@@ -46,15 +46,48 @@ pub async fn record(
     field_name: &str,
     proposed: &Value,
 ) -> Result<(), YorishiroError> {
-    let active = ActiveModel {
-        job_id: ActiveValue::Set(job_id),
-        workspace_id: ActiveValue::Set(workspace_id),
-        entity_id: ActiveValue::Set(entity_id),
-        field_name: ActiveValue::Set(field_name.to_string()),
-        proposed: ActiveValue::Set(proposed.clone()),
-        ..Default::default()
-    };
-    Entity::insert(active)
+    record_batch(
+        conn,
+        workspace_id,
+        job_id,
+        [(entity_id, field_name.to_string(), proposed.clone())],
+    )
+    .await
+}
+
+/// One entity's field and the value proposed for it, as [`record_batch`] takes them.
+pub type ProposedField = (Uuid, String, Value);
+
+/// Records every field a job proposed in one statement, instead of one `INSERT` per field.
+/// Same replace-on-conflict behavior as [`record`], which now just calls this with one field.
+///
+/// `fields` must not repeat a `(entity_id, field_name)` pair: Postgres refuses `ON CONFLICT DO
+/// UPDATE` when one statement would affect the same row twice ("command cannot affect row a
+/// second time"), unlike single-row upserts, where a repeat was harmless. This is safe as called
+/// from `infer_fill`: each entity's proposed fields come from one `InferenceClient::propose_fields`
+/// call, which returns a `serde_json::Map` keyed by field name, so it cannot itself contain a
+/// duplicate field for one entity, and different entities never share an `entity_id`.
+pub async fn record_batch(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+    fields: impl IntoIterator<Item = ProposedField>,
+) -> Result<(), YorishiroError> {
+    let active_models: Vec<ActiveModel> = fields
+        .into_iter()
+        .map(|(entity_id, field_name, proposed)| ActiveModel {
+            job_id: ActiveValue::Set(job_id),
+            workspace_id: ActiveValue::Set(workspace_id),
+            entity_id: ActiveValue::Set(entity_id),
+            field_name: ActiveValue::Set(field_name),
+            proposed: ActiveValue::Set(proposed),
+            ..Default::default()
+        })
+        .collect();
+    if active_models.is_empty() {
+        return Ok(());
+    }
+    Entity::insert_many(active_models)
         .on_conflict(
             OnConflict::columns([
                 Column::WorkspaceId,

@@ -450,3 +450,136 @@ async fn an_infrastructure_failure_on_get_surfaces_as_itself() {
     })
     .await;
 }
+
+/// `record_batch` (called by `infer_fill` once per job instead of once per proposed field, to
+/// avoid an INSERT-per-field N+1) must attribute every field to the entity it was actually
+/// proposed for, not just insert the right *number* of rows: two entities, each with two
+/// distinct field proposals, exercises the same grouping a batch insert getting entity/field
+/// pairs crossed would silently get wrong.
+#[tokio::test]
+#[serial]
+async fn record_batch_attributes_every_field_to_its_own_entity() {
+    request_with_create_db::<HostedApp, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+
+        let create_schema = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "name": "note",
+                "entity_types": {
+                    "note": { "fields": { "title": { "type": "string", "required": true } } }
+                }
+            }))
+            .await;
+        assert_eq!(
+            create_schema.status_code(),
+            201,
+            "response: {:?}",
+            create_schema.text()
+        );
+
+        let mut entity_ids = Vec::new();
+        for _ in 0..2 {
+            let create_entity = request
+                .post("/api/entities")
+                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .json(&serde_json::json!({
+                    "schema_name": "note",
+                    "entity_type": "note",
+                    "data": { "title": "original" }
+                }))
+                .await;
+            assert_eq!(
+                create_entity.status_code(),
+                201,
+                "response: {:?}",
+                create_entity.text()
+            );
+            let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+            entity_ids.push(entity_id);
+        }
+        let (entity_a, entity_b) = (entity_ids[0], entity_ids[1]);
+
+        let db = ctx.shared_store.get::<DbHandle>().unwrap();
+        let job_id = Uuid::new_v4();
+        {
+            let txn = db
+                .tenant
+                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+                .await
+                .expect("begin tenant txn");
+            fill_proposals::record_batch(
+                &txn,
+                setup.workspace_id,
+                job_id,
+                [
+                    (
+                        entity_a,
+                        "summary".to_string(),
+                        serde_json::json!("a-summary"),
+                    ),
+                    (
+                        entity_a,
+                        "author".to_string(),
+                        serde_json::json!("a-author"),
+                    ),
+                    (
+                        entity_b,
+                        "summary".to_string(),
+                        serde_json::json!("b-summary"),
+                    ),
+                    (
+                        entity_b,
+                        "author".to_string(),
+                        serde_json::json!("b-author"),
+                    ),
+                ],
+            )
+            .await
+            .expect("record_batch");
+            txn.commit().await.expect("commit batch");
+        }
+
+        let verify_txn = db
+            .tenant
+            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+            .await
+            .expect("begin tenant txn");
+        let mut proposals = fill_proposals::for_job(&verify_txn, setup.workspace_id, job_id)
+            .await
+            .expect("list proposals");
+        proposals.sort_by(|a, b| (a.entity_id, &a.field_name).cmp(&(b.entity_id, &b.field_name)));
+        verify_txn.rollback().await.expect("rollback verify txn");
+
+        assert_eq!(proposals.len(), 4, "proposals: {proposals:?}");
+        let by_entity_field: Vec<(Uuid, &str, &serde_json::Value)> = proposals
+            .iter()
+            .map(|p| (p.entity_id, p.field_name.as_str(), &p.proposed))
+            .collect();
+        assert!(
+            by_entity_field.contains(&(entity_a, "summary", &serde_json::json!("a-summary"))),
+            "{by_entity_field:?}"
+        );
+        assert!(
+            by_entity_field.contains(&(entity_a, "author", &serde_json::json!("a-author"))),
+            "{by_entity_field:?}"
+        );
+        assert!(
+            by_entity_field.contains(&(entity_b, "summary", &serde_json::json!("b-summary"))),
+            "{by_entity_field:?}"
+        );
+        assert!(
+            by_entity_field.contains(&(entity_b, "author", &serde_json::json!("b-author"))),
+            "{by_entity_field:?}"
+        );
+
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}

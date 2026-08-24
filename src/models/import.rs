@@ -40,6 +40,12 @@ pub async fn import_jsonl(
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
     // Exported schema_ids are workspace-local to the source, so track name-by-old-id for schema lines this import has processed instead of re-querying the exported id.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
+    // A schema that already existed in the destination workspace before this import (not itself
+    // a schema line in this file) falls through to get_by_id below on every entity line that
+    // references it; memoized the same way migration_dry_run and recall_context cache a schema
+    // lookup, since a batch of entities sharing one pre-existing schema is the common case, not
+    // the exception.
+    let mut schema_name_by_id: HashMap<Uuid, String> = HashMap::new();
 
     for (line_no, line) in reader.lines().enumerate() {
         let line_no = line_no + 1;
@@ -82,12 +88,18 @@ pub async fn import_jsonl(
                 // Prefer a schema line this import just created; fall back to looking the exported ID up in the destination workspace, for a schema that already exists there.
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
-                    None => {
-                        content_schemas::get_by_id(conn, workspace_id, entity.schema_id)
-                            .await
-                            .map_err(|err| annotate_line(line_no, err))?
-                            .name
-                    }
+                    None => match schema_name_by_id.get(&entity.schema_id) {
+                        Some(name) => name.clone(),
+                        None => {
+                            let name =
+                                content_schemas::get_by_id(conn, workspace_id, entity.schema_id)
+                                    .await
+                                    .map_err(|err| annotate_line(line_no, err))?
+                                    .name;
+                            schema_name_by_id.insert(entity.schema_id, name.clone());
+                            name
+                        }
+                    },
                 };
 
                 let input = CreateEntityInput {

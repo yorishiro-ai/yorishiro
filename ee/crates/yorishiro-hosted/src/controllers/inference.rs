@@ -140,6 +140,11 @@ async fn infer_fill(
 
     let mut proposed = 0i64;
     let mut skipped = 0i64;
+    // Collected across every entity and written in one insert_many at the end, instead of one
+    // INSERT per proposed field per entity: the LLM call itself still runs once per entity (there
+    // is no batched-inference API to fold that into), but the DB write it produces does not need
+    // its own round trip per field.
+    let mut to_record: Vec<fill_proposals::ProposedField> = Vec::new();
 
     // The same set base's fill-defaults would walk: entities on a version older than the active one.
     // An entity already on the active version has nothing the schema says is missing.
@@ -186,11 +191,12 @@ async fn infer_fill(
         }
 
         for (field, value) in answers {
-            fill_proposals::record(&schema_txn, workspace_id, job_id, row.id, &field, &value)
-                .await?;
+            to_record.push((row.id, field, value));
             proposed += 1;
         }
     }
+
+    fill_proposals::record_batch(&schema_txn, workspace_id, job_id, to_record).await?;
 
     schema_txn.commit().await.internal()?;
 
