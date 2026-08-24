@@ -17,6 +17,10 @@ pub struct TenantBillingRecord {
     pub stripe_customer_id: Option<String>,
 }
 
+/// The columns [`TenantBillingRecord`] needs, shared by both lookups below so they can't drift
+/// apart from each other (see `search.rs`'s `HIT_COLUMNS` for the same pattern).
+const BILLING_COLUMNS: &str = "tenant_id, plan, stripe_customer_id";
+
 /// Reads a tenant's billing state.
 /// `None` means the tenant is unbilled, not that it is missing: the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
 pub async fn get_billing(
@@ -25,8 +29,7 @@ pub async fn get_billing(
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {
     TenantBillingRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT tenant_id, plan, stripe_customer_id FROM identity_tenant_billing \
-         WHERE tenant_id = $1",
+        format!("SELECT {BILLING_COLUMNS} FROM identity_tenant_billing WHERE tenant_id = $1"),
         [tenant_id.into()],
     ))
     .one(conn)
@@ -42,8 +45,9 @@ pub async fn get_by_stripe_customer(
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {
     TenantBillingRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT tenant_id, plan, stripe_customer_id FROM identity_tenant_billing \
-         WHERE stripe_customer_id = $1",
+        format!(
+            "SELECT {BILLING_COLUMNS} FROM identity_tenant_billing WHERE stripe_customer_id = $1"
+        ),
         [stripe_customer_id.into()],
     ))
     .one(conn)
