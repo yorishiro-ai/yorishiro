@@ -193,8 +193,8 @@ async fn a_member_key_cannot_touch_maintenance() {
     .await;
 }
 
-/// A typo must not read as a mode. Silently ignoring it would leave an operator believing the
-/// deployment is locked when it is serving.
+/// A typo must not read as a mode.
+/// Silently ignoring it would leave an operator believing the deployment is locked when it is serving.
 #[tokio::test]
 #[serial]
 async fn an_unknown_mode_is_refused() {

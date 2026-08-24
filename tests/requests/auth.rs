@@ -75,8 +75,7 @@ async fn signup_then_login_round_trip() {
             .await;
         assert_eq!(replay_response.status_code(), 422);
 
-        // A wrong password on an otherwise-valid account must not leak whether the account
-        // exists differently than a truly unknown email would.
+        // A wrong password on an otherwise-valid account must not leak whether the account exists differently than a truly unknown email would.
         let bad_password_response = request
             .post("/auth/login")
             .json(&serde_json::json!({

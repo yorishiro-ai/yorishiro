@@ -26,8 +26,7 @@ async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
     workspace.id
 }
 
-/// `list_for_workspace` must return every key issued for the workspace, oldest first, and never
-/// leak into another workspace's listing.
+/// `list_for_workspace` must return every key issued for the workspace, oldest first, and never leak into another workspace's listing.
 #[tokio::test]
 #[serial]
 async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
