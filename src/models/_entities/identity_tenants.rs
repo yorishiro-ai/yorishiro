@@ -18,12 +18,18 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::content_schemas::Entity")]
     ContentSchemas,
+    #[sea_orm(has_many = "super::identity_api_key_audit_log::Entity")]
+    IdentityApiKeyAuditLog,
     #[sea_orm(has_many = "super::identity_api_keys::Entity")]
     IdentityApiKeys,
     #[sea_orm(has_many = "super::identity_invites::Entity")]
     IdentityInvites,
+    #[sea_orm(has_many = "super::identity_template_reviews::Entity")]
+    IdentityTemplateReviews,
     #[sea_orm(has_many = "super::identity_templates::Entity")]
     IdentityTemplates,
+    #[sea_orm(has_one = "super::identity_tenant_billing::Entity")]
+    IdentityTenantBilling,
     #[sea_orm(has_many = "super::identity_tenant_memberships::Entity")]
     IdentityTenantMemberships,
     #[sea_orm(has_many = "super::identity_workspaces::Entity")]
@@ -33,6 +39,12 @@ pub enum Relation {
 impl Related<super::content_schemas::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ContentSchemas.def()
+    }
+}
+
+impl Related<super::identity_api_key_audit_log::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityApiKeyAuditLog.def()
     }
 }
 
@@ -48,9 +60,21 @@ impl Related<super::identity_invites::Entity> for Entity {
     }
 }
 
+impl Related<super::identity_template_reviews::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityTemplateReviews.def()
+    }
+}
+
 impl Related<super::identity_templates::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IdentityTemplates.def()
+    }
+}
+
+impl Related<super::identity_tenant_billing::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityTenantBilling.def()
     }
 }
 

@@ -29,8 +29,12 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::content_entities::Entity")]
     ContentEntities,
+    #[sea_orm(has_many = "super::content_entity_column_preferences::Entity")]
+    ContentEntityColumnPreferences,
     #[sea_orm(has_many = "super::content_entity_snapshots::Entity")]
     ContentEntitySnapshots,
+    #[sea_orm(has_many = "super::content_fill_proposals::Entity")]
+    ContentFillProposals,
     #[sea_orm(has_many = "super::content_relations::Entity")]
     ContentRelations,
     #[sea_orm(
@@ -41,6 +45,8 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     ContentSchemas,
+    #[sea_orm(has_many = "super::identity_api_key_audit_log::Entity")]
+    IdentityApiKeyAuditLog,
     #[sea_orm(has_many = "super::identity_api_keys::Entity")]
     IdentityApiKeys,
     #[sea_orm(
@@ -51,6 +57,8 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     IdentityTenants,
+    #[sea_orm(has_one = "super::identity_workspace_llm_keys::Entity")]
+    IdentityWorkspaceLlmKeys,
 }
 
 impl Related<super::content_entities::Entity> for Entity {
@@ -59,9 +67,21 @@ impl Related<super::content_entities::Entity> for Entity {
     }
 }
 
+impl Related<super::content_entity_column_preferences::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ContentEntityColumnPreferences.def()
+    }
+}
+
 impl Related<super::content_entity_snapshots::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ContentEntitySnapshots.def()
+    }
+}
+
+impl Related<super::content_fill_proposals::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ContentFillProposals.def()
     }
 }
 
@@ -77,6 +97,12 @@ impl Related<super::content_schemas::Entity> for Entity {
     }
 }
 
+impl Related<super::identity_api_key_audit_log::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityApiKeyAuditLog.def()
+    }
+}
+
 impl Related<super::identity_api_keys::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IdentityApiKeys.def()
@@ -86,5 +112,11 @@ impl Related<super::identity_api_keys::Entity> for Entity {
 impl Related<super::identity_tenants::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IdentityTenants.def()
+    }
+}
+
+impl Related<super::identity_workspace_llm_keys::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityWorkspaceLlmKeys.def()
     }
 }

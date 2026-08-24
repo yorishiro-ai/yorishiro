@@ -33,6 +33,10 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::content_schemas::Entity")]
     ContentSchemas,
+    #[sea_orm(has_many = "super::identity_template_reviews::Entity")]
+    IdentityTemplateReviews,
+    #[sea_orm(has_many = "super::identity_template_versions::Entity")]
+    IdentityTemplateVersions,
     #[sea_orm(
         belongs_to = "Entity",
         from = "Column::ForkOf",
@@ -62,6 +66,18 @@ pub enum Relation {
 impl Related<super::content_schemas::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ContentSchemas.def()
+    }
+}
+
+impl Related<super::identity_template_reviews::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityTemplateReviews.def()
+    }
+}
+
+impl Related<super::identity_template_versions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityTemplateVersions.def()
     }
 }
 

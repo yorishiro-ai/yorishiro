@@ -31,17 +31,41 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::identity_api_key_audit_log::Entity")]
+    IdentityApiKeyAuditLog,
     #[sea_orm(has_many = "super::identity_api_keys::Entity")]
     IdentityApiKeys,
+    #[sea_orm(has_many = "super::identity_template_reviews::Entity")]
+    IdentityTemplateReviews,
+    #[sea_orm(has_many = "super::identity_template_versions::Entity")]
+    IdentityTemplateVersions,
     #[sea_orm(has_many = "super::identity_templates::Entity")]
     IdentityTemplates,
     #[sea_orm(has_many = "super::identity_tenant_memberships::Entity")]
     IdentityTenantMemberships,
 }
 
+impl Related<super::identity_api_key_audit_log::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityApiKeyAuditLog.def()
+    }
+}
+
 impl Related<super::identity_api_keys::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IdentityApiKeys.def()
+    }
+}
+
+impl Related<super::identity_template_reviews::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityTemplateReviews.def()
+    }
+}
+
+impl Related<super::identity_template_versions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityTemplateVersions.def()
     }
 }
 
