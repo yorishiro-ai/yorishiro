@@ -9,7 +9,7 @@ use crate::error::{ResultExt, YorishiroError};
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct OpenAiCompatibleConfig {
-    /// Example: `http://10.0.3.200:1234/v1` (a trailing `/` is optional).
+    /// Example: `http://localhost:11434`
     pub base_url: String,
     pub api_key: String,
     pub model: String,

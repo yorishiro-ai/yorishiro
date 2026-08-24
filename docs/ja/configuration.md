@@ -15,7 +15,7 @@ Loco 移植の直近のスライスが触れた2領域である。
 | 変数 | 説明 |
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local`でローカルONNXプロバイダを選択する(後述)。それ以外の値、または未設定の場合はOpenAI互換プロバイダを選択する |
-| `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI互換プロバイダのみ。OpenAI互換の埋め込みエンドポイントのベースURL(LM Studio、Ollama、vLLM、または実際のOpenAI)。例: `http://10.0.3.200:1234/v1`。`YORISHIRO_EMBEDDING_MODEL`とあわせて設定が必要。どちらか一方でも未設定だと、起動は埋め込みバックエンド未設定のまま進み(失敗しない)、埋め込み呼び出しはすべてリクエスト時に`ProviderUnreachable`で失敗するようになる |
+| `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI互換プロバイダのみ。OpenAI互換の埋め込みエンドポイントのベースURL(LM Studio、Ollama、vLLM、または実際のOpenAI)。例: `http://localhost:11434`。`YORISHIRO_EMBEDDING_MODEL`とあわせて設定が必要。どちらか一方でも未設定だと、起動は埋め込みバックエンド未設定のまま進み(失敗しない)、埋め込み呼び出しはすべてリクエスト時に`ProviderUnreachable`で失敗するようになる |
 | `YORISHIRO_EMBEDDING_MODEL` | OpenAI互換プロバイダのみ。埋め込みリクエストの`model`フィールドに送られるモデル名。ワークスペース作成時、そのワークスペースが埋め込まれたモデルとしても刻印される。未設定の場合、ワークスペースには`unconfigured`が刻印される |
 | `YORISHIRO_EMBEDDING_API_KEY` | OpenAI互換プロバイダのみ。`YORISHIRO_EMBEDDING_BASE_URL`に送るベアラートークン。既定は空文字列で、トークンを確認しないローカルサーバー(LM Studio、Ollama)にはこれが正しい |
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | 期待するベクトルの次元数(既定: `768`)。デプロイ内のすべてのベクトルはこの次元数を共有する必要がある。ローカルONNXプロバイダは起動時のプローブ推論でこれを検証し、OpenAI互換プロバイダはレスポンスごとに検証する |
