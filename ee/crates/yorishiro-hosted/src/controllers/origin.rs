@@ -80,8 +80,7 @@ async fn merge_preview(
         schema_id,
     )
     .await?;
-    // Read-only: rolling back (rather than committing) a transaction that made no writes is
-    // equivalent, and dropping it does exactly that.
+    // Read-only: rolling back (rather than committing) a transaction that made no writes is equivalent, and dropping it does exactly that.
     Ok(Json(plan))
 }
 

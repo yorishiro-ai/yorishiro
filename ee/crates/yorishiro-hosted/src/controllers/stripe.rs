@@ -19,8 +19,8 @@ use crate::models::{billing, stripe_events};
 use crate::services::plan::{Plan, StripePriceMapping};
 use crate::services::{hmac_sign, non_empty_env};
 
-/// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible
-/// replay. Stripe's own guidance uses 5 minutes.
+/// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible replay.
+/// Stripe's own guidance uses 5 minutes.
 const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
 /// Configuration for the Stripe integration.

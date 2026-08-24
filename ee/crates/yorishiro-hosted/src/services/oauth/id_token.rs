@@ -45,8 +45,7 @@ pub fn verify(
         YorishiroError::Unauthenticated
     })?;
 
-    // Restricting to RS256 closes off the "alg: none" / algorithm-confusion class of JWT
-    // vulnerabilities by construction, rather than by checking `header.alg` separately.
+    // Restricting to RS256 closes off the "alg: none" / algorithm-confusion class of JWT vulnerabilities by construction, rather than by checking `header.alg` separately.
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_issuer(&[issuer_url]);
     validation.set_audience(&[client_id]);

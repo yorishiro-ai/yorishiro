@@ -1,7 +1,6 @@
 //! Reading and writing the OAuth identity columns on `identity_users`.
 //!
-//! The query alone: what to do with a lookup's result (first login vs. returning user, tenant
-//! and workspace auto-provisioning) is `services::oauth::users`'s.
+//! The query alone: what to do with a lookup's result (first login vs. returning user, tenant and workspace auto-provisioning) is `services::oauth::users`'s.
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,

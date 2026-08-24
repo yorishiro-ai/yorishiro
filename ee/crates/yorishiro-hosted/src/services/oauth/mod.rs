@@ -46,8 +46,7 @@ pub async fn build_authorize_redirect(
     })
 }
 
-/// The verified result of a callback: the identity provider's subject id/email/display name,
-/// ready to be handed to `users::find_or_create`.
+/// The verified result of a callback: the identity provider's subject id/email/display name, ready to be handed to `users::find_or_create`.
 pub struct CallbackIdentity {
     pub subject_id: String,
     pub email: Option<String>,
