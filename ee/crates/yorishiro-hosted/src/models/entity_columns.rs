@@ -10,17 +10,15 @@ use yorishiro_core::error::{ResultExt, YorishiroError};
 
 /// How many columns a workspace may turn on at once.
 ///
-/// Not a storage limit: a table wide enough to scroll horizontally stops being a table, and a
-/// schema with sixty fields would otherwise let one click produce one.
+/// Not a storage limit: a table wide enough to scroll horizontally stops being a table, and a schema with sixty fields would otherwise let one click produce one.
 pub const MAX_VISIBLE_COLUMNS: usize = 12;
 
 /// The visible columns for one entity type, in display order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnPreference {
     pub entity_type: String,
-    /// Field names from the schema, in the order they are displayed. A name the schema no
-    /// longer defines stays here and is skipped when rendering, so a schema change does not
-    /// have to know about display settings.
+    /// Field names from the schema, in the order they are displayed.
+    /// A name the schema no longer defines stays here and is skipped when rendering, so a schema change does not have to know about display settings.
     pub columns: Vec<String>,
 }
 
@@ -54,8 +52,7 @@ pub async fn get(
     }))
 }
 
-/// Every stored preference in the workspace, so a caller can switch entity types without a
-/// round trip each time.
+/// Every stored preference in the workspace, so a caller can switch entity types without a round trip each time.
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -130,8 +127,7 @@ pub async fn set(
 
 /// Drops the choice, so the table goes back to the schema-derived default.
 ///
-/// Deleting the row rather than storing an empty list: an empty list is itself a choice, "show
-/// no columns", and a reset has to be distinguishable from it.
+/// Deleting the row rather than storing an empty list: an empty list is itself a choice, "show no columns", and a reset has to be distinguishable from it.
 pub async fn clear(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

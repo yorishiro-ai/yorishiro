@@ -35,8 +35,8 @@ pub struct SignupResponse {
     pub email: String,
     pub tenant_id: Uuid,
     pub role: MembershipRole,
-    /// The workspaces the new member can now log into. The client picks one and passes its id
-    /// to `/auth/login`.
+    /// The workspaces the new member can now log into.
+    /// The client picks one and passes its id to `/auth/login`.
     pub workspaces: Vec<WorkspaceSummary>,
 }
 
@@ -147,8 +147,8 @@ pub struct LoginRequest {
 
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
-    /// The freshly issued API key's plaintext. Shown only in this response: only its hash is
-    /// ever persisted, so it cannot be recovered afterward.
+    /// The freshly issued API key's plaintext.
+    /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
     pub api_key: String,
     pub api_key_id: Uuid,
     pub workspace_id: Uuid,
@@ -160,16 +160,14 @@ pub async fn login(
     State(ctx): State<AppContext>,
     Json(body): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    // Credentials are checked before the workspace is looked up, so a request with a bad
-    // password never reveals whether workspace_id exists.
+    // Credentials are checked before the workspace is looked up, so a request with a bad password never reveals whether workspace_id exists.
     let user = tenancy::verify_login(&ctx.db, &body.email, &body.password)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
 
     let workspace_id = match body.workspace_id {
         Some(workspace_id) => {
-            // Confirms the workspace exists before the membership check below, matching the
-            // NotFound this call would surface anyway.
+            // Confirms the workspace exists before the membership check below, matching the NotFound this call would surface anyway.
             tenancy::get_workspace_tenant(&ctx.db, workspace_id).await?;
             workspace_id
         }

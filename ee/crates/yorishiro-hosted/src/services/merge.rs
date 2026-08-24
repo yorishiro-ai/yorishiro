@@ -257,8 +257,7 @@ pub fn apply_plan(
 
                 match upstream_field {
                     Some(def) => {
-                        // The entity type may not exist locally yet: an upstream addition of a
-                        // whole type arrives field by field.
+                        // The entity type may not exist locally yet: an upstream addition of a whole type arrives field by field.
                         merged
                             .entity_types
                             .entry(field.entity_type.clone())
@@ -279,8 +278,7 @@ pub fn apply_plan(
                             .insert(field.field.clone(), def.clone());
                     }
                     None => {
-                        // Removed upstream, untouched locally: the plan calls that an update, and
-                        // the update is the removal.
+                        // Removed upstream, untouched locally: the plan calls that an update, and the update is the removal.
                         if let Some(entity_type) = merged.entity_types.get_mut(&field.entity_type) {
                             entity_type.fields.remove(&field.field);
                         }

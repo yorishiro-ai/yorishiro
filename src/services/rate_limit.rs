@@ -63,9 +63,8 @@ impl RateLimiter {
         Self::new(max_tokens, Duration::from_secs(60))
     }
 
-    /// Returns `true` if this call is within the limit, `false` if `key` has exhausted its quota
-    /// for the current window. The window resets lazily on the first call after it elapses,
-    /// rather than on a background timer.
+    /// Returns `true` if this call is within the limit, `false` if `key` has exhausted its quota for the current window.
+    /// The window resets lazily on the first call after it elapses, rather than on a background timer.
     pub fn allow(&self, key: &str) -> bool {
         self.allow_cost(key, 1)
     }
@@ -80,9 +79,8 @@ impl RateLimiter {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
 
-        // Lazy GC: evict expired entries every 128 calls to bound memory growth. Without this,
-        // an attacker rotating source IPs would grow the map without limit (the rate limiter
-        // itself becoming a DoS vector).
+        // Lazy GC: evict expired entries every 128 calls to bound memory growth.
+        // Without this, an attacker rotating source IPs would grow the map without limit (the rate limiter itself becoming a DoS vector).
         if buckets.len() > 128 {
             let window = self.window;
             buckets.retain(|_, (start, _)| now.duration_since(*start) < window);
@@ -172,8 +170,7 @@ mod tests {
         assert!(!is_guarded("/setup"));
     }
 
-    /// Counts tokens as the byte length exactly, so a test can pick a query whose cost is known
-    /// up front rather than depending on the default estimate's rounding.
+    /// Counts tokens as the byte length exactly, so a test can pick a query whose cost is known up front rather than depending on the default estimate's rounding.
     struct FixedCostProvider;
 
     #[async_trait]

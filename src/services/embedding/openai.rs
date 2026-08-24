@@ -14,8 +14,7 @@ pub struct OpenAiCompatibleConfig {
     pub api_key: String,
     pub model: String,
     pub dimensions: usize,
-    /// Some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) don't recognize the
-    /// `dimensions` parameter, so callers can explicitly choose whether to include it.
+    /// Some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) don't recognize the `dimensions` parameter, so callers can explicitly choose whether to include it.
     pub send_dimensions_param: bool,
 }
 
@@ -86,10 +85,8 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             })
             .send()
             .await
-            // Not `.internal()`: a request that never reached the provider is a configuration
-            // or outage problem the operator can act on, and `internal server error` tells
-            // them nothing. `send` fails before any HTTP status exists, so this arm is exactly
-            // the "could not be reached" case and never a provider that answered.
+            // Not `.internal()`: a request that never reached the provider is a configuration or outage problem the operator can act on, and `internal server error` tells them nothing.
+            // `send` fails before any HTTP status exists, so this arm is exactly the "could not be reached" case and never a provider that answered.
             .map_err(|err| YorishiroError::ProviderUnreachable {
                 url: self.base_url.clone(),
                 message: err.to_string(),
@@ -97,9 +94,8 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
 
         let status = response.status();
         if !status.is_success() {
-            // A provider saying "too many requests" or "temporarily unavailable" is saying to
-            // come back, different from a request it will never accept. Told apart here so the
-            // caller can wait instead of dropping the work.
+            // A provider saying "too many requests" or "temporarily unavailable" is saying to come back, different from a request it will never accept.
+            // Told apart here so the caller can wait instead of dropping the work.
             if let Some(after) = retry_after(status.as_u16(), response.headers()) {
                 let body = response.text().await.unwrap_or_default();
                 return Err(YorishiroError::ProviderBusy {

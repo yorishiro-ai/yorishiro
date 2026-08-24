@@ -56,9 +56,8 @@ impl Hooks for App {
                 .map_err(|e| {
                     loco_rs::Error::Message(format!("failed to build tenant pool: {e}"))
                 })?;
-        // The identity pool connects as the migration role (bypassing RLS) for control-plane
-        // access: signup, setup, the admin CLI. No after_connect/after_release, since it
-        // never scopes to a tenant/workspace.
+        // The identity pool connects as the migration role (bypassing RLS) for control-plane access: signup, setup, the admin CLI.
+        // No after_connect/after_release, since it never scopes to a tenant/workspace.
         let identity = sqlx::postgres::PgPoolOptions::new()
             .max_connections(ctx.config.database.max_connections)
             .connect(&database_url)
@@ -66,21 +65,16 @@ impl Hooks for App {
             .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
         ctx.shared_store
             .insert(crate::db::DbHandle { tenant, identity });
-        // The authenticator seam: a deployment that needs a different authentication rule
-        // (a key naming its workspace per request, an external identity system) replaces this
-        // insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
+        // The authenticator seam: a deployment that needs a different authentication rule (a key naming its workspace per request, an external identity system) replaces this insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
         ctx.shared_store
             .insert(crate::services::auth::default_authenticator());
-        // Boot fails loudly if the embedding provider is misconfigured, rather than deferring
-        // the error to the first search.
+        // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the error to the first search.
         let embedding_provider =
             crate::services::embedding::build_embedding_provider().map_err(|e| {
                 loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
             })?;
         ctx.shared_store.insert(embedding_provider);
-        // Per-workspace search token budget: a request scope, so it belongs in shared_store
-        // rather than being built fresh in after_routes like the (per-IP, request-scoped-only)
-        // auth rate limiter is.
+        // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
         ctx.shared_store.insert(std::sync::Arc::new(
             crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
         ));
