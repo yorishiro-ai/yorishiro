@@ -240,6 +240,148 @@ async fn confirming_an_unknown_job_is_refused() {
     .await;
 }
 
+/// Sets up one schema, one entity and one recorded proposal for the infrastructure-failure tests
+/// below, then locks `content_entities` in `lock_mode` from a second connection and calls
+/// `confirm` with a short `lock_timeout`, returning `confirm`'s result as a string (its `Err`
+/// message, or `"Ok"` if it somehow succeeded) for the caller to assert on.
+///
+/// yorishiro_app is granted per-table (see loco-architecture.md), not the owner of any table, so
+/// it cannot DROP or REVOKE its own way into a failure; locking the table from a second connection
+/// is a failure `confirm`'s loop can genuinely hit without needing privileges the RLS role does
+/// not have.
+async fn confirm_with_content_entities_locked(
+    request: &axum_test::TestServer,
+    ctx: &loco_rs::app::AppContext,
+    lock_mode: &'static str,
+) -> String {
+    licence(ctx);
+    let setup = setup(ctx).await;
+
+    let create_schema = request
+        .post("/api/schemas")
+        .add_header("Authorization", format!("Bearer {}", setup.key))
+        .json(&serde_json::json!({
+            "name": "note",
+            "entity_types": {
+                "note": { "fields": { "title": { "type": "string", "required": true } } }
+            }
+        }))
+        .await;
+    assert_eq!(
+        create_schema.status_code(),
+        201,
+        "response: {:?}",
+        create_schema.text()
+    );
+
+    let create_entity = request
+        .post("/api/entities")
+        .add_header("Authorization", format!("Bearer {}", setup.key))
+        .json(&serde_json::json!({
+            "schema_name": "note",
+            "entity_type": "note",
+            "data": { "title": "original" }
+        }))
+        .await;
+    assert_eq!(
+        create_entity.status_code(),
+        201,
+        "response: {:?}",
+        create_entity.text()
+    );
+    let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let db = ctx.shared_store.get::<DbHandle>().unwrap();
+    let job_id = Uuid::new_v4();
+    {
+        let txn = db
+            .tenant
+            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+            .await
+            .expect("begin tenant txn");
+        fill_proposals::record(
+            &txn,
+            setup.workspace_id,
+            job_id,
+            entity_id,
+            "title",
+            &serde_json::json!("guessed"),
+        )
+        .await
+        .expect("record proposal");
+        txn.commit().await.expect("commit proposal");
+    }
+
+    let mut blocker = db.identity.acquire().await.expect("acquire blocker conn");
+    sqlx::query("BEGIN")
+        .execute(&mut *blocker)
+        .await
+        .expect("begin blocker txn");
+    let lock_statement = match lock_mode {
+        "EXCLUSIVE" => "LOCK TABLE content_entities IN EXCLUSIVE MODE",
+        "ACCESS EXCLUSIVE" => "LOCK TABLE content_entities IN ACCESS EXCLUSIVE MODE",
+        other => panic!("unexpected lock mode {other:?}"),
+    };
+    sqlx::query(lock_statement)
+        .execute(&mut *blocker)
+        .await
+        .expect("lock content_entities");
+
+    let result = {
+        let txn = db
+            .tenant
+            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+            .await
+            .expect("begin tenant txn");
+        txn.execute_raw(Statement::from_string(
+            sea_orm::DatabaseBackend::Postgres,
+            "SET LOCAL lock_timeout = '50ms'",
+        ))
+        .await
+        .expect("set lock_timeout");
+
+        let result = fill_proposals::confirm(&txn, setup.workspace_id, job_id).await;
+        // Rolls back on drop: the lock_timeout is transaction-local, and anything confirm did
+        // before failing is undone along with it.
+        match result {
+            Ok(_) => "Ok".to_string(),
+            Err(err) => err.to_string(),
+        }
+    };
+
+    sqlx::query("ROLLBACK")
+        .execute(&mut *blocker)
+        .await
+        .expect("release blocker lock");
+    // The pool does not consider this connection returned until it drops: the next
+    // begin_for_workspace call hangs until this one is, so it must go before that call.
+    drop(blocker);
+
+    // Proposals survive either way, old code and new: a real Postgres error aborts the whole
+    // transaction, so the trailing DELETE FROM content_fill_proposals never runs regardless. This
+    // is not itself evidence of a fix; it is checked here only so the fixture is confirmed sane.
+    let verify_txn = db
+        .tenant
+        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+        .await
+        .expect("begin tenant txn");
+    let remaining = fill_proposals::for_job(&verify_txn, setup.workspace_id, job_id)
+        .await
+        .expect("list proposals");
+    assert_eq!(
+        remaining.len(),
+        1,
+        "the fixture's one proposal should still be there"
+    );
+    verify_txn.rollback().await.expect("rollback verify txn");
+
+    result
+}
+
 /// The enclosing transaction already guarantees proposals survive any genuine infrastructure
 /// failure, old code and new alike: a real Postgres error aborts the transaction, so the trailing
 /// `DELETE FROM content_fill_proposals` can never run either way. What the old code actually cost
@@ -252,7 +394,8 @@ async fn confirming_an_unknown_job_is_refused() {
 /// `content_entities` is locked `EXCLUSIVE`, not `ACCESS EXCLUSIVE`: `EXCLUSIVE` still admits the
 /// plain `SELECT` `content_entities::get` runs earlier in the same loop iteration, so the failure
 /// lands specifically on `update`'s write, exercising the `Err(err) => return Err(err)` arm this
-/// fix added there rather than the one on `get`.
+/// fix added there rather than the one on `get`. `an_infrastructure_failure_on_get_surfaces_as_itself`
+/// below is `get`'s counterpart, with `ACCESS EXCLUSIVE` instead so the failure lands there first.
 ///
 /// Asserting on `"lock timeout"` in the error text matches Postgres's own (English) server
 /// message, which depends on the server's `lc_messages`; this suite's container runs
@@ -262,143 +405,46 @@ async fn confirming_an_unknown_job_is_refused() {
 #[serial]
 async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
     request_with_create_db::<HostedApp, _, _>(|request, ctx| async move {
-        licence(&ctx);
-        let setup = setup(&ctx).await;
-
-        let create_schema = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
-            .json(&serde_json::json!({
-                "name": "note",
-                "entity_types": {
-                    "note": { "fields": { "title": { "type": "string", "required": true } } }
-                }
-            }))
-            .await;
-        assert_eq!(
-            create_schema.status_code(),
-            201,
-            "response: {:?}",
-            create_schema.text()
+        let message = confirm_with_content_entities_locked(&request, &ctx, "EXCLUSIVE").await;
+        // The observable difference between the old code and this fix: the old code let the lock
+        // timeout fall into `skipped`, then hit "current transaction is aborted" on the next
+        // statement and returned *that* instead. This fix returns the lock timeout itself,
+        // immediately, from the `update` call where it actually happened.
+        assert!(
+            message.contains("lock timeout"),
+            "expected the lock timeout itself, not a downstream error: {message}"
+        );
+        assert!(
+            !message.contains("transaction is aborted"),
+            "the old code's masked failure mode must not reappear: {message}"
         );
 
-        let create_entity = request
-            .post("/api/entities")
-            .add_header("Authorization", format!("Bearer {}", setup.key))
-            .json(&serde_json::json!({
-                "schema_name": "note",
-                "entity_type": "note",
-                "data": { "title": "original" }
-            }))
-            .await;
-        assert_eq!(
-            create_entity.status_code(),
-            201,
-            "response: {:?}",
-            create_entity.text()
+        super::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// `get`'s counterpart to the `update` test above: `content_entities` is locked
+/// `ACCESS EXCLUSIVE`, the one lock mode that also blocks the plain `SELECT`
+/// `content_entities::get` runs, so the failure lands on `get` (the very first statement in the
+/// loop) rather than on `update`. This isolates the `Err(err) => return Err(err)` arm the fix
+/// added to `get`'s own match, which `an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error`
+/// does not exercise: that test's `EXCLUSIVE` lock still admits `get`'s read, so it only ever
+/// proved the `update` arm.
+#[tokio::test]
+#[serial]
+async fn an_infrastructure_failure_on_get_surfaces_as_itself() {
+    request_with_create_db::<HostedApp, _, _>(|request, ctx| async move {
+        let message =
+            confirm_with_content_entities_locked(&request, &ctx, "ACCESS EXCLUSIVE").await;
+        assert!(
+            message.contains("lock timeout"),
+            "expected the lock timeout itself, not a downstream error: {message}"
         );
-        let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .unwrap();
-
-        let db = ctx.shared_store.get::<DbHandle>().unwrap();
-        let job_id = Uuid::new_v4();
-        {
-            let txn = db
-                .tenant
-                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-                .await
-                .expect("begin tenant txn");
-            fill_proposals::record(
-                &txn,
-                setup.workspace_id,
-                job_id,
-                entity_id,
-                "title",
-                &serde_json::json!("guessed"),
-            )
-            .await
-            .expect("record proposal");
-            txn.commit().await.expect("commit proposal");
-        }
-
-        // yorishiro_app is granted per-table (see loco-architecture.md), not the owner of any
-        // table, so it cannot DROP or REVOKE its own way into a failure. Locking the table from a
-        // second connection and giving confirm's transaction a short lock_timeout is a failure
-        // the update inside confirm's loop can genuinely hit, without needing privileges the RLS
-        // role does not have.
-        let mut blocker = db.identity.acquire().await.expect("acquire blocker conn");
-        sqlx::query("BEGIN")
-            .execute(&mut *blocker)
-            .await
-            .expect("begin blocker txn");
-        sqlx::query("LOCK TABLE content_entities IN EXCLUSIVE MODE")
-            .execute(&mut *blocker)
-            .await
-            .expect("lock content_entities");
-        {
-            let txn = db
-                .tenant
-                .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-                .await
-                .expect("begin tenant txn");
-            txn.execute_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Postgres,
-                "SET LOCAL lock_timeout = '50ms'",
-            ))
-            .await
-            .expect("set lock_timeout");
-
-            let result = fill_proposals::confirm(&txn, setup.workspace_id, job_id).await;
-            // The observable difference between the old code and this fix: the old code let the
-            // lock timeout fall into `skipped`, then hit "current transaction is aborted" on the
-            // next statement and returned *that* instead. This fix returns the lock timeout
-            // itself, immediately, from the `update` call where it actually happened.
-            let message = result
-                .as_ref()
-                .expect_err(
-                    "confirm should fail once its update cannot acquire a lock on content_entities",
-                )
-                .to_string();
-            assert!(
-                message.contains("lock timeout"),
-                "expected the lock timeout itself, not a downstream error: {message}"
-            );
-            assert!(
-                !message.contains("transaction is aborted"),
-                "the old code's masked failure mode must not reappear: {message}"
-            );
-            // Rolls back on drop: the lock_timeout is transaction-local, and anything confirm did
-            // before failing is undone along with it.
-        }
-        sqlx::query("ROLLBACK")
-            .execute(&mut *blocker)
-            .await
-            .expect("release blocker lock");
-        // The pool does not consider this connection returned until it drops: the next
-        // begin_for_workspace call hangs until this one is, so it must go before that call.
-        drop(blocker);
-
-        // Proposals survive either way, old code and new: a real Postgres error aborts the whole
-        // transaction, so the trailing DELETE FROM content_fill_proposals never runs regardless.
-        // This is not itself evidence of the fix (see the doc comment above); it is checked here
-        // only so the fixture is confirmed sane.
-        let verify_txn = db
-            .tenant
-            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-            .await
-            .expect("begin tenant txn");
-        let remaining = fill_proposals::for_job(&verify_txn, setup.workspace_id, job_id)
-            .await
-            .expect("list proposals");
-        assert_eq!(
-            remaining.len(),
-            1,
-            "the fixture's one proposal should still be there"
+        assert!(
+            !message.contains("transaction is aborted"),
+            "the old code's masked failure mode must not reappear: {message}"
         );
-        verify_txn.rollback().await.expect("rollback verify txn");
 
         super::close_app_pools(&ctx).await;
     })
