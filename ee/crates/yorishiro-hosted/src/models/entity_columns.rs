@@ -11,6 +11,7 @@ use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::_entities::content_entity_column_preferences::{
     ActiveModel, Column, Entity,
 };
+use yorishiro_core::models::pagination::ListParams;
 
 /// How many columns a workspace may turn on at once.
 ///
@@ -32,6 +33,10 @@ struct Row {
     columns: serde_json::Value,
 }
 
+/// The columns [`Row`] needs, shared by both lookups below so they can't drift apart from each
+/// other (see `search.rs`'s `HIT_COLUMNS` for the same pattern).
+const ROW_COLUMNS: &str = "entity_type, columns";
+
 /// Reads the stored preference for one entity type.
 ///
 /// `None` means the workspace has never chosen, which is different from having chosen nothing: the caller falls back to the schema's own first few fields rather than rendering a table with no columns.
@@ -42,8 +47,10 @@ pub async fn get(
 ) -> Result<Option<ColumnPreference>, YorishiroError> {
     let row = Row::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT entity_type, columns FROM content_entity_column_preferences \
-         WHERE workspace_id = $1 AND entity_type = $2",
+        format!(
+            "SELECT {ROW_COLUMNS} FROM content_entity_column_preferences \
+             WHERE workspace_id = $1 AND entity_type = $2"
+        ),
         [workspace_id.into(), entity_type.into()],
     ))
     .one(conn)
@@ -60,12 +67,20 @@ pub async fn get(
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
+    page: ListParams,
 ) -> Result<Vec<ColumnPreference>, YorishiroError> {
     let rows = Row::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT entity_type, columns FROM content_entity_column_preferences \
-         WHERE workspace_id = $1 ORDER BY entity_type ASC",
-        [workspace_id.into()],
+        format!(
+            "SELECT {ROW_COLUMNS} FROM content_entity_column_preferences \
+             WHERE workspace_id = $1 ORDER BY entity_type ASC \
+             LIMIT $2 OFFSET $3"
+        ),
+        [
+            workspace_id.into(),
+            page.limit().into(),
+            page.offset().into(),
+        ],
     ))
     .all(conn)
     .await

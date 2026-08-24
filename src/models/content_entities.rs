@@ -79,8 +79,7 @@ pub struct CreateEntityInput {
     pub data: Value,
 }
 
-pub const DEFAULT_LIST_LIMIT: i64 = 50;
-
+#[derive(Default)]
 pub struct ListEntitiesQuery {
     pub entity_type: Option<String>,
     /// JSONB containment filter (`data @> filter`), e.g. `{"status": "active"}`.
@@ -88,20 +87,7 @@ pub struct ListEntitiesQuery {
     /// Restricts results to entities created against this schema version.
     /// Entities keep the version they were written against, so this selects the entities a given version produced, not the ones that would validate against it today.
     pub schema_version: Option<i32>,
-    pub limit: i64,
-    pub offset: i64,
-}
-
-impl Default for ListEntitiesQuery {
-    fn default() -> Self {
-        Self {
-            entity_type: None,
-            filter: None,
-            schema_version: None,
-            limit: DEFAULT_LIST_LIMIT,
-            offset: 0,
-        }
-    }
+    pub page: super::pagination::ListParams,
 }
 
 /// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
@@ -335,9 +321,6 @@ pub async fn list(
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
     use super::_entities::content_entities::Column;
 
-    let limit = query.limit.clamp(1, 200);
-    let offset = query.offset.max(0);
-
     let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
     if let Some(entity_type) = query.entity_type {
         select = select.filter(Column::EntityType.eq(entity_type));
@@ -351,8 +334,8 @@ pub async fn list(
 
     select
         .order_by_desc(Column::CreatedAt)
-        .limit(limit as u64)
-        .offset(offset as u64)
+        .limit(query.page.limit() as u64)
+        .offset(query.page.offset() as u64)
         .all(conn)
         .await
         .internal()

@@ -28,8 +28,8 @@ pub struct ListRelationsParams {
     /// Restricts the listing to one state.
     /// Omitted, every state is listed.
     pub status: Option<String>,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
+    #[serde(flatten)]
+    pub page: crate::controllers::PageParams,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,14 +77,12 @@ pub async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
-    let default = content_relations::ListRelationsQuery::default();
     let query = content_relations::ListRelationsQuery {
         source_id: params.source_id,
         target_id: params.target_id,
         relation_type: params.relation_type,
         status: params.status,
-        limit: params.limit.unwrap_or(default.limit),
-        offset: params.offset.unwrap_or(default.offset),
+        page: params.page.into(),
     };
 
     let workspace_id = authorized.ctx.workspace_id;

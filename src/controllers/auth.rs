@@ -84,7 +84,12 @@ async fn signup_with_invite(
     tenancy::add_member(&txn, invite.tenant_id, user.id, invite.role).await?;
     txn.commit().await.internal()?;
 
-    let workspaces = tenancy::list_workspaces(&ctx.db, invite.tenant_id).await?;
+    let workspaces = tenancy::list_workspaces(
+        &ctx.db,
+        invite.tenant_id,
+        crate::models::pagination::ListParams::default(),
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,

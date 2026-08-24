@@ -6,7 +6,7 @@
 //! The scope check is explicit for the same reason: there is no extractor here to carry it.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -44,12 +44,15 @@ pub struct MergeResponse {
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    Query(page): Query<yorishiro_core::controllers::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
 
     // ctx.db: this joins identity_templates, which the request role cannot read.
-    let changes = origin_model::list_with_upstream_changes(&ctx.db, auth_ctx.workspace_id).await?;
+    let changes =
+        origin_model::list_with_upstream_changes(&ctx.db, auth_ctx.workspace_id, page.into())
+            .await?;
     Ok(Json(changes))
 }
 

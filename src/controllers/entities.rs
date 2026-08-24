@@ -49,8 +49,8 @@ pub struct ListEntitiesParams {
     pub filter: Option<String>,
     /// Restricts results to entities created against this schema version.
     pub schema_version: Option<i32>,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
+    #[serde(flatten)]
+    pub page: crate::controllers::PageParams,
 }
 
 pub async fn create_entity(
@@ -110,13 +110,11 @@ pub async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
-    let default = content_entities::ListEntitiesQuery::default();
     let query = content_entities::ListEntitiesQuery {
         entity_type: params.entity_type,
         filter: crate::controllers::parse_filter_param(params.filter)?,
         schema_version: params.schema_version,
-        limit: params.limit.unwrap_or(default.limit),
-        offset: params.offset.unwrap_or(default.offset),
+        page: params.page.into(),
     };
 
     let workspace_id = authorized.ctx.workspace_id;

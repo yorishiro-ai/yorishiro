@@ -20,6 +20,21 @@ pub use error::ApiError;
 
 use crate::error::YorishiroError;
 
+/// The `limit`/`offset` query-string pair every list endpoint accepts.
+/// `#[serde(flatten)]` this into a request's own `Params` struct alongside its filters, the same
+/// way `models::pagination::ListParams` is embedded into a table's own `ListXQuery`.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct PageParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+impl From<PageParams> for crate::models::pagination::ListParams {
+    fn from(params: PageParams) -> Self {
+        Self::new(params.limit, params.offset)
+    }
+}
+
 /// Parses a query-string `filter` parameter (a JSON object, e.g. `{"status":"active"}`) used as a JSONB containment filter.
 /// `None`/empty means no filter.
 pub(crate) fn parse_filter_param(

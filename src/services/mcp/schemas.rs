@@ -35,6 +35,14 @@ pub struct GetEntityTypeJsonSchemaArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListSchemasArgs {
+    /// Maximum number of results (defaults to 50 if omitted).
+    pub limit: Option<i64>,
+    /// Number of records to skip (defaults to 0 if omitted).
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateSchemaArgs {
     /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
     /// If a schema with the same name already exists, whether the change is breaking or non-breaking is detected automatically and it is registered as a new version.
@@ -55,12 +63,14 @@ impl YorishiroMcpServer {
     )]
     pub async fn list_schemas(
         &self,
+        Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
 
         let workspace_id = authorized.ctx.workspace_id;
-        let summaries = mcp_try!(content_schemas::list(authorized.txn(), workspace_id).await);
+        let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
+        let summaries = mcp_try!(content_schemas::list(authorized.txn(), workspace_id, page).await);
         ok_json(summaries)
     }
 

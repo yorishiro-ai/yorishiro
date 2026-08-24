@@ -23,9 +23,18 @@ impl Task for ListMembers {
             .parse()
             .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
 
-        let members = tenancy::list_members(&app_context.db, tenant_id)
-            .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+        // A CLI listing, not a paged UI: shows up to MAX_LIST_LIMIT rather than truncating
+        // silently at the smaller default an operator has no way to override here.
+        let members = tenancy::list_members(
+            &app_context.db,
+            tenant_id,
+            crate::models::pagination::ListParams {
+                limit: crate::models::pagination::MAX_LIST_LIMIT,
+                offset: 0,
+            },
+        )
+        .await
+        .map_err(|err| Error::Message(err.to_string()))?;
 
         if members.is_empty() {
             println!("no members for tenant {tenant_id}");

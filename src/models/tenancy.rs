@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
-    QueryFilter, SqlErr,
+    QueryFilter, QueryOrder, QuerySelect, SqlErr,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -233,10 +233,14 @@ pub async fn get_user_by_email(
 pub async fn list_members(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
+    page: super::pagination::ListParams,
 ) -> Result<Vec<MembershipRecord>, YorishiroError> {
     let memberships = identity_tenant_memberships::Entity::find()
         .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
         .find_also_related(identity_users::Entity)
+        .order_by_asc(identity_tenant_memberships::Column::CreatedAt)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
         .all(conn)
         .await
         .internal()?;
@@ -381,11 +385,15 @@ pub struct WorkspaceSummary {
 pub async fn list_workspaces(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
+    page: super::pagination::ListParams,
 ) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
     use crate::models::_entities::identity_workspaces;
 
     let workspaces = identity_workspaces::Entity::find()
         .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        .order_by_asc(identity_workspaces::Column::CreatedAt)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
         .all(conn)
         .await
         .internal()?;
@@ -401,6 +409,11 @@ pub async fn list_workspaces(
 
 /// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
 /// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
+///
+/// Deliberately unpaginated: this drives sign-in, not a browsing UI, and its own caller
+/// (`resolve_login_workspace`) needs the true, complete set to tell "exactly one, resolve to it"
+/// from "more than one, the caller must say which." A default `LIMIT` here would silently hide a
+/// membership from a user who holds more workspaces than the page size, rather than list them.
 pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,

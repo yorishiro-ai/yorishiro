@@ -21,6 +21,7 @@ pub mod identity_users;
 pub mod identity_workspace_llm_keys;
 pub mod identity_workspaces;
 pub mod import;
+pub mod pagination;
 pub mod recall;
 pub mod search;
 pub mod tenancy;

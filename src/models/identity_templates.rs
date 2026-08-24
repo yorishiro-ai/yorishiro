@@ -5,7 +5,7 @@
 
 pub use super::_entities::identity_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, Condition, QueryOrder};
+use sea_orm::{ActiveValue, Condition, QueryOrder, QuerySelect};
 use serde::Serialize;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -91,10 +91,13 @@ fn visible_to(tenant_id: uuid::Uuid) -> Condition {
 pub async fn list_templates(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
+    page: super::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
     let rows = Entity::find()
         .filter(visible_to(tenant_id))
         .order_by_asc(Column::CreatedAt)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
         .all(conn)
         .await
         .internal()?;

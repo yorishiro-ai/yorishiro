@@ -145,13 +145,11 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
 
-        let default = content_entities::ListEntitiesQuery::default();
         let query = content_entities::ListEntitiesQuery {
             entity_type: args.entity_type,
             filter: args.filter,
             schema_version: args.schema_version,
-            limit: args.limit.unwrap_or(default.limit),
-            offset: args.offset.unwrap_or(default.offset),
+            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
         };
 
         let workspace_id = authorized.ctx.workspace_id;

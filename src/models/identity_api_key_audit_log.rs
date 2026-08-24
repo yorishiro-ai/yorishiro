@@ -92,19 +92,15 @@ pub async fn record(
 pub async fn list_for_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    limit: i64,
-    offset: i64,
+    page: super::pagination::ListParams,
 ) -> Result<Vec<Model>, YorishiroError> {
     use super::_entities::identity_api_key_audit_log::Column;
-
-    let limit = limit.clamp(1, 200);
-    let offset = offset.max(0);
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .order_by_desc(Column::CreatedAt)
-        .limit(limit as u64)
-        .offset(offset as u64)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
         .all(conn)
         .await
         .internal()

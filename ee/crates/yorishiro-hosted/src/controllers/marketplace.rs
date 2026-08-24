@@ -12,8 +12,8 @@ use uuid::Uuid;
 use yorishiro_core::controllers::ApiError;
 
 use crate::models::marketplace::{
-    self as marketplace_models, ListMarketplaceQuery, MarketplaceListing, PublishVersionRequest,
-    SubmitReviewRequest, TemplateReviewRecord, TemplateVersionRecord,
+    self as marketplace_models, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest,
+    TemplateReviewRecord, TemplateVersionRecord,
 };
 use crate::services::authz;
 use crate::services::licence::LicenceState;
@@ -35,26 +35,15 @@ async fn licensed_tenant(
     authz::authenticate_tenant(ctx, headers).await
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ListMarketplaceParams {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-
 /// `GET /hosted/marketplace`: community-visible templates from every tenant, ordered by name then id.
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Query(params): Query<ListMarketplaceParams>,
+    Query(page): Query<yorishiro_core::controllers::PageParams>,
 ) -> Result<Json<Vec<MarketplaceListing>>, ApiError> {
     // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
     let _ = licensed_tenant(&ctx, &headers).await?;
-    let default = ListMarketplaceQuery::default();
-    let query = ListMarketplaceQuery {
-        limit: params.limit.unwrap_or(default.limit),
-        offset: params.offset.unwrap_or(default.offset),
-    };
-    let listings = marketplace_models::list_marketplace(&ctx.db, query).await?;
+    let listings = marketplace_models::list_marketplace(&ctx.db, page.into()).await?;
     Ok(Json(listings))
 }
 
@@ -63,9 +52,11 @@ async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
+    Query(page): Query<yorishiro_core::controllers::PageParams>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
-    let versions = marketplace_models::list_versions(&ctx.db, tenant_id, template_id).await?;
+    let versions =
+        marketplace_models::list_versions(&ctx.db, tenant_id, template_id, page.into()).await?;
     Ok(Json(versions))
 }
 
@@ -86,9 +77,11 @@ async fn list_reviews(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
+    Query(page): Query<yorishiro_core::controllers::PageParams>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
-    let reviews = marketplace_models::list_reviews(&ctx.db, tenant_id, template_id).await?;
+    let reviews =
+        marketplace_models::list_reviews(&ctx.db, tenant_id, template_id, page.into()).await?;
     Ok(Json(reviews))
 }
 

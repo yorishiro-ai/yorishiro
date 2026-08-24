@@ -4,7 +4,7 @@
 //! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -38,6 +38,7 @@ pub struct SetColumnsRequest {
 async fn list_columns(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    Query(page): Query<yorishiro_core::controllers::PageParams>,
 ) -> Result<Json<Vec<ColumnPreference>>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
@@ -50,7 +51,7 @@ async fn list_columns(
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
         .await
         .internal()?;
-    let stored = entity_columns::list(&schema_txn, auth_ctx.workspace_id).await?;
+    let stored = entity_columns::list(&schema_txn, auth_ctx.workspace_id, page.into()).await?;
     Ok(Json(stored))
 }
 

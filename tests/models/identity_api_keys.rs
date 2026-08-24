@@ -51,9 +51,13 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
         .await
         .expect("create key in other workspace");
 
-        let keys = ApiKeys::list_for_workspace(&ctx.db, workspace_id)
-            .await
-            .expect("list_for_workspace");
+        let keys = ApiKeys::list_for_workspace(
+            &ctx.db,
+            workspace_id,
+            yorishiro_core::models::pagination::ListParams::default(),
+        )
+        .await
+        .expect("list_for_workspace");
 
         assert_eq!(keys.len(), 2, "keys: {keys:?}");
         assert_eq!(keys[0].id, first.id, "oldest first");
@@ -83,9 +87,13 @@ async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
             .await
             .expect("first revoke succeeds");
 
-        let keys = ApiKeys::list_for_workspace(&ctx.db, workspace_id)
-            .await
-            .expect("list_for_workspace");
+        let keys = ApiKeys::list_for_workspace(
+            &ctx.db,
+            workspace_id,
+            yorishiro_core::models::pagination::ListParams::default(),
+        )
+        .await
+        .expect("list_for_workspace");
         assert!(keys.is_empty(), "revoked key must be gone: {keys:?}");
 
         let result = ApiKeys::revoke(&ctx.db, created.id).await;

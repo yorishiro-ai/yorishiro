@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -32,9 +32,10 @@ pub(crate) async fn require_tenant_admin(
 pub async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
+    Query(page): Query<crate::controllers::PageParams>,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
-    let members = tenancy::list_members(&ctx.db, auth.tenant_id).await?;
+    let members = tenancy::list_members(&ctx.db, auth.tenant_id, page.into()).await?;
     Ok(Json(members))
 }
 

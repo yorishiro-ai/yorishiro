@@ -121,14 +121,12 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
 
-        let default = content_relations::ListRelationsQuery::default();
         let query = content_relations::ListRelationsQuery {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
             status: args.status,
-            limit: args.limit.unwrap_or(default.limit),
-            offset: args.offset.unwrap_or(default.offset),
+            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
         };
 
         let workspace_id = authorized.ctx.workspace_id;

@@ -76,9 +76,13 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             .await
             .expect("insert hidden template");
 
-        let visible = templates::list_templates(&ctx.db, tenant_a.id)
-            .await
-            .expect("list_templates");
+        let visible = templates::list_templates(
+            &ctx.db,
+            tenant_a.id,
+            yorishiro_core::models::pagination::ListParams::default(),
+        )
+        .await
+        .expect("list_templates");
         let names: Vec<&str> = visible.iter().map(|t| t.name.as_str()).collect();
         assert!(
             names.contains(&"a-private"),

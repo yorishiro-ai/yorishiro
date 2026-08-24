@@ -11,6 +11,7 @@ use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::content_schemas::UpstreamChange;
+use yorishiro_core::models::pagination::ListParams;
 
 #[derive(FromQueryResult)]
 struct Row {
@@ -32,6 +33,7 @@ struct Row {
 pub async fn list_with_upstream_changes(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
+    page: ListParams,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
     let rows = Row::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
@@ -43,8 +45,13 @@ pub async fn list_with_upstream_changes(
             AND s.status = 'active' \
             AND s.origin_status = 'linked' \
             AND t.updated_at > s.created_at \
-          ORDER BY t.updated_at DESC",
-        [workspace_id.into()],
+          ORDER BY t.updated_at DESC \
+          LIMIT $2 OFFSET $3",
+        [
+            workspace_id.into(),
+            page.limit().into(),
+            page.offset().into(),
+        ],
     ))
     .all(conn)
     .await

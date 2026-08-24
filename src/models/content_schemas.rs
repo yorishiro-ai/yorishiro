@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveValue, QueryOrder, SqlErr};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -213,6 +213,7 @@ impl From<Model> for SchemaSummary {
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
+    page: super::pagination::ListParams,
 ) -> Result<Vec<SchemaSummary>, YorishiroError> {
     use super::_entities::content_schemas::Column;
 
@@ -220,6 +221,8 @@ pub async fn list(
         .filter(Column::WorkspaceId.eq(workspace_id))
         .order_by_asc(Column::Name)
         .order_by_asc(Column::Version)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
         .all(conn)
         .await
         .internal()?;

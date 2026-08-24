@@ -18,6 +18,14 @@ pub struct GetTemplateLibraryItemArgs {
     pub id: Uuid,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListTemplateLibraryArgs {
+    /// Maximum number of results (defaults to 50 if omitted).
+    pub limit: Option<i64>,
+    /// Number of records to skip (defaults to 0 if omitted).
+    pub offset: Option<i64>,
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_template_library)]
 impl YorishiroMcpServer {
     #[tool(
@@ -28,12 +36,15 @@ impl YorishiroMcpServer {
     )]
     pub async fn list_template_library(
         &self,
+        Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
 
         let tenant_id = authorized.ctx.tenant_id;
-        let templates = mcp_try!(identity_templates::list_templates(&self.ctx.db, tenant_id).await);
+        let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
+        let templates =
+            mcp_try!(identity_templates::list_templates(&self.ctx.db, tenant_id, page).await);
         ok_json(templates)
     }
 

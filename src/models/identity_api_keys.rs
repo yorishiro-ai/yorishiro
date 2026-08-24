@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QueryOrder, TransactionTrait};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, TransactionTrait};
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::services::auth::{
@@ -81,12 +81,15 @@ impl Entity {
     pub async fn list_for_workspace(
         conn: &impl ConnectionTrait,
         workspace_id: uuid::Uuid,
+        page: super::pagination::ListParams,
     ) -> Result<Vec<Model>, YorishiroError> {
         use super::_entities::identity_api_keys::Column;
 
         Entity::find()
             .filter(Column::WorkspaceId.eq(workspace_id))
             .order_by_asc(Column::CreatedAt)
+            .limit(page.limit() as u64)
+            .offset(page.offset() as u64)
             .all(conn)
             .await
             .internal()

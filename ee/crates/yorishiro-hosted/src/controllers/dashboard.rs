@@ -46,7 +46,19 @@ async fn tenant_overview(
         .ok_or_else(|| yorishiro_core::YorishiroError::not_found("tenant not found"))?;
     let billing = billing::get_billing(&ctx.db, tenant_id).await?;
     let usage = usage::compute_tenant_usage(&ctx.db, tenant_id).await?;
-    let members = tenancy::list_members(&ctx.db, tenant_id).await?;
+    // The dashboard overview shows every member, not a page: it's a fixed-shape summary, not a
+    // browsable list with its own query params. A tenant with more than MAX_LIST_LIMIT members
+    // would now see a truncated list where it previously saw all of them; flagged rather than
+    // silently accepted, since nothing here has measured how common that is.
+    let members = tenancy::list_members(
+        &ctx.db,
+        tenant_id,
+        yorishiro_core::models::pagination::ListParams {
+            limit: yorishiro_core::models::pagination::MAX_LIST_LIMIT,
+            offset: 0,
+        },
+    )
+    .await?;
 
     Ok(Json(TenantOverview {
         tenant_id,

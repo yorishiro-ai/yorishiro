@@ -5,12 +5,12 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, Statement};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
-use yorishiro_core::models::content_entities::DEFAULT_LIST_LIMIT;
+use yorishiro_core::models::pagination::ListParams;
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
 #[derive(Debug, Serialize, FromQueryResult)]
@@ -80,22 +80,6 @@ pub(crate) struct ForkSource {
     pub(crate) author: Option<String>,
 }
 
-/// `GET /hosted/marketplace`'s `limit`/`offset`, clamped the same way `entities::list`'s are.
-#[derive(Debug, Clone, Copy)]
-pub struct ListMarketplaceQuery {
-    pub limit: i64,
-    pub offset: i64,
-}
-
-impl Default for ListMarketplaceQuery {
-    fn default() -> Self {
-        Self {
-            limit: DEFAULT_LIST_LIMIT,
-            offset: 0,
-        }
-    }
-}
-
 /// Lists community-visible templates across every tenant, ordered by name then id, one page at a time.
 ///
 /// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
@@ -103,10 +87,10 @@ impl Default for ListMarketplaceQuery {
 /// The three aggregates (latest stable version, review count, average rating) stay correlated subqueries rather than a `JOIN` + `GROUP BY`: with `limit` bounding the page to at most 200 rows, their cost is bounded by the page size, and nothing here has measured the join rewrite as faster.
 pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
-    query: ListMarketplaceQuery,
+    page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
-    let limit = query.limit.clamp(1, 200);
-    let offset = query.offset.max(0);
+    let limit = page.limit();
+    let offset = page.offset();
 
     MarketplaceListing::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
@@ -140,6 +124,7 @@ pub async fn list_versions(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     template_id: Uuid,
+    page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
     TemplateVersionRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
@@ -150,8 +135,14 @@ pub async fn list_versions(
           WHERE v.template_id = $1 \
             AND (t.tenant_id = $2 OR t.visibility = 'community') \
             AND (v.status <> 'draft' OR t.tenant_id = $2) \
-          ORDER BY v.version DESC",
-        [template_id.into(), tenant_id.into()],
+          ORDER BY v.version DESC \
+          LIMIT $3 OFFSET $4",
+        [
+            template_id.into(),
+            tenant_id.into(),
+            page.limit().into(),
+            page.offset().into(),
+        ],
     ))
     .all(conn)
     .await
@@ -196,6 +187,7 @@ pub async fn list_reviews(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     template_id: Uuid,
+    page: ListParams,
 ) -> Result<Vec<TemplateReviewRecord>, YorishiroError> {
     TemplateReviewRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
@@ -205,8 +197,14 @@ pub async fn list_reviews(
            JOIN identity_templates t ON t.id = r.template_id \
           WHERE r.template_id = $1 \
             AND (t.tenant_id = $2 OR t.visibility = 'community') \
-          ORDER BY r.created_at DESC",
-        [template_id.into(), tenant_id.into()],
+          ORDER BY r.created_at DESC \
+          LIMIT $3 OFFSET $4",
+        [
+            template_id.into(),
+            tenant_id.into(),
+            page.limit().into(),
+            page.offset().into(),
+        ],
     ))
     .all(conn)
     .await
@@ -349,33 +347,25 @@ pub(crate) async fn insert_fork(
     fork_of: Uuid,
     user_id: Option<Uuid>,
 ) -> Result<InsertForkOutcome, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct Inserted {
-        id: Uuid,
-    }
+    use yorishiro_core::models::_entities::identity_templates::ActiveModel;
 
-    let result = Inserted::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_templates \
-                (tenant_id, name, description, definition, tags, author, visibility, fork_of, \
-                 created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, 'tenant', $7, $8) \
-         RETURNING id",
-        [
-            tenant_id.into(),
-            source.name.clone().into(),
-            source.description.clone().into(),
-            definition.clone().into(),
-            source.tags.clone().into(),
-            source.author.clone().into(),
-            fork_of.into(),
-            user_id.into(),
-        ],
-    ))
-    .one(conn)
-    .await;
+    // `visibility = 'tenant'` for the reason this function's own doc comment gives; not one of
+    // ForkSource's copyable columns, since a fork never starts out community-visible regardless
+    // of what its source was.
+    let active = ActiveModel {
+        tenant_id: sea_orm::ActiveValue::Set(tenant_id),
+        name: sea_orm::ActiveValue::Set(source.name.clone()),
+        description: sea_orm::ActiveValue::Set(source.description.clone()),
+        definition: sea_orm::ActiveValue::Set(definition.clone()),
+        tags: sea_orm::ActiveValue::Set(source.tags.clone()),
+        author: sea_orm::ActiveValue::Set(source.author.clone()),
+        visibility: sea_orm::ActiveValue::Set("tenant".to_string()),
+        fork_of: sea_orm::ActiveValue::Set(Some(fork_of)),
+        created_by: sea_orm::ActiveValue::Set(user_id),
+        ..Default::default()
+    };
 
-    match result {
+    match active.insert(conn).await {
         Err(sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(err)))
             if err
                 .as_database_error()
@@ -383,12 +373,7 @@ pub(crate) async fn insert_fork(
         {
             Ok(InsertForkOutcome::NameTaken)
         }
-        other => {
-            let row = other.internal()?.ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!("insert returned no row"))
-            })?;
-            Ok(InsertForkOutcome::Created(row.id))
-        }
+        other => Ok(InsertForkOutcome::Created(other.internal()?.id)),
     }
 }
 

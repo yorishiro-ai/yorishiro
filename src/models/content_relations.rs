@@ -51,8 +51,7 @@ pub struct CreateRelationInput {
     pub properties: Value,
 }
 
-pub const DEFAULT_LIST_LIMIT: i64 = 50;
-
+#[derive(Default)]
 pub struct ListRelationsQuery {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
@@ -60,21 +59,7 @@ pub struct ListRelationsQuery {
     /// Restricts the listing to one state.
     /// `None` lists every state, so a caller that does not pass `status` sees deprecated and archived relations along with every other state.
     pub status: Option<String>,
-    pub limit: i64,
-    pub offset: i64,
-}
-
-impl Default for ListRelationsQuery {
-    fn default() -> Self {
-        Self {
-            source_id: None,
-            target_id: None,
-            relation_type: None,
-            status: None,
-            limit: DEFAULT_LIST_LIMIT,
-            offset: 0,
-        }
-    }
+    pub page: super::pagination::ListParams,
 }
 
 /// Validates that `relation_type` doesn't conflict with the source/target entity_types.
@@ -253,9 +238,6 @@ pub async fn list(
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
     use super::_entities::content_relations::Column;
 
-    let limit = query.limit.clamp(1, 200);
-    let offset = query.offset.max(0);
-
     let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
     if let Some(source_id) = query.source_id {
         select = select.filter(Column::SourceId.eq(source_id));
@@ -272,8 +254,8 @@ pub async fn list(
 
     select
         .order_by_desc(Column::CreatedAt)
-        .limit(limit as u64)
-        .offset(offset as u64)
+        .limit(query.page.limit() as u64)
+        .offset(query.page.offset() as u64)
         .all(conn)
         .await
         .internal()

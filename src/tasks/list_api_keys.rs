@@ -24,9 +24,18 @@ impl Task for ListApiKeys {
             .parse()
             .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
 
-        let keys = ApiKeys::list_for_workspace(&app_context.db, workspace_id)
-            .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+        // A CLI listing, not a paged UI: shows up to MAX_LIST_LIMIT rather than truncating
+        // silently at the smaller default an operator has no way to override here.
+        let keys = ApiKeys::list_for_workspace(
+            &app_context.db,
+            workspace_id,
+            crate::models::pagination::ListParams {
+                limit: crate::models::pagination::MAX_LIST_LIMIT,
+                offset: 0,
+            },
+        )
+        .await
+        .map_err(|err| Error::Message(err.to_string()))?;
 
         if keys.is_empty() {
             println!("no api keys for workspace {workspace_id}");

@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use loco_rs::app::AppContext;
@@ -24,9 +24,10 @@ pub struct CreateSchemaResponse {
 
 pub async fn list_schemas(
     authorized: Authorized<ReadScope>,
+    Query(page): Query<crate::controllers::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let summaries = content_schemas::list(authorized.txn(), workspace_id).await?;
+    let summaries = content_schemas::list(authorized.txn(), workspace_id, page.into()).await?;
     Ok(Json(summaries))
 }
 

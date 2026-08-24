@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
@@ -19,8 +19,10 @@ use crate::models::identity_templates::{
 pub async fn list_templates(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
+    Query(page): Query<crate::controllers::PageParams>,
 ) -> Result<Json<Vec<TemplateRecord>>, ApiError> {
-    let templates = identity_templates::list_templates(&ctx.db, auth.tenant_id).await?;
+    let templates =
+        identity_templates::list_templates(&ctx.db, auth.tenant_id, page.into()).await?;
     Ok(Json(templates))
 }
 
