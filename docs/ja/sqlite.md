@@ -8,7 +8,8 @@ Yorishiroのマイグレーション(`migration/`)は、PostgreSQLだけでな�
 ## 現状: スキーマと単一テナントガード
 
 `src/db.rs`と`Hooks::after_context`(`src/app.rs`)は、いまもPostgreSQL専用の接続(生の`sqlx::PgPool`と、それをラップするSeaORMの`DatabaseConnection`)しか構築しないため、アプリケーション本体はまだSQLiteファイルに対してエンドツーエンドでは動作しない。
-現時点で存在し、テストで確認されているのは次の2つである。SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができること、そして`tenancy::create_tenant`がSQLiteの`DatabaseConnection`に対して呼ばれたとき、`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制すること。
+現時点で存在し、テストで確認されているのは次の2つである。
+SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができること、そして`tenancy::create_tenant`がSQLiteの`DatabaseConnection`に対して呼ばれたとき、`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制すること。
 実際に動作するアプリケーション(2プール構成、RLSスコープ付きのリクエスト処理)をSQLiteファイルへ接続させる配線は、別の、後続の作業である。
 
 ## SQLiteが想定する用途
@@ -21,15 +22,22 @@ PostgreSQLの行レベルセキュリティのようなデータベース側で�
 ## 単一テナントガード
 
 `tenancy::create_tenant`(`src/models/tenancy.rs`)は、PostgreSQL上では`YORISHIRO_MAX_TENANTS`を`count_tenants`と突き合わせて強制しており、その前に`db::lock_for_update`を取得することでカウント後にINSERTするまでの間のTOCTOUの隙を塞いでいる。
-SQLite上ではこの上限を`YORISHIRO_MAX_TENANTS`からはまったく読まない。上限は1に固定されており、このバックエンドでは環境変数は意図的に何の効果も持たない。
-`YORISHIRO_MAX_TENANTS`を上げるという行為は、設定可能なポリシーを緩めるものである。SQLite上でこの上限が存在するのは、分離の仕組み(RLS)そのものが無いからであって、ポリシーの都合ではないため、設定で回避できてはならない。
+SQLite上ではこの上限を`YORISHIRO_MAX_TENANTS`からはまったく読まない。
+上限は1に固定されており、このバックエンドでは環境変数は意図的に何の効果も持たない。
+`YORISHIRO_MAX_TENANTS`を上げるという行為は、設定可能なポリシーを緩めるものである。
+SQLite上でこの上限が存在するのは、分離の仕組み(RLS)そのものが無いからであって、ポリシーの都合ではないため、設定で回避できてはならない。
 
-`db::lock_for_update`(`src/db.rs`)は、SQLite上では代替ロックではなくno-opになる。SQLiteには`pg_advisory_xact_lock`に相当するものが無いためである。
-それでもこれは単なる便宜ではなく、レースに対して安全である。SQLiteは同時に1つの書き込みトランザクションしか許さないため、あるトランザクションが古いカウントを読んだあとに、別のトランザクションがその間に書き込んでコミット済みだった場合、その後のコミットは`SQLITE_BUSY`となり、2件目のテナントがコミットされるのではなく、トランザクション全体が失敗する。
-PostgreSQL上でロックが塞いでいるTOCTOUは、SQLite上では黙って矛盾した書き込みが通るのではなく、リトライ可能なエラーとして現れる形になる。この根拠の詳細、および1トランザクション内で複数行を書き込む他のロック呼び出し箇所もこれで説明がつく理由は、`lock_for_update`のドキュメントコメントを参照。
+`db::lock_for_update`(`src/db.rs`)は、SQLite上では代替ロックではなくno-opになる。
+SQLiteには`pg_advisory_xact_lock`に相当するものが無いためである。
+それでもこれは単なる便宜ではなく、レースに対して安全である。
+SQLiteは同時に1つの書き込みトランザクションしか許さないため、あるトランザクションが古いカウントを読んだあとに、別のトランザクションがその間に書き込んでコミット済みだった場合、その後のコミットは`SQLITE_BUSY`となり、2件目のテナントがコミットされるのではなく、トランザクション全体が失敗する。
+PostgreSQL上でロックが塞いでいるTOCTOUは、SQLite上では黙って矛盾した書き込みが通るのではなく、リトライ可能なエラーとして現れる形になる。
+この根拠の詳細、および1トランザクション内で複数行を書き込む他のロック呼び出し箇所もこれで説明がつく理由は、`lock_for_update`のドキュメントコメントを参照。
 
-`identity_tenants::ActiveModel`の`id`カラムは、PostgreSQLでは`uuidv7()`のデフォルト値を持つが、SQLiteでは(後述の通り)デフォルト値を一切持たない。そのため`create_tenant`は、SQLiteの分岐でのみ`id`を自分で設定し(`Uuid::now_v7()`)、PostgreSQL側はカラムのデフォルト値のまま変更しない。
-このコードベースの他のすべての`ActiveModel`によるINSERT箇所にも、SQLite上では同じデフォルト値欠如の問題があるが、このガードではそこまでは対応していない。一般的な修正は、`src/db.rs`のSQLite接続経路が実装されるときに合わせて行う。
+`identity_tenants::ActiveModel`の`id`カラムは、PostgreSQLでは`uuidv7()`のデフォルト値を持つが、SQLiteでは(後述の通り)デフォルト値を一切持たない。
+そのため`create_tenant`は、SQLiteの分岐でのみ`id`を自分で設定し(`Uuid::now_v7()`)、PostgreSQL側はカラムのデフォルト値のまま変更しない。
+このコードベースの他のすべての`ActiveModel`によるINSERT箇所にも、SQLite上では同じデフォルト値欠如の問題があるが、このガードではそこまでは対応していない。
+一般的な修正は、`src/db.rs`のSQLite接続経路が実装されるときに合わせて行う。
 
 ## PostgreSQL版スキーマとの違いとその理由
 

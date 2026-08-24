@@ -25,7 +25,8 @@ Raising `YORISHIRO_MAX_TENANTS` is a way to loosen a configurable policy; on SQL
 
 `db::lock_for_update` (`src/db.rs`) is a no-op on SQLite rather than a substitute lock: SQLite has no equivalent to `pg_advisory_xact_lock`.
 This is still race-safe, not merely convenient: SQLite allows only one write transaction at a time, and a transaction that read a stale count and then tries to commit after a different transaction has since written and committed gets `SQLITE_BUSY`, failing the whole transaction rather than committing a second tenant.
-The TOCTOU the lock closes on PostgreSQL therefore surfaces as a retryable error on SQLite instead of a silently-accepted inconsistent write — see the doc comment on `lock_for_update` for the full reasoning, including why this also covers the codebase's other lock call sites that write more than one row per transaction.
+The TOCTOU the lock closes on PostgreSQL therefore surfaces as a retryable error on SQLite instead of a silently-accepted inconsistent write.
+See the doc comment on `lock_for_update` for the full reasoning, including why this also covers the codebase's other lock call sites that write more than one row per transaction.
 
 `identity_tenants::ActiveModel`'s `id` column has a `uuidv7()` default on PostgreSQL and no default at all on SQLite (see below), so `create_tenant` sets `id` itself (`Uuid::now_v7()`) only on the SQLite branch, leaving PostgreSQL on its column default unchanged.
 Every other `ActiveModel` insert path in this codebase has the same missing-default gap on SQLite and is not addressed by this guard; the general fix belongs with the SQLite connection path in `src/db.rs` when that lands.
