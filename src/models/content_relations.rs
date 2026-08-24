@@ -113,8 +113,7 @@ async fn validate_relation_type(
     Ok(())
 }
 
-/// Creates a new relation: verifies both the source and target entities exist and that
-/// `relation_type` matches the metaschema's source/target constraint, then persists it.
+/// Creates a new relation: verifies both the source and target entities exist and that `relation_type` matches the metaschema's source/target constraint, then persists it.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn create(

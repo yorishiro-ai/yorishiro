@@ -172,8 +172,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
     .await;
 }
 
-/// An explicit empty selection is a choice ("show nothing") and is stored as a row, distinct
-/// from having never chosen at all.
+/// An explicit empty selection is a choice ("show nothing") and is stored as a row, distinct from having never chosen at all.
 #[tokio::test]
 #[serial]
 async fn an_empty_selection_is_stored_as_a_choice() {

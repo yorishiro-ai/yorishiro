@@ -38,8 +38,7 @@ pub async fn merge_preview(
     ))
 }
 
-/// The three definitions a merge compares, resolved together because preview and apply need
-/// exactly the same set and must refuse on exactly the same grounds.
+/// The three definitions a merge compares, resolved together because preview and apply need exactly the same set and must refuse on exactly the same grounds.
 struct MergeSides {
     base: MetaSchemaDefinition,
     upstream: MetaSchemaDefinition,

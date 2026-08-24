@@ -8,8 +8,7 @@ use crate::controllers::extractors::{Authorized, ReadScope};
 use crate::error::ResultExt;
 use crate::models::export;
 
-/// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace,
-/// one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
+/// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 pub async fn export_jsonl(
     authorized: Authorized<ReadScope>,
 ) -> Result<impl IntoResponse, ApiError> {

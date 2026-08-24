@@ -51,8 +51,8 @@ pub async fn maintenance_guard(
         Some(err) => {
             let retry_after = current.retry_after;
             let mut response = ApiError::from(err).into_response();
-            // Agents retry on the header rather than on the body. Without it a 423 invites an
-            // immediate retry, which is the load the mode exists to shed.
+            // Agents retry on the header rather than on the body.
+            // Without it a 423 invites an immediate retry, which is the load the mode exists to shed.
             if let Ok(value) = retry_after.to_string().parse() {
                 response.headers_mut().insert("retry-after", value);
             }

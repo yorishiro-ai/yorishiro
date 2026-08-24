@@ -21,8 +21,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
     result
 }
 
-/// Installing `TenantScopedAuthenticator` (`HostedApp::after_context`) must not break a
-/// workspace-scoped key on a route base itself defines.
+/// Installing `TenantScopedAuthenticator` (`HostedApp::after_context`) must not break a workspace-scoped key on a route base itself defines.
 #[tokio::test]
 #[serial]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
@@ -59,8 +58,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     .await;
 }
 
-/// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with
-/// `X-Workspace-Id`, and is rejected without one.
+/// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with `X-Workspace-Id`, and is rejected without one.
 #[tokio::test]
 #[serial]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {

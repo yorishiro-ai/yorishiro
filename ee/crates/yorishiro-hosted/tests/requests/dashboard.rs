@@ -19,8 +19,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
     result
 }
 
-/// The freshly bootstrapped owner can read their own tenant's overview: zero usage, no plan
-/// (never subscribed), and themselves as the sole member.
+/// The freshly bootstrapped owner can read their own tenant's overview: zero usage, no plan (never subscribed), and themselves as the sole member.
 #[tokio::test]
 #[serial]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {

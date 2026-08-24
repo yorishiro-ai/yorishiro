@@ -19,8 +19,8 @@ pub use error::ApiError;
 
 use crate::error::YorishiroError;
 
-/// Parses a query-string `filter` parameter (a JSON object, e.g. `{"status":"active"}`) used as
-/// a JSONB containment filter. `None`/empty means no filter.
+/// Parses a query-string `filter` parameter (a JSON object, e.g. `{"status":"active"}`) used as a JSONB containment filter.
+/// `None`/empty means no filter.
 pub(crate) fn parse_filter_param(
     raw: Option<String>,
 ) -> Result<Option<serde_json::Value>, YorishiroError> {

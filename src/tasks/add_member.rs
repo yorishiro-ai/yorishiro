@@ -6,8 +6,8 @@ use crate::models::tenancy::{self, MembershipRole};
 
 /// `cargo loco task add_member tenant_id:<uuid> user_id:<uuid> role:owner`
 ///
-/// `role` is one of `owner`/`admin`/`member`/`viewer`. Adds a new membership, or updates the
-/// role of an existing one (see `tenancy::add_member`'s upsert).
+/// `role` is one of `owner`/`admin`/`member`/`viewer`.
+/// Adds a new membership, or updates the role of an existing one (see `tenancy::add_member`'s upsert).
 pub struct AddMember;
 
 #[async_trait]
