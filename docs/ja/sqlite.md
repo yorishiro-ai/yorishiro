@@ -13,8 +13,10 @@ setupはそのデプロイメントの唯一のテナント・ワークスペー
 テナントを作成しうるもう1つの経路である`POST /auth/signup`は、上限に達すると2回目の`/setup`呼び出しと同様、`409`とSQLite固有の対処メッセージで拒否される。
 
 `AuthContext`、`Authorized<R>`、`AuditAuthorized`はいずれもSQLite用の分岐を持つ(`src/controllers/extractors.rs`)。
-認証したうえで、後の2つは`DbHandle`/`TenantDb::begin_for_workspace`を経由せず`ctx.db`に対して直接プレーンなトランザクションを開く。RLS前提の2プール構成は、RLSを持たない単一テナントバックエンドにはそもそもスコープすべき対象が無いためである。
-`Verified<R>`だけは意図的にSQLite用の分岐を持たない。唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体が`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
+認証したうえで、後の2つは`DbHandle`/`TenantDb::begin_for_workspace`を経由せず`ctx.db`に対して直接プレーンなトランザクションを開く。
+RLS前提の2プール構成は、RLSを持たない単一テナントバックエンドにはそもそもスコープすべき対象が無いためである。
+`Verified<R>`だけは意図的にSQLite用の分岐を持たない。
+唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体が`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
 
 `config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
 `tests/`はいまもPostgreSQL専用のままである。
@@ -23,11 +25,15 @@ setupはそのデプロイメントの唯一のテナント・ワークスペー
 
 ## `database.max_connections`はSQLite上で2以上が必須
 
-`Authorized<R>`/`AuditAuthorized`は、リクエストの間ずっとトランザクション上で1本の接続を保持しつつ、`identity_api_keys.last_used_at`の更新は同じプールの別の独立した接続で行う。別接続にしている理由はPostgreSQL版の`authorize`/`touch_last_used_on`と同じで、読み取り専用ハンドラはトランザクションをコミットせずに落とすため、そこで更新すると黙ってロールバックされてしまうからである。
+`Authorized<R>`/`AuditAuthorized`は、リクエストの間ずっとトランザクション上で1本の接続を保持しつつ、`identity_api_keys.last_used_at`の更新は同じプールの別の独立した接続で行う。
+別接続にしている理由はPostgreSQL版の`authorize`/`touch_last_used_on`と同じで、読み取り専用ハンドラはトランザクションをコミットせずに落とすため、そこで更新すると黙ってロールバックされてしまうからである。
 `max_connections: 1`だと、この2本目の接続取得には空いている接続が無く、`connect_timeout`を使い切ったうえで失敗するしかない。
 
-SQLite上で`max_connections`が2未満のまま起動しようとすると、起動そのものを拒否する(`db::require_min_sqlite_connections`、`Hooks::after_context`から呼ばれる)。負荷がかかったときに不定に失敗させるのではなく、である。
-このガードが入る前に実測した内容: `max_connections: 1`、`connect_timeout: 500`の状態で、読み取り専用ルート(`GET /api/relations`)は`200`のまま返った。失敗した`last_used_at`更新はbest-effortでログ警告のみだからである。一方、本物の書き込みのために2本目の接続を自身で必要とするルート(`PUT /api/system/maintenance`。保持中のトランザクションとは独立に`ctx.db`へ書き込む)は、約500ms後に`500`で失敗し、ログには`Failed to acquire connection from pool: Connection pool timed out`と記録された。
+SQLite上で`max_connections`が2未満のまま起動しようとすると、起動そのものを拒否する(`db::require_min_sqlite_connections`、`Hooks::after_context`から呼ばれる)。
+負荷がかかったときに不定に失敗させるのではなく、である。
+このガードが入る前に実測した内容: `max_connections: 1`、`connect_timeout: 500`の状態で、読み取り専用ルート(`GET /api/relations`)は`200`のまま返った。
+失敗した`last_used_at`更新はbest-effortでログ警告のみだからである。
+一方、本物の書き込みのために2本目の接続を自身で必要とするルート(`PUT /api/system/maintenance`。保持中のトランザクションとは独立に`ctx.db`へ書き込む)は、約500ms後に`500`で失敗し、ログには`Failed to acquire connection from pool: Connection pool timed out`と記録された。
 `config/sqlite.yaml`は`max_connections: 10`で出荷されており、下限を十分に上回っている。
 
 ## SQLiteが想定する用途
@@ -84,8 +90,10 @@ SQLiteでも表現はできるが構文が異なるものは、バックエン�
 `src/models/_entities/content_entities.rs`(`cargo loco db entities`が生成し、手で編集することは無いファイル)は、`Model`構造体上に`embedding: Option<PgVector>`を無条件に宣言している。
 このカラムはPostgreSQLにしか存在せず(前述の通り)、SQLite版のテーブルには`embedding`カラム自体が無い。
 SeaORMのEntity APIは`Model`のすべてのフィールドからクエリを組み立てるため、`content_entities::Entity`に対するクエリは読み書きを問わず、SQLiteに存在しないカラムを要求することになり、そのまま失敗する。
-これは静かに空や部分的な結果が返るのではなく、はっきりした失敗になる。実測では、`GET /api/entities`に対する応答は`500 {"error":{"code":"internal","message":"internal server error"}}`で、サーバーログには実際の原因である`no such column: content_entities.embedding`が記録される。
-つまり呼び出し元は「エンティティが無い」ではなく明確な失敗を目にするが、応答本体自体はSQLiteを名指ししない汎用の`500`のままである。呼び出し元は本ドキュメントかサーバー自身のログを読まない限り、「このバックエンドではこのルートが未対応」だということを、他の内部エラーと区別できない。
+これは静かに空や部分的な結果が返るのではなく、はっきりした失敗になる。
+実測では、`GET /api/entities`に対する応答は`500 {"error":{"code":"internal","message":"internal server error"}}`で、サーバーログには実際の原因である`no such column: content_entities.embedding`が記録される。
+つまり呼び出し元は「エンティティが無い」ではなく明確な失敗を目にするが、応答本体自体はSQLiteを名指ししない汎用の`500`のままである。
+呼び出し元は本ドキュメントかサーバー自身のログを読まない限り、「このバックエンドではこのルートが未対応」だということを、他の内部エラーと区別できない。
 
 これの直接の帰結としてブロックされるもの:
 
@@ -97,9 +105,13 @@ SeaORMのEntity APIは`Model`のすべてのフィールドからクエリを組
 - **`GET /api/search`**(`Verified<ReadScope>`)—これは上記とは独立した理由(`embedding`そのもの)によるものだが、原因が同じテーブルである点は共通している。
 
 `content_entities`に触れないためブロックされないもの: `GET`/`DELETE /api/relations/{id}`、`PUT /api/relations/{id}/status`、`GET /api/relations`(一覧)、スキーマ系(`GET`/`POST /api/schemas`、`GET /api/schemas/active/{name}`、`GET /api/schemas/{schema_id}`、テンプレート系)、`GET /api/audit-log`、`GET`/`PUT /api/system/maintenance`。
-`POST /api/schemas`を`template_id`付きボディで呼ぶ場合は、`content_entities`には触れないものの知っておく価値のある部分的な例外である。`identity_templates::resolve_template_definition`を`ctx.db`に対して呼び出しており、これはリクエスト自身のトランザクションが開いたままの状態で取得する2本目の接続である。上記の`max_connections`下限の範囲内であれば安全で、`set_maintenance`と同じ話であり、別立ての制約ではない。
+`POST /api/schemas`を`template_id`付きボディで呼ぶ場合は、`content_entities`には触れないものの知っておく価値のある部分的な例外である。
+`identity_templates::resolve_template_definition`を`ctx.db`に対して呼び出しており、これはリクエスト自身のトランザクションが開いたままの状態で取得する2本目の接続である。
+上記の`max_connections`下限の範囲内であれば安全で、`set_maintenance`と同じ話であり、別立ての制約ではない。
 
-`content_entities.rs`のクエリ関数群を`select_only().columns([...])`で書き換えて`embedding`を除外する案は検討したうえで、今回は見送った。お試し・個人利用向けに位置づけたばかりのティアのために、Postgresのリクエストホットパス10関数を書き換えることになるうえ、このコードベースのSeaORM移行が他の箇所で削ってきたのとまったく同じ種類の、手書きの列リストを再導入することになる。後で`content_entities`に列が追加され、10箇所のうち1つで書き漏らした場合、コンパイルエラーにはならず、フィールドが黙って欠ける形で失敗する。
+`content_entities.rs`のクエリ関数群を`select_only().columns([...])`で書き換えて`embedding`を除外する案は検討したうえで、今回は見送った。
+お試し・個人利用向けに位置づけたばかりのティアのために、Postgresのリクエストホットパス10関数を書き換えることになるうえ、このコードベースのSeaORM移行が他の箇所で削ってきたのとまったく同じ種類の、手書きの列リストを再導入することになる。
+後で`content_entities`に列が追加され、10箇所のうち1つで書き漏らした場合、コンパイルエラーにはならず、フィールドが黙って欠ける形で失敗する。
 
 ## バックエンド分岐ロジックの置き場所
 
