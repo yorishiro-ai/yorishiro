@@ -8,7 +8,7 @@ Yorishiroのマイグレーション(`migration/`)は、PostgreSQLだけでな�
 ## 現状: スキーマ、単一テナントガード、そして大半の認証済みルート
 
 SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができ、`tenancy::create_tenant`は`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制する。
-それに加えて、アプリケーション本体はSQLiteファイルに対して実際に起動し、`POST /setup`、`GET /api/whoami`、そして`content_entities`に触れない`Authorized<R>`/`AuditAuthorized`ルートをすべて処理する(境界の詳細は後述「まだブロックされているもの」を参照)。
+それに加えて、アプリケーション本体はSQLiteファイルに対して実際に起動し、`POST /setup`、`GET /api/whoami`、そしてエンティティCRUDを含む`Authorized<R>`/`AuditAuthorized`ルートをすべて処理する(残っている狭い境界の詳細は後述「まだブロックされているもの」を参照)。
 setupはそのデプロイメントの唯一のテナント・ワークスペース・ユーザー・APIキーを作成し、`/whoami`はそのキーを認証して解決されたアイデンティティを返す。
 テナントを作成しうるもう1つの経路である`POST /auth/signup`は、上限に達すると2回目の`/setup`呼び出しと同様、`409`とSQLite固有の対処メッセージで拒否される。
 
@@ -16,7 +16,7 @@ setupはそのデプロイメントの唯一のテナント・ワークスペー
 認証したうえで、後の2つは`DbHandle`/`TenantDb::begin_for_workspace`を経由せず`ctx.db`に対して直接プレーンなトランザクションを開く。
 RLS前提の2プール構成は、RLSを持たない単一テナントバックエンドにはそもそもスコープすべき対象が無いためである。
 `Verified<R>`だけは意図的にSQLite用の分岐を持たない。
-唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体が`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
+唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体がベクトル類似検索のために`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
 
 `config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
 `tests/`はいまもPostgreSQL専用のままである。
@@ -85,33 +85,29 @@ SQLiteでも表現はできるが構文が異なるものは、バックエン�
 このバックエンドでは、ベクトル類似検索と全文検索はまだ動作しない。
 これらの移植は、pgvectorの代わりに`sqlite-vec`の`vec0`仮想テーブル(ベクトル検索用)、`pg_trgm`の代わりにSQLiteの`FTS5`拡張(全文検索用)を使う形になる見込みだが、いずれもまだ実装されていない。
 
-## まだブロックされているもの: `content_entities`に触れるもの全般
+## まだブロックされているもの: ベクトル検索と、`neighbors_batch`自身のPostgres専用SQL
 
-`src/models/_entities/content_entities.rs`(`cargo loco db entities`が生成し、手で編集することは無いファイル)は、`Model`構造体上に`embedding: Option<PgVector>`を無条件に宣言している。
-このカラムはPostgreSQLにしか存在せず(前述の通り)、SQLite版のテーブルには`embedding`カラム自体が無い。
-SeaORMのEntity APIは`Model`のすべてのフィールドからクエリを組み立てるため、`content_entities::Entity`に対するクエリは読み書きを問わず、SQLiteに存在しないカラムを要求することになり、そのまま失敗する。
-これは静かに空や部分的な結果が返るのではなく、はっきりした失敗になる。
-実測では、`GET /api/entities`に対する応答は`500 {"error":{"code":"internal","message":"internal server error"}}`で、サーバーログには実際の原因である`no such column: content_entities.embedding`が記録される。
-つまり呼び出し元は「エンティティが無い」ではなく明確な失敗を目にするが、応答本体自体はSQLiteを名指ししない汎用の`500`のままである。
-呼び出し元は本ドキュメントかサーバー自身のログを読まない限り、「このバックエンドではこのルートが未対応」だということを、他の内部エラーと区別できない。
+`src/models/_entities/content_entities.rs`(`cargo loco db entities`が生成し、手で編集することは無いファイル)は、`Model`構造体上に`embedding: Option<PgVector>`を無条件に宣言しているが、このカラムはPostgreSQLにしか存在せず、SQLite版のテーブルには`embedding`カラム自体が無い。
+以前はこれが原因で、このテーブルに対するクエリはすべて失敗していた。
+SeaORMのEntity APIがバックエンドを問わず`Model`のすべてのフィールドからクエリを組み立てていたためである。
+`count`・`get`・`get_batch`・`list`・`export_all`・`create`・`update`・`delete`(`src/models/content_entities.rs`)は、いまは内部で分岐する。
+SQLite上では`embedding`を除いた列リストでクエリを組み立てて結果をデコードし(`select_record_columns`)、`create`/`update`はさらにもう1つ、別の失敗を回避する。
+`ActiveModelTrait::insert`/`update`が戻り値をデコードする際にも`embedding`に触れてしまい、SeaORMの`pgvector::Vector`のデコード実装は、カラムの有無にかかわらずSQLiteの行に対して無条件にエラーを返すためである。
+どちらの分岐もPostgreSQL側は一切変えておらず、この8関数を呼ぶ側(`content_relations::create`、`controllers/workspaces.rs`の`entity_count`、`recall.rs`、エンティティCRUD/エクスポート/インポートの各ルート)は、この変更による影響を受けない。
+行が実際に存在するようになった今、入力・戻り値の型・エラーはどちらのバックエンドでも変わらない。
 
-これの直接の帰結としてブロックされるもの:
+まだブロックされているもの:
 
-- **エンティティCRUD**(`POST`/`GET`/`PUT`/`DELETE /api/entities`、`POST /api/migration-jobs/{id}/undo`)—`content_entities`を直接読み書きする。
-- **エクスポート/インポート**(`GET /api/export.jsonl`、`POST /api/import.jsonl`)—同上。
-- **`GET /api/workspaces/{id}`の`entity_count`フィールド**—`content_entities::count`を呼ぶ。
-- **`POST /api/relations`(リレーションの作成)**—`content_relations::create`が、リンクする前にsource側とtarget側の両方のidについて`content_entities::get`で存在確認を行う。
-- **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理)—そのクエリが`content_entities`に直接`JOIN`している。
-- **`GET /api/search`**(`Verified<ReadScope>`)—これは上記とは独立した理由(`embedding`そのもの)によるものだが、原因が同じテーブルである点は共通している。
+- **ベクトル類似検索**(`GET /api/search`、`Verified<ReadScope>`)—`content_entities.embedding`そのものを読むため、SQLiteにはまだ存在しない。前述の`Verified<R>`にSQLite用の分岐が無い理由は、実質的にこれである。
+- **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理)—`embedding`とは無関係な理由でブロックされている。この生SQLは`embedding`列を一切SELECTしていないが、`Statement::from_sql_and_values(DatabaseBackend::Postgres, ...)`をハードコードしたうえ、PostgreSQL専用の配列関数`unnest($2::uuid[])`を使っている。`embedding`のギャップが埋まる前から、SQLiteでは動く見込みが無かった。
+- **`content_entity_snapshots::snapshot`**(上書きされる前のエンティティのデータを記録する`INSERT ... SELECT`)と**`undo_job`**(そのスナップショットから復元する処理)—`snapshot`は`neighbors_batch`と同様、生のPostgres専用SQLである。`undo_job`は`content_entities::update`を経由せず`ActiveModel::update(conn)`を直接呼んでいるため、`create`/`update`がかつて直面していたのと同じ戻り値のデコード失敗にいまも当たる。
+  結果として`POST /api/migration-jobs/{id}/undo`はブロックされたままである。
 
-`content_entities`に触れないためブロックされないもの: `GET`/`DELETE /api/relations/{id}`、`PUT /api/relations/{id}/status`、`GET /api/relations`(一覧)、スキーマ系(`GET`/`POST /api/schemas`、`GET /api/schemas/active/{name}`、`GET /api/schemas/{schema_id}`、テンプレート系)、`GET /api/audit-log`、`GET`/`PUT /api/system/maintenance`。
+ブロックされていないもの: エンティティCRUD(`POST`/`GET`/`PUT`/`DELETE /api/entities`)、エクスポート/インポート(`GET /api/export.jsonl`、`POST /api/import.jsonl`)、`GET /api/workspaces/{id}`の`entity_count`フィールド、リレーションの作成(`POST /api/relations`。両端のidについて`content_entities::get`を呼ぶ)。
+`content_entities`に触れないため同じく影響を受けないもの: `GET`/`DELETE /api/relations/{id}`、`PUT /api/relations/{id}/status`、`GET /api/relations`(一覧)、スキーマ系(`GET`/`POST /api/schemas`、`GET /api/schemas/active/{name}`、`GET /api/schemas/{schema_id}`、テンプレート系)、`GET /api/audit-log`、`GET`/`PUT /api/system/maintenance`。
 `POST /api/schemas`を`template_id`付きボディで呼ぶ場合は、`content_entities`には触れないものの知っておく価値のある部分的な例外である。
 `identity_templates::resolve_template_definition`を`ctx.db`に対して呼び出しており、これはリクエスト自身のトランザクションが開いたままの状態で取得する2本目の接続である。
 上記の`max_connections`下限の範囲内であれば安全で、`set_maintenance`と同じ話であり、別立ての制約ではない。
-
-`content_entities.rs`のクエリ関数群を`select_only().columns([...])`で書き換えて`embedding`を除外する案は検討したうえで、今回は見送った。
-お試し・個人利用向けに位置づけたばかりのティアのために、Postgresのリクエストホットパス10関数を書き換えることになるうえ、このコードベースのSeaORM移行が他の箇所で削ってきたのとまったく同じ種類の、手書きの列リストを再導入することになる。
-後で`content_entities`に列が追加され、10箇所のうち1つで書き漏らした場合、コンパイルエラーにはならず、フィールドが黙って欠ける形で失敗する。
 
 ## バックエンド分岐ロジックの置き場所
 
