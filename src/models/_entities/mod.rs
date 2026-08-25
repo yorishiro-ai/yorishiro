@@ -5,7 +5,6 @@ pub mod prelude;
 pub mod content_entities;
 pub mod content_entity_column_preferences;
 pub mod content_entity_snapshots;
-pub mod content_fill_proposals;
 pub mod content_relations;
 pub mod content_schemas;
 pub mod identity_api_key_audit_log;

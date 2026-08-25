@@ -792,6 +792,26 @@ pub async fn snapshot(
     Ok(())
 }
 
+/// Removes one entity's snapshot from `job_id`'s group.
+///
+/// For a caller that takes a snapshot before a write it isn't certain will land (`ee/`'s `infer_fill`, writing a model's guess straight to the entity): if that write then fails for a reason specific to it, the snapshot no longer describes a real change, and leaving it would let a later, unrelated edit to the same entity be misattributed to this job on undo.
+pub async fn delete_snapshot(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use super::_entities::content_entity_snapshots;
+    content_entity_snapshots::Entity::delete_many()
+        .filter(content_entity_snapshots::Column::WorkspaceId.eq(workspace_id))
+        .filter(content_entity_snapshots::Column::EntityId.eq(entity_id))
+        .filter(content_entity_snapshots::Column::JobId.eq(job_id))
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
 /// Puts every entity in `job_id` back to what it held before.
 ///
 /// An entity deleted since the snapshot is counted rather than failed: refusing the whole undo because one row is gone would leave the rest wrong.

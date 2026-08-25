@@ -14,7 +14,7 @@ use yorishiro_core::controllers::ApiError;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
 
-use crate::models::fill_proposals::{self, ConfirmReport, FillProposal};
+use crate::models::entity_fill;
 use crate::models::llm_keys::{self, LlmKeyDescription};
 use crate::services::authz;
 use crate::services::inference::InferenceClient;
@@ -85,15 +85,21 @@ async fn delete_llm_key(
 
 #[derive(Debug, Serialize)]
 pub struct InferFillReport {
-    /// Groups the proposals, and later the snapshots a confirmation takes.
+    /// Groups every snapshot this run takes, so `POST /api/migration-jobs/{job_id}/undo` (base's own, unchanged) can put every entity this run touched back to what it held before.
     pub job_id: Uuid,
-    /// How many fields the model proposed a value for.
-    pub proposed: i64,
-    /// Entities the model declined to guess for, or that had nothing missing.
+    /// Fields a model proposed and this run wrote to `content_entities`.
+    pub applied: i64,
+    /// Entities skipped: nothing missing, the model declined to guess, or the guess didn't fit the schema.
     pub skipped: i64,
 }
 
 /// `POST /hosted/schemas/active/{name}/infer-fill`
+///
+/// Writes each accepted guess straight to `content_entities`, the same "compute and write
+/// immediately" shape `EmbeddingSyncWorker` uses, in place of the earlier propose/confirm
+/// workflow: a guess is reversible the same way any other entity write is, through base's own
+/// `content_entities::snapshot`/`undo_job`, so holding it in a separate table pending a second
+/// request added a step with no reversibility this deployment didn't already have another way.
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -109,7 +115,7 @@ async fn infer_fill(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     let workspace_id = auth_ctx.workspace_id;
 
-    // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero proposals and reads as "nothing to infer".
+    // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero applied and reads as "nothing to infer".
     let config = llm_keys::get(&ctx.db, workspace_id).await?.ok_or_else(|| {
         YorishiroError::ValidationFailed {
             message: "this workspace has no LLM credentials configured".into(),
@@ -137,17 +143,12 @@ async fn infer_fill(
     let job_id = Uuid::new_v4();
     let client = InferenceClient::new(config);
 
-    let mut proposed = 0i64;
+    let mut applied = 0i64;
     let mut skipped = 0i64;
-    // Collected across every entity and written in one insert_many at the end, instead of one
-    // INSERT per proposed field per entity: the LLM call itself still runs once per entity (there
-    // is no batched-inference API to fold that into), but the DB write it produces does not need
-    // its own round trip per field.
-    let mut to_record: Vec<fill_proposals::ProposedField> = Vec::new();
 
     // The same set base's fill-defaults would walk: entities on a version older than the active one.
     let rows =
-        fill_proposals::entities_on_outdated_schema(&schema_txn, workspace_id, &name, active.id)
+        entity_fill::entities_on_outdated_schema(&schema_txn, workspace_id, &name, active.id)
             .await?;
 
     for row in rows {
@@ -173,65 +174,22 @@ async fn infer_fill(
             skipped += 1;
             continue;
         }
+        let field_count = answers.len() as i64;
 
-        for (field, value) in answers {
-            to_record.push((row.id, field, value));
-            proposed += 1;
+        if entity_fill::apply_answers(&schema_txn, workspace_id, &row, job_id, answers).await? {
+            applied += field_count;
+        } else {
+            skipped += 1;
         }
     }
-
-    fill_proposals::record_batch(&schema_txn, workspace_id, job_id, to_record).await?;
 
     schema_txn.commit().await.internal()?;
 
     Ok(Json(InferFillReport {
         job_id,
-        proposed,
+        applied,
         skipped,
     }))
-}
-
-/// `GET /hosted/migration-jobs/{job_id}/proposals`
-async fn list_proposals(
-    State(ctx): State<AppContext>,
-    headers: HeaderMap,
-    Path(job_id): Path<Uuid>,
-) -> Result<Json<Vec<FillProposal>>, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
-    require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let db = ctx
-        .shared_store
-        .get::<yorishiro_core::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
-    let proposals = fill_proposals::for_job(&schema_txn, auth_ctx.workspace_id, job_id).await?;
-    Ok(Json(proposals))
-}
-
-/// `POST /hosted/migration-jobs/{job_id}/confirm`
-async fn confirm_proposals(
-    State(ctx): State<AppContext>,
-    headers: HeaderMap,
-    Path(job_id): Path<Uuid>,
-) -> Result<Json<ConfirmReport>, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    let db = ctx
-        .shared_store
-        .get::<yorishiro_core::db::DbHandle>()
-        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
-    let schema_txn = db
-        .tenant
-        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
-        .await
-        .internal()?;
-    let report = fill_proposals::confirm(&schema_txn, auth_ctx.workspace_id, job_id).await?;
-    schema_txn.commit().await.internal()?;
-    Ok(Json(report))
 }
 
 pub fn routes() -> Routes {
@@ -246,13 +204,5 @@ pub fn routes() -> Routes {
         .add(
             "/schemas/active/{name}/infer-fill",
             axum::routing::post(infer_fill),
-        )
-        .add(
-            "/migration-jobs/{job_id}/proposals",
-            axum::routing::get(list_proposals),
-        )
-        .add(
-            "/migration-jobs/{job_id}/confirm",
-            axum::routing::post(confirm_proposals),
         )
 }
