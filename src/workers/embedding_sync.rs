@@ -63,6 +63,7 @@ impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
 
     /// A worker process only dequeues jobs matching at least one of these tags (see `pg.rs`'s `dequeue`, shared across the Postgres/`SQLite` queue providers).
     /// Every `WorkerClass` variant's tag is listed, not just `Shared`: this process is the only registered `EmbeddingSyncWorker`, so until a deployment can run a second, differently-tagged process (the not-yet-built external-node registration), one process must still take every class of job or `TenantPrivate`/`Official` jobs would queue forever with nothing to dequeue them.
+    /// This is not purely a future concern: `cargo loco start --worker=worker-class:official` already exists in loco-rs's own CLI and restricts that process to the listed tags immediately, no code change required. Running a deployment with only tag-restricted worker processes and no all-tags one leaves whatever class none of them cover stuck in `pg_loco_queue` forever, the same failure this comment already describes for a not-yet-built second process, just reachable sooner through an operator's own startup flags.
     fn tags() -> Vec<String> {
         vec![
             WorkerClass::TenantPrivate.tag().to_string(),
