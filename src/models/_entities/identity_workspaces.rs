@@ -33,8 +33,6 @@ pub enum Relation {
     ContentEntityColumnPreferences,
     #[sea_orm(has_many = "super::content_entity_snapshots::Entity")]
     ContentEntitySnapshots,
-    #[sea_orm(has_many = "super::content_fill_proposals::Entity")]
-    ContentFillProposals,
     #[sea_orm(has_many = "super::content_relations::Entity")]
     ContentRelations,
     #[sea_orm(
@@ -78,12 +76,6 @@ impl Related<super::content_entity_column_preferences::Entity> for Entity {
 impl Related<super::content_entity_snapshots::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ContentEntitySnapshots.def()
-    }
-}
-
-impl Related<super::content_fill_proposals::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ContentFillProposals.def()
     }
 }
 

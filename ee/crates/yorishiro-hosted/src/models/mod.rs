@@ -6,7 +6,7 @@
 pub mod billing;
 pub mod embedding_keys;
 pub mod entity_columns;
-pub mod fill_proposals;
+pub mod entity_fill;
 pub mod llm_keys;
 pub mod marketplace;
 pub mod oauth_users;
