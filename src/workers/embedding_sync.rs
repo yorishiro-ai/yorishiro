@@ -12,12 +12,43 @@ use uuid::Uuid;
 use crate::models::content_entities;
 use crate::services::embedding;
 
+/// Which class of worker process a queued job is meant for.
+///
+/// Routes jobs via `BackgroundWorker::tags()` (loco-rs's own dequeue-time tag filter, shared by the Postgres, `SQLite`, and Redis queue providers, unlike `queues: Option<Vec<String>>`, which only exists on the Redis config) rather than a named queue: this deployment's queue provider is Postgres (`pg_loco_queue`), and `queue: Option<String>` is silently discarded by that provider's `enqueue` (no column for it), so a named-queue split would require switching to Redis first.
+/// Only `Shared` is actually produced today (see `enqueue_embedding_sync`'s call site in `controllers::entities`): the other two variants exist so `tags()` has something to route once a deployment can register a worker process that only wants tenant-private or official-node jobs, work this enum does not itself perform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerClass {
+    /// Runs only on compute a single tenant registered for its own workspaces.
+    TenantPrivate,
+    /// Runs only on compute this deployment operates itself.
+    Official,
+    /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
+    Shared,
+}
+
+impl WorkerClass {
+    /// The `tags()` value this class routes through.
+    ///
+    /// `worker-class:<variant>` rather than the bare variant name: a future tag dimension (region, priority band) added to the same job would otherwise collide on an unprefixed string with no way to tell which dimension it came from.
+    fn tag(self) -> &'static str {
+        match self {
+            Self::TenantPrivate => "worker-class:tenant-private",
+            Self::Official => "worker-class:official",
+            Self::Shared => "worker-class:shared",
+        }
+    }
+}
+
 /// Only `workspace_id`/`entity_id`, not the `EntityRecord` itself: the record is re-read from the database inside `perform`, so a create-then-update (or create-then-delete) racing ahead of a still-queued job is picked up as the entity's current state rather than overwriting it with whatever was true at enqueue time.
 /// A deleted entity is simply not found when re-read, and the job is a no-op for it.
+///
+/// No `model` field: `perform` already re-resolves the embedding provider from `workspace_id` via `WorkspaceEmbeddingResolver` on every run (the same live-lookup reasoning as not re-reading the entity at enqueue time), and `EmbeddingProvider` exposes no model identifier for a payload field to even mirror. Carrying one here would be a value nothing reads and nothing keeps in sync with the resolver's own answer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
+    pub worker_class: WorkerClass,
 }
 
 pub struct EmbeddingSyncWorker {
@@ -28,6 +59,16 @@ pub struct EmbeddingSyncWorker {
 impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
     fn build(ctx: &AppContext) -> Self {
         Self { ctx: ctx.clone() }
+    }
+
+    /// A worker process only dequeues jobs matching at least one of these tags (see `pg.rs`'s `dequeue`, shared across the Postgres/`SQLite` queue providers).
+    /// Every `WorkerClass` variant's tag is listed, not just `Shared`: this process is the only registered `EmbeddingSyncWorker`, so until a deployment can run a second, differently-tagged process (the not-yet-built external-node registration), one process must still take every class of job or `TenantPrivate`/`Official` jobs would queue forever with nothing to dequeue them.
+    fn tags() -> Vec<String> {
+        vec![
+            WorkerClass::TenantPrivate.tag().to_string(),
+            WorkerClass::Official.tag().to_string(),
+            WorkerClass::Shared.tag().to_string(),
+        ]
     }
 
     /// Loco has no automatic retry for any queue driver (see `Queue::retry_failed`'s own doc comment): `Ok` marks the job `Completed` in `pg_loco_queue` and `Err` marks it `Failed`, and only `Failed` is something an operator can find and re-run with `retry_failed`.
@@ -88,5 +129,44 @@ impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `EmbeddingSyncWorker::tags()` must list every `WorkerClass`'s own tag: it is the one process registered today, so a class this list drops would queue jobs no running process ever dequeues.
+    #[test]
+    fn worker_tags_cover_every_worker_class() {
+        let worker_tags = EmbeddingSyncWorker::tags();
+        for class in [
+            WorkerClass::TenantPrivate,
+            WorkerClass::Official,
+            WorkerClass::Shared,
+        ] {
+            assert!(
+                worker_tags.contains(&class.tag().to_string()),
+                "tags() is missing {class:?}'s tag ({})",
+                class.tag()
+            );
+        }
+    }
+
+    /// `serde(rename_all = "snake_case")` is what `EmbeddingSyncArgs` actually persists into `pg_loco_queue`'s `task_data`; asserting the wire form catches an accidental rename breaking a job already sitting in the queue at deploy time.
+    #[test]
+    fn worker_class_serializes_to_snake_case() {
+        assert_eq!(
+            serde_json::to_value(WorkerClass::TenantPrivate).unwrap(),
+            serde_json::json!("tenant_private")
+        );
+        assert_eq!(
+            serde_json::to_value(WorkerClass::Official).unwrap(),
+            serde_json::json!("official")
+        );
+        assert_eq!(
+            serde_json::to_value(WorkerClass::Shared).unwrap(),
+            serde_json::json!("shared")
+        );
     }
 }
