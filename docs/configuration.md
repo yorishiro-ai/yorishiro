@@ -18,6 +18,28 @@ Every variable listed here is read directly from the environment; there is no `c
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector width (default: `768`). Every vector in a deployment must share this width; the local ONNX provider verifies it at startup with a probe inference, the OpenAI-compatible provider verifies it per response |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | OpenAI-compatible provider only. `true` includes a `dimensions` field in the embeddings request. Default `false`, since some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) reject a `dimensions` field they don't recognise |
 
+### A workspace's own embedding provider (paid edition)
+
+`PUT /hosted/workspace/embedding-key` points one workspace's own embedding work at a different provider than the deployment-wide one above, instead of every workspace sharing `YORISHIRO_EMBEDDING_BASE_URL`.
+Not part of the base edition: this is the same split as `PUT /hosted/workspace/llm-key`, which assigns LLM inference credentials per workspace already.
+Which workspace uses which compute backend is a paid-edition decision, the compute-offload work's first stage.
+
+| Field | Description |
+|---|---|
+| `base_url` | An OpenAI-compatible embeddings endpoint, e.g. `https://api.openai.com/v1` |
+| `model` | Model name sent in the embeddings request |
+| `api_key` | Bearer token. Stored, and never returned by `GET`: only `base_url`, `model`, `dimensions` and whether one is configured come back |
+| `dimensions` | The vector width this provider produces |
+| `send_dimensions_param` | `true` includes a `dimensions` field in the embeddings request; default `false`, matching `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` above |
+
+A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so setting nothing is the same as before this endpoint existed.
+`DELETE /hosted/workspace/embedding-key` returns a workspace to that deployment default.
+
+`PUT` refuses a `dimensions` value that does not match the workspace's own stamped vector width (the `embedding_dimensions` recorded when the workspace was created) with `422`, before storing anything: assigning a provider whose output width does not match the vectors already on disk would otherwise only be discovered on the next entity write, when `sync_embedding`'s own write-time check (`services/embedding/sync.rs`) rejects it.
+Both checks exist and neither replaces the other: the write-time check still runs regardless of how a workspace ended up with a mismatched provider, but this one surfaces the same mistake immediately, at the point an operator makes it.
+
+There is no caching: an assignment made through this endpoint takes effect on the very next request that resolves an embedding provider for that workspace (search, embedding sync), not after some delay or a restart.
+
 ### Local ONNX provider (`YORISHIRO_EMBEDDING_PROVIDER=local`)
 
 Runs a BERT-family ONNX model in-process, with no external embedding service.
