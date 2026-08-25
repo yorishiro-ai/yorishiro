@@ -18,5 +18,6 @@ pub use super::identity_tenant_billing::Entity as IdentityTenantBilling;
 pub use super::identity_tenant_memberships::Entity as IdentityTenantMemberships;
 pub use super::identity_tenants::Entity as IdentityTenants;
 pub use super::identity_users::Entity as IdentityUsers;
+pub use super::identity_workspace_embedding_keys::Entity as IdentityWorkspaceEmbeddingKeys;
 pub use super::identity_workspace_llm_keys::Entity as IdentityWorkspaceLlmKeys;
 pub use super::identity_workspaces::Entity as IdentityWorkspaces;

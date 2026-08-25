@@ -1,4 +1,5 @@
 pub(crate) mod authz;
+pub mod embedding_resolver;
 pub(crate) mod hmac_sign;
 pub mod inference;
 pub mod licence;

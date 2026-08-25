@@ -21,7 +21,7 @@ Migrations live in the `migration/` crate.
 
 **Schema namespace**: the old two-schema split (`identity.*`, `content.*`) is retired.
 Every table lives in `public`, with the old schema name kept as a table-name prefix (`identity_workspaces`, `content_entities`), since Loco's schema builder has no PostgreSQL schema-namespace support.
-**GRANT is always per-table, never schema-wide**: `migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant structurally awkward to write, because unifying the schema means a wildcard grant would now also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`).
+**GRANT is always per-table, never schema-wide**: `migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant structurally awkward to write, because unifying the schema means a wildcard grant would now also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`, `identity_workspace_embedding_keys`).
 Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 
 **Migrations**: one file per table under `migration/src/`, generated via `cargo loco generate migration Create<Name>` then hand-edited.
@@ -86,6 +86,18 @@ This makes every such request need 2 connections at once; at `max_connections: 1
 `db::require_min_sqlite_connections`, called from `after_context`, rejects boot outright when `max_connections < 2` on SQLite rather than letting an operator discover this as an intermittent `500` under load.
 Measured before the guard existed, at `max_connections: 1`: a read-only route still returned `200` (the failed `last_used_at` update is best-effort, logged not propagated), while a route needing a real second write (`set_maintenance`, writing through `ctx.db` independently of the held transaction) failed with `500` after ~500ms, logged as `Connection pool timed out`.
 `config/sqlite.yaml` ships `max_connections: 10`.
+
+**Decided (2026-08-25): embedding provider resolution is workspace-aware, through a seam base declares and `ee/` implements; assigning a workspace's own provider is an `ee/`-only decision.**
+`WorkspaceEmbeddingResolver` (`src/services/embedding/mod.rs`) is a trait with one method, `resolve(conn: &sea_orm::DatabaseConnection, workspace_id) -> Result<Option<Arc<dyn EmbeddingProvider>>, YorishiroError>`, matching `Authenticator`'s seam shape but taking `&sea_orm::DatabaseConnection` rather than `&DbHandle`: `DbHandle` does not exist on SQLite, and unlike `Authenticator` (a PostgreSQL/RLS-only concept), this seam must resolve on both backends.
+`Ok(None)` means "this workspace has no assignment of its own," which the caller (`controllers::extractors::resolve_embedding_provider`) reads as "fall back to the deployment-wide provider already in `shared_store`" rather than the seam constructing that fallback itself: building it (an ONNX model load can be hundreds of megabytes) is a cost worth paying once, not on every resolution whether or not a workspace override exists.
+`DefaultEmbeddingResolver` (base's own implementation, installed unconditionally in `after_context` on every backend) always returns `None`, so an existing deployment that installs nothing extra is unaffected.
+No caching: `resolve` runs once per call, the same shape `identity_workspace_llm_keys::get` already accepts for LLM inference credentials.
+
+`ee/`'s `identity_workspace_embedding_keys` table (no RLS, no GRANT, read through `ctx.db`, matching `identity_workspace_llm_keys`) and its `EmbeddingKeyResolver` are the paid-edition decision: which workspace points at which compute backend is tenant-level policy, the same reasoning that keeps `llm_keys` in `ee/` rather than base.
+`embedding_keys::set` (`ee/crates/yorishiro-hosted/src/models/embedding_keys.rs`) checks a new provider's `dimensions` against the workspace's own stamped `identity_workspaces.embedding_dimensions` at assignment time, refusing a mismatch with `ValidationFailed` before anything is stored; this is in front of `sync_embedding`'s existing write-time guard (`src/services/embedding/sync.rs`), not a replacement for it, since a workspace created before either check existed, or one assigned by direct database access outside this endpoint, still needs the write-time check to catch what assignment-time validation didn't see.
+
+`setup.rs` and `workspaces.rs::create_workspace` were deliberately left calling the deployment-default `embedding_provider(&ctx)` unchanged: both only stamp a new workspace's initial `embedding_dimensions`/`embedding_model` from the deployment default, and a workspace-specific assignment (if any) is something an operator adds afterward through the `ee/` endpoint, not something a fresh workspace needs at creation time.
+`resolve_embedding_provider` is the function that reaches the seam; the three callers that resolve a provider for a workspace's own work (`controllers::search`, `services::mcp::search`, `workers::embedding_sync`) all call it instead of `embedding_provider(&ctx)`.
 
 **`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against `loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs `db::converge` only after `create_context` returns).
 Nothing in `after_context` may assume a migration-created object exists yet.

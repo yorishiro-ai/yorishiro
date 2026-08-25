@@ -57,6 +57,8 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     IdentityTenants,
+    #[sea_orm(has_one = "super::identity_workspace_embedding_keys::Entity")]
+    IdentityWorkspaceEmbeddingKeys,
     #[sea_orm(has_one = "super::identity_workspace_llm_keys::Entity")]
     IdentityWorkspaceLlmKeys,
 }
@@ -112,6 +114,12 @@ impl Related<super::identity_api_keys::Entity> for Entity {
 impl Related<super::identity_tenants::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IdentityTenants.def()
+    }
+}
+
+impl Related<super::identity_workspace_embedding_keys::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IdentityWorkspaceEmbeddingKeys.def()
     }
 }
 

@@ -25,6 +25,7 @@ use migration::Migrator;
 use std::path::Path;
 use yorishiro_core::app::App;
 
+use services::embedding_resolver::EmbeddingKeyResolver;
 use services::licence::LicenceState;
 use services::tenant_auth::TenantScopedAuthenticator;
 
@@ -61,6 +62,15 @@ impl Hooks for HostedApp {
                 as std::sync::Arc<
                     dyn yorishiro_core::services::auth::Authenticator,
                 >);
+        // The embedding resolver seam: a workspace with its own row in identity_workspace_embedding_keys
+        // uses that provider instead of the deployment default (see WorkspaceEmbeddingResolver's own doc
+        // comment). Tenant-level assignment is the paid-edition decision, the same reasoning that keeps
+        // llm_keys in ee/: base only needs to be able to *receive* a different provider per workspace.
+        ctx.shared_store
+            .insert(std::sync::Arc::new(EmbeddingKeyResolver)
+                as std::sync::Arc<
+                    dyn yorishiro_core::services::embedding::WorkspaceEmbeddingResolver,
+                >);
         Ok(ctx)
     }
 
@@ -69,6 +79,7 @@ impl Hooks for HostedApp {
     fn routes(ctx: &AppContext) -> AppRoutes {
         App::routes(ctx)
             .add_route(controllers::dashboard::routes())
+            .add_route(controllers::embedding::routes())
             .add_route(controllers::entity_columns::routes())
             .add_route(controllers::inference::routes())
             .add_route(controllers::marketplace::routes())

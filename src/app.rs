@@ -85,6 +85,10 @@ impl Hooks for App {
                 loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
             })?;
         ctx.shared_store.insert(embedding_provider);
+        // The per-workspace embedding resolver seam: a deployment that lets a workspace point at its own embedding backend replaces this insert with its own `Arc<dyn WorkspaceEmbeddingResolver>` rather than changing every call site.
+        // Unlike the authenticator seam, this is inserted on every backend: it reads `ctx.db` directly (see the trait's own doc comment), which works on SQLite too, and a workspace-level assignment is not an RLS concept the way `Authenticator` is.
+        ctx.shared_store
+            .insert(crate::services::embedding::default_embedding_resolver());
         // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
         ctx.shared_store.insert(std::sync::Arc::new(
             crate::services::rate_limit::RateLimiter::search_tokens_from_env(),

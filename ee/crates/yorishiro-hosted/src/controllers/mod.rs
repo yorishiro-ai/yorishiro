@@ -1,4 +1,5 @@
 pub mod dashboard;
+pub mod embedding;
 pub mod entity_columns;
 pub mod inference;
 pub mod marketplace;

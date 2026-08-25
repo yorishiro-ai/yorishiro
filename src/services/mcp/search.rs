@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{YorishiroMcpServer, mcp_try, ok_json, verified};
-use crate::controllers::extractors::{db_handle, embedding_provider, search_token_limiter};
+use crate::controllers::extractors::{db_handle, resolve_embedding_provider, search_token_limiter};
 use crate::models::search;
 use crate::services::auth::ApiKeyScope;
 use crate::services::rate_limit::charge_search_tokens;
@@ -47,7 +47,11 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let provider = mcp_try!(embedding_provider(&self.ctx).map_err(|err| err.0));
+        let provider = mcp_try!(
+            resolve_embedding_provider(&self.ctx, auth_ctx.workspace_id)
+                .await
+                .map_err(|err| err.0)
+        );
         let limiter = mcp_try!(search_token_limiter(&self.ctx).map_err(|err| err.0));
         // Charged before embedding, same as the REST adapter: the budget bounds embedding work, and this tool does exactly as much of it as `GET /api/search`.
         mcp_try!(charge_search_tokens(

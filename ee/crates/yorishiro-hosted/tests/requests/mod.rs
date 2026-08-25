@@ -1,4 +1,5 @@
 mod dashboard;
+mod embedding;
 mod entity_columns;
 mod inference;
 mod marketplace;

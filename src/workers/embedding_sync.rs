@@ -34,7 +34,12 @@ impl BackgroundWorker<EmbeddingSyncArgs> for EmbeddingSyncWorker {
     /// A structural failure (a schema no longer defining the field being embedded, a workspace's stamped dimension count not matching what the provider produces) will not go away on retry, so it is logged and reported `Ok`: retrying it would just mark the same job `Completed` again with nothing to show for the failure.
     /// A transient one (`ProviderBusy`, `ProviderUnreachable`, or `Internal`, chiefly a DB failure on the write/read this function itself does) is exactly what `Failed` plus `retry_failed` exists for, so those propagate as `Err`: reporting them `Ok` would let an entire provider outage's worth of jobs mark themselves `Completed` with the embedding still `NULL` and no record that anything went wrong, which is indistinguishable from a job that never needed to run at all.
     async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-        let provider = match crate::controllers::extractors::embedding_provider(&self.ctx) {
+        let provider = match crate::controllers::extractors::resolve_embedding_provider(
+            &self.ctx,
+            args.workspace_id,
+        )
+        .await
+        {
             Ok(provider) => provider,
             Err(err) => {
                 tracing::warn!(entity_id = %args.entity_id, error = %err.0, "embedding sync worker: no embedding provider configured");

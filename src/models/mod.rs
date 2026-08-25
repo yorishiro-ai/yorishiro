@@ -18,6 +18,7 @@ pub mod identity_tenant_billing;
 pub mod identity_tenant_memberships;
 pub mod identity_tenants;
 pub mod identity_users;
+pub mod identity_workspace_embedding_keys;
 pub mod identity_workspace_llm_keys;
 pub mod identity_workspaces;
 pub mod import;

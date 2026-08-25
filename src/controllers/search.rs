@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{
-    ReadScope, Verified, db_handle, embedding_provider, search_token_limiter,
+    ReadScope, Verified, db_handle, resolve_embedding_provider, search_token_limiter,
 };
 use crate::error::YorishiroError;
 use crate::models::search::{self, SearchHit};
@@ -34,7 +34,7 @@ pub async fn search_entities(
         limit: params.limit.unwrap_or(default.limit),
     };
 
-    let provider = embedding_provider(&ctx)?;
+    let provider = resolve_embedding_provider(&ctx, verified.ctx.workspace_id).await?;
     let limiter = search_token_limiter(&ctx)?;
     charge_search_tokens(
         &limiter,

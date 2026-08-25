@@ -6,7 +6,10 @@ pub mod sync;
 
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use uuid::Uuid;
 
 use crate::error::YorishiroError;
 
@@ -60,6 +63,44 @@ pub trait EmbeddingProvider: Send + Sync {
             ))
         })
     }
+}
+
+/// Resolves a workspace's own embedding provider, if it has one.
+///
+/// A seam: a deployment can let a workspace point at a different embedding backend than the deployment default (its own ONNX node, a different OpenAI-compatible endpoint) without touching the callers that resolve a provider.
+/// [`DefaultEmbeddingResolver`] is the behaviour of every deployment that does not replace it: every workspace uses the deployment-wide provider.
+///
+/// `conn` is `ctx.db` (Loco's own `DatabaseConnection`), not the RLS-scoped tenant pool: a per-workspace assignment is deployment configuration, read the same way `identity_workspace_llm_keys` is, not tenant content.
+/// This is why `conn` takes a `sea_orm::DatabaseConnection` rather than `DbHandle`: `DbHandle` does not exist on SQLite (see `Hooks::after_context`), and this seam must work on both backends, unlike `Authenticator`, which is a PostgreSQL/RLS-only concept by design.
+///
+/// Returns `Ok(None)` when the workspace has no assignment of its own, so the caller falls back to the deployment default already held in `shared_store` rather than this seam constructing it: building the fallback (an ONNX model load can be hundreds of megabytes) is a cost only worth paying once, not on every call whether or not a workspace override exists.
+/// No caching: this runs once per call, same as `identity_workspace_llm_keys::get`. Acceptable for the same reason it is there: a metadata read, not the slow work.
+#[async_trait]
+pub trait WorkspaceEmbeddingResolver: Send + Sync {
+    async fn resolve(
+        &self,
+        conn: &sea_orm::DatabaseConnection,
+        workspace_id: Uuid,
+    ) -> Result<Option<Arc<dyn EmbeddingProvider>>, YorishiroError>;
+}
+
+/// This crate's own rule: no workspace has its own provider, so every caller falls back to the deployment default.
+pub struct DefaultEmbeddingResolver;
+
+#[async_trait]
+impl WorkspaceEmbeddingResolver for DefaultEmbeddingResolver {
+    async fn resolve(
+        &self,
+        _conn: &sea_orm::DatabaseConnection,
+        _workspace_id: Uuid,
+    ) -> Result<Option<Arc<dyn EmbeddingProvider>>, YorishiroError> {
+        Ok(None)
+    }
+}
+
+/// The resolver a deployment gets when it does not choose one.
+pub fn default_embedding_resolver() -> Arc<dyn WorkspaceEmbeddingResolver> {
+    Arc::new(DefaultEmbeddingResolver)
 }
 
 /// A provider that satisfies the dimension count but errors on every actual call.
