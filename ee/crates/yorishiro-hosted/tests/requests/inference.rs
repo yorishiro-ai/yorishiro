@@ -52,10 +52,14 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
+    // Migration, not Schema: ApiKeyScope::Schema (infer_fill's own requirement) is a lower rung
+    // than Migration (POST /api/migration-jobs/{job_id}/undo's requirement, see
+    // controllers::entities::undo_migration_job), and Migration subsumes it, so one key issued at
+    // the higher scope satisfies both this file's infer_fill calls and its undo call.
     let key = identity_api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
-        ApiKeyScope::Schema,
+        ApiKeyScope::Migration,
         Some(owner.id),
         false,
     )
