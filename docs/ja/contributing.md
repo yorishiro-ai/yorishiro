@@ -1,124 +1,109 @@
-# コントリビューション
+# コントリビューションガイド
 
 ## コードをどこに置くか
 
-構成は Laravel の MVC に従います。
-Laravel のディレクトリにあたるものを、Rust のモジュールが担います。
+構成は標準的なMVCの分割に倣い、そのディレクトリの役割をRustのモジュールが担う。
 
-| Laravel | ここ | 持つもの |
-|---|---|---|
-| `app/Models/` | `crates/yorishiro-core/src/models/` | レコードの型、入力DTO、そしてそれらを読み書きするクエリ |
-| `app/Http/Controllers/` | `crates/yorishiro-server/src/http/controllers/` | リクエストが何を意味し、何をするか |
-| `routes/` | `crates/yorishiro-server/src/routes.rs` | URLとコントローラの対応 |
-| `app/Services/` | `crates/yorishiro-core/src/services/` | 1リクエストを超えて生きる判断: 認証、埋め込み、キュー |
-| `resources/views/` | `ee/web/` | SPA |
-| `database/migrations/` | `migrations/` | スキーマのバージョン管理 |
-| `database/seeders/` | `crates/yorishiro-core/templates/*.json` | シードデータ |
+| 置き場所 | 持つもの |
+|---|---|
+| `src/models/` | レコードの形、入力DTO、それらを読み書きするクエリ |
+| `src/controllers/` | リクエストが何を意味し、何をするか |
+| `src/app.rs`の`Hooks::routes` | URLとコントローラの対応 |
+| `src/services/` | 1リクエストより長く生きる判断: 認証、埋め込み、MCP |
+| `migration/src/` | スキーマのバージョニング |
+| `src/app.rs`の`Hooks::seed`、`templates/*.json` | 初期データ |
+| `src/tasks/` | 管理・単発コマンド(`cargo loco task`経由) |
 
-有料版は上4つを `ee/crates/yorishiro-hosted/src/` に同じ形で持ちます。
-そちらが追加するテーブルとエンドポイントのためです。
+有償版は、追加するテーブルとエンドポイントについて、models・controllers・servicesを`ee/crates/yorishiro-hosted/src/`配下に同じ形で持つ。
 
 ### モデルはテーブルを1つ持つ
 
-型とクエリは同じモジュールに置きます。
-Eloquent のモデルが両方を持つのと同じです。
+その2つは同じモジュールに置く。
+リポジトリ層は無い。
+`repositories`はパターンの名前であって層の名前ではなく、その名前のディレクトリを作った結果、`models`が構造体だけを持ち、クエリはすべて隣に置かれる状態になった。
 
-リポジトリ層はありません。
-`repositories` はパターンの名前であって層の名前ではなく、その名前のディレクトリを作った結果、`models` には構造体しか残らず、クエリは全部その隣にありました。
+`src/models/_entities/`は`cargo loco db entities`が生成するもので、手で編集しない。
+ビジネスロジックは同じ階層の`src/models/<table>.rs`に置く。
 
-テーブルを足すなら `models/` にモジュールを足してください。
-テーブルに触る判断を足すなら、判断を `services/` に、クエリを `models/` に置いてください。
+テーブルを追加するときは、`migration/src/`にマイグレーションを追加し、エンティティを再生成し、`models/`配下にモジュールを追加する。
+テーブルを参照する判断を追加するときは、判断を`services/`に、クエリを`models/`に置く。
 
-### モデルではないもの
+### モデルでないもの
 
-`migrations/`、`templates/*.json`、`db.rs` はデータベース自身の関心事であってモデルの関心事ではないので、意図的に `models/` の外にあります。
+`migration/src/`、`templates/*.json`、`db.rs`はデータベース側の関心事であってモデルの関心事ではないため、意図的に`models/`の外に置いている。
 
-### クエリの場所
+### クエリの置き場所
 
-新しいテーブルのクエリは `models/` に置きます。
-`models/` の外にある `sqlx::query` のうち、次は正しいものとして残します。
+新しいテーブルのクエリは`models/`に置く。
+生SQLは、SeaORMのエンティティAPIで表現できないものに限る。
+具体的にはJSONBの包含判定(`data @> filter`)、pgvectorの類似検索、アドバイザリロック、どのエンティティも列を持たない値(同一クエリ内で計算する相関集計)、そして1つの文として実行されることに正しさが依存する書き込みである。
+それ以外は、呼び出し側が持っているコネクションまたはトランザクションの上で`Entity::find()`/`ActiveModel`/`Set(...)`を使う。
+最後の2つの現在の実例は`ee/crates/yorishiro-hosted/src/models/marketplace.rs`にある。
+`list_marketplace`は`identity_templates`自体の列に加えて3つの相関サブクエリを選択しており、これはどのエンティティ射影からも作れない。
+`insert_next_version`はテンプレートの次のバージョン番号を計算する`INSERT ... SELECT`を1つの文として実行しており、これによってアドバイザリロックが2つの同時公開を同じバージョン番号へ競合させないという保証が成り立っている。
 
-- `crates/yorishiro-core/src/db.rs` と `services/db_load_guard.rs` は接続の扱いであって、テーブルへのアクセスではありません
-- `crates/yorishiro-server/src/http/controllers/health.rs` の `SELECT 1` は死活監視で、属するテーブルがありません
-- `crates/yorishiro-core/src/services/auth/` はリクエストの身元を決める過程でキーを読みます。これはレコードではなく判断です
-- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs` は同じ例外の EE 側です。`TenantScopedAuthenticator::authenticate` はこのクレートの `Authenticator` 実装そのもので、`create_tenant_api_key` は `create_api_key` にテナント存在確認とロール上限チェックを重ねたものです。どちらもレコードではなく判断です
-- `ee/crates/yorishiro-hosted/src/services/official_templates.rs` は seeder です。`migrations/` を外に置くのと同じ対応で、seeder もモデルの外にあります
-- `ee/crates/yorishiro-hosted/src/services/oauth/users.rs` の `pg_try_advisory_xact_lock` 呼び出しは `db.rs` と同種の例外です。アドバイザリロックはどのテーブルにも属しません
+`models/`の外にある生SQLのうち、以下は正しいものとして残す。
+ただし対象はそのファイル全体ではなく、実際にそれを必要とする個々のクエリだけである。
+同じファイルの中にエンティティAPIで書くべき別のクエリがあってもよく、実際にある。
 
-残りは意図ではなく既知の負債で、少しずつ移しています。
-`crates/yorishiro-server/src/admin/commands.rs`、`http/controllers/setup/mod.rs`、`services/embedding/sync/`、`ee/` 側の `http/controllers/inference.rs` です。
-すでにそのファイルを編集しているなら、クエリを `models/` に寄せてもらえると助かります。
-そうでないなら触らないでください。
-動作の変更と一緒に読めない移動だけの差分は、レビューできません。
+- `src/db.rs`はテーブルアクセスではなくコネクション管理であり、その`SET ROLE`/`RESET`/`set_config`/アドバイザリロックはSeaORMに対応物の無いPostgresのセッションプリミティブである。
+- `src/services/auth/authenticate.rs`の`authenticate_api_key($1)`呼び出しは、RLSが意図的に迂回を許す唯一の口であるSECURITY DEFINER関数で、通常のコネクションのセッション状態では隠れてしまう行を読む。
+  `touch_last_used`の`last_used_at`書き込みも同じ種類のコネクション(リクエストのRLSセッション変数がスコープされた`TenantDb::acquire_for_workspace`が返す、汎用のコネクションではないもの)で動く必要があるため、同じく生SQLのままにしている。
+  他のコネクションでエンティティAPI経由の更新を試みると、読み取り専用リクエストのトランザクションと一緒にロールバックされるか、`identity_api_keys`自体のRLSポリシーの下で黙って0行を更新することになる。
+  この形に当てはまらない`authenticate.rs`の他の処理はエンティティAPI上にある(`authenticate_sqlite`/`touch_last_used_sqlite`を参照。これらはRLSを保持する必要が無いのでSQLite上では全面的にエンティティAPIを使っている)。
+- `src/services/embedding/sync.rs`と`src/tasks/resync_embeddings.rs`は`embedding`カラムを書き・走査する。
+  このカラムはpgvector型で、エンティティAPIでの表現手段が無い。
+- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`の`TenantScopedAuthenticator::authenticate`は、同じSECURITY DEFINER関数の2引数オーバーロードである`authenticate_api_key($1, $2)`を呼んでおり、上と同じ理由で残している。
+  `create_tenant_api_key`自身のテナント存在チェック・ロール取得・INSERTにはその理由が無く、エンティティAPI上にある。
 
-## tests は src を1対1で写す
+### MCPはコントローラではなくサービス
 
-`tests/` は `src/` のツリーをそのまま再現します。
-`crates/yorishiro-core/src/models/schemas/mod.rs` をテストするのは `crates/yorishiro-core/tests/models/schemas/mod.rs` だけです。
+`src/services/mcp/`には、サーバ型(`YorishiroMcpServer`)とドメインごとの`#[tool_router]`実装が置かれている。
+MCPツールはコントローラと同じくエントリポイントであるにもかかわらず、である。
+これは上の対応表に対する意図的な例外で、MCPはルーティングのロジックではなく`ee/`が合成する接合面だからである。
+ルートの*マウント*は`src/controllers/mcp.rs::mount()`の1行で、`Hooks::after_routes`から呼ばれる。
+`controllers/`に属するのはその1行のほうである。
 
-繋ぎ方は結合テストではなく include です。
+## テスト
 
-```rust
-#[cfg(test)]
-#[path = "../../../tests/models/schemas/mod.rs"]
-mod tests;
-```
+`tests/`は素のLoco統合テストクレートである。
+`#[path]`インクルードも`autotests = false`も無い。
+`tests/`配下のファイルは、そこにあるという理由でコンパイルされ実行される。
 
-全クレートが `autotests = false` を設定しているので、`tests/` にあってどの `#[path]` からも名指されないファイルは、何にもコンパイルされません。
-失敗はしません。
-ただ一度も走らないだけです。
-ソースを移動したら、テストも同じように移動して `#[path]` の深さを直してください。
+リクエストテストは`loco_rs::testing::request::request_with_create_db::<App, _, _>`でアプリを起動する。
+**そのすべてが、クロージャを抜ける前に`close_app_pools`を呼ばなければならない。**
+呼ばないと、テストが通っていてもティアダウンでpanicする。
+アプリはLocoのハーネスが把握していないプールを開いており、そのどれも自力では閉じないためである。
+`tests/requests/mod.rs`にそのヘルパーがあり、これが踏襲すべきパターンである。
 
-## push の前に
+`ee/`では、共有テストヘルパーは`tests/lib.rs`で1度だけ宣言し、`use crate::tests::test_helpers;`で参照する。
+複数のファイルで`mod test_helpers;`を宣言すると`clippy::duplicate_mod`に引っかかる。
 
-```sh
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --check
-cargo test --workspace
-pnpm --dir ee/web run check   # ee/web を触ったときだけ
-```
-
-テストには `template1` に `vector` と `pg_trgm` が入った PostgreSQL と、**スーパーユーザではない**ロールが要ります。
-スーパーユーザは `FORCE` の有無にかかわらず RLS を迂回するので、その権限で緑になっても分離については何も証明できません。
-
-## ブラウザテスト
-
-`cargo test` では走りません。
-ライセンス済みでスキーマとエンティティが入ったサーバと chromedriver が要ります。
-依存が無いときに黙って通るテストは、走らせないテストより悪いものです。
-そのため `ee/crates/yorishiro-hosted/tests/e2e/` のテストは全て `#[ignore]` で、対象の deployment を名指しで要求します。
+## push前に
 
 ```sh
-chromedriver --port=9515 &
-YORISHIRO_E2E_URL=http://localhost:18081 \
-  YORISHIRO_E2E_EMAIL=you@example.com \
-  YORISHIRO_E2E_PASSWORD=... \
-  cargo test -p yorishiro-hosted --test e2e -- --ignored --test-threads=1
+make check          # cargo check --workspace
+make clippy         # cargo clippy --workspace --all-targets -- -D warnings
+make fmt-check      # cargo fmt --check
+make test           # cargo test --workspace
 ```
 
-**driver とブラウザのメジャーバージョンは一致させてください。**
-152 の driver は Chrome 151 に対してセッションを作りません。
-エラーが両方のバージョンを表示するので、driver が無いと決めつけずに読んでください。
+`make -C <path> <target>`はどこからでも実行できる。
+`cargo loco task`とCLIバイナリが「`config/`がプロセス自身の作業ディレクトリにあること」を要求するため、これが効いてくる。
 
-CI には入れていません。
-正しくやるにはライセンスキーをリポジトリの secret に置き、データを投入した deployment が要ります。
-実際には動かないジョブは、ジョブが無いより悪いものです。
-何もせずに緑を報告するからです。
+テストスイートには、`vector`と`pg_trgm`が**`template1`に**入ったPostgreSQLが要る。
+デプロイ本体のデータベースに入っているだけでは足りない。
+Locoのハーネスは使い捨てのテスト用データベースを`CREATE DATABASE`で作り、これは`template1`を複製するためである。
+思い込まずに`psql -d template1 -c '\dx'`で確認すること。
 
-このスイートは1回だけサインインし、セッションを共有します。
-認証のレート制限は IP あたり毎分10リクエストで、`/auth/login`・`/auth/signup`・**`/setup`** を合わせて数えます。
-SPA は読み込み時に `/setup` を見るので、ページ読み込みもサインインと同じ枠を消費します。
-制限に当たったときはウィンドウが明けるまで待ちます。
-テストのために deployment 側の制限を緩めることはしません。
-実行が14秒ではなく76秒になるのはそのためです。
+さらに、スーパーユーザー**でない**ロールが要る。
+スーパーユーザーは`FORCE`の有無にかかわらずRLSを迂回するため、その権限で緑になっても分離については何も証明しない。
 
 ## このリポジトリの文章
 
-1文1行で書きます。
-Markdown もコメントも同じです。
-特定の文字数で折り返さないでください。
-ダッシュで2つの節を繋がないでください。
+Markdownでもコメントでも、1文1行。
+ハードラップしない。
+2つの節をダッシュでつながない。
 
-`migrations/` だけは見た目に関する規則すべての例外です。
-sqlx がコメントを含めてファイル全体のチェックサムを取るので、適用済みのマイグレーションを編集するとサーバが起動しなくなります。
+`migration/src/`はこの規則の例外ではない。
+`sea-orm-migration`は、このプロジェクトが以前使っていたsqlxのマイグレーションと違い、マイグレーションファイルのチェックサムを取らないため、適用済みのマイグレーションを編集しても問題ない。

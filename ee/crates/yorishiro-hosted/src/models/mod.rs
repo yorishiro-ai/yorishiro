@@ -1,12 +1,10 @@
 //! The model layer for the tables this crate owns: record shapes and the queries that read and write them, together.
 //!
-//! The community edition's own models are reached through `yorishiro_core::models`; these are the ones whose tables this repository's migrations add.
-//!
-//! This directory was named `repositories` and held nothing but a doc comment, while every query it described sat in `services`.
-//! A module here owns a table, or a read across several that no single module owns.
-//! A module in `services` owns a decision, and calls these when it needs one persisted.
+//! Base's own models are reached through `yorishiro_core::models`; most modules here are the ones whose tables this crate's own migrations add.
+//! `origin` is the exception: it owns no table, and reads base's own `content_schemas`/`identity_templates` on `ctx.db`, since the endpoint it serves is enterprise regardless of which tables it happens to read.
 
 pub mod billing;
+pub mod embedding_keys;
 pub mod entity_columns;
 pub mod fill_proposals;
 pub mod llm_keys;

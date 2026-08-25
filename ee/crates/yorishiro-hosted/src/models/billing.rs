@@ -1,100 +1,87 @@
-//! Billing state stored in this repository's own `identity.tenant_billing` table.
+//! Billing state stored in this crate's own `identity_tenant_billing` table.
 //!
-//! `yorishiro-core` owns `identity.tenants` and knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
+//! `yorishiro-core` owns `identity_tenants` and knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
 //! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
-use sea_query::{Alias, Expr, Iden, OnConflict, PostgresQueryBuilder, Query};
-use sea_query_binder::SqlxBinder;
-use sqlx::PgPool;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::identity_tenant_billing::{ActiveModel, Column, Entity};
 
-#[derive(Iden)]
-enum TenantBilling {
-    Table,
-    TenantId,
-    Plan,
-    StripeCustomerId,
-    UpdatedAt,
-}
-
-fn billing_columns() -> [TenantBilling; 3] {
-    [
-        TenantBilling::TenantId,
-        TenantBilling::Plan,
-        TenantBilling::StripeCustomerId,
-    ]
-}
-
-/// A tenant's billing state.
-/// Absent for any tenant that has never been through checkout.
-#[derive(Debug, Clone, sqlx::FromRow)]
+/// A tenant's billing state. Absent for any tenant that has never been through checkout.
+#[derive(Debug, Clone)]
 pub struct TenantBillingRecord {
     pub tenant_id: Uuid,
     pub plan: Option<String>,
     pub stripe_customer_id: Option<String>,
 }
 
+impl From<yorishiro_core::models::_entities::identity_tenant_billing::Model>
+    for TenantBillingRecord
+{
+    fn from(model: yorishiro_core::models::_entities::identity_tenant_billing::Model) -> Self {
+        TenantBillingRecord {
+            tenant_id: model.tenant_id,
+            plan: model.plan,
+            stripe_customer_id: model.stripe_customer_id,
+        }
+    }
+}
+
 /// Reads a tenant's billing state.
-/// `None` means the tenant is unbilled, not that it is missing:
-/// the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
+/// `None` means the tenant is unbilled, not that it is missing: the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
 pub async fn get_billing(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {
-    let (sql, values) = Query::select()
-        .columns(billing_columns())
-        .from((Alias::new("identity"), TenantBilling::Table))
-        .and_where(Expr::col(TenantBilling::TenantId).eq(tenant_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_as_with::<_, TenantBillingRecord, _>(&sql, values)
-        .fetch_optional(pool)
+    Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .one(conn)
         .await
         .internal()
+        .map(|row| row.map(TenantBillingRecord::from))
 }
 
 /// Resolves the tenant a Stripe webhook is about.
 /// Subscription updated/deleted events carry only the Stripe customer id, so this is the inbound lookup path.
 pub async fn get_by_stripe_customer(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     stripe_customer_id: &str,
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {
-    let (sql, values) = Query::select()
-        .columns(billing_columns())
-        .from((Alias::new("identity"), TenantBilling::Table))
-        .and_where(Expr::col(TenantBilling::StripeCustomerId).eq(stripe_customer_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_as_with::<_, TenantBillingRecord, _>(&sql, values)
-        .fetch_optional(pool)
+    Entity::find()
+        .filter(Column::StripeCustomerId.eq(stripe_customer_id))
+        .one(conn)
         .await
         .internal()
+        .map(|row| row.map(TenantBillingRecord::from))
 }
 
 /// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via [`get_by_stripe_customer`].
 /// Upserts, because checkout can be completed for a tenant that already has a billing row (a resubscribe after cancellation).
 pub async fn link_stripe_customer(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     stripe_customer_id: &str,
 ) -> Result<(), YorishiroError> {
-    let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), TenantBilling::Table))
-        .columns([TenantBilling::TenantId, TenantBilling::StripeCustomerId])
-        .values_panic([tenant_id.into(), stripe_customer_id.into()])
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        stripe_customer_id: ActiveValue::Set(Some(stripe_customer_id.to_string())),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    // updated_at is set explicitly here rather than left to ActiveModelBehavior::before_save:
+    // Entity::insert(...).on_conflict(...) builds and executes a raw INSERT ... ON CONFLICT
+    // statement directly, bypassing before_save entirely (it only runs on the
+    // ActiveModelTrait::insert/update/save path), for both the insert and the conflict-update
+    // branch.
+    Entity::insert(active)
         .on_conflict(
-            OnConflict::column(TenantBilling::TenantId)
-                .values([
-                    (TenantBilling::StripeCustomerId, stripe_customer_id.into()),
-                    (TenantBilling::UpdatedAt, Expr::current_timestamp().into()),
-                ])
+            OnConflict::column(Column::TenantId)
+                .update_columns([Column::StripeCustomerId, Column::UpdatedAt])
                 .to_owned(),
         )
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_with(&sql, values)
-        .execute(pool)
+        .exec(conn)
         .await
         .internal()?;
     Ok(())
@@ -103,30 +90,27 @@ pub async fn link_stripe_customer(
 /// Sets a tenant's plan.
 /// Upserts for the same reason as [`link_stripe_customer`]: a plan can be assigned before or after the customer id is linked, depending on which webhook lands first.
 ///
-/// The workspace cap that comes with the plan is not written here: it lives on `identity.tenants.max_workspaces`, which the community edition owns and enforces at workspace-creation time.
+/// The workspace cap that comes with the plan is not written here: it lives on `identity_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
 /// The caller applies both.
-pub async fn set_plan(pool: &PgPool, tenant_id: Uuid, plan: &str) -> Result<(), YorishiroError> {
-    let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), TenantBilling::Table))
-        .columns([TenantBilling::TenantId, TenantBilling::Plan])
-        .values_panic([tenant_id.into(), plan.into()])
+pub async fn set_plan(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    plan: &str,
+) -> Result<(), YorishiroError> {
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        plan: ActiveValue::Set(Some(plan.to_string())),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    Entity::insert(active)
         .on_conflict(
-            OnConflict::column(TenantBilling::TenantId)
-                .values([
-                    (TenantBilling::Plan, plan.into()),
-                    (TenantBilling::UpdatedAt, Expr::current_timestamp().into()),
-                ])
+            OnConflict::column(Column::TenantId)
+                .update_columns([Column::Plan, Column::UpdatedAt])
                 .to_owned(),
         )
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_with(&sql, values)
-        .execute(pool)
+        .exec(conn)
         .await
         .internal()?;
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../tests/models/billing.rs"]
-mod tests;

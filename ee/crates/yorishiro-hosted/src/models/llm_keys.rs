@@ -1,36 +1,23 @@
 //! A workspace's own LLM credentials, for the one feature that infers values.
 //!
-//! Reads and writes go through the migration-role pool, not the request role: `yorishiro_app` has no GRANT on this table, so a query issued on a request connection fails at the permission check rather than relying on an RLS policy being right.
-//! See the migration.
+//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `identity_templates`.
 //!
 //! [`get`] returns the key so the inference client can send it.
 //! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
 
-use sea_query::{Alias, Expr, Iden, OnConflict, PostgresQueryBuilder, Query};
-use sea_query_binder::SqlxBinder;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
-use sqlx::PgPool;
-use utoipa::ToSchema;
 use uuid::Uuid;
+use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::identity_workspace_llm_keys::{ActiveModel, Column, Entity};
 
 use crate::services::inference::InferenceConfig;
-use yorishiro_core::{ResultExt, YorishiroError};
-
-#[derive(Iden)]
-enum WorkspaceLlmKeys {
-    Table,
-    WorkspaceId,
-    BaseUrl,
-    Model,
-    ApiKey,
-    UpdatedAt,
-}
 
 /// What a workspace has configured, without the key itself.
 ///
-/// The shape an endpoint returns.
 /// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LlmKeyDescription {
     pub base_url: String,
     pub model: String,
@@ -44,11 +31,10 @@ pub struct LlmKeyDescription {
 /// The value is interpolated into a request URL, so a `file://` or `gopher://` there points reqwest at something that is not an HTTP conversation at all, and a scheme-less string silently becomes a relative path.
 /// Checked here, at the point a person types it, so the refusal names the field rather than surfacing later as a failed inference run.
 ///
-/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator; see docs/api.md.
+/// **This is not SSRF protection.** Which hosts a workspace may name is unrestricted and is a policy question for the operator; see `ee/docs/api.md`.
 /// This only rules out URLs that could never be a chat-completions endpoint.
-pub(crate) fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
-    let trimmed = base_url.trim();
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
+    if base_url.starts_with("http://") || base_url.starts_with("https://") {
         return Ok(());
     }
     Err(YorishiroError::ValidationFailed {
@@ -60,7 +46,7 @@ pub(crate) fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
 
 /// Stores or replaces a workspace's credentials.
 pub async fn set(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     base_url: &str,
     model: &str,
@@ -73,79 +59,59 @@ pub async fn set(
             hint: "remove the configuration instead of storing an empty key".into(),
         });
     }
-    // Normalise once, then validate and store the same string.
-    // Checking `base_url.trim()` and storing `base_url` would let "  https://host  " pass and be persisted with its padding, which `InferenceClient` then interpolates straight into a request URL: the check and the stored value have to be the same value.
+    // Normalise once, then validate and store the same string: checking `base_url.trim()` and storing `base_url` would let "  https://host  " pass and be persisted with its padding, which `InferenceClient` then interpolates straight into a request URL, so the check and the stored value have to be the same value.
     let base_url = base_url.trim().trim_end_matches('/');
     check_scheme(base_url)?;
 
-    let (sql, values) = Query::insert()
-        .into_table((Alias::new("identity"), WorkspaceLlmKeys::Table))
-        .columns([
-            WorkspaceLlmKeys::WorkspaceId,
-            WorkspaceLlmKeys::BaseUrl,
-            WorkspaceLlmKeys::Model,
-            WorkspaceLlmKeys::ApiKey,
-        ])
-        .values_panic([
-            workspace_id.into(),
-            base_url.into(),
-            model.into(),
-            api_key.into(),
-        ])
+    let active = ActiveModel {
+        workspace_id: ActiveValue::Set(workspace_id),
+        base_url: ActiveValue::Set(base_url.to_string()),
+        model: ActiveValue::Set(model.to_string()),
+        api_key: ActiveValue::Set(api_key.to_string()),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    Entity::insert(active)
         .on_conflict(
-            OnConflict::column(WorkspaceLlmKeys::WorkspaceId)
+            OnConflict::column(Column::WorkspaceId)
                 .update_columns([
-                    WorkspaceLlmKeys::BaseUrl,
-                    WorkspaceLlmKeys::Model,
-                    WorkspaceLlmKeys::ApiKey,
+                    Column::BaseUrl,
+                    Column::Model,
+                    Column::ApiKey,
+                    Column::UpdatedAt,
                 ])
-                .value(WorkspaceLlmKeys::UpdatedAt, Expr::current_timestamp())
                 .to_owned(),
         )
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_with(&sql, values)
-        .execute(pool)
+        .exec(conn)
         .await
         .internal()?;
     Ok(())
 }
 
-/// Removes a workspace's credentials.
-/// Inference then refuses until one is configured again.
-pub async fn clear(pool: &PgPool, workspace_id: Uuid) -> Result<(), YorishiroError> {
-    let (sql, values) = Query::delete()
-        .from_table((Alias::new("identity"), WorkspaceLlmKeys::Table))
-        .and_where(Expr::col(WorkspaceLlmKeys::WorkspaceId).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    sqlx::query_with(&sql, values)
-        .execute(pool)
+/// Removes a workspace's credentials. Inference then refuses until one is configured again.
+pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
+    Entity::delete_many()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .exec(conn)
         .await
         .internal()?;
     Ok(())
 }
 
-/// What is configured, for an endpoint to report.
-/// Never includes the key.
+/// What is configured, for an endpoint to report. Never includes the key.
 pub async fn describe(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
-    let (sql, values) = Query::select()
-        .columns([WorkspaceLlmKeys::BaseUrl, WorkspaceLlmKeys::Model])
-        .from((Alias::new("identity"), WorkspaceLlmKeys::Table))
-        .and_where(Expr::col(WorkspaceLlmKeys::WorkspaceId).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    let row: Option<(String, String)> = sqlx::query_as_with(&sql, values)
-        .fetch_optional(pool)
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .one(conn)
         .await
         .internal()?;
 
-    Ok(row.map(|(base_url, model)| LlmKeyDescription {
-        base_url,
-        model,
+    Ok(row.map(|row| LlmKeyDescription {
+        base_url: row.base_url,
+        model: row.model,
         configured: true,
     }))
 }
@@ -155,31 +121,18 @@ pub async fn describe(
 /// `None` means the workspace has configured none.
 /// Callers turn that into a refusal rather than a fallback: inferring nothing and filling defaults instead would look, to the caller, like inference that produced default-shaped answers.
 pub async fn get(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<InferenceConfig>, YorishiroError> {
-    let (sql, values) = Query::select()
-        .columns([
-            WorkspaceLlmKeys::BaseUrl,
-            WorkspaceLlmKeys::Model,
-            WorkspaceLlmKeys::ApiKey,
-        ])
-        .from((Alias::new("identity"), WorkspaceLlmKeys::Table))
-        .and_where(Expr::col(WorkspaceLlmKeys::WorkspaceId).eq(workspace_id))
-        .build_sqlx(PostgresQueryBuilder);
-
-    let row: Option<(String, String, String)> = sqlx::query_as_with(&sql, values)
-        .fetch_optional(pool)
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .one(conn)
         .await
         .internal()?;
 
-    Ok(row.map(|(base_url, model, api_key)| InferenceConfig {
-        base_url,
-        model,
-        api_key,
+    Ok(row.map(|row| InferenceConfig {
+        base_url: row.base_url,
+        model: row.model,
+        api_key: row.api_key,
     }))
 }
-
-#[cfg(test)]
-#[path = "../../tests/models/llm_keys.rs"]
-mod tests;

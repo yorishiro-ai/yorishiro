@@ -1,0 +1,56 @@
+# Manual acceptance environment for the SQLite tier (see docs/sqlite.md): boots the app against a
+# SQLite file directly, LOCO_ENV=sqlite. Not wired into any test suite — `tests/` stays
+# PostgreSQL-only (request_with_create_db issues `CREATE DATABASE`, which SQLite has no
+# equivalent for) — this file exists for `cargo loco start -e sqlite`-style manual verification.
+#
+# YORISHIRO_MAX_TENANTS must still be set (to any value) for POST /setup to answer as enabled:
+# setup.rs's wizard_enabled() checks only that the variable is set, not its value: the SQLite cap
+# of 1 is enforced separately by tenancy::create_tenant regardless of what this variable says.
+
+logger:
+  enable: true
+  pretty_backtrace: true
+  level: debug
+  format: compact
+
+server:
+  port: <%= get_env(name="PORT", default="5150") %>
+  binding: <%= get_env(name="BINDING", default="localhost") %>
+  host: http://localhost
+  middlewares:
+    request_id:
+      enable: true
+    logger:
+      enable: true
+
+# ForegroundBlocking, matching config/test.yaml: no `queue:` block is configured here (the
+# Postgres-backed queue provider isn't ported to SQLite either), so BackgroundQueue mode would
+# silently skip EmbeddingSyncWorker::perform_later rather than run it.
+workers:
+  mode: ForegroundBlocking
+
+mailer:
+  stub: true
+  smtp:
+    enable: true
+    host: <%= get_env(name="MAILER_HOST", default="localhost") %>
+    port: 1025
+    secure: false
+
+database:
+  # A bare `sqlite://path` is relative to the process's CWD; an absolute path avoids surprises
+  # depending on where `cargo loco start` is run from.
+  uri: <%= get_env(name="DATABASE_URL", default="sqlite://yorishiro-sqlite.sqlite3?mode=rwc") %>
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: 500
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 10
+  auto_migrate: true
+  dangerously_truncate: false
+  dangerously_recreate: false
+
+auth:
+  jwt:
+    secret: sqliteTierManualVerification
+    expiration: 604800

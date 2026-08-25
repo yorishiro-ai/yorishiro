@@ -1,32 +1,30 @@
 //! The `state` parameter carried through the OAuth2 authorization-code round trip.
 //!
-//! This process is stateless across `/auth/oauth/authorize` and `/auth/oauth/callback`: there is no server-side session store, and a hosted deployment may load-balance the two requests across different instances.
-//! So instead of storing the PKCE code verifier server-side and looking it up by an opaque id on callback, it's packed into the `state` value itself and HMAC-SHA256 signed via [`crate::services::hmac_sign`] (the same primitive and verification style as the Stripe webhook signature in `http::controllers::stripe`) so the callback can trust whatever comes back without needing to have remembered it.
+//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::services::hmac_sign`], rather than stored server-side and looked up by an opaque id.
 //!
-//! The signature alone only proves this process issued *some* `state` at some point: it says nothing about whether the browser presenting it is the one the flow was started for.
-//! That's what the CSRF cookie is for: `authorize` (see `http::controllers::oauth`) sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it doesn't match [`verify`]'s `csrf_hash` output.
-//! An attacker who captures a victim's `code`/`state` pair (by, say, starting their own login and relaying the callback URL) cannot forge the victim's browser's cookie, so the double-submit check fails even though the `state` signature itself is valid.
+//! The signature alone only proves this process issued *some* `state`, not that the browser presenting it is the one the flow was started for.
+//! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
+//! An attacker who captures a victim's `code`/`state` pair cannot forge the victim's browser's cookie, so the double-submit check fails even though the `state` signature itself is valid.
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::Rng;
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use yorishiro_core::services::auth::hex_encode;
 
 use crate::services::hmac_sign;
 
 /// How long a `state` value remains acceptable after being issued.
-/// Bounds how long an authorization-code flow can stay in flight, mainly to limit the window a captured (but not yet used) `state`/redirect URL could be replayed in.
-/// Also used as the CSRF cookie's max-age (see `http::controllers::oauth::authorize`), so the cookie never outlives the `state` that depends on it.
+/// Also used as the CSRF cookie's max-age, so the cookie never outlives the `state` that depends on it.
 pub const STATE_TTL_SECS: i64 = 600;
 
 /// Number of random bytes in the CSRF cookie value.
-/// Only its SHA-256 hash is ever embedded in `state`, so this can be shorter than a value that needed to resist offline brute-forcing on its own: 16 bytes (128 bits) is already far beyond what onlookers could guess before the cookie expires.
+/// Only its SHA-256 hash is ever embedded in `state`, so this need not resist offline brute-forcing on its own.
 const CSRF_COOKIE_BYTES: usize = 16;
 
 pub struct IssuedState {
     /// The opaque value to embed in the authorize URL's `state` query parameter.
-    /// Carries the PKCE code verifier too (see module docs), so the callback can recover it via [`verify`] without this process having kept anything in memory in between.
+    /// Carries the PKCE code verifier too, so the callback can recover it via [`verify`] without this process having kept anything in memory in between.
     pub state: String,
     /// The PKCE code challenge (`BASE64URL(SHA256(verifier))`) to send in the authorize request.
     pub pkce_challenge: String,
@@ -66,7 +64,7 @@ pub fn issue(signing_key: &[u8]) -> IssuedState {
 }
 
 /// Verifies a `state` value's signature and freshness, returning the PKCE verifier and expected CSRF hash it carries.
-/// Rejects anything that doesn't parse, doesn't verify, or has aged past [`STATE_TTL_SECS`]: each is indistinguishable from the others to the caller (all map to the same `YorishiroError::Unauthenticated`), so a forged/expired/malformed `state` can't be distinguished by an attacker probing the endpoint.
+/// Rejects anything that does not parse, does not verify, or has aged past [`STATE_TTL_SECS`]: each is indistinguishable from the others to the caller, so a forged, expired or malformed `state` cannot be told apart by an attacker probing the endpoint.
 ///
 /// This alone does **not** prove the presenting browser is the one the flow was started for.
 /// See the module docs.
@@ -89,7 +87,7 @@ pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     let issued_at: i64 = issued_at_str.parse().ok()?;
     let now = chrono::Utc::now().timestamp();
     if now - issued_at > STATE_TTL_SECS || issued_at - now > 5 {
-        // Allow a small amount of clock skew in the "issued in the future" direction, but not an outright future-dated token.
+        // Small clock-skew allowance in the future direction; not an outright future-dated token.
         return None;
     }
 
@@ -105,5 +103,69 @@ pub fn hash_csrf_cookie(cookie_value: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/services/oauth/state_token.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    const KEY: &[u8] = b"a signing key";
+
+    #[test]
+    fn issued_state_verifies_and_the_csrf_hash_matches_the_cookie() {
+        let issued = issue(KEY);
+        let verified = verify(KEY, &issued.state).expect("a freshly issued state must verify");
+        assert_eq!(
+            verified.csrf_hash,
+            hash_csrf_cookie(&issued.csrf_cookie_value)
+        );
+    }
+
+    #[test]
+    fn verify_rejects_a_wrong_signing_key() {
+        let issued = issue(KEY);
+        assert!(verify(b"a different key", &issued.state).is_none());
+    }
+
+    #[test]
+    fn verify_rejects_a_tampered_payload() {
+        let issued = issue(KEY);
+        // Flip the last character of the payload without re-signing.
+        let mut parts: Vec<&str> = issued.state.split('.').collect();
+        let last_payload_part = parts[2].to_string();
+        let mut tampered_part = last_payload_part.clone();
+        tampered_part.push('x');
+        parts[2] = &tampered_part;
+        let tampered = parts.join(".");
+
+        assert!(verify(KEY, &tampered).is_none());
+    }
+
+    #[test]
+    fn verify_rejects_a_malformed_state() {
+        assert!(verify(KEY, "not.enough.parts").is_none());
+        assert!(verify(KEY, "").is_none());
+    }
+
+    #[test]
+    fn verify_rejects_an_expired_state() {
+        // Hand-built rather than sleeping in the test.
+        let issued_at = chrono::Utc::now().timestamp() - STATE_TTL_SECS - 1;
+        let csrf_hash = "deadbeef";
+        let pkce_verifier = "verifier";
+        let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
+        let signature = hmac_sign::sign(KEY, payload.as_bytes());
+        let state = format!("{payload}.{signature}");
+
+        assert!(verify(KEY, &state).is_none());
+    }
+
+    #[test]
+    fn verify_rejects_a_state_issued_too_far_in_the_future() {
+        let issued_at = chrono::Utc::now().timestamp() + 10;
+        let csrf_hash = "deadbeef";
+        let pkce_verifier = "verifier";
+        let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
+        let signature = hmac_sign::sign(KEY, payload.as_bytes());
+        let state = format!("{payload}.{signature}");
+
+        assert!(verify(KEY, &state).is_none());
+    }
+}

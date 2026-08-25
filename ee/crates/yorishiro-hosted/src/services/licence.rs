@@ -20,7 +20,6 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../../keys/licence-public.pem");
 /// What a licence key asserts.
 ///
 /// `plan` is recorded and logged but gates nothing yet: every valid, unexpired key unlocks every paid feature.
-/// A plan-to-feature matrix is not provided: there is one plan to sell, and a mapping built before the second one exists would encode a guess.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
     /// Who the licence was issued to.
@@ -47,12 +46,9 @@ pub(crate) fn resolve_licence_key(
     }
 }
 
-/// `license_key:` from the config file, read here rather than in `yorishiro-server`'s shared loader.
+/// `license_key:` from the config file, read here rather than in a shared config loader.
 ///
-/// That loader copies every setting it parses into the environment, and doing so for this one would put the string `YORISHIRO_LICENSE_KEY` into the community binary, which the release gate scans for and rejects, correctly: that build is meant to carry no trace of the paid edition.
-/// The shared struct therefore accepts the key and ignores it, and the edition that actually uses it reads the file itself.
-///
-/// Environment first, file second, matching every other setting.
+/// `config.yml` does not exist in this crate's own config directory, so this always returns `None` and only the environment-variable path (`YORISHIRO_LICENSE_KEY`, checked in `LicenceState::from_env` before this is ever called) is live.
 fn licence_key_from_config() -> Option<String> {
     let path = std::env::var("YORISHIRO_CONFIG_PATH").unwrap_or_else(|_| "config.yml".into());
     licence_key_in(&std::fs::read_to_string(path).ok()?)
@@ -65,7 +61,7 @@ pub fn licence_key_in(yaml: &str) -> Option<String> {
         license_key: Option<String>,
     }
 
-    // Not `deny_unknown_fields`: this reads one key out of a file whose other keys belong to a different struct, so everything else has to pass through rather than be rejected.
+    // Not `deny_unknown_fields`: this reads one key out of a file whose other keys belong to a different struct.
     let parsed: JustTheLicence = serde_yaml_ng::from_str(yaml).ok()?;
     parsed.license_key.filter(|k| !k.is_empty())
 }
@@ -109,8 +105,9 @@ pub struct LicenceState {
 impl LicenceState {
     /// Reads `YORISHIRO_LICENSE_KEY` and verifies it against the compiled-in public key.
     ///
-    /// An absent or empty variable yields an unlicensed state, which is a supported way to run:
-    /// the free half works and the paid gates answer 404. A *present but invalid* key also yields an unlicensed state rather than aborting startup, because refusing to boot would take down the free half over a paid-feature misconfiguration, but it is logged at `warn`, since it almost certainly means someone expected paid features to be on.
+    /// An absent or empty variable yields an unlicensed state, which is a supported way to run: the free half works and the paid gates answer 404.
+    /// A *present but invalid* key also yields an unlicensed state rather than aborting startup, because refusing to boot would take down the free half over a paid-feature misconfiguration.
+    /// It is logged at `warn`, since it almost certainly means someone expected paid features to be on.
     pub fn from_env() -> Self {
         let from_env =
             std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());
@@ -172,7 +169,3 @@ impl LicenceState {
         ))
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/services/licence.rs"]
-mod tests;

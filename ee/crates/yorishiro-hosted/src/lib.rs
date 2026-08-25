@@ -1,137 +1,116 @@
-//! The paid edition: Stripe billing, OAuth/OIDC, the marketplace, LLM-backed fill, and the SPA.
+//! The paid edition's composition seam.
 //!
-//! This crate's binary is the only one the product ships, so a self-hosted deployment runs it too: what a deployment gets is decided by its licence key and its configuration, not by which binary it installed.
-//! The separation that matters is the dependency direction:
-//! `yorishiro-core` and `yorishiro-server` do not depend on this crate, and composing them here is what lets the paid half be removed without touching them.
+//! `HostedApp` is a second `loco_rs::app::Hooks` implementation, distinct from `yorishiro_core::app::App`.
+//! Every method delegates to `App`'s associated fn for the base behaviour first; `ee/`-only wiring is added around that call rather than duplicating it.
+//!
+//! `yorishiro-core` must never depend on this crate; this crate depends on it.
 
-pub mod error;
-pub mod http;
+pub mod controllers;
 pub mod models;
 pub mod services;
-pub mod state;
-pub mod web;
+pub mod tasks;
 
-use std::sync::LazyLock;
-
-use axum::Router;
-use axum::routing::{get, post, put};
-use utoipa::OpenApi;
-
-use http::controllers::{
-    HostedApiDoc, dashboard, entity_columns, inference, marketplace, oauth, origin, stripe,
+use async_trait::async_trait;
+use loco_rs::{
+    Result,
+    app::{AppContext, Hooks, Initializer},
+    bgworker::Queue,
+    boot::{BootResult, StartMode, create_app},
+    config::Config,
+    controller::AppRoutes,
+    environment::Environment,
+    task::Tasks,
 };
-use state::HostedState;
+use migration::Migrator;
+use std::path::Path;
+use yorishiro_core::app::App;
 
-/// The hosted dashboard/webhook/OAuth-status router, mounted by `yorishiro-server`'s `main` (or, alternatively, nested into `yorishiro-server`'s own router by a deployment that prefers a single process).
-/// `/auth/oauth/status` always returns `200` regardless of whether OAuth is configured, so the Web UI's login page can tell "OAuth not configured" apart from "this deployment predates OAuth entirely".
-/// See [`oauth_login_router`] for `/auth/oauth/authorize|callback`, which behave differently and are mounted separately.
-///
-/// Reachable without a bearer token exactly like `yorishiro-server`'s own `/auth/*`/`/setup*` routes, but split into two builders (this one, and [`oauth_login_router`]) rather than one flat `Router` because they need different treatment: `/auth/oauth/authorize|callback` are as brute-forceable as a login form and need the same rate limiter `yorishiro-server` applies to its own unauthenticated routes; everything else here either requires a bearer token already (`/hosted/tenant/overview`), is a Stripe-signature-verified webhook that must never be rate-limited (dropping a legitimate billing event on `429` is worse than not rate-limiting it), or is `/auth/oauth/status`, deliberately unlimited because the Web UI's login page polls it on every load.
-/// `apply_rate_limit_layer` itself lives in `yorishiro-server`, and a layer can only be applied where the routers are composed, which is `yorishiro-server`'s `main`, since that is what merges these two sub-routers with the community edition's own.
-/// Applying it here instead would give the OAuth routes a second `RateLimiter`, so the same client would get two independent quotas rather than the one shared with `/auth/login`.
-pub fn router() -> Router<HostedState> {
-    Router::new()
-        .route("/hosted/stripe/webhook", post(stripe::stripe_webhook))
-        .route("/hosted/tenant/overview", get(dashboard::tenant_overview))
-        .route("/auth/oauth/status", get(oauth::status))
-        .route("/api-docs/hosted-openapi.json", get(hosted_openapi))
-        // The marketplace is an enterprise capability, so it lives here: the community edition serves none of these paths, so nothing is being shadowed.
-        // Each path still declares **every** method it needs in one `.route`, because a path defined on this router takes that path entirely: a method left out would answer 405 rather than falling through.
-        .route("/api/marketplace", get(marketplace::list_marketplace))
-        .route(
-            "/api/marketplace/{id}/versions",
-            get(marketplace::list_versions).post(marketplace::publish_version),
-        )
-        .route(
-            "/api/marketplace/{id}/reviews",
-            get(marketplace::list_reviews).post(marketplace::submit_review),
-        )
-        .route(
-            "/api/marketplace/{id}/fork",
-            post(marketplace::fork_template),
-        )
-        .route(
-            "/api/marketplace/{id}/visibility",
-            put(marketplace::set_visibility),
-        )
-        // The origin/merge chain is also an enterprise capability.
-        // These paths overlay base's `/api/schemas` namespace, so the shadowing rule matters here: a path defined on this router takes that path entirely.
-        // `merge-preview` and `merge` are distinct trailing segments, so base's `/api/schemas/{schema_id}` is untouched.
-        // `/api/schemas/upstream- changes` is the one to watch: base has no such literal path, and its `{schema_id}` route would otherwise catch the word as a UUID and answer 400; this router takes it first.
-        .route(
-            "/api/schemas/upstream-changes",
-            get(origin::list_upstream_changes),
-        )
-        .route(
-            "/api/schemas/{schema_id}/merge-preview",
-            get(origin::merge_preview),
-        )
-        .route("/api/schemas/{schema_id}/merge", post(origin::merge_apply))
-        // Fill mode B is an enterprise capability for the same reason as the rest: the server makes an outbound chat completion, and a bring-your-own-key design moves who pays for it without changing that.
-        //
-        // The shadowing rule applies again, across two namespaces.
-        // `infer-fill` is a distinct trailing segment under `/api/schemas/active/{name}`, so base's own routes there are untouched.
-        // `proposals` and `confirm` sit beside base's surviving `undo` on the `/api/migration-jobs/{job_id}` prefix, distinct trailing segments again, so the three coexist and confirming still snapshots through the mechanism `undo` reverses.
-        .route(
-            "/api/workspace/llm-key",
-            put(inference::set_llm_key)
-                .get(inference::get_llm_key)
-                .delete(inference::delete_llm_key),
-        )
-        .route(
-            "/api/schemas/active/{name}/infer-fill",
-            post(inference::infer_fill),
-        )
-        .route(
-            "/api/migration-jobs/{job_id}/proposals",
-            get(inference::list_proposals),
-        )
-        .route(
-            "/api/migration-jobs/{job_id}/confirm",
-            post(inference::confirm_proposals),
-        )
-        // Which columns the Entities table shows, per workspace and entity type.
-        // Base defines nothing under `/api/workspace/`, so no path here shadows one of its routes.
-        .route(
-            "/api/workspace/entity-columns",
-            get(entity_columns::list_columns),
-        )
-        .route(
-            "/api/workspace/entity-columns/{entity_type}",
-            put(entity_columns::set_columns).delete(entity_columns::reset_columns),
-        )
+use services::embedding_resolver::EmbeddingKeyResolver;
+use services::licence::LicenceState;
+use services::tenant_auth::TenantScopedAuthenticator;
+
+pub struct HostedApp;
+
+#[async_trait]
+impl Hooks for HostedApp {
+    fn app_name() -> &'static str {
+        env!("CARGO_CRATE_NAME")
+    }
+
+    fn app_version() -> String {
+        App::app_version()
+    }
+
+    async fn boot(
+        mode: StartMode,
+        environment: &Environment,
+        config: Config,
+    ) -> Result<BootResult> {
+        create_app::<Self, Migrator>(mode, environment, config).await
+    }
+
+    async fn initializers(ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
+        App::initializers(ctx).await
+    }
+
+    /// An absent or invalid licence key does not fail boot.
+    async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        let ctx = App::after_context(ctx).await?;
+        ctx.shared_store.insert(LicenceState::from_env());
+        ctx.shared_store
+            .insert(std::sync::Arc::new(TenantScopedAuthenticator)
+                as std::sync::Arc<
+                    dyn yorishiro_core::services::auth::Authenticator,
+                >);
+        // The embedding resolver seam: a workspace with its own row in identity_workspace_embedding_keys
+        // uses that provider instead of the deployment default (see WorkspaceEmbeddingResolver's own doc
+        // comment). Tenant-level assignment is the paid-edition decision, the same reasoning that keeps
+        // llm_keys in ee/: base only needs to be able to *receive* a different provider per workspace.
+        ctx.shared_store
+            .insert(std::sync::Arc::new(EmbeddingKeyResolver)
+                as std::sync::Arc<
+                    dyn yorishiro_core::services::embedding::WorkspaceEmbeddingResolver,
+                >);
+        Ok(ctx)
+    }
+
+    /// `dashboard` and the Stripe webhook are always mounted (not licence-gated); `marketplace` 404s without a licence.
+    /// `inference`'s `/hosted` prefix is an unchecked deviation from `origin`/`entity_columns`, which mount at master's own paths after confirming no collision: reconcile before the PR.
+    fn routes(ctx: &AppContext) -> AppRoutes {
+        App::routes(ctx)
+            .add_route(controllers::dashboard::routes())
+            .add_route(controllers::embedding::routes())
+            .add_route(controllers::entity_columns::routes())
+            .add_route(controllers::inference::routes())
+            .add_route(controllers::marketplace::routes())
+            .add_route(controllers::oauth::routes())
+            .add_route(controllers::origin::routes())
+            .add_route(controllers::stripe::routes())
+    }
+
+    /// `controllers::mcp::mount` hardcodes a concrete `ServerHandler` type, so an ee-only MCP tool would mean re-implementing `mount` and its layers here.
+    async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
+        App::after_routes(router, ctx).await
+    }
+
+    async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
+        App::connect_workers(ctx, queue).await
+    }
+
+    fn register_tasks(tasks: &mut Tasks) {
+        App::register_tasks(tasks);
+        tasks.register(tasks::seed_official_templates::SeedOfficialTemplates);
+        tasks.register(tasks::create_tenant_api_key::CreateTenantApiKey);
+    }
+
+    async fn truncate(ctx: &AppContext) -> Result<()> {
+        App::truncate(ctx).await
+    }
+
+    /// Publishing the templates themselves stays `seed_official_templates`'s own job.
+    async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
+        App::seed(ctx, base).await?;
+        services::official_templates::ensure_official_tenant(&ctx.db).await?;
+        Ok(())
+    }
 }
-
-/// Serialized once on first request rather than per call: the document is fixed at compile time, and `to_json` walks the whole structure.
-static HOSTED_OPENAPI_JSON: LazyLock<String> = LazyLock::new(|| {
-    HostedApiDoc::openapi()
-        .to_json()
-        .expect("the derived OpenAPI document is static and always serializable")
-});
-
-/// `GET /api-docs/hosted-openapi.json`: the OpenAPI document for this crate's own routes.
-///
-/// A sibling of the community edition's `/api-docs/openapi.json` rather than an addition to it:
-/// `build_app` mounts that route itself from a `pub(crate)` `ApiDoc` this crate cannot reach, and `Router::merge` panics on a duplicate path.
-/// See [`http::controllers::HostedApiDoc`].
-///
-/// Unauthenticated, matching how the community edition serves its own spec, and not rate-limited: it is a static document containing no tenant data.
-async fn hosted_openapi() -> impl axum::response::IntoResponse {
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
-        HOSTED_OPENAPI_JSON.as_str(),
-    )
-}
-
-/// `/auth/oauth/authorize`/`/auth/oauth/callback`: the two routes in this crate that need the same brute-force protection `yorishiro-server` applies to its own `/auth/login`/`/auth/signup`.
-/// Both are always mounted here: they 404 internally (see `http::controllers::oauth`) rather than being conditionally added, so their presence/absence never depends on route-table state, only on the request they each handle.
-/// See [`router`]'s doc comment for why these two are split into their own builder instead of living there.
-pub fn oauth_login_router() -> Router<HostedState> {
-    Router::new()
-        .route("/auth/oauth/authorize", get(oauth::authorize))
-        .route("/auth/oauth/callback", get(oauth::callback))
-}
-
-#[cfg(test)]
-#[path = "../tests/lib.rs"]
-mod tests;

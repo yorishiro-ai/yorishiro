@@ -1,16 +1,25 @@
-use sqlx::{PgPool, Row};
+//! Publishes the community edition's built-in templates as official marketplace listings.
+//! Bypasses `services::marketplace::publish_version`'s ownership check, since the seed has no authenticated tenant to check ownership against.
+//! Invoked from a Loco task (`register_tasks`), not a request path.
+
+use loco_rs::app::AppContext;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
+};
 use uuid::Uuid;
-use yorishiro_core::ResultExt;
 use yorishiro_core::db;
-use yorishiro_core::error::YorishiroError;
+use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::{identity_template_versions, identity_tenants};
+use yorishiro_core::models::tenancy::INFRASTRUCTURE_TENANT_ID;
 
 /// The tenant that owns the officially published templates.
-///
-/// A fixed id rather than a lookup by name, so re-running the seed finds the same row and a deployment that renames it does not end up with two publishers.
-pub const OFFICIAL_TENANT_ID: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0001);
+/// A fixed id, so re-running the seed finds the same row rather than creating a second publisher.
+pub const OFFICIAL_TENANT_ID: Uuid = INFRASTRUCTURE_TENANT_ID;
 
 /// Shown as the listing's author.
-/// `identity.templates.author` is free text, so this does not require a user account.
+/// `identity_templates.author` is free text, so this does not require a user account.
 pub const OFFICIAL_AUTHOR: &str = "Yorishiro";
 
 const OFFICIAL_TENANT_NAME: &str = "Yorishiro Official";
@@ -24,16 +33,11 @@ pub struct SeedOutcome {
     pub unchanged: Vec<String>,
 }
 
-/// Publishes the community edition's built-in templates as official marketplace listings.
-///
-/// The publisher is a tenant row with **no members and no workspaces**: `identity.templates` requires a `tenant_id`, and the marketplace scopes ownership by it, so a listing has to belong to some tenant.
-/// Nobody can log into this one (there is no membership to log in through) and it holds no data of its own.
-/// It exists to satisfy the foreign key and to give official listings a stable owner, not to be used.
-///
-/// Idempotent, and safe to run on every deployment: a template is matched by `(tenant_id, name)`, and a new version is published only when the built-in definition differs from the latest one already published.
-/// Re-running with unchanged built-ins writes nothing.
-pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, YorishiroError> {
-    ensure_official_tenant(pool).await?;
+/// Publishes every built-in template as an official, community-visible marketplace listing.
+/// Idempotent: a new version is published only when the built-in definition differs from the latest one already published.
+/// Calls `ensure_official_tenant` itself, so this still works standalone.
+pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, YorishiroError> {
+    ensure_official_tenant(&ctx.db).await?;
 
     let mut outcome = SeedOutcome::default();
 
@@ -42,7 +46,7 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
         let definition_json = serde_json::to_value(&definition).internal()?;
 
         let template_id = upsert_template(
-            pool,
+            &ctx.db,
             &summary.id,
             summary.description.as_deref(),
             &definition_json,
@@ -50,24 +54,16 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
         .await?;
 
         // Compare against the newest version of any status, not just `stable`: publishing a fresh version every run would otherwise walk the version number up forever while the definition stayed the same.
-        let latest: Option<(i32, serde_json::Value)> = sqlx::query(
-            "SELECT version, definition FROM identity.template_versions \
-             WHERE template_id = $1 ORDER BY version DESC LIMIT 1",
-        )
-        .bind(template_id)
-        .fetch_optional(pool)
-        .await
-        .internal()?
-        .map(|row| {
-            Ok::<_, YorishiroError>((
-                row.try_get("version").internal()?,
-                row.try_get("definition").internal()?,
-            ))
-        })
-        .transpose()?;
+        let latest = identity_template_versions::Entity::find()
+            .filter(identity_template_versions::Column::TemplateId.eq(template_id))
+            .order_by_desc(identity_template_versions::Column::Version)
+            .limit(1)
+            .one(&ctx.db)
+            .await
+            .internal()?;
 
         match latest {
-            Some((_, published)) if published == definition_json => {
+            Some(latest) if latest.definition == definition_json => {
                 outcome.unchanged.push(summary.id.clone());
                 continue;
             }
@@ -75,80 +71,80 @@ pub async fn seed_official_templates(pool: &PgPool) -> Result<SeedOutcome, Yoris
             None => outcome.published.push(summary.id.clone()),
         }
 
-        // Same read-then-write race as `marketplace::publish_version`, and the same remedy: the version is read by `max(version) + 1` inside the inserting statement, which locks no range at READ COMMITTED.
-        // Two deployments seeding at once (a rolling restart is enough) would otherwise both compute the same number and one would fail on `UNIQUE (template_id, version)`.
-        //
-        // `stable` rather than `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
-        // An official template that nobody can see is the same as not publishing it.
-        let mut tx = pool.begin().await.internal()?;
-        db::lock_for_update(&mut tx, &format!("template-version:{template_id}"))
+        // `stable`, not `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
+        let request = crate::models::marketplace::PublishVersionRequest {
+            definition: definition_json,
+            changelog: Some(format!("Built-in template '{}'", summary.id)),
+            status: "stable".to_string(),
+        };
+        // lock_for_update is transaction-scoped, so this needs its own txn rather than ctx.db.
+        let txn = ctx.db.begin().await.internal()?;
+        db::lock_for_update(&txn, &format!("template-version:{template_id}"))
             .await
             .internal()?;
-        sqlx::query(
-            "INSERT INTO identity.template_versions \
-                    (template_id, version, definition, changelog, status, created_by) \
-             SELECT $1, COALESCE(max(v.version), 0) + 1, $2, $3, 'stable', NULL \
-               FROM identity.template_versions v WHERE v.template_id = $1",
-        )
-        .bind(template_id)
-        .bind(&definition_json)
-        .bind(format!("Built-in template '{}'", summary.id))
-        .execute(&mut *tx)
-        .await
-        .internal()?;
-        tx.commit().await.internal()?;
+        crate::models::marketplace::insert_next_version(&txn, template_id, &request, None).await?;
+        txn.commit().await.internal()?;
     }
 
     Ok(outcome)
 }
 
-async fn ensure_official_tenant(pool: &PgPool) -> Result<(), YorishiroError> {
-    // Written directly rather than through `create_tenant`, which enforces `YORISHIRO_MAX_TENANTS`.
-    // The publisher is infrastructure, not a customer, and a deployment sitting at its tenant cap still needs its official templates.
-    sqlx::query(
-        "INSERT INTO identity.tenants (id, name) VALUES ($1, $2) \
-         ON CONFLICT (id) DO NOTHING",
-    )
-    .bind(OFFICIAL_TENANT_ID)
-    .bind(OFFICIAL_TENANT_NAME)
-    .execute(pool)
-    .await
-    .internal()?;
+/// Creates the official-templates publisher tenant if it does not already exist.
+/// Idempotent (`ON CONFLICT DO NOTHING` on the fixed id).
+pub async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
+    // Bypasses tenancy::create_tenant: the publisher is infrastructure, not subject to YORISHIRO_MAX_TENANTS.
+    let active = identity_tenants::ActiveModel {
+        id: ActiveValue::Set(OFFICIAL_TENANT_ID),
+        name: ActiveValue::Set(OFFICIAL_TENANT_NAME.to_string()),
+        ..Default::default()
+    };
+    identity_tenants::Entity::insert(active)
+        .on_conflict(
+            OnConflict::column(identity_tenants::Column::Id)
+                .do_nothing()
+                .to_owned(),
+        )
+        .exec_without_returning(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 
 /// Creates the template row, or refreshes the description/definition of the existing one.
-/// `identity.templates` is unique on `(tenant_id, name)`, which is what makes this idempotent.
+/// `identity_templates` is unique on `(tenant_id, name)`, which is what makes this idempotent.
 async fn upsert_template(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     name: &str,
     description: Option<&str>,
     definition: &serde_json::Value,
 ) -> Result<Uuid, YorishiroError> {
-    let row = sqlx::query(
-        "INSERT INTO identity.templates \
-                (tenant_id, name, description, definition, visibility, author) \
-         VALUES ($1, $2, $3, $4, 'community', $5) \
-         ON CONFLICT (tenant_id, name) DO UPDATE \
-            SET description = EXCLUDED.description, \
-                definition  = EXCLUDED.definition, \
-                visibility  = 'community', \
-                author      = EXCLUDED.author, \
-                updated_at  = now() \
-         RETURNING id",
-    )
-    .bind(OFFICIAL_TENANT_ID)
-    .bind(name)
-    .bind(description)
-    .bind(definition)
-    .bind(OFFICIAL_AUTHOR)
-    .fetch_one(pool)
-    .await
-    .internal()?;
+    use yorishiro_core::models::_entities::identity_templates::{ActiveModel, Column, Entity};
 
-    row.try_get("id").internal()
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(OFFICIAL_TENANT_ID),
+        name: ActiveValue::Set(name.to_string()),
+        description: ActiveValue::Set(description.map(str::to_string)),
+        definition: ActiveValue::Set(definition.clone()),
+        visibility: ActiveValue::Set("community".to_string()),
+        author: ActiveValue::Set(Some(OFFICIAL_AUTHOR.to_string())),
+        updated_at: ActiveValue::Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    let row = Entity::insert(active)
+        .on_conflict(
+            OnConflict::columns([Column::TenantId, Column::Name])
+                .update_columns([
+                    Column::Description,
+                    Column::Definition,
+                    Column::Visibility,
+                    Column::Author,
+                    Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec_with_returning(conn)
+        .await
+        .internal()?;
+
+    Ok(row.id)
 }
-
-#[cfg(test)]
-#[path = "../../tests/services/official_templates.rs"]
-mod tests;

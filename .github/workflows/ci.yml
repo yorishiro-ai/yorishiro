@@ -1,8 +1,15 @@
 name: CI
 
+# Rewritten for the Loco rebuild's actual layout (root package + ee/crates/yorishiro-hosted +
+# migration/), replacing a version that still referenced master's pre-rebuild crates/ split
+# (crates/yorishiro-core, crates/yorishiro-server), ee/web's SPA, packaging/, and a Dockerfile,
+# none of which exist here. Deliberately minimal: cargo check/clippy/fmt-check/test against a
+# Postgres service, matching what `make check clippy fmt-check test` already runs locally.
+# master's own ci.yml is untouched; it is correct for master's own structure.
+
 on:
   push:
-    branches: [master]
+    branches: [develop, loco-rebuild]
     paths-ignore:
       - "docs/**"
       - "ee/docs/**"
@@ -10,7 +17,7 @@ on:
       - ".github/dependabot.yml"
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [master]
+    branches: [develop, loco-rebuild]
     paths-ignore:
       - "docs/**"
       - "ee/docs/**"
@@ -55,359 +62,50 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # The SPA is embedded into the binary from `ee/web/dist`, which is a build output and is
-      # not committed: it has to be built before any cargo step, or `embeds_a_built_spa`
-      # fails and every other web test passes against an empty embed. `pnpm run check` is the
-      # web side's own gate (lint, format, typecheck, vitest) and ends in the build, so one step
-      # covers both.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          package_json_file: ee/web/package.json
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: ee/web/pnpm-lock.yaml
-
-      - name: Build the SPA
+      # Request tests each create their own throwaway database via `CREATE DATABASE`, which
+      # copies `template1`: a fresh Postgres image's template1 carries neither extension, and
+      # every request test would fail migrating content_entities.embedding (pgvector) or the
+      # trigram index (pg_trgm) without this. See .claude/rules/testing.md.
+      - name: Install pgvector and pg_trgm into template1
         run: |
-          pnpm --dir ee/web install --frozen-lockfile
-          pnpm --dir ee/web run check
+          PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d template1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
       # sccache caches compiled objects by content hash, complementing rust-cache's file-level
       # target/ caching. Installing it is separate from using it: the action exports SCCACHE_PATH
       # and nothing else, so without the "Route rustc through sccache" step below sccache is
-      # present and never invoked (measured: stats came back all-zero), and without
-      # SCCACHE_GHA_ENABLED it caches to local disk on an ephemeral runner, which can never hit.
+      # present and never invoked, and without SCCACHE_GHA_ENABLED it caches to local disk on an
+      # ephemeral runner, which can never hit.
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Where ort-sys extracts the onnxruntime binary at build time. Not covered by the
-          # default cache targets (~/.cargo, ./target), so without caching this the linker
-          # fails to find the library on the second and later warm-cache CI runs.
-          cache-directories: ~/.cache/ort.pyke.io
-          # Shared with `package-smoke` below (same shared-key), which sets `save-if: false`
-          # and so never writes its own, but can still restore the cache master writes here.
-          shared-key: rust
-          # PRs can only ever restore from master's cache and their own, never write back to
-          # master's key, so only master needs to save.
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          # PRs can only ever restore from develop's cache and their own, never write back to
+          # develop's key, so only a push to develop needs to save.
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
 
       # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache
-      # key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache master
-      # already saved (measured: adding RUSTFLAGS earlier turned every restore into "No cache
-      # found"). Still before the first cargo invocation below, which is all sccache needs.
+      # key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache a
+      # save-if run already wrote. Still before the first cargo invocation below, which is all
+      # sccache needs.
       - name: Route rustc through sccache
         run: |
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres
-
-      - name: Run migrations
-        run: cargo sqlx migrate run
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check
+        run: cargo check --workspace
+
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --tests -- -D warnings
 
+      # Reaches migration/'s own tests (including the two SQLite-file migration tests, run with
+      # no DATABASE_URL and no feature flag: SeaORM's DatabaseConnection is runtime-polymorphic
+      # across backends here, so there is no compile-time "sqlite" feature to select the way
+      # master's pre-rebuild Engine-generic layer needed) because it runs against the whole
+      # workspace, not a single -p package.
       - name: Test
-        run: cargo test --all
-
-      # Proves the generic bounds in yorishiro-core's models/ are satisfiable by Sqlite, that the
-      # rendered SQL is dialect-correct (no `content`/`identity` qualifier, valid Sqlite syntax),
-      # and (sqlite_execution) that PR #213's four rewritten entities:: functions actually execute
-      # and behave correctly against a real in-memory Sqlite database. That last group opens its
-      # own `sqlite::memory:` connection per test, so this still needs no DATABASE_URL; `stays_bare`
-      # matches every dialect-rendering test's Sqlite half.
-      - name: Sqlite bounds check
-        run: cargo test -p yorishiro-core --features sqlite -- sqlite_satisfies_the_generic_bounds stays_bare sqlite_execution
-
-      # The community package exists so a deployment can hold no proprietary code at all. That
-      # is a property of the shipped artifact, not of the dependency graph, so it is checked on
-      # the built binary: `cargo tree` would still pass if a symbol leaked in through a path the
-      # manifest does not name.
-      #
-      # The same markers are asserted *present* in the paid binary. Without that half, a typo in
-      # a pattern would make this step pass by matching nothing.
-      - name: The community binary contains no paid code
-        run: |
-          # Release, not debug: the packages ship `target/release`, and this must scan the
-          # artifact that reaches a user. A build-profile difference could otherwise let
-          # something through the check that ships anyway.
-          cargo build --release --bin yorishiro-ce-server -p yorishiro-server
-          cargo build --release --bin yorishiro-server -p yorishiro-hosted
-
-          markers='hosted/stripe yorishiro_hosted api/marketplace LICENSE_KEY infer-fill'
-          status=0
-
-          for m in $markers; do
-            if strings -a target/release/yorishiro-ce-server | grep -q -- "$m"; then
-              echo "::error::'$m' is present in the community binary, which must carry no ee/ code" >&2
-              status=1
-            fi
-          done
-
-          for m in $markers; do
-            if ! strings -a target/release/yorishiro-server | grep -q -- "$m"; then
-              echo "::error::'$m' is absent from the paid binary, so the check above proves nothing" >&2
-              status=1
-            fi
-          done
-
-          [ "$status" -eq 0 ] && echo "community binary is clean; every marker discriminates"
-          exit "$status"
-
-      # The packages declare a glibc floor, and a declaration that drifts from the artifact is
-      # worse than none: apt/dnf would install onto a system the binary cannot run on. This
-      # compares what the binary demands against what the packaging promises.
-      #
-      # It caught a real one: a host-built binary needed GLIBC_2.43, and the rpm installed
-      # happily on Rocky 9 (2.34) before dying on a missing symbol at first start.
-      - name: The declared glibc floor matches the binary
-        run: |
-          status=0
-
-          # Each binary against its own package definition, and both symbol families: GLIBCXX
-          # is what actually broke on Rocky 9, so checking GLIBC alone would have missed it.
-          check() {
-            bin="$1" cfg="$2"
-            for sym in GLIBC GLIBCXX; do
-              declared=$(grep -oE "${sym}_[0-9]+(\.[0-9]+)+" "$cfg" | sort -uV | tail -1)
-              needed=$(objdump -T "$bin" | grep -oE "${sym}_[0-9]+(\.[0-9]+)+" | sort -uV | tail -1)
-              [ -n "$needed" ] || continue
-              if [ -z "$declared" ]; then
-                echo "::error::$bin needs $needed but $cfg declares no $sym floor" >&2
-                status=1
-              elif [ "$(printf '%s\n%s\n' "$needed" "$declared" | sort -V | tail -1)" != "$declared" ]; then
-                echo "::error::$bin needs $needed but $cfg declares $declared" >&2
-                status=1
-              else
-                echo "$(basename "$bin") vs $(basename "$cfg"): needs $needed, declared $declared"
-              fi
-            done
-          }
-
-          check target/release/yorishiro-server packaging/nfpm-yorishiro-ee.yaml
-          check target/release/yorishiro-ce-server packaging/nfpm-yorishiro-ce.yaml
-          exit "$status"
-
-      # Handed to `package-install` rather than rebuilt there: these are the same release
-      # binaries the two steps above just scanned, so the job that installs them tests the
-      # artifact the gates passed, and skips a second cold ort/tokenizers build.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-binaries
-          path: |
-            target/release/yorishiro-server
-            target/release/yorishiro-ce-server
-          retention-days: 1
-
-  # Installs the packages in the distributions they claim to support. `check` reads the binaries
-  # and the packaging configuration; nothing before this job ever ran a package manager, and
-  # every packaging bug found so far was invisible until one did: dpkg deleting the licence file
-  # under `path-exclude=/usr/share/doc/*`, an rpm that installed onto a glibc too old to run it,
-  # an unconfigured start printing a Rust panic at an operator.
-  #
-  # The script is the same one that runs locally (`packaging/test-install.sh`), so a failure here
-  # reproduces without pushing a commit.
-  #
-  # It pulls five public images (four distributions plus postgres). A failure whose message is
-  # about pulling rather than about a package is Docker Hub's unauthenticated rate limit on a
-  # shared runner, not a packaging fault: rerun, and authenticate the pulls if it recurs.
-  package-install:
-    runs-on: ubuntu-latest
-    needs: check
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      # Into `target/release/`, because nfpm resolves `src:` against the working directory
-      # rather than against the config file.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: release-binaries
-          path: target/release
-
-      # Artifacts are zipped without permissions, so both binaries arrive as 644. nfpm would
-      # package them exactly as it found them, and every "does it run" assertion downstream
-      # would fail looking like a broken build.
-      - name: Restore the executable bit
-        run: chmod +x target/release/yorishiro-server target/release/yorishiro-ce-server
-
-      # Pinned: an unpinned install makes nfpm's next release able to break this job on a
-      # commit that changed nothing. Checksum-verified as well, the same way release.yml does
-      # it: a pinned version still trusts whatever that URL serves, and this builds the
-      # artifacts the release publishes. Keep the version in step with release.yml's
-      # NFPM_VERSION, so CI tests the packager that ships.
-      - name: Install nfpm
-        env:
-          NFPM_VERSION: 2.47.0
-        run: |
-          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
-          asset="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
-          curl -fsSL -o "/tmp/$asset" "${base}/${asset}"
-          curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
-          ( cd /tmp && sha256sum --check --ignore-missing --strict nfpm-checksums.txt )
-          tar -xzf "/tmp/$asset" -C /usr/local/bin nfpm
-          nfpm --version
-
-      - name: Build the packages
-        run: |
-          mkdir -p dist
-          for cfg in packaging/nfpm-yorishiro-ee.yaml packaging/nfpm-yorishiro-ce.yaml; do
-            for pkg in deb rpm; do
-              nfpm package --config "$cfg" --packager "$pkg" --target dist/
-            done
-          done
-          ls -l dist/
-
-      - name: Install and check the packages
-        run: ./packaging/test-install.sh dist
-
-      # Starting the service is a different claim from installing it, and nothing above makes
-      # it: `systemd-analyze verify` checks unit syntax, and every other case here runs the
-      # binary directly. Both defects this catches stay invisible unless systemd itself runs the
-      # unit: a comment naming a path dpkg deletes, and an unconfigured start that retries
-      # forever while `is-failed` answers `activating`.
-      #
-      # Same job rather than its own, so the packages built above are reused; only this step
-      # needs a privileged container, and `test-install.sh` stays runnable without one.
-      - name: Start the service under systemd
-        run: ./packaging/test-systemd.sh dist
-
-  # Verifies the built binary actually boots and serves traffic, not just that it compiles
-  # and its unit/integration tests pass: `check` above never starts the real `main()`, so a
-  # startup-only failure (a panicking `.expect()` in config/provider construction, a missing
-  # env var only main.rs reads) would otherwise ship unnoticed until a real deploy.
-  # The release builds this image; nothing before it does. Without this job, a Dockerfile
-  # that no longer matches the binaries it copies would only fail at release time.
-  #
-  # amd64 only, and no push: this is asking whether the file still describes a buildable,
-  # runnable image, not reproducing the release's multi-arch publish.
-  image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Build the image
-        run: docker build -t yorishiro:ci .
-
-      # Built is not runnable: a wrong ENTRYPOINT builds fine and dies on first start. The
-      # unconfigured exit is 78 (EX_CONFIG), the same contract the packaged unit relies on.
-      - name: The image starts
-        run: |
-          docker run --rm yorishiro:ci --help >/dev/null
-          docker run --rm yorishiro:ci >/tmp/out 2>&1 && { echo "::error::expected a nonzero exit" >&2; exit 1; }
-          code=$?
-          grep -q 'database connection is not configured' /tmp/out \
-            || { echo "::error::the image did not print the configuration error" >&2; exit 1; }
-          [ "$code" = 78 ] || { echo "::error::expected exit 78, got $code" >&2; exit 1; }
-          echo "image runs, and exits 78 unconfigured"
-
-  package-smoke:
-    runs-on: ubuntu-latest
-    # A cold `cargo build` here pulls in ort/tokenizers same as `check`'s clippy/test steps do,
-    # but doesn't reuse their compiled artifacts (debug profile, different step). The timeout
-    # stays generous even with the warm shared-key cache, so a slow cold run doesn't misread as a real failure.
-    timeout-minutes: 15
-
-    services:
-      db:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_USER: yorishiro
-          POSTGRES_PASSWORD: yorishiro
-          POSTGRES_DB: yorishiro
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U yorishiro"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-
-    env:
-      DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-      # The default "local" provider requires ONNX model files that aren't checked into git
-      # (docker-compose mounts them from disk instead, see models/ in .gitignore), so a bare
-      # CI checkout can't load it. "openai" only builds an HTTP client at startup: it never
-      # connects until an actual embed() call, which this smoke test never makes, so a
-      # non-resolving placeholder URL is enough to boot without needing a real endpoint.
-      YORISHIRO_EMBEDDING_PROVIDER: openai
-      YORISHIRO_EMBEDDING_BASE_URL: http://localhost:1
-      YORISHIRO_EMBEDDING_MODEL: smoke-test-unused
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: mozilla-actions/sccache-action@v0.0.11
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: ~/.cache/ort.pyke.io
-          shared-key: rust
-          save-if: false
-
-      # After rust-cache: see the note in the `check` job above.
-      - name: Route rustc through sccache
-        run: |
-          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      # The embedded SPA is a build output; without it the binary links but serves a 404 at `/`,
-      # which is exactly the kind of fault this job exists to catch before a deploy does.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          package_json_file: ee/web/package.json
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: ee/web/pnpm-lock.yaml
-
-      - name: Build the SPA
-        run: |
-          pnpm --dir ee/web install --frozen-lockfile
-          pnpm --dir ee/web run build
-
-      - name: Build
-        run: cargo build -p yorishiro-hosted
-
-      # The binary migrates the database itself on startup, so no separate `sqlx migrate run`
-      # step is needed here.
-      - name: Boot and check /up
-        run: |
-          ./target/debug/yorishiro-server &
-          SERVER_PID=$!
-          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
-
-          ok=
-          for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
-              ok=1
-              break
-            fi
-            sleep 1
-          done
-          [ -n "$ok" ] || { echo "server did not serve /up within 30s"; exit 1; }
-          echo "server booted and served /up"
-
-          # The one binary now serves the UI too, so a boot that answers /up while serving no
-          # index.html is still a broken deploy. Asserted here rather than only in the embed
-          # test, because this is the step that runs the real `main`.
-          curl -fsS http://127.0.0.1:8080/ | grep -q "<html" \
-            || { echo "server booted but served no SPA at /"; exit 1; }
-          echo "server served the SPA at /"
+        run: cargo test --workspace

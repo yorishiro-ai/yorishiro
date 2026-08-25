@@ -1,9 +1,13 @@
 name: Documentation Check
 
+# Retargeted from master to develop/loco-rebuild, and the source-path detection below from
+# crates/ + migrations/ (master's pre-rebuild layout) to src/ + ee/crates/ + migration/ (the
+# Loco rebuild's own), so the check actually looks at paths this branch has.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [master]
+    branches: [develop, loco-rebuild]
 
 permissions:
   contents: read
@@ -29,7 +33,7 @@ jobs:
             });
 
             const srcChanged = files.some(f =>
-              f.filename.startsWith('crates/') &&
+              (f.filename.startsWith('src/') || f.filename.startsWith('ee/crates/')) &&
               f.filename.endsWith('.rs') &&
               !f.filename.includes('/tests/')
             );
@@ -38,7 +42,7 @@ jobs:
               f.filename === 'README.md'
             );
             const migrationChanged = files.some(f =>
-              f.filename.startsWith('migrations/')
+              f.filename.startsWith('migration/')
             );
             const configChanged = files.some(f => f.filename.includes('config'));
 

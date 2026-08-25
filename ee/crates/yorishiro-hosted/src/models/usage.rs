@@ -1,30 +1,14 @@
-use sea_query::{Alias, Asterisk, Expr, Func, Iden, PostgresQueryBuilder, Query, SelectStatement};
-use sea_query_binder::SqlxBinder;
+//! Usage counters for invoicing/dashboard display.
+
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::Serialize;
-use sqlx::PgPool;
 use uuid::Uuid;
-use yorishiro_core::{ResultExt, YorishiroError};
+use yorishiro_core::error::{ResultExt, YorishiroError};
+use yorishiro_core::models::_entities::{
+    content_entities, identity_tenant_memberships, identity_workspaces,
+};
 
-#[derive(Iden)]
-enum Workspaces {
-    Table,
-    Id,
-    TenantId,
-}
-
-#[derive(Iden)]
-enum TenantMemberships {
-    Table,
-    TenantId,
-}
-
-#[derive(Iden)]
-enum Entities {
-    Table,
-    WorkspaceId,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TenantUsage {
     pub tenant_id: Uuid,
     pub workspace_count: i64,
@@ -32,66 +16,38 @@ pub struct TenantUsage {
     pub entity_count: i64,
 }
 
-/// Builds and runs a `SELECT COUNT(*) ...` statement, returning the single count it yields.
-/// Shared by every counter `compute_tenant_usage` needs: each caller only differs in the `FROM`/`JOIN`/`WHERE` clauses of `query`, and `COUNT(*)` always yields exactly one row.
-async fn fetch_count(pool: &PgPool, query: SelectStatement) -> Result<i64, YorishiroError> {
-    let (sql, values) = query.build_sqlx(PostgresQueryBuilder);
-    let (count,): (i64,) = sqlx::query_as_with(&sql, values)
-        .fetch_one(pool)
-        .await
-        .internal()?;
-    Ok(count)
-}
-
 /// Computes usage counters for invoicing/dashboard display.
-/// Runs over the admin/migration-role pool (the same one `identity_pool` uses), since it aggregates across every workspace in a tenant and `content.entities` only has a workspace-level RLS policy, not a tenant-wide one.
+/// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every workspace in a tenant and `content_entities` only has a workspace-level RLS policy, not a tenant-wide one.
 pub async fn compute_tenant_usage(
-    pool: &PgPool,
+    conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<TenantUsage, YorishiroError> {
-    let workspace_count = fetch_count(
-        pool,
-        Query::select()
-            .expr(Func::count(Expr::col(Asterisk)))
-            .from((Alias::new("identity"), Workspaces::Table))
-            .and_where(Expr::col(Workspaces::TenantId).eq(tenant_id))
-            .to_owned(),
-    )
-    .await?;
+    let workspace_count = identity_workspaces::Entity::find()
+        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
 
-    let member_count = fetch_count(
-        pool,
-        Query::select()
-            .expr(Func::count(Expr::col(Asterisk)))
-            .from((Alias::new("identity"), TenantMemberships::Table))
-            .and_where(Expr::col(TenantMemberships::TenantId).eq(tenant_id))
-            .to_owned(),
-    )
-    .await?;
+    let member_count = identity_tenant_memberships::Entity::find()
+        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
 
-    let entity_count = fetch_count(
-        pool,
-        Query::select()
-            .expr(Func::count(Expr::col(Asterisk)))
-            .from((Alias::new("content"), Entities::Table))
-            .inner_join(
-                (Alias::new("identity"), Workspaces::Table),
-                Expr::col((Workspaces::Table, Workspaces::Id))
-                    .equals((Entities::Table, Entities::WorkspaceId)),
-            )
-            .and_where(Expr::col((Workspaces::Table, Workspaces::TenantId)).eq(tenant_id))
-            .to_owned(),
-    )
-    .await?;
+    // Filters on identity_workspaces.tenant_id, a column content_entities does not itself carry,
+    // via the belongs_to relation content_entities::Relation::IdentityWorkspaces already defines
+    // (content_entities.workspace_id -> identity_workspaces.id).
+    let entity_count = content_entities::Entity::find()
+        .inner_join(identity_workspaces::Entity)
+        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
 
     Ok(TenantUsage {
         tenant_id,
-        workspace_count,
-        member_count,
-        entity_count,
+        workspace_count: workspace_count as i64,
+        member_count: member_count as i64,
+        entity_count: entity_count as i64,
     })
 }
-
-#[cfg(test)]
-#[path = "../../tests/models/usage.rs"]
-mod tests;

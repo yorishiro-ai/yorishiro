@@ -2,143 +2,91 @@
 
 [English](../configuration.md) | **日本語**
 
-設定は1つのYAMLファイルにまとまっています。
-[`config.example.yml`](../../config.example.yml)に全設定の既定値と説明があるので、`config.yml`にコピーして編集してください。
-パッケージからの導入では`/etc/yorishiro/config.yml`に置かれ、unitが既にそこを指しています。
-それ以外では、作業ディレクトリの`config.yml`、または`YORISHIRO_CONFIG_PATH`が示すパスを読みます。
-
-ファイルが無いこともキーが無いことも、エラーにはなりません。
-未知のキーはエラーです。
-設定したつもりの値が効かないまま動くより、起動を拒否します。
-
-各設定には環境変数も用意してあり(`config.example.yml`に併記)、環境変数がファイルの値より優先されます。
-これによりコンテナ配備や一時的な上書きをファイル編集なしで行えます。
-docker composeの`environment:`や`docker compose exec -e`、systemdの`Environment=`、シェルなどで設定してください。
-必須ではありません。
-
-変数はすべて`YORISHIRO_*`です。
-
-## config.yml
-
-以下の設定はすべて`config.yml`ファイルでも指定できます。
-キー一覧は[`config.example.yml`](../../config.example.yml)を参照してください(`embedding:`・`logging:`・`auth_rate_limit:`はグループごとにネストします)。
-デフォルトでは作業ディレクトリの`config.yml`を読み込みます。
-見つからない場合は`/etc/yorishiro/config.yml`にフォールバックします。
-このフォールバックにより、パッケージ導入したホストでシェルから`yorishiro-server admin ...`を実行できます。
-パスはunitが渡していてシェルには無いため、これが無いと隣で動いているサービスと同じ設定があるのにCLIだけが「データベース未設定」と報告します。
-別の場所を使う場合は`YORISHIRO_CONFIG_PATH`で指定してください。
-明示指定した場合はフォールバックしません。
-指定したファイルが無ければ何も読まず、別の配備の設定を黙って拾うことはありません。
-
-ファイルが存在しない場合や、ファイル内に該当キーがない場合はエラーにならず、通常のデフォルト値にフォールバックします。
-**環境変数が設定されている場合は、対応する`config.yml`のキーより常に優先されます。**
-未知のキー(タイポなど)が含まれている場合は拒否されます。
-サーバはそのキーを無視するのではなく、起動に失敗します。
-
-これにより、`config.yml`をデプロイの基本設定として使い、環境変数は一時的な上書き用途(1回限りのDocker `-e`オプションなど)に限定する使い方ができます。
-
-## 基本
-
-| 変数 | 内容 |
-|---|---|
-| `YORISHIRO_DATABASE_DRIVER` | `DATABASE_URL`が接続するエンジン。`postgres`(既定)または`sqlite`。認識できない値は`postgres`へ黙ってフォールバックせず起動を拒否する。`sqlite`はシングルテナント専用で、`YORISHIRO_MAX_TENANTS`は未設定または`1`のみを受け付け、既に複数テナントを持つ`.db`ファイルは起動を拒否する。現時点で対応するのは初回セットアップと認証のみで、REST APIの残り・MCP・管理CLIは動くふりをせず明確に失敗し、それ以外の用途では引き続きPostgreSQLをデプロイする。エンタープライズ版バイナリ(`yorishiro-server`)は`postgres`のみを受け付ける。エンタープライズ版固有の内容は[エンタープライズ版の設定リファレンス](../../ee/docs/ja/configuration.md)を参照 |
-| `DATABASE_URL` | 接続文字列(必須)。ドライバが`postgres`ならPostgreSQL接続文字列、`sqlite`なら`sqlite://`パス |
-| `YORISHIRO_CONFIG_PATH` | 後述の`config.yml`ファイルのパス。未設定時は作業ディレクトリの`config.yml`、次に`/etc/yorishiro/config.yml`を探す |
-| `YORISHIRO_BIND` | リッスンアドレス(既定: `0.0.0.0:8080`) |
-| `YORISHIRO_CORS_ORIGINS` | ブラウザからアクセスする場合の許可オリジン(カンマ区切り。例: 別オリジンで動くダッシュボードが`/auth/login`/`/api/members`を呼べるようにする)。未設定時はクロスオリジン読み取り不可。デバッグビルド限定で、未設定のまま`http://localhost:*`/`http://127.0.0.1:*`(任意ポート)からのアクセスを自動許可する(MCP Inspector等の開発ツール向け)。リリースビルドではこの自動許可は無効 |
-| `YORISHIRO_MAX_TENANTS` | `admin create-tenant`が作成できるテナント数の上限。未設定時は既定で`1`(シングルテナント)。無制限にするには`0`を、複数許可するにはその上限数を設定する。`POST /auth/signup`はテナントを作成しない(既存テナントへ招待を引き換えるだけ)ため影響を受けない。初回セットアップウィザード([setup.md](setup.md#初回セットアップ)参照)もこの変数で有効/無効が決まり、上限が`0`でない場合のみ有効化される |
-| `YORISHIRO_WEB_DIR` | Web UIは`ee/web/dist`からバイナリに組み込まれ、既定で`/`から配信される。実ディレクトリから配信させたい場合に設定する。リクエストごとに読み直すため、バイナリを再ビルドせずUIを編集・反映できる |
-| `YORISHIRO_AUTH_RATE_LIMIT_MAX` / `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` | `/auth/signup`・`/auth/login`・`/setup`(bearerトークン不要なエンドポイントであり、未認証の呼び出し元が総当たりできる唯一の経路)に対する、呼び出し元IPごとのレート制限。既定値: 60秒あたり10リクエスト |
-| `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | 1ワークスペースが1分間に検索へ使えるトークン数(既定: `100000`)。`GET /api/search` と MCP ツール `search_entities` のどちらから来ても同じ予算から引かれる(プロトコルごとではなくワークスペースごとに1つ)。**検索だけをトークンで計量する**のは、それが埋め込みモデルへの実コストであるためであり、書き込みは本文が大きく計量自体が書き込みより高くつくためリクエスト数のままとする。予算を超える単発クエリも1回は通り、その後ウィンドウを使い切った状態になる |
-| `YORISHIRO_SNAPSHOT_RETENTION_DAYS` | 一括移行を取り消せる日数(既定: `30`。`0`以下で無期限保持)。移行は触れたエンティティ1件につき変更前イメージを1行書き、取り消し以外では消えない。無制限にすると、移行を繰り返すワークスペースでイメージが実データを上回る。掃除はタイマーではなく、そのワークスペースで次に移行が走った時点で行う。期限を過ぎたジョブの取り消しは`404`となり、一度も実行されなかったジョブと同じ答えになる。32bit整数にならない値は丸めず既定値に戻す。600万年の保持は打ち間違いであり、最も近い有効値を採ればそれを隠してしまうためである |
-| `RUST_LOG` | ログレベル(例: `info`) |
-
-## DBロードガード
-
-データベースの負荷が続いている間だけデプロイを読み取り専用に落とし、負荷が引いたら戻します。
-閾値を設定しない限り無効です。
-求められてもいないのに読み取り専用へ落とすのは既定の挙動として重すぎ、また適切な値は`max_connections`に依存しますが、それはサーバが決める値ではないためです。
-
-PostgreSQL専用です。
-`pg_stat_activity`を問い合わせており、Sqliteには相当するものがなく、コミュニティ版バイナリは閾値を設定していても`sqlite`エンジンではこのガードを起動しません。
-
-| 変数 | 説明 |
-|---|---|
-| `YORISHIRO_DB_LOAD_THRESHOLD` | この接続数を超えると読み取り専用になる。未設定または`0`でガード自体が無効 |
-| `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | 閾値超過が何秒続いたら切り替えるか(既定: `30`)。瞬間的なスパイクで切り替わらないようにする |
-| `YORISHIRO_DB_LOAD_POLL_SECS` | 接続数を確認する間隔(既定: `5`)。`0`は無効化ではなく既定値に戻る。ガードの無効化は`YORISHIRO_DB_LOAD_THRESHOLD=0`を使う |
-
-## リクエスト相関
-
-すべてのレスポンスに`x-request-id`ヘッダが付与されます。
-リクエストに既に付いていればその値をそのまま返し、無ければサーバがUUIDを生成します。
-同じ値がそのリクエストのtracingスパンにも付くため、処理中に出た`warn`/`error`(認証拒否・レート制限超過・内部エラー等)はアクセスログの行と同じ`request_id`フィールドを持ちます。
-障害調査の際、特定の失敗したリクエストとサーバ側のログ行を突き合わせるのに使えます。
-
-拒否されたリクエスト(APIキー不正・欠落、スコープ不足、レート制限超過)は呼び出し元IPとパスを添えて`warn`でログ出力されます(提示されたキー自体は出力しません)。
-
-## ログ出力
-
-HTTPアクセスログ(method・path・status・latency)を含む全てのログ行はJSON形式で出力されます。
-`YORISHIRO_LOG_TARGET`で出力先を選択できます。
-
-| 変数 | 内容 |
-|---|---|
-| `YORISHIRO_LOG_TARGET` | `stdout`(既定、コンテナランタイムのログドライバ向け)、`single`(単一ファイルへ追記、ローテーションなし)、`daily`(日次ローテーションするファイル)、`syslog`(Linux/Unix系OS限定。他プラットフォームでは起動時にエラーになる) |
-
-### `YORISHIRO_LOG_TARGET=single`または`daily`の場合
-
-| 変数 | 内容 |
-|---|---|
-| `YORISHIRO_LOG_DIR` | ログファイルの出力先ディレクトリ(既定: `.`)。ファイル名は`yorishiro.log`固定で、`daily`の場合は日付が付与される(例: `yorishiro.log.2026-07-13`) |
-
-### `YORISHIRO_LOG_TARGET=syslog`の場合
-
-| 変数 | 内容 |
-|---|---|
-| `YORISHIRO_SYSLOG_SOCKET` | RFC 3164形式のメッセージを送信するUnixドメインソケット(既定: `/dev/log`)。Linux/Unix系OS限定 |
+これは設定の網羅的なリファレンスではない。
+埋め込みプロバイダと、ワークスペース単位の検索トークンクォータと、`config/production.yaml`のキュー調整を扱う。
+Loco 移植の直近のスライスが触れた領域である。
+ここに載せる変数はすべて環境変数から直接読まれる。
+このブランチにはこれらの設定用の `config.yml` 形式のファイルは無い。
 
 ## 埋め込みプロバイダ
 
-| 変数 | 内容 |
+`build_embedding_provider`(`src/services/embedding/mod.rs`)が、埋め込みの書き込み(`sync_embedding`)と検索(`GET /api/search`、MCPツールの`search_entities`)の両方で使うプロバイダを選択・設定する。
+
+| 変数 | 説明 |
 |---|---|
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local`(既定)または`openai` |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | 埋め込みベクトルの次元数(既定: `1024`。既定モデルの出力次元)。使用するモデルの出力次元と一致する必要があります。**ワークスペースは作成時にこの値を記録し、異なるモデルによる書き込みは拒否されます**(下記) |
+| `YORISHIRO_EMBEDDING_PROVIDER` | `local`でローカルONNXプロバイダを選択する(後述)。それ以外の値、または未設定の場合はOpenAI互換プロバイダを選択する |
+| `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI互換プロバイダのみ。OpenAI互換の埋め込みエンドポイントのベースURL(LM Studio、Ollama、vLLM、または実際のOpenAI)。例: `http://localhost:11434`。`YORISHIRO_EMBEDDING_MODEL`とあわせて設定が必要。どちらか一方でも未設定だと、起動は埋め込みバックエンド未設定のまま進み(失敗しない)、埋め込み呼び出しはすべてリクエスト時に`ProviderUnreachable`で失敗するようになる |
+| `YORISHIRO_EMBEDDING_MODEL` | OpenAI互換プロバイダのみ。埋め込みリクエストの`model`フィールドに送られるモデル名。ワークスペース作成時、そのワークスペースが埋め込まれたモデルとしても刻印される。未設定の場合、ワークスペースには`unconfigured`が刻印される |
+| `YORISHIRO_EMBEDDING_API_KEY` | OpenAI互換プロバイダのみ。`YORISHIRO_EMBEDDING_BASE_URL`に送るベアラートークン。既定は空文字列で、トークンを確認しないローカルサーバー(LM Studio、Ollama)にはこれが正しい |
+| `YORISHIRO_EMBEDDING_DIMENSIONS` | 期待するベクトルの次元数(既定: `768`)。デプロイ内のすべてのベクトルはこの次元数を共有する必要がある。ローカルONNXプロバイダは起動時のプローブ推論でこれを検証し、OpenAI互換プロバイダはレスポンスごとに検証する |
+| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | OpenAI互換プロバイダのみ。`true`にすると埋め込みリクエストに`dimensions`フィールドを含める。既定は`false`で、一部のOpenAI互換実装(vLLM、Ollama、LM Studio)は認識しない`dimensions`フィールドを拒否するため |
 
-### `YORISHIRO_EMBEDDING_PROVIDER=local`の場合(ONNXエクスポート、既定)
+### ワークスペース自身の埋め込みプロバイダ(有償版)
 
-| 変数 | 内容 |
+`PUT /hosted/workspace/embedding-key`は、どのワークスペースもデプロイ全体で同じ`YORISHIRO_EMBEDDING_BASE_URL`を共有する代わりに、1つのワークスペースの埋め込み処理だけを上記のデプロイ全体共通のものとは別のプロバイダに向ける。
+base版には含まれない。
+これは既にワークスペース単位でLLM推論の認証情報を割り当てている`PUT /hosted/workspace/llm-key`と同じ切り分けで、どのワークスペースがどの計算先を使うかは有償版の判断であり、計算力の外出しの第1段階にあたる。
+
+| フィールド | 説明 |
 |---|---|
-| `YORISHIRO_ONNX_MODEL_PATH` | ONNXモデルのパス(既定: `models/model.onnx`) |
-| `YORISHIRO_ONNX_TOKENIZER_PATH` | tokenizerのパス(既定: `models/tokenizer.json`) |
-| `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | 最大シーケンス長(既定: `512`) |
-| `YORISHIRO_ONNX_POOLING` | トークン埋め込みを1本のベクトルへ集約する方式: `mean`(既定)または`last_token`。**好みではなくモデルの性質**であり、sentence-transformers系(bge-small・multilingual-e5・all-mpnet)は`mean`、Qwen3-Embedding系は`last_token`を要求する。誤った方式で読んでもエラーにはならず検索品質だけが落ちるため、未知の値は起動失敗とし既定へフォールバックしない |
-| `YORISHIRO_ONNX_QUERY_INSTRUCTION` | 検索クエリにのみ前置する指示文。Qwen3-Embedding系は`Instruct: {task}\nQuery:{text}`を要求する。**保存する文書には付かない**。未設定または空文字列で無効(既定)。対称なモデルでは設定しない |
+| `base_url` | OpenAI互換の埋め込みエンドポイント。例: `https://api.openai.com/v1` |
+| `model` | 埋め込みリクエストに送られるモデル名 |
+| `api_key` | ベアラートークン。保存はされるが`GET`では返らない。返るのは`base_url`、`model`、`dimensions`、設定済みかどうかのみ |
+| `dimensions` | このプロバイダが生成するベクトルの次元数 |
+| `send_dimensions_param` | `true`にすると埋め込みリクエストに`dimensions`フィールドを含める。既定は`false`で、前述の`YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM`と同じ |
 
-### 埋め込みモデルを変更する
+ここに何も設定していないワークスペースは、引き続きデプロイ全体共通のプロバイダ(`YORISHIRO_EMBEDDING_BASE_URL`など)を使う。
+つまり何も設定しなければ、このエンドポイントが存在する前と同じ挙動のままである。
+`DELETE /hosted/workspace/embedding-key`で、ワークスペースをそのデプロイ既定値に戻せる。
 
-ワークスペースは作成時のモデルと次元数を記録します。
-異なる次元のベクトルを書き込もうとすると、両方の数値を示して**422**で拒否されます。
+`PUT`は、ワークスペース自身に刻印されたベクトル幅と一致しない`dimensions`値を、何も保存する前に`422`で拒否する。
+これが無いと、ディスク上に既にあるベクトルの幅と合わないプロバイダを割り当ててしまった場合、次にそのワークスペースへエンティティを書き込んだ時点で`sync_embedding`自身の書き込み時チェック(`services/embedding/sync.rs`)に拒否されるまで気づけない。
+この2つのチェックはどちらも存在し、どちらも他方を置き換えるものではない。
+書き込み時チェックは、ワークスペースがどんな経路で不一致なプロバイダを持つに至ったかに関わらず引き続き効く一方、設定時チェックは運用者がその間違いを犯したまさにその瞬間に同じ問題を表面化させる。
 
-このチェックが無いと書き込み自体は成功し(列は次元を持たないため)、
-そのワークスペースの次の検索が `different vector dimensions 384 and 1024`で失敗します。
-**原因となったエンティティも書き込みも示されません。**
+キャッシュは無い。
+このエンドポイント経由の設定変更は、そのワークスペースに対して埋め込みプロバイダを解決する次のリクエスト(検索、埋め込み同期)から即座に効く。
+何らかの遅延や再起動を待つ必要はない。
 
-別のモデルへ移す場合は、デプロイをそのモデルに向けたうえで再埋め込みします:
+### ローカルONNXプロバイダ(`YORISHIRO_EMBEDDING_PROVIDER=local`)
 
-```console
-$ yorishiro-server admin resync-embeddings --workspace <id>
-```
+BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサービスを使わない。
 
-記録を持たないワークスペースは、デプロイが生成するものをそのまま受け入れます。
-
-### `YORISHIRO_EMBEDDING_PROVIDER=openai`の場合(例: Ollama, LM Studio, OpenAI)
-
-| 変数 | 内容 |
+| 変数 | 説明 |
 |---|---|
-| `YORISHIRO_EMBEDDING_BASE_URL` | `/v1/embeddings`互換エンドポイントのベースURL(必須) |
-| `YORISHIRO_EMBEDDING_MODEL` | モデル名(必須) |
-| `YORISHIRO_EMBEDDING_API_KEY` | エンドポイントが要求する場合のAPIキー |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストボディに`dimensions`パラメータを含めるか。未設定時は既定で`true`。一度設定すると、小文字の文字列`true`と完全一致する場合のみ有効のままとなり、`false`・`False`・`FALSE`・`0`等それ以外の値はすべて無効(`false`)として扱われる |
+| `YORISHIRO_ONNX_MODEL_PATH` | `.onnx`モデルファイルへのパス(既定: `models/model.onnx`)。リポジトリに同梱されず、自動取得もされない。このファイルまたは`YORISHIRO_ONNX_TOKENIZER_PATH`のいずれかが無いと、両方のパスを名指ししたメッセージとともに起動が失敗する |
+| `YORISHIRO_ONNX_TOKENIZER_PATH` | トークナイザの`tokenizer.json`へのパス(既定: `models/tokenizer.json`)。ファイル欠如時の挙動は`YORISHIRO_ONNX_MODEL_PATH`と同じ |
 
-具体的な取得例(`https://huggingface.co/Xenova/multilingual-e5-large`の`onnx/model_quantized.onnx`と`tokenizer.json`)は[docs/ja/embedding-providers.md](embedding-providers.md)を参照してください。
+このプロバイダを組み込んでビルドすると`ort`クレートが入る。
+`ort`の既定機能`download-binaries`はビルド時に`cdn.pyke.io`からonnxruntimeバイナリを取得する。
+ビルド環境自体を外部から遮断する必要がある場合は、`ORT_LIB_LOCATION`で事前に用意したonnxruntimeを指すこと。
+
+## 検索トークンクォータ
+
+| 変数 | 説明 |
+|---|---|
+| `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | ワークスペースが1分間に検索へ使えるトークン数(既定: `100000`)。埋め込みの前、クエリ1回につき1度課金される。`GET /api/search`経由でもMCPツールの`search_entities`経由でも同じで、プロトコルごとではなくワークスペースごとに1つの予算を共有する。予算を超えたクエリは実行されず、HTTP `422`(`validation_failed`)が返る。既定値は通常利用では到達しないほど高く設定されており、通常のトラフィックを制限するためではなく、暴走したエージェントを制限するために存在する |
+
+検索がリクエスト数ではなくトークン数で計測されているのは、それが埋め込みモデルにとっての実際のコストだからである。
+エンティティの書き込みはリクエスト数のままで、大きな本文を数えること自体にコストがかかるためである。
+クエリのトークン数は`EmbeddingProvider::count_tokens`から得られる。
+ローカルONNXプロバイダはこれをトークナイザによる正確なカウントで上書きし、それ以外のプロバイダはすべてバイト長からの概算(`text.len() / 4`、切り上げ)を既定値として使う。
+この概算は英語向けに調整されたもので、英語ではおおよそ4バイトで1トークンになる。
+日本語のテキストはUTF-8でおおよそ1文字3バイトで、トークナイザにかけるとおおよそ1文字1トークンになるため、同じ日本語クエリに対してこの概算は実際のトークナイザが返す数の半分以下しか返さない。
+つまりローカルONNXプロバイダ以外の構成では、日本語の検索クエリは実際のコストより大幅に低く見積もられて予算から差し引かれる。
+`YORISHIRO_SEARCH_TOKENS_PER_MINUTE`は、同じ予算値でも英語より日本語の検索トラフィックをかなり多く通してから`422`を返し始めることになる。
+デプロイの検索トラフィックが日本語中心で、かつローカルONNXプロバイダを使っていない場合は、この偏りを踏まえて予算値を決めること。
+
+## キューの調整(`config/production.yaml`)
+
+`config/production.yaml`の`queue:`ブロックは、`development.yaml`が固定値のまま持つ2つの設定を、環境変数として受け付ける。
+どちらもLoco自身の`queue`設定スキーマにある項目で、このコードベースが追加したものではない。
+
+| 変数 | 説明 |
+|---|---|
+| `YORISHIRO_QUEUE_WORKERS` | ジョブを並列に取り出すワーカー数(既定: `2`)。Postgresは`FOR UPDATE SKIP LOCKED`で行を確保するため、この値を上げると、このデプロイのPostgresバックエンドのキューでは実際に並列度が上がる |
+| `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | ジョブが`processing`のまま留まってよい分数で、これを超えるとreaperがそのジョブを`Queued`へ戻す(既定: `30`)。Locoのreaperはopt-inで既定では無効。無効のままだと、実行中に落ちたワーカー(クラッシュ、強制終了)が持っていたジョブは`processing`のまま永久に残る。ほかの何もそのジョブを`processing`から動かさず、`fail_job`は`perform`自体がエラーを返したときにしか走らないためである。健全なジョブが正当にかかりうる最長時間より大きい値を設定すること。そうしないと、reaperはまだ本当に進行中の作業を戻してしまう |
+
+`development.yaml`はこれらの環境変数を読む代わりに、同じreaperを固定値(`num_workers: 2`、`age_minutes: 10`)で有効化している。
+ローカルの開発環境にはデプロイごとに調整する理由が無いためである。
+`config/test.yaml`には`queue:`ブロック自体が無く(理由は`.claude/rules/testing.md`を参照)、どちらの設定もそこには当てはまらない。

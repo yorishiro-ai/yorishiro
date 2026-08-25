@@ -1,7 +1,9 @@
+//! Subscription tiers for the hosted offering.
+//!
+//! Self-hosted deployments never assign a plan (`identity_tenants.plan` stays absent, since base never writes `identity_tenant_billing`); this type is only ever produced by this crate's Stripe integration.
+
 use serde::{Deserialize, Serialize};
 
-/// Subscription tiers for the hosted offering.
-/// Self-hosted deployments never assign a plan (`identity.tenants.plan` stays `NULL`); this type is only ever produced by this crate's Stripe integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Plan {
@@ -11,7 +13,8 @@ pub enum Plan {
 }
 
 /// Caps applied when a tenant is on a given plan.
-/// `max_workspaces` is written straight onto `identity.tenants` (see `yorishiro_core::models::tenancy::set_tenant_plan`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active: existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
+/// `max_workspaces` is written straight onto `identity_tenants` (see `yorishiro_core::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
+/// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
 #[derive(Debug, Clone, Copy)]
 pub struct PlanCaps {
     pub max_workspaces: Option<i32>,
@@ -73,7 +76,3 @@ impl StripePriceMapping {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/services/plan.rs"]
-mod tests;

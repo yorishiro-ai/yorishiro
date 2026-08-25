@@ -1,45 +1,38 @@
-.PHONY: build init up down restart logs shell test fmt fmt-check clippy admin clean
+# Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
 
-# Build the app (production) and dev (toolchain) images.
-build:
-	docker compose build
+# Host-mapped port for a locally run dev Postgres container. CI's own DATABASE_URL is set
+# independently in .github/workflows/ci.yml against its Postgres service container, which listens
+# on the standard 5432 inside the job's network namespace rather than this host-mapped 25433 - the
+# two values are deliberately different, not a drift to unify.
+DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:25433/yorishiro
 
-# First-time setup: build images, then start db + app. Migrations apply automatically on
-# app startup.
-init: build up
+ENVIRONMENT ?= development
 
-# Start db + app in the background.
-up:
-	docker compose up -d db app
+.PHONY: check clippy fmt fmt-check test build task doctor
 
-down:
-	docker compose down
-
-restart: down up
-
-logs:
-	docker compose logs -f app
-
-# Drop into the dev toolchain container for ad-hoc work.
-shell:
-	docker compose run --rm dev bash
-
-test:
-	docker compose run --rm dev cargo test --workspace
-
-fmt:
-	docker compose run --rm dev cargo fmt
-
-fmt-check:
-	docker compose run --rm dev cargo fmt --check
+check:
+	cargo check --workspace
 
 clippy:
-	docker compose run --rm dev cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --tests -- -D warnings
 
-# Usage: make admin ARGS="create-tenant demo"
-admin:
-	docker compose exec app yorishiro-server admin $(ARGS)
+fmt:
+	cargo fmt --all
 
-# Stops containers and deletes the pgdata volume too (fresh database on next `make init`).
-clean:
-	docker compose down -v
+fmt-check:
+	cargo fmt --all --check
+
+# make test [ARGS="-p yorishiro-core --test mod auth"]
+test:
+	DATABASE_URL=$(DATABASE_URL) cargo test --workspace $(ARGS)
+
+build:
+	cargo build -p yorishiro-core --bin yorishiro_core-cli
+
+# make task NAME=seed_official_templates [ARGS="key:value"]
+task: build
+	DATABASE_URL=$(DATABASE_URL) ./target/debug/yorishiro_core-cli task $(NAME) $(ARGS)
+
+# make doctor [ENVIRONMENT=production]
+doctor: build
+	DATABASE_URL=$(DATABASE_URL) ./target/debug/yorishiro_core-cli doctor -e $(ENVIRONMENT)

@@ -2,130 +2,75 @@
 
 **English** | [日本語](ja/configuration.md)
 
-Configuration lives in a single YAML file.
-[`config.example.yml`](../config.example.yml) lists every setting with its default and what it does; copy it to `config.yml` and edit.
-A package install puts it at `/etc/yorishiro/config.yml`, which the unit already points at; otherwise the server reads `config.yml` from its working directory, or wherever `YORISHIRO_CONFIG_PATH` names.
-
-A missing file is not an error, and neither is a missing key.
-An unrecognised key is: the server refuses to start rather than run with a setting you believe is in effect.
-
-Every setting also has an environment variable, named in `config.example.yml` beside it, and an environment variable takes precedence over the file.
-That is what makes container deployments and one-off overrides work without editing anything: set them via `environment:` in docker compose, `docker compose exec -e`, `Environment=` in systemd, or the shell.
-Nothing requires them.
-
-Every variable is named `YORISHIRO_*`.
-
-## config.yml
-
-Every setting below can also go in a `config.yml` file instead.
-See [`config.example.yml`](../config.example.yml) for the full key list (nested under `embedding:`, `logging:`, and `auth_rate_limit:` for those groups).
-By default the server looks for `config.yml` in its working directory, then falls back to `/etc/yorishiro/config.yml`; set `YORISHIRO_CONFIG_PATH` to point elsewhere.
-The fallback is what makes `yorishiro-server admin ...` work from a shell on a packaged host: the unit exports the path, a shell does not, and without it the CLI reports the database as unconfigured while the service beside it runs normally.
-An explicit `YORISHIRO_CONFIG_PATH` never falls back: a named file that is absent means nothing is read, rather than a different deployment's settings being picked up silently.
-
-A missing file, or a missing key within it, is not an error: that setting just falls back to its usual default.
-**A set environment variable always wins over the equivalent `config.yml` key.**
-An *unknown* key (e.g. a typo) is rejected: the server fails to start rather than silently ignoring it.
-
-This makes `config.yml` convenient as the base configuration for a deployment, with environment variables reserved for one-off overrides (e.g. a Docker `-e` flag for a single run) rather than the only way to configure anything.
-
-## Core
-
-| Variable | Description |
-|---|---|
-| `YORISHIRO_DATABASE_DRIVER` | Which engine `DATABASE_URL` below connects to: `postgres` (default) or `sqlite`. An unrecognised value refuses to start rather than falling back to `postgres` silently. `sqlite` is single-tenant only: `YORISHIRO_MAX_TENANTS` must stay unset or `1`, and an existing `.db` file already holding more than one tenant refuses to start. It currently covers first-run setup and authentication only; the rest of the REST API, MCP, and the admin CLI fail loudly rather than run against it, and PostgreSQL remains the engine to deploy on beyond that. The enterprise binary (`yorishiro-server`) accepts `postgres` only; see [the enterprise configuration reference](../ee/docs/configuration.md) for what is enterprise-specific |
-| `DATABASE_URL` | Connection string (required): a PostgreSQL URL when the driver is `postgres`, or a `sqlite://` path when it is `sqlite` |
-| `YORISHIRO_CONFIG_PATH` | Path to the `config.yml` file described below. Unset, the working directory's `config.yml` is tried first and `/etc/yorishiro/config.yml` second |
-| `YORISHIRO_BIND` | Listen address (default: `0.0.0.0:8080`) |
-| `YORISHIRO_CORS_ORIGINS` | Comma-separated list of allowed origins for browser access (e.g. so a browser-based dashboard on a different origin can call `/auth/login`/`/api/members`). Cross-origin reads are disabled if unset. In debug builds only, leaving this unset also auto-allows any `http://localhost:*`/`http://127.0.0.1:*` origin (for browser-based dev tools like the MCP Inspector): release builds never do this |
-| `YORISHIRO_MAX_TENANTS` | Deployment-wide cap on tenants `admin create-tenant` may create. Defaults to `1` (single-tenant). Set `0` for unlimited, or a higher number for that many. `POST /auth/signup` never creates a tenant (it just redeems an invite), so it's unaffected. Also gates the first-run setup wizard (see [setup.md](setup.md#first-run-setup)), enabled only when the cap isn't `0` |
-| `YORISHIRO_WEB_DIR` | The web UI is compiled into the binary from `ee/web/dist` and served at `/` by default. Set this to serve it from a real directory on disk instead, read fresh on every request, to iterate on the UI without rebuilding |
-| `YORISHIRO_AUTH_RATE_LIMIT_MAX` / `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` | Per-client-IP rate limit on `/auth/signup`, `/auth/login`, and `/setup`: the endpoints reachable without a bearer token, and therefore the only ones an unauthenticated caller can brute-force. Defaults: 10 requests per 60 seconds |
-| `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | Tokens a workspace may spend on search per minute (default: `100000`), charged the same whether the query arrives at `GET /api/search` or through the `search_entities` MCP tool: one budget per workspace, not one per protocol. Search is metered in tokens rather than requests because that is what it costs the embedding model; writes stay on request counts, since counting a large body costs more than the write. A query over budget still runs once and leaves the window spent, rather than being permanently impossible |
-| `YORISHIRO_SNAPSHOT_RETENTION_DAYS` | How many days a batch migration stays undoable (default: `30`; `0` or less keeps every before-image forever). A migration writes one image per entity it touches, and only an undo takes them away, so an unbounded workspace that migrates repeatedly ends up holding more images than entities. The sweep runs at the start of the next migration in that workspace rather than on a timer. Undoing a job past the window answers `404`, the same as a job that never ran. A value that is not a 32-bit integer falls back to the default rather than being clamped: six million years of retention is a typo, and honouring the nearest legal value would hide it |
-| `RUST_LOG` | Log level (e.g. `info`) |
-
-## Database load guard
-
-Drops the deployment to read-only while the database is under sustained load, and restores it when the load falls away.
-Off unless a threshold is set: dropping a deployment to read-only uninvited is a large thing to do on a default, and the right number depends on `max_connections`, which the server does not choose.
-
-PostgreSQL only: it queries `pg_stat_activity`, which has no Sqlite equivalent, and the community binary never starts it on the `sqlite` engine even when a threshold is set.
-
-| Variable | Description |
-|---|---|
-| `YORISHIRO_DB_LOAD_THRESHOLD` | Active connections above which the deployment goes read-only. Unset or `0` disables the guard entirely |
-| `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | How long the threshold must be exceeded before switching (default: `30`). Stops a momentary spike from tripping it |
-| `YORISHIRO_DB_LOAD_POLL_SECS` | How often the connection count is sampled (default: `5`). `0` is not an off switch and falls back to the default: disabling the guard is `YORISHIRO_DB_LOAD_THRESHOLD=0` |
-
-## Request correlation
-
-Every response carries an `x-request-id` header: a UUID the server generates if the request didn't already have one, otherwise the caller's own value is echoed back unchanged.
-The same value tags the tracing span for that request, so any `warn`/`error` line logged while handling it (an authentication rejection, a rate-limit hit, an internal error) carries the same `request_id` field as the access log line for that request.
-Useful for tying a specific failed request to its server-side log lines when following up on an incident report.
-
-Rejected requests (bad/missing API key, insufficient scope, rate limit exceeded) are logged at `warn` with the caller's IP and the request path, but never the presented credential.
-
-## Logging
-
-Every log line, including the HTTP access log (method, path, status, latency), is a JSON object.
-`YORISHIRO_LOG_TARGET` selects where those lines go:
-
-| Variable | Description |
-|---|---|
-| `YORISHIRO_LOG_TARGET` | `stdout` (default, for a container runtime's log driver), `single` (one file, never rotated), `daily` (one file per day), or `syslog` (Unix only: rejected at startup on other platforms) |
-
-### When `YORISHIRO_LOG_TARGET=single` or `daily`
-
-| Variable | Description |
-|---|---|
-| `YORISHIRO_LOG_DIR` | Directory the log file is written under (default: `.`). The file is named `yorishiro.log`, with the date appended for `daily` (e.g. `yorishiro.log.2026-07-13`) |
-
-### When `YORISHIRO_LOG_TARGET=syslog`
-
-| Variable | Description |
-|---|---|
-| `YORISHIRO_SYSLOG_SOCKET` | Unix domain socket to send RFC 3164-framed messages to (default: `/dev/log`). Linux/Unix only |
+This is not a full settings reference: it covers the embedding provider, the per-workspace search token quota, and `config/production.yaml`'s queue tuning, the areas the Loco rebuild's most recent slices touched.
+Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings on this branch.
 
 ## Embedding provider
 
-| Variable | Description |
-|---|---|
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local` (default) or `openai` |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | Dimensionality of the embedding vectors (default: `1024`, the width of the default model). Must match the model's output dimension. A workspace is stamped with this value when it is created, and a later write produced by a different model is refused: see below |
-
-### When `YORISHIRO_EMBEDDING_PROVIDER=local` (ONNX export, the default)
+`build_embedding_provider` (`src/services/embedding/mod.rs`) selects and configures the provider used for both writing embeddings (`sync_embedding`) and search (`GET /api/search`, the `search_entities` MCP tool).
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_ONNX_MODEL_PATH` | Path to the ONNX model (default: `models/model.onnx`) |
-| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer (default: `models/tokenizer.json`) |
-| `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | Maximum sequence length (default: `512`) |
-| `YORISHIRO_ONNX_POOLING` | How token embeddings are reduced to one vector: `mean` (default) or `last_token`. This is a property of the model, not a preference: sentence-transformers exports (bge-small, multilingual-e5, all-mpnet) want `mean`, the Qwen3-Embedding family wants `last_token`. Reading a model with the wrong one raises no error; the search results just get worse, so an unrecognised value fails startup rather than falling back |
-| `YORISHIRO_ONNX_QUERY_INSTRUCTION` | Instruction prefixed to search queries only. Qwen3-Embedding expects `Instruct: {task}\nQuery:{text}`; stored documents never get it. Unset or empty disables it (the default). Leave unset for symmetric models |
+| `YORISHIRO_EMBEDDING_PROVIDER` | `local` selects the local ONNX provider (see below). Anything else, or unset, selects the OpenAI-compatible provider |
+| `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI-compatible provider only. Base URL of an OpenAI-compatible embeddings endpoint (LM Studio, Ollama, vLLM, or real OpenAI), e.g. `http://localhost:11434`. Required together with `YORISHIRO_EMBEDDING_MODEL`: if either is unset, boot proceeds with no embedding backend configured rather than failing, and every embed call fails at request time with `ProviderUnreachable` instead |
+| `YORISHIRO_EMBEDDING_MODEL` | OpenAI-compatible provider only. Model name sent in the `model` field of the embeddings request. Also stamped onto a workspace at creation time as the model it was embedded with; unset, a workspace is stamped `unconfigured` |
+| `YORISHIRO_EMBEDDING_API_KEY` | OpenAI-compatible provider only. Bearer token sent to `YORISHIRO_EMBEDDING_BASE_URL`. Empty by default, which is correct for a local server (LM Studio, Ollama) that doesn't check one |
+| `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector width (default: `768`). Every vector in a deployment must share this width; the local ONNX provider verifies it at startup with a probe inference, the OpenAI-compatible provider verifies it per response |
+| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | OpenAI-compatible provider only. `true` includes a `dimensions` field in the embeddings request. Default `false`, since some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) reject a `dimensions` field they don't recognise |
 
-### Changing the embedding model
+### A workspace's own embedding provider (paid edition)
 
-A workspace records the model and dimension count it was created under.
-A write whose vector is a different width is refused with `422`, naming both numbers.
+`PUT /hosted/workspace/embedding-key` points one workspace's own embedding work at a different provider than the deployment-wide one above, instead of every workspace sharing `YORISHIRO_EMBEDDING_BASE_URL`.
+Not part of the base edition: this is the same split as `PUT /hosted/workspace/llm-key`, which assigns LLM inference credentials per workspace already.
+Which workspace uses which compute backend is a paid-edition decision.
 
-Without that check the write would succeed (the column is dimensionless), and the workspace's next search would fail with `different vector dimensions 384 and 1024`, naming neither the entity nor the write that caused it.
+| Field | Description |
+|---|---|
+| `base_url` | An OpenAI-compatible embeddings endpoint, e.g. `https://api.openai.com/v1` |
+| `model` | Model name sent in the embeddings request |
+| `api_key` | Bearer token. Stored, and never returned by `GET`: only `base_url`, `model`, `dimensions` and whether one is configured come back |
+| `dimensions` | The vector width this provider produces |
+| `send_dimensions_param` | `true` includes a `dimensions` field in the embeddings request; default `false`, matching `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` above |
 
-To move a workspace to another model, point the deployment at it and re-embed:
+A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so setting nothing is the same as before this endpoint existed.
+`DELETE /hosted/workspace/embedding-key` returns a workspace to that deployment default.
 
-```console
-$ yorishiro-server admin resync-embeddings --workspace <id>
-```
+`PUT` refuses a `dimensions` value that does not match the workspace's own stamped vector width (the `embedding_dimensions` recorded when the workspace was created) with `422`, before storing anything: assigning a provider whose output width does not match the vectors already on disk would otherwise only be discovered on the next entity write, when `sync_embedding`'s own write-time check (`services/embedding/sync.rs`) rejects it.
+Both checks exist and neither replaces the other: the write-time check still runs regardless of how a workspace ended up with a mismatched provider, but this one surfaces the same mistake immediately, at the point an operator makes it.
 
-A workspace with no stamp accepts whatever the deployment produces.
+There is no caching: an assignment made through this endpoint takes effect on the very next request that resolves an embedding provider for that workspace (search, embedding sync), not after some delay or a restart.
 
-### When `YORISHIRO_EMBEDDING_PROVIDER=openai` (e.g. Ollama, LM Studio, OpenAI)
+### Local ONNX provider (`YORISHIRO_EMBEDDING_PROVIDER=local`)
+
+Runs a BERT-family ONNX model in-process, with no external embedding service.
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_EMBEDDING_BASE_URL` | Base URL of the `/v1/embeddings`-compatible endpoint (required) |
-| `YORISHIRO_EMBEDDING_MODEL` | Model name (required) |
-| `YORISHIRO_EMBEDDING_API_KEY` | API key, if required by the endpoint |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | Whether to include a `dimensions` parameter in the request body. Defaults to `true` when unset. Once set, only the exact lowercase string `true` keeps it enabled: every other value, including `false`, `False`, `FALSE`, and `0`, disables it |
+| `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file (default: `models/model.onnx`). Not bundled with the repository or fetched automatically; boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if either file is missing |
+| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json` (default: `models/tokenizer.json`). Same missing-file behaviour as `YORISHIRO_ONNX_MODEL_PATH` |
 
-See [docs/embedding-providers.md](embedding-providers.md) for a worked example, e.g. `https://huggingface.co/Xenova/multilingual-e5-large` (`onnx/model_quantized.onnx` and `tokenizer.json`).
+Building with this provider compiled in pulls in the `ort` crate, whose default `download-binaries` feature fetches an onnxruntime binary from `cdn.pyke.io` at build time; point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime if the build environment must be closed off.
+
+## Search token quota
+
+| Variable | Description |
+|---|---|
+| `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | Tokens a workspace may spend on search per minute (default: `100000`). Charged once per query, before embedding, whether the request arrives at `GET /api/search` or through the `search_entities` MCP tool: one shared budget per workspace, not one per protocol. A query over budget gets HTTP `422` (`validation_failed`) instead of running. The default is high enough that ordinary use never reaches it; it exists to bound a runaway agent, not to ration normal traffic |
+
+Search is metered in tokens rather than requests because that's what a query costs the embedding model; entity writes stay on request counts, since counting a large body is itself expensive.
+The token count for a query comes from `EmbeddingProvider::count_tokens`, which the local ONNX provider overrides to the tokenizer's exact count and every other provider defaults to a byte-length estimate (`text.len() / 4`, rounded up).
+That estimate is calibrated for English, where roughly 4 bytes make one token; Japanese text is roughly 3 bytes per character and tokenizes at roughly one token per character, so the estimate returns under half the token count a real tokenizer would report for the same Japanese query.
+In other words, outside the local ONNX provider, a Japanese search query is charged against the budget at well under its real cost: `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` admits noticeably more Japanese-language search traffic per minute than English before this quota starts returning `422`.
+Size the budget with that skew in mind if the deployment's search traffic is mostly Japanese and not running the local ONNX provider.
+
+## Queue tuning (`config/production.yaml`)
+
+`config/production.yaml`'s `queue:` block accepts two settings beyond what `development.yaml` hardcodes, both of Loco's own `queue` config schema, not something this codebase adds.
+
+| Variable | Description |
+|---|---|
+| `YORISHIRO_QUEUE_WORKERS` | How many workers dequeue jobs in parallel (default: `2`). Postgres claims a row with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism on this deployment's Postgres-backed queue |
+| `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | Minutes a job may sit in `processing` before the reaper requeues it as `Queued` (default: `30`). Loco's own reaper is opt-in and off by default: without it, a job a worker died on while it was running (a crash, a forced kill) stays `processing` forever, since nothing else moves a job out of that state, `fail_job` only runs when `perform` itself returns an error. Set this above the longest a healthy job can legitimately take, or the reaper requeues work that is still genuinely in progress |
+
+`development.yaml` enables the same reaper with fixed values (`num_workers: 2`, `age_minutes: 10`) rather than reading these variables, since a local development environment has no reason to tune them per deployment.
+`config/test.yaml` has no `queue:` block at all (`docs`/`.claude/rules/testing.md` covers why), so neither setting applies there.

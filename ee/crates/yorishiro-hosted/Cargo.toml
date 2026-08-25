@@ -1,63 +1,51 @@
 [package]
 name = "yorishiro-hosted"
-version.workspace = true
-edition.workspace = true
-# Not `license.workspace = true`: the workspace is BUSL-1.1 and this crate is not. Everything
-# under `ee/` is licensed by `ee/LICENSE`, which adds a Competing Use restriction.
+version = "0.1.0"
+edition = "2024"
+# Not `license.workspace = true`: this manifest has no workspace-level license field to
+# inherit from (the root package's Cargo.toml carries no `[workspace.package]`), and even if
+# it did, `ee/` is not BUSL-1.1. `ee/LICENSE` adds a Competing Use restriction the rest of the
+# repository doesn't carry.
 license-file = "../../LICENSE"
-autotests = false
 publish = false
 
-# Both editions install their binary as `yorishiro-server`, and both ship the same
-# `yorishiro.service`, and the packages conflict, so a machine has exactly one of each. The
-# edition is carried by the package name and the file on the release page; everything on disk
-# is edition-neutral, which is what makes switching editions a file swap rather than a
-# migration of unit names, ExecStart paths and runbooks.
+# Not `yorishiro-hosted-server` or similar: the base binary is `yorishiro_core-cli` (see the root
+# Cargo.toml), a distinct name from this crate's own, so this one needs no edition qualifier of
+# its own to avoid colliding with it.
 [[bin]]
 name = "yorishiro-server"
 path = "src/bin/yorishiro_server.rs"
 
 [dependencies]
-async-trait.workspace = true
-yorishiro-core = { path = "../../../crates/yorishiro-core" }
-yorishiro-server = { path = "../../../crates/yorishiro-server" }
-anyhow.workspace = true
-axum.workspace = true
-axum-extra.workspace = true
-base64.workspace = true
-chrono.workspace = true
-clap.workspace = true
-cookie.workspace = true
-hmac.workspace = true
-jsonwebtoken.workspace = true
-mime_guess.workspace = true
-rand.workspace = true
-rmcp.workspace = true
-rust-embed.workspace = true
-reqwest.workspace = true
-sea-query.workspace = true
-sea-query-binder.workspace = true
-serde.workspace = true
-serde_yaml_ng.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-sqlx.workspace = true
+yorishiro-core = { path = "../../.." }
+# Relative, not path = "migration" like the root manifest's own dependency on the same crate:
+# this is not eligible for the workspace.dependencies table the way version-and-features-only
+# dependencies are, since a relative path is resolved from this manifest's own directory, and the
+# root's path = "migration" would not reach the same crate from here.
+migration = { path = "../../../migration" }
+loco-rs = { workspace = true }
 tokio.workspace = true
+axum.workspace = true
+async-trait.workspace = true
+jsonwebtoken = { version = "9" }
+serde.workspace = true
+serde_yaml_ng = { version = "0.10" }
+chrono.workspace = true
+anyhow.workspace = true
 tracing.workspace = true
-url.workspace = true
-utoipa.workspace = true
+sea-orm.workspace = true
 uuid.workspace = true
+sqlx.workspace = true
+hmac = { version = "0.12" }
+sha2.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+base64 = { version = "0.22" }
+rand.workspace = true
+url = { version = "2.5" }
 
 [dev-dependencies]
-tempfile.workspace = true
-thirtyfour.workspace = true
-tower.workspace = true
-tracing-test = { workspace = true, features = ["no-env-filter"] }
-
-# The browser suite, separate from the crate's own `tests/` tree because it needs things the
-# unit tests do not: a running licensed server, a built SPA, and a chromedriver to drive.
-# `autotests = false` means nothing here is picked up implicitly, so it is named explicitly.
-# Every test in it is `#[ignore]`, so `cargo test` stays the same for anyone who has none of that.
-[[test]]
-name = "e2e"
-path = "tests/e2e/main.rs"
+tempfile = { version = "3" }
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test.workspace = true
+axum-test = { version = "17.3" }

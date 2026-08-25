@@ -1,11 +1,8 @@
-[profile.dev]
-debug = "line-tables-only"
-split-debuginfo = "unpacked"
-codegen-units = 16
+[alias]
+loco = "run --"
+loco-tool = "run --"
 
-[profile.dev.build-override]
-debug = false
-
-[profile.test]
-debug = "line-tables-only"
-split-debuginfo = "unpacked"
+# https://github.com/rust-lang/rust/issues/141626
+# (can be removed once link.exe is fixed)
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
