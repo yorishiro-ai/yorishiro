@@ -42,23 +42,17 @@
 `list_marketplace`は`identity_templates`自体の列に加えて3つの相関サブクエリを選択しており、これはどのエンティティ射影からも作れない。
 `insert_next_version`はテンプレートの次のバージョン番号を計算する`INSERT ... SELECT`を1つの文として実行しており、これによってアドバイザリロックが2つの同時公開を同じバージョン番号へ競合させないという保証が成り立っている。
 
-`models/`の外にある生SQLのうち、以下は正しいものとして残す。
+`models/`の外にある生SQLのうち、以下は正しいものとして残す。ただし対象はそのファイル全体ではなく、実際にそれを必要とする個々のクエリだけである。同じファイルの中にエンティティAPIで書くべき別のクエリがあってもよく、実際にある。
 
-- `src/db.rs`はテーブルアクセスではなくコネクション管理であり、その`SET ROLE`/`RESET`はプールのセッションライフサイクルそのものである。
-- `src/services/auth/authenticate.rs`は、リクエストの識別を決める一部としてキーを読む。
-  これはレコードではなく判断である。
-  `last_used_at`の書き込みも同じ判断の一部で、リクエストのトランザクションではなく専用の短命なコネクションで意図的に実行している。
-  リクエストのトランザクションに載せると、読み取り専用のリクエストや拒否されたリクエストのたびにロールバックされてしまうためである。
+- `src/db.rs`はテーブルアクセスではなくコネクション管理であり、その`SET ROLE`/`RESET`/`set_config`/アドバイザリロックはSeaORMに対応物の無いPostgresのセッションプリミティブである。
+- `src/services/auth/authenticate.rs`の`authenticate_api_key($1)`呼び出しは、RLSが意図的に迂回を許す唯一の口であるSECURITY DEFINER関数で、通常のコネクションのセッション状態では隠れてしまう行を読む。
+  `touch_last_used`の`last_used_at`書き込みも同じ種類のコネクション(リクエストのRLSセッション変数がスコープされた`TenantDb::acquire_for_workspace`が返す、汎用のコネクションではないもの)で動く必要があるため、同じく生SQLのままにしている。
+  他のコネクションでエンティティAPI経由の更新を試みると、読み取り専用リクエストのトランザクションと一緒にロールバックされるか、`identity_api_keys`自体のRLSポリシーの下で黙って0行を更新することになる。
+  この形に当てはまらない`authenticate.rs`の他の処理はエンティティAPI上にある(`authenticate_sqlite`/`touch_last_used_sqlite`を参照。これらはRLSを保持する必要が無いのでSQLite上では全面的にエンティティAPIを使っている)。
 - `src/services/embedding/sync.rs`と`src/tasks/resync_embeddings.rs`は`embedding`カラムを書き・走査する。
   このカラムはpgvector型で、エンティティAPIでの表現手段が無い。
-- `ee/crates/yorishiro-hosted/src/services/official_templates.rs`はシーダーであり、`migration/src/`を`models/`の外に置くのと同じ対応関係でモデルの外に位置する。
-- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`は認証の例外の有償版側の対応物である。
-  `TenantScopedAuthenticator::authenticate`はこのクレートの`Authenticator`実装であり、`create_tenant_api_key`は`create_api_key`にテナント存在チェックとロール上限チェックを畳み込んだもので、どちらもレコードではなく判断である。
-
-`ee/crates/yorishiro-hosted/src/controllers/inference.rs`には`models/`に置くべきクエリが残っており、まだ移していない。
-このファイルを別の用件で編集しているなら、クエリを移すのは歓迎する。
-そうでないなら、そのままにしておく。
-ファイルを触る理由が他に無い移動は、挙動の変更と突き合わせてレビューできない差分になる。
+- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`の`TenantScopedAuthenticator::authenticate`は、同じSECURITY DEFINER関数の2引数オーバーロードである`authenticate_api_key($1, $2)`を呼んでおり、上と同じ理由で残している。
+  `create_tenant_api_key`自身のテナント存在チェック・ロール取得・INSERTにはその理由が無く、エンティティAPI上にある。
 
 ### MCPはコントローラではなくサービス
 

@@ -6,13 +6,16 @@
 //! Confirming reuses `content_entity_snapshots`: the same `job_id` groups the before-images, so `content_entities::undo_job` reverses a confirmation with no machinery of its own.
 
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
-use yorishiro_core::models::_entities::content_entity_snapshots;
+use yorishiro_core::models::_entities::content_entities as content_entities_entity;
 use yorishiro_core::models::_entities::content_fill_proposals::{ActiveModel, Column, Entity};
+use yorishiro_core::models::_entities::{content_entity_snapshots, content_schemas};
 use yorishiro_core::models::content_entities;
 
 /// One field's proposed value, as a caller reviews it.
@@ -32,6 +35,53 @@ pub struct ConfirmReport {
     /// Proposals whose entity no longer exists, or whose value the schema rejects.
     /// Skipping is not an error: a proposal is a guess, and one guess failing validation should not stop the rest of a reviewed batch from landing.
     pub skipped: i64,
+}
+
+/// One entity `infer_fill` should consider: still on some earlier version of `name`, not yet on `active_schema_id`.
+pub struct OutdatedEntity {
+    pub id: Uuid,
+    pub entity_type: String,
+    pub data: Value,
+}
+
+/// Every entity in `workspace_id` still on a version of the schema named `name` other than `active_schema_id`.
+/// The set `infer_fill` walks: an entity already on the active version has nothing the schema says is missing.
+///
+/// `content_schemas` rows sharing `(workspace_id, name)` are versions of the same logical schema, so this first
+/// collects every version's id, then filters `content_entities` by membership in that set: an entity-API
+/// equivalent of the join, since neither table needs a column the other doesn't already expose.
+pub async fn entities_on_outdated_schema(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    name: &str,
+    active_schema_id: Uuid,
+) -> Result<Vec<OutdatedEntity>, YorishiroError> {
+    let schema_ids: Vec<Uuid> = content_schemas::Entity::find()
+        .filter(content_schemas::Column::WorkspaceId.eq(workspace_id))
+        .filter(content_schemas::Column::Name.eq(name))
+        .select_only()
+        .column(content_schemas::Column::Id)
+        .into_tuple()
+        .all(conn)
+        .await
+        .internal()?;
+
+    let rows = content_entities_entity::Entity::find()
+        .filter(content_entities_entity::Column::WorkspaceId.eq(workspace_id))
+        .filter(content_entities_entity::Column::SchemaId.is_in(schema_ids))
+        .filter(content_entities_entity::Column::SchemaId.ne(active_schema_id))
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| OutdatedEntity {
+            id: row.id,
+            entity_type: row.entity_type,
+            data: row.data,
+        })
+        .collect())
 }
 
 /// Records what a model proposed.

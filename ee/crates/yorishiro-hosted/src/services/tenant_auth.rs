@@ -7,11 +7,12 @@
 //! Installing this replaces base's own `default_authenticator()` in `shared_store` (`Arc<dyn Authenticator>` is keyed by `TypeId`, so the later insert wins), which means it is honoured on every authenticated path in the process, REST and MCP alike, not only the routes this crate adds.
 
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sea_orm::{ActiveValue, EntityTrait, PaginatorTrait};
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::db::DbHandle;
 use yorishiro_core::error::ResultExt;
+use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants};
 use yorishiro_core::services::auth::{ApiKeyScope, AuthContext, Authenticator};
 
 /// The header naming which workspace a tenant-scoped API key should act on.
@@ -125,9 +126,9 @@ pub struct CreatedTenantApiKey {
 /// Base's own `create_api_key` always records a workspace, so a key with none cannot be made through it: this writes the row directly.
 /// The role cap is the same one that command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
 ///
-/// **`pool` must be the identity pool (`DbHandle::identity`), not the tenant pool.** This reads `identity_tenants` and `identity_tenant_memberships`, and neither is granted to `yorishiro_app` (the tenant pool's role): calling this with `DbHandle::tenant.pool()` fails with "permission denied for table identity_tenants".
+/// **`conn` must be the identity pool (`DbHandle::identity`, wrapped as a `sea_orm::DatabaseConnection`), not the tenant pool.** This reads `identity_tenants` and `identity_tenant_memberships`, and neither is granted to `yorishiro_app` (the tenant pool's role): calling this against the tenant pool fails with "permission denied for table identity_tenants".
 pub async fn create_tenant_api_key(
-    pool: &PgPool,
+    conn: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     scope: &str,
     user_id: Option<Uuid>,
@@ -139,29 +140,20 @@ pub async fn create_tenant_api_key(
             hint: "use one of: read, write, schema".into(),
         })?;
 
-    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM identity_tenants WHERE id = $1")
-        .bind(tenant_id)
-        .fetch_optional(pool)
+    let exists = identity_tenants::Entity::find_by_id(tenant_id)
+        .count(conn)
         .await
-        .internal()?;
-    if exists.is_none() {
+        .internal()?
+        > 0;
+    if !exists {
         return Err(YorishiroError::not_found(format!(
             "tenant '{tenant_id}' does not exist"
         )));
     }
 
     if let Some(user_id) = user_id {
-        // `tenancy::get_membership_role` takes `&impl sea_orm::ConnectionTrait`, not a raw sqlx pool, so the role is read the same raw-SQL way as everything else here.
-        let role_str: Option<(String,)> = sqlx::query_as(
-            "SELECT role FROM identity_tenant_memberships WHERE tenant_id = $1 AND user_id = $2",
-        )
-        .bind(tenant_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await
-        .internal()?;
-        let role = role_str
-            .and_then(|(s,)| yorishiro_core::models::tenancy::MembershipRole::from_db_str(&s))
+        let role = yorishiro_core::models::tenancy::get_membership_role(conn, tenant_id, user_id)
+            .await?
             .ok_or_else(|| {
                 YorishiroError::not_found(format!(
                     "user '{user_id}' is not a member of tenant '{tenant_id}'"
@@ -184,21 +176,22 @@ pub async fn create_tenant_api_key(
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let plaintext = format!("{prefix}_{secret}");
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO identity_api_keys (tenant_id, workspace_id, key_hash, key_prefix, scope, user_id) \
-         VALUES ($1, NULL, $2, $3, $4, $5) RETURNING id",
-    )
-    .bind(tenant_id)
-    .bind(yorishiro_core::services::auth::hash_key(&plaintext))
-    .bind(&prefix)
-    .bind(scope.as_db_str())
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .internal()?;
+    let active = identity_api_keys::ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        workspace_id: ActiveValue::Set(None),
+        key_hash: ActiveValue::Set(yorishiro_core::services::auth::hash_key(&plaintext)),
+        key_prefix: ActiveValue::Set(prefix),
+        scope: ActiveValue::Set(scope.as_db_str().to_string()),
+        user_id: ActiveValue::Set(user_id),
+        ..Default::default()
+    };
+    let inserted = identity_api_keys::Entity::insert(active)
+        .exec_with_returning(conn)
+        .await
+        .internal()?;
 
     Ok(CreatedTenantApiKey {
-        id: row.0,
+        id: inserted.id,
         plaintext,
     })
 }

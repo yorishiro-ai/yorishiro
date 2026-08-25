@@ -8,7 +8,6 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::FromQueryResult;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use yorishiro_core::controllers::ApiError;
@@ -147,24 +146,9 @@ async fn infer_fill(
     let mut to_record: Vec<fill_proposals::ProposedField> = Vec::new();
 
     // The same set base's fill-defaults would walk: entities on a version older than the active one.
-    // An entity already on the active version has nothing the schema says is missing.
-    #[derive(sea_orm::FromQueryResult)]
-    struct Row {
-        id: Uuid,
-        entity_type: String,
-        data: serde_json::Value,
-    }
-    let rows: Vec<Row> = Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT e.id, e.entity_type, e.data \
-           FROM content_entities e \
-           JOIN content_schemas s ON s.id = e.schema_id \
-          WHERE e.workspace_id = $1 AND s.name = $2 AND e.schema_id <> $3",
-        [workspace_id.into(), name.clone().into(), active.id.into()],
-    ))
-    .all(&schema_txn)
-    .await
-    .internal()?;
+    let rows =
+        fill_proposals::entities_on_outdated_schema(&schema_txn, workspace_id, &name, active.id)
+            .await?;
 
     for row in rows {
         let Some(type_def) = active.definition.entity_types.get(&row.entity_type) else {

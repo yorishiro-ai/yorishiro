@@ -41,7 +41,8 @@ impl Task for CreateTenantApiKey {
             .get::<DbHandle>()
             .ok_or_else(|| Error::Message("DbHandle missing from shared_store".to_string()))?;
 
-        let created = create_tenant_api_key(&db.identity, tenant_id, scope, user_id)
+        let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
+        let created = create_tenant_api_key(&identity, tenant_id, scope, user_id)
             .await
             .map_err(|err| Error::Message(err.to_string()))?;
 

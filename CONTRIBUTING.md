@@ -38,18 +38,12 @@ Raw SQL is for what the SeaORM entity API genuinely cannot express: JSONB contai
 Everything else uses `Entity::find()`/`ActiveModel`/`Set(...)`, on whichever connection or transaction the caller holds.
 `ee/crates/yorishiro-hosted/src/models/marketplace.rs` has the current instances of the last two: `list_marketplace` selects three correlated subqueries alongside `identity_templates`' own columns, which no entity projection can produce, and `insert_next_version` computes a template's next version number and inserts it in the same `INSERT ... SELECT`, which is what makes its advisory lock actually prevent two concurrent publishes from racing to the same version number.
 
-Some raw SQL outside `models/` is correct and stays:
+Some raw SQL outside `models/` is correct and stays, but only the specific query that needs it, not the whole file it lives in: a file on this list can still have other queries that belong on the entity API, and do.
 
-- `src/db.rs` is connection handling, not table access: its `SET ROLE`/`RESET` statements are the pool's session lifecycle.
-- `src/services/auth/authenticate.rs` reads keys as part of deciding a request's identity, which is a decision rather than a record.
-  Its `last_used_at` write is part of that same decision, and deliberately runs on its own short-lived connection rather than the request transaction, which would roll it back on every read-only or rejected request.
+- `src/db.rs` is connection handling, not table access: its `SET ROLE`/`RESET`/`set_config`/advisory-lock statements are Postgres session primitives SeaORM has no equivalent for.
+- `src/services/auth/authenticate.rs`'s `authenticate_api_key($1)` call is the SECURITY DEFINER function that is RLS's one intentional bypass, reading rows an ordinary connection's session state would hide; its `touch_last_used`'s `last_used_at` write runs on that same kind of connection (one `TenantDb::acquire_for_workspace` scoped with the request's RLS session vars, not a general-purpose connection), which is why it stays raw too: an update through the entity API on any other connection would either roll back with a read-only request's transaction, or silently match zero rows under `identity_api_keys`' own RLS policy. Everything else `authenticate.rs` does not fitting that shape is on the entity API (see `authenticate_sqlite`/`touch_last_used_sqlite`, which have no RLS to preserve and use it throughout).
 - `src/services/embedding/sync.rs` and `src/tasks/resync_embeddings.rs` write and scan the `embedding` column, which is pgvector-typed and has no entity-API expression.
-- `ee/crates/yorishiro-hosted/src/services/official_templates.rs` is a seeder, and seeders sit outside the model by the same mapping that puts `migration/src/` there.
-- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs` is the auth exception's paid-edition mirror: `TenantScopedAuthenticator::authenticate` is this crate's `Authenticator` impl, and `create_tenant_api_key` is `create_api_key` with a tenant-exists check and a role-cap check folded in, both decisions rather than records.
-
-`ee/crates/yorishiro-hosted/src/controllers/inference.rs` holds a query that belongs in `models/` and has not been moved yet.
-If you are already editing it, moving the query is welcome.
-If not, leave it: a move with no reason to touch the file is a diff nobody can review against a behaviour change.
+- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`'s `TenantScopedAuthenticator::authenticate` calls `authenticate_api_key($1, $2)`, the two-argument overload of the same SECURITY DEFINER function, for the same reason as above; `create_tenant_api_key`'s own existence check, role lookup and insert have no such reason and are on the entity API.
 
 ### MCP is a service, not a controller
 

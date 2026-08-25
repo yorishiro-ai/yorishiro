@@ -83,7 +83,9 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
 
             // create_tenant_api_key reads identity_tenants and identity_tenant_memberships, neither granted to yorishiro_app (see identity_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
             let db = ctx.shared_store.get::<DbHandle>().unwrap();
-            let tenant_key = create_tenant_api_key(&db.identity, tenant_id, "read", Some(user_id))
+            let identity =
+                sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
+            let tenant_key = create_tenant_api_key(&identity, tenant_id, "read", Some(user_id))
                 .await
                 .expect("issuing a tenant-scoped key");
 

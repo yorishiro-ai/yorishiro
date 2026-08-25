@@ -5,12 +5,13 @@
 use loco_rs::app::AppContext;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ActiveValue, ConnectionTrait, EntityTrait, FromQueryResult, Statement, TransactionTrait,
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
 };
 use uuid::Uuid;
 use yorishiro_core::db;
 use yorishiro_core::error::{ResultExt, YorishiroError};
-use yorishiro_core::models::_entities::identity_tenants;
+use yorishiro_core::models::_entities::{identity_template_versions, identity_tenants};
 use yorishiro_core::models::tenancy::INFRASTRUCTURE_TENANT_ID;
 
 /// The tenant that owns the officially published templates.
@@ -53,15 +54,13 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
         .await?;
 
         // Compare against the newest version of any status, not just `stable`: publishing a fresh version every run would otherwise walk the version number up forever while the definition stayed the same.
-        let latest = LatestVersion::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT version, definition FROM identity_template_versions \
-              WHERE template_id = $1 ORDER BY version DESC LIMIT 1",
-            [template_id.into()],
-        ))
-        .one(&ctx.db)
-        .await
-        .internal()?;
+        let latest = identity_template_versions::Entity::find()
+            .filter(identity_template_versions::Column::TemplateId.eq(template_id))
+            .order_by_desc(identity_template_versions::Column::Version)
+            .limit(1)
+            .one(&ctx.db)
+            .await
+            .internal()?;
 
         match latest {
             Some(latest) if latest.definition == definition_json => {
@@ -88,13 +87,6 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
     }
 
     Ok(outcome)
-}
-
-#[derive(FromQueryResult)]
-struct LatestVersion {
-    #[allow(dead_code)]
-    version: i32,
-    definition: serde_json::Value,
 }
 
 /// Creates the official-templates publisher tenant if it does not already exist.
