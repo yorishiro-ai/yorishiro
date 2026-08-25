@@ -7,14 +7,19 @@ Yorishiroのマイグレーション(`migration/`)は、PostgreSQLだけでな�
 
 ## 現状: スキーマ、単一テナントガード、そして`/setup` → `/whoami`
 
-SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができ、`tenancy::create_tenant`は`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制する。それに加えて、アプリケーション本体もいまやSQLiteファイルに対して実際に起動し、`POST /setup`と`GET /api/whoami`を実際に処理する。setupはそのデプロイメントの唯一のテナント・ワークスペース・ユーザー・APIキーを作成し、`/whoami`はそのキーを認証して解決されたアイデンティティを返す。
+SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができ、`tenancy::create_tenant`は`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制する。
+それに加えて、アプリケーション本体もいまやSQLiteファイルに対して実際に起動し、`POST /setup`と`GET /api/whoami`を実際に処理する。
+setupはそのデプロイメントの唯一のテナント・ワークスペース・ユーザー・APIキーを作成し、`/whoami`はそのキーを認証して解決されたアイデンティティを返す。
 テナントを作成しうるもう1つの経路である`POST /auth/signup`もSQLite上で動作し、上限に達すると2回目の`/setup`呼び出しと同様、`409`とSQLite固有の対処メッセージで拒否される。
 
-`Authorized<R>`、`AuditAuthorized`、`Verified<R>`のいずれかの抽出器を使う認証済みルートは、まだ移植されていない。これらはいまも無条件に`db_handle()`を呼び出しており、このバックエンドでは`DbHandle`が一切構築されないため(後述「バックエンド分岐ロジックの置き場所」を参照)、`DbHandle missing`で失敗する。
+`Authorized<R>`、`AuditAuthorized`、`Verified<R>`のいずれかの抽出器を使う認証済みルートは、まだ移植されていない。
+これらはいまも無条件に`db_handle()`を呼び出しており、このバックエンドでは`DbHandle`が一切構築されないため(後述「バックエンド分岐ロジックの置き場所」を参照)、`DbHandle missing`で失敗する。
 SQLite用の分岐を持つのは`AuthContext`(スコープもトランザクションも持たない)だけである。
 
-`config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。`tests/`はいまもPostgreSQL専用のままである。
-`queue:`ブロックは無く(`ForegroundBlocking`ワーカー)、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
+`config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
+`tests/`はいまもPostgreSQL専用のままである。
+`queue:`ブロックは無く(`ForegroundBlocking`ワーカー)、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。
+ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
 
 ## SQLiteが想定する用途
 
@@ -38,8 +43,10 @@ SQLiteは同時に1つの書き込みトランザクションしか許さない�
 PostgreSQL上でロックが塞いでいるTOCTOUは、SQLite上では黙って矛盾した書き込みが通るのではなく、リトライ可能なエラーとして現れる形になる。
 この根拠の詳細、および1トランザクション内で複数行を書き込む他のロック呼び出し箇所もこれで説明がつく理由は、`lock_for_update`のドキュメントコメントを参照。
 
-`uuidv7()`をデフォルト値に持つすべての`id`カラム(`identity_tenants`、`identity_workspaces`、`identity_users`、`identity_tenant_memberships`、`identity_api_keys`)は、`ActiveModelBehavior::before_save`を通じてSQLite上で自分のidを生成する。この`before_save`は`db::sqlite_generated_id(conn, self.id)`を呼び出し、`id`がすでに`Set`済みか、バックエンドがPostgreSQLの場合はno-op、それ以外は`Uuid::now_v7()`を返す。
-これは通常の`ActiveModel::insert()`/`.save()`呼び出しはすべてカバーするが、`Entity::insert(active).on_conflict(...).exec(conn)`はカバーしない。このビルダー経路は`before_save`を呼び出さないため(`sea-orm` 2.0.2のソースで確認済み)、これを使っている唯一の呼び出し箇所である`tenancy::add_member`は、フックに頼らず`id`を明示的に設定している。
+`uuidv7()`をデフォルト値に持つすべての`id`カラム(`identity_tenants`、`identity_workspaces`、`identity_users`、`identity_tenant_memberships`、`identity_api_keys`)は、`ActiveModelBehavior::before_save`を通じてSQLite上で自分のidを生成する。
+この`before_save`は`db::sqlite_generated_id(conn, self.id)`を呼び出し、`id`がすでに`Set`済みか、バックエンドがPostgreSQLの場合はno-op、それ以外は`Uuid::now_v7()`を返す。
+これは通常の`ActiveModel::insert()`/`.save()`呼び出しはすべてカバーするが、`Entity::insert(active).on_conflict(...).exec(conn)`はカバーしない。
+このビルダー経路は`before_save`を呼び出さないため(`sea-orm` 2.0.2のソースで確認済み)、これを使っている唯一の呼び出し箇所である`tenancy::add_member`は、フックに頼らず`id`を明示的に設定している。
 今後`on_conflict`を使うINSERTを追加する場合も、同様に明示的な対応が必要であり、`before_save`だけではカバーされない。
 
 ## PostgreSQL版スキーマとの違いとその理由
@@ -82,7 +89,10 @@ SQLiteは既定では外部キーを強制しない。
 
 SQLite上の`CURRENT_TIMESTAMP`は、sea_queryが`timestamp_with_timezone_text`と名付けたカラムに対して、`YYYY-MM-DD HH:MM:SS`(オフセット無し)という形式でレンダリングされる。
 このカラムはその名前とは裏腹に、実体はただのSQLiteの`TEXT`カラムであり、PostgreSQLの`timestamptz`のようなタイムゾーン対応のストレージはこのバックエンドには存在しない。
-このカラムのデフォルト値経由で書き込まれた値と、アプリケーションが書き込んだ値(`chrono::Utc::now()`、例えば`touch_last_used_sqlite`による`last_used_at`の更新)は、同じカラムの中で異なるテキスト形式になる —`2026-08-24 14:27:08`と`2026-08-24T15:37:02.437013178+00:00`。パースすればどちらもタイムスタンプとして正しく比較できるが、文字列としては比較できない。このコードベースには現時点でこれらのカラムを生の文字列比較で並べ替えている箇所は無いが、将来そうするクエリを書く場合はまずパースが必要になる。
+このカラムのデフォルト値経由で書き込まれた値と、アプリケーションが書き込んだ値(`chrono::Utc::now()`、例えば`touch_last_used_sqlite`による`last_used_at`の更新)は、同じカラムの中で異なるテキスト形式になる —`2026-08-24 14:27:08`と`2026-08-24T15:37:02.437013178+00:00`。
+パースすればどちらもタイムスタンプとして正しく比較できるが、文字列としては比較できない。
+このコードベースには現時点でこれらのカラムを生の文字列比較で並べ替えている箇所は無いが、将来そうするクエリを書く場合はまずパースが必要になる。
 
 `sqlx::postgres::PgPoolOptions::connect`は、`sqlite://`のURLに対してエラーを返さない —無期限にハングする(直接プローブして確認済み)。
-これが、`after_context`のPostgreSQLプール構築をSQLite上では試みて早期に失敗させるのではなく、丸ごとスキップしている理由である。このバックエンドでこのコード経路に実際に到達すると、診断可能なエラーを出す代わりに、ログ出力の無いままブート自体がハングしてしまう。
+これが、`after_context`のPostgreSQLプール構築をSQLite上では試みて早期に失敗させるのではなく、丸ごとスキップしている理由である。
+このバックエンドでこのコード経路に実際に到達すると、診断可能なエラーを出す代わりに、ログ出力の無いままブート自体がハングしてしまう。
