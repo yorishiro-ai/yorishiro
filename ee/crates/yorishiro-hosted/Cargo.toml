@@ -18,34 +18,34 @@ path = "src/bin/yorishiro_server.rs"
 
 [dependencies]
 yorishiro-core = { path = "../../.." }
+# Relative, not path = "migration" like the root manifest's own dependency on the same crate:
+# this is not eligible for the workspace.dependencies table the way version-and-features-only
+# dependencies are, since a relative path is resolved from this manifest's own directory, and the
+# root's path = "migration" would not reach the same crate from here.
 migration = { path = "../../../migration" }
-loco-rs = { version = "1.1" }
-tokio = { version = "1.45", default-features = false, features = ["rt-multi-thread"] }
-axum = { version = "0.8" }
-async-trait = { version = "0.1" }
+loco-rs = { workspace = true }
+tokio.workspace = true
+axum.workspace = true
+async-trait.workspace = true
 jsonwebtoken = { version = "9" }
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 serde_yaml_ng = { version = "0.10" }
-chrono = { version = "0.4" }
-anyhow = { version = "1" }
-tracing = { version = "0.1" }
-sea-orm = { version = "2.0", features = [
-  "sqlx-postgres",
-  "runtime-tokio-rustls",
-  "macros",
-] }
-uuid = { version = "1.6", features = ["v4"] }
-sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+chrono.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+sea-orm.workspace = true
+uuid.workspace = true
+sqlx.workspace = true
 hmac = { version = "0.12" }
-sha2 = { version = "0.10" }
-serde_json = { version = "1" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
 base64 = { version = "0.22" }
-rand = { version = "0.9" }
+rand.workspace = true
 url = { version = "2.5" }
 
 [dev-dependencies]
 tempfile = { version = "3" }
-loco-rs = { version = "1.1", features = ["testing"] }
-serial_test = { version = "3.1.1" }
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test.workspace = true
 axum-test = { version = "17.3" }

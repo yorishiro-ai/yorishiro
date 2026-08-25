@@ -51,6 +51,15 @@ queue:
   uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/loco_development") %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
+
+  # Workers dequeuing in parallel. Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism here, unlike on SQLite where `BEGIN IMMEDIATE` serializes every dequeue regardless of this number.
+  num_workers: 2
+
+  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
+  # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.
+  reaper:
+    age_minutes: 10
+    interval_seconds: 60
   
 
 # Mailer Configuration.

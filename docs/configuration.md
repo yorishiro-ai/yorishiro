@@ -2,7 +2,7 @@
 
 **English** | [日本語](ja/configuration.md)
 
-This is not a full settings reference: it covers the embedding provider and the per-workspace search token quota only, the two areas the Loco rebuild's most recent slice touched.
+This is not a full settings reference: it covers the embedding provider, the per-workspace search token quota, and `config/production.yaml`'s queue tuning, the areas the Loco rebuild's most recent slices touched.
 Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings on this branch.
 
 ## Embedding provider
@@ -62,3 +62,15 @@ The token count for a query comes from `EmbeddingProvider::count_tokens`, which 
 That estimate is calibrated for English, where roughly 4 bytes make one token; Japanese text is roughly 3 bytes per character and tokenizes at roughly one token per character, so the estimate returns under half the token count a real tokenizer would report for the same Japanese query.
 In other words, outside the local ONNX provider, a Japanese search query is charged against the budget at well under its real cost: `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` admits noticeably more Japanese-language search traffic per minute than English before this quota starts returning `422`.
 Size the budget with that skew in mind if the deployment's search traffic is mostly Japanese and not running the local ONNX provider.
+
+## Queue tuning (`config/production.yaml`)
+
+`config/production.yaml`'s `queue:` block accepts two settings beyond what `development.yaml` hardcodes, both of Loco's own `queue` config schema, not something this codebase adds.
+
+| Variable | Description |
+|---|---|
+| `YORISHIRO_QUEUE_WORKERS` | How many workers dequeue jobs in parallel (default: `2`). Postgres claims a row with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism on this deployment's Postgres-backed queue |
+| `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | Minutes a job may sit in `processing` before the reaper requeues it as `Queued` (default: `30`). Loco's own reaper is opt-in and off by default: without it, a job a worker died on while it was running (a crash, a forced kill) stays `processing` forever, since nothing else moves a job out of that state, `fail_job` only runs when `perform` itself returns an error. Set this above the longest a healthy job can legitimately take, or the reaper requeues work that is still genuinely in progress |
+
+`development.yaml` enables the same reaper with fixed values (`num_workers: 2`, `age_minutes: 10`) rather than reading these variables, since a local development environment has no reason to tune them per deployment.
+`config/test.yaml` has no `queue:` block at all (`docs`/`.claude/rules/testing.md` covers why), so neither setting applies there.
