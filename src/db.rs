@@ -167,6 +167,28 @@ pub fn sqlite_generated_id(
     }
 }
 
+/// Rejects boot outright when `database.max_connections` is below 2, on SQLite only.
+///
+/// `authorize_sqlite`/`authorize_audit_sqlite` (`services/auth/authorize.rs`) hold a transaction open on `ctx.db` for the lifetime of an `Authorized<R>`/`AuditAuthorized` request while also touching `last_used_at` on a second, independent connection from that same pool — the same reason Postgres's `authorize`/`authorize_audit` use `touch_last_used_on`'s own short-lived connection rather than the request's own transaction: a read-only handler drops its transaction without committing, and updating `last_used_at` there would silently roll back with it.
+/// At `max_connections: 1` the pool has only one connection to give out, so that second acquire always waits for the first (held) one to free, which happens only when the transaction ends; `connect_timeout` bounds that wait rather than leaving it unbounded (empirically: reads still return `200` in this state, since `touch_last_used_sqlite`'s failure is logged and swallowed, but any handler that itself needs a second connection, e.g. `set_maintenance` writing through `ctx.db`, fails with `500` around 500ms in, logged as "Connection pool timed out").
+/// A `2`-or-more pool has a free connection for the second acquire to succeed on immediately, matching production's `config/sqlite.yaml` default of `10`; this rejects boot rather than letting an operator discover the failure as an intermittent `500` under load.
+pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String> {
+    if max_connections < 2 {
+        return Err(format!(
+            "database.max_connections is {max_connections}, but the SQLite backend requires at least 2: \
+             an Authorized<R>/AuditAuthorized request holds one connection open on a transaction for its \
+             duration while touching last_used_at on a second, independent connection from the same pool \
+             (kept separate so a read-only handler that never commits doesn't silently roll that update back \
+             with it, matching PostgreSQL's own authorize/touch_last_used_on split). \
+             With only 1 connection available, that second acquire can only wait for connect_timeout and then \
+             fail with a pool-timeout error, which surfaces as an intermittent 500 on any handler that itself \
+             needs a second connection (read-only handlers still return normally, since the last_used_at \
+             update is best-effort)."
+        ));
+    }
+    Ok(())
+}
+
 /// Serializes a transaction against others naming the same `key`, until it commits.
 ///
 /// The lock is transaction-scoped, so it releases on commit or rollback without an unlock call to forget.

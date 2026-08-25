@@ -52,6 +52,10 @@ impl Hooks for App {
     /// On SQLite, none of this runs: `sqlx::postgres::PgPoolOptions::connect` on a `sqlite://` URL doesn't error, it hangs indefinitely (confirmed by direct probe), so this whole block must not be reached at all rather than be expected to fail fast.
     /// SQLite has no second tenant to isolate with RLS in the first place (see `docs/sqlite.md`), so `DbHandle`/`Authenticator` are simply not built for it: `crate::controllers::extractors` branches on `ctx.db.get_database_backend()` and authenticates directly against `ctx.db` instead of going through the `Authenticator` seam, which is a PostgreSQL/`ee/`-only concept on a deployment with no `ee/` and one backend.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
+                .map_err(loco_rs::Error::Message)?;
+        }
         if ctx.db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
             let database_url = ctx.config.database.uri.clone();
             let tenant =

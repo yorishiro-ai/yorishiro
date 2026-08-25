@@ -1,9 +1,9 @@
-use sea_orm::DatabaseTransaction;
+use sea_orm::{DatabaseTransaction, TransactionTrait};
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 
-use super::{ApiKeyScope, AuthContext, Authenticator, touch_last_used};
+use super::{ApiKeyScope, AuthContext, Authenticator, authenticate_sqlite, touch_last_used};
 
 /// Enforces that an authenticated context satisfies the required scope, returning
 /// `YorishiroError::ScopeInsufficient` when it doesn't.
@@ -84,6 +84,39 @@ pub async fn authorize_audit(
         .internal()?;
 
     touch_last_used_on(db, ctx.tenant_id, ctx.workspace_id, ctx.api_key_id).await;
+
+    Ok((ctx, txn))
+}
+
+/// SQLite equivalent of [`authorize`]: no `DbHandle` exists on this backend (see `Hooks::after_context`), so this authenticates directly against `ctx.db` and begins a plain transaction on it instead of `TenantDb::begin_for_workspace`.
+///
+/// A plain `ctx.db.begin()`, not `begin_with_options(SqliteTransactionMode::Immediate)`: SQLite's default (DEFERRED) matches PostgreSQL's own behavior of not taking a write lock until a write actually happens, and `db::lock_for_update`'s doc comment already covers why a transaction that reads a stale value and later tries to commit a write against it fails with `SQLITE_BUSY` rather than silently succeeding. If concurrent SQLite request handling is ever observed to fail on `SQLITE_BUSY` in practice, `Immediate` is reachable here (unlike inside `lock_for_update`, which never opens its own transaction).
+///
+/// No RLS to scope on this backend, so no `set_config` step; scope/audit is still enforced the same way `authorize`/`authorize_audit` enforce it, just against a plain transaction rather than an RLS-scoped one.
+pub async fn authorize_sqlite(
+    db: &sea_orm::DatabaseConnection,
+    presented_key: &str,
+    required: ApiKeyScope,
+) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
+    let ctx = authenticate_sqlite(db, presented_key).await?;
+    require_scope(&ctx, required)?;
+
+    let txn = db.begin().await.internal()?;
+    super::touch_last_used_sqlite(db, ctx.api_key_id).await;
+
+    Ok((ctx, txn))
+}
+
+/// As `authorize_sqlite`, but checking `require_audit` instead of a scope: the SQLite counterpart to `authorize_audit`.
+pub async fn authorize_audit_sqlite(
+    db: &sea_orm::DatabaseConnection,
+    presented_key: &str,
+) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
+    let ctx = authenticate_sqlite(db, presented_key).await?;
+    require_audit(&ctx)?;
+
+    let txn = db.begin().await.internal()?;
+    super::touch_last_used_sqlite(db, ctx.api_key_id).await;
 
     Ok((ctx, txn))
 }

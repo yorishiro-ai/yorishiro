@@ -201,9 +201,22 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let headers = header_pairs(parts);
 
         let app_ctx = AppContext::from_ref(state);
+
+        // See AuthContext's own SQLite branch: no DbHandle/Authenticator is built for that backend, so this authenticates and begins a plain transaction on ctx.db directly (auth::authorize_sqlite).
+        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            let (ctx, txn) = auth::authorize_sqlite(&app_ctx.db, presented_key, R::SCOPE)
+                .await
+                .inspect_err(|err| log_auth_rejection(parts, err))?;
+            return Ok(Authorized {
+                ctx,
+                txn,
+                _scope: PhantomData,
+            });
+        }
+
+        let headers = header_pairs(parts);
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
@@ -242,9 +255,18 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let headers = header_pairs(parts);
 
         let app_ctx = AppContext::from_ref(state);
+
+        // See Authorized<R>'s own SQLite branch.
+        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            let (ctx, txn) = auth::authorize_audit_sqlite(&app_ctx.db, presented_key)
+                .await
+                .inspect_err(|err| log_auth_rejection(parts, err))?;
+            return Ok(AuditAuthorized { ctx, txn });
+        }
+
+        let headers = header_pairs(parts);
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
@@ -258,6 +280,11 @@ where
 
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
+///
+/// **Deliberately has no SQLite branch, unlike `Authorized<R>`/`AuditAuthorized`.**
+/// Its one caller, `search_entities` (`controllers/search.rs`), calls `db_handle(&ctx)?` directly in the handler body once the slow embedding call returns, so a SQLite branch here would still dead-end at that unconditional `db_handle` call.
+/// The route is unreachable on SQLite for an independent reason regardless: `content_entities.embedding` (the pgvector column `search_by_vector` reads) does not exist on that backend at all (see `docs/sqlite.md`).
+/// A future second caller of `Verified<R>` that doesn't touch `embedding`/`DbHandle` afterward would need this reconsidered.
 pub struct Verified<R> {
     pub ctx: auth::AuthContext,
     _scope: PhantomData<R>,

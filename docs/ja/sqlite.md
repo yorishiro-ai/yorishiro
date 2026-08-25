@@ -5,21 +5,30 @@
 Yorishiroのマイグレーション(`migration/`)は、PostgreSQLだけでなくSQLite上でも正しいスキーマを生成する。
 本ドキュメントは、現時点で何がカバーされていて何がカバーされていないかを説明する。
 
-## 現状: スキーマ、単一テナントガード、そして`/setup` → `/whoami`
+## 現状: スキーマ、単一テナントガード、そして大半の認証済みルート
 
 SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができ、`tenancy::create_tenant`は`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制する。
-それに加えて、アプリケーション本体もいまやSQLiteファイルに対して実際に起動し、`POST /setup`と`GET /api/whoami`を実際に処理する。
+それに加えて、アプリケーション本体はSQLiteファイルに対して実際に起動し、`POST /setup`、`GET /api/whoami`、そして`content_entities`に触れない`Authorized<R>`/`AuditAuthorized`ルートをすべて処理する(境界の詳細は後述「まだブロックされているもの」を参照)。
 setupはそのデプロイメントの唯一のテナント・ワークスペース・ユーザー・APIキーを作成し、`/whoami`はそのキーを認証して解決されたアイデンティティを返す。
-テナントを作成しうるもう1つの経路である`POST /auth/signup`もSQLite上で動作し、上限に達すると2回目の`/setup`呼び出しと同様、`409`とSQLite固有の対処メッセージで拒否される。
+テナントを作成しうるもう1つの経路である`POST /auth/signup`は、上限に達すると2回目の`/setup`呼び出しと同様、`409`とSQLite固有の対処メッセージで拒否される。
 
-`Authorized<R>`、`AuditAuthorized`、`Verified<R>`のいずれかの抽出器を使う認証済みルートは、まだ移植されていない。
-これらはいまも無条件に`db_handle()`を呼び出しており、このバックエンドでは`DbHandle`が一切構築されないため(後述「バックエンド分岐ロジックの置き場所」を参照)、`DbHandle missing`で失敗する。
-SQLite用の分岐を持つのは`AuthContext`(スコープもトランザクションも持たない)だけである。
+`AuthContext`、`Authorized<R>`、`AuditAuthorized`はいずれもSQLite用の分岐を持つ(`src/controllers/extractors.rs`)。
+認証したうえで、後の2つは`DbHandle`/`TenantDb::begin_for_workspace`を経由せず`ctx.db`に対して直接プレーンなトランザクションを開く。RLS前提の2プール構成は、RLSを持たない単一テナントバックエンドにはそもそもスコープすべき対象が無いためである。
+`Verified<R>`だけは意図的にSQLite用の分岐を持たない。唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体が`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
 
 `config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
 `tests/`はいまもPostgreSQL専用のままである。
 `queue:`ブロックは無く(`ForegroundBlocking`ワーカー)、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。
 ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
+
+## `database.max_connections`はSQLite上で2以上が必須
+
+`Authorized<R>`/`AuditAuthorized`は、リクエストの間ずっとトランザクション上で1本の接続を保持しつつ、`identity_api_keys.last_used_at`の更新は同じプールの別の独立した接続で行う。別接続にしている理由はPostgreSQL版の`authorize`/`touch_last_used_on`と同じで、読み取り専用ハンドラはトランザクションをコミットせずに落とすため、そこで更新すると黙ってロールバックされてしまうからである。
+`max_connections: 1`だと、この2本目の接続取得には空いている接続が無く、`connect_timeout`を使い切ったうえで失敗するしかない。
+
+SQLite上で`max_connections`が2未満のまま起動しようとすると、起動そのものを拒否する(`db::require_min_sqlite_connections`、`Hooks::after_context`から呼ばれる)。負荷がかかったときに不定に失敗させるのではなく、である。
+このガードが入る前に実測した内容: `max_connections: 1`、`connect_timeout: 500`の状態で、読み取り専用ルート(`GET /api/relations`)は`200`のまま返った。失敗した`last_used_at`更新はbest-effortでログ警告のみだからである。一方、本物の書き込みのために2本目の接続を自身で必要とするルート(`PUT /api/system/maintenance`。保持中のトランザクションとは独立に`ctx.db`へ書き込む)は、約500ms後に`500`で失敗し、ログには`Failed to acquire connection from pool: Connection pool timed out`と記録された。
+`config/sqlite.yaml`は`max_connections: 10`で出荷されており、下限を十分に上回っている。
 
 ## SQLiteが想定する用途
 
@@ -70,6 +79,28 @@ SQLiteでも表現はできるが構文が異なるものは、バックエン�
 このバックエンドでは、ベクトル類似検索と全文検索はまだ動作しない。
 これらの移植は、pgvectorの代わりに`sqlite-vec`の`vec0`仮想テーブル(ベクトル検索用)、`pg_trgm`の代わりにSQLiteの`FTS5`拡張(全文検索用)を使う形になる見込みだが、いずれもまだ実装されていない。
 
+## まだブロックされているもの: `content_entities`に触れるもの全般
+
+`src/models/_entities/content_entities.rs`(`cargo loco db entities`が生成し、手で編集することは無いファイル)は、`Model`構造体上に`embedding: Option<PgVector>`を無条件に宣言している。
+このカラムはPostgreSQLにしか存在せず(前述の通り)、SQLite版のテーブルには`embedding`カラム自体が無い。
+SeaORMのEntity APIは`Model`のすべてのフィールドからクエリを組み立てるため、`content_entities::Entity`に対するクエリは読み書きを問わず、SQLiteに存在しないカラムを要求することになり、そのまま失敗する。
+これは静かに空や部分的な結果が返るのではなく、はっきりした失敗になる。実測では、`GET /api/entities`に対する応答は`500 {"error":{"code":"internal","message":"internal server error"}}`で、サーバーログには実際の原因である`no such column: content_entities.embedding`が記録される。
+つまり呼び出し元は「エンティティが無い」ではなく明確な失敗を目にするが、応答本体自体はSQLiteを名指ししない汎用の`500`のままである。呼び出し元は本ドキュメントかサーバー自身のログを読まない限り、「このバックエンドではこのルートが未対応」だということを、他の内部エラーと区別できない。
+
+これの直接の帰結としてブロックされるもの:
+
+- **エンティティCRUD**(`POST`/`GET`/`PUT`/`DELETE /api/entities`、`POST /api/migration-jobs/{id}/undo`)—`content_entities`を直接読み書きする。
+- **エクスポート/インポート**(`GET /api/export.jsonl`、`POST /api/import.jsonl`)—同上。
+- **`GET /api/workspaces/{id}`の`entity_count`フィールド**—`content_entities::count`を呼ぶ。
+- **`POST /api/relations`(リレーションの作成)**—`content_relations::create`が、リンクする前にsource側とtarget側の両方のidについて`content_entities::get`で存在確認を行う。
+- **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理)—そのクエリが`content_entities`に直接`JOIN`している。
+- **`GET /api/search`**(`Verified<ReadScope>`)—これは上記とは独立した理由(`embedding`そのもの)によるものだが、原因が同じテーブルである点は共通している。
+
+`content_entities`に触れないためブロックされないもの: `GET`/`DELETE /api/relations/{id}`、`PUT /api/relations/{id}/status`、`GET /api/relations`(一覧)、スキーマ系(`GET`/`POST /api/schemas`、`GET /api/schemas/active/{name}`、`GET /api/schemas/{schema_id}`、テンプレート系)、`GET /api/audit-log`、`GET`/`PUT /api/system/maintenance`。
+`POST /api/schemas`を`template_id`付きボディで呼ぶ場合は、`content_entities`には触れないものの知っておく価値のある部分的な例外である。`identity_templates::resolve_template_definition`を`ctx.db`に対して呼び出しており、これはリクエスト自身のトランザクションが開いたままの状態で取得する2本目の接続である。上記の`max_connections`下限の範囲内であれば安全で、`set_maintenance`と同じ話であり、別立ての制約ではない。
+
+`content_entities.rs`のクエリ関数群を`select_only().columns([...])`で書き換えて`embedding`を除外する案は検討したうえで、今回は見送った。お試し・個人利用向けに位置づけたばかりのティアのために、Postgresのリクエストホットパス10関数を書き換えることになるうえ、このコードベースのSeaORM移行が他の箇所で削ってきたのとまったく同じ種類の、手書きの列リストを再導入することになる。後で`content_entities`に列が追加され、10箇所のうち1つで書き漏らした場合、コンパイルエラーにはならず、フィールドが黙って欠ける形で失敗する。
+
 ## バックエンド分岐ロジックの置き場所
 
 `migration/src/helpers.rs`に、マイグレーション用のバックエンド条件分岐ヘルパー(`enable_rls_with_policy`、`grant`、`pg_only`、`sqlite_only`、`create_table_with_checks`、`uuidv7_pk`)がすべてまとまっており、それぞれが`manager.get_database_backend()`を確認する。
@@ -77,9 +108,10 @@ SQLiteでも表現はできるが構文が異なるものは、バックエン�
 結果として生成されるPostgreSQLのスキーマ(すべてのテーブル、カラム、制約名、インデックス、ポリシー、GRANT)は、SQLite対応が入る前と変わっていない。
 一部の制約を発行するSQL文自体は`create_table_with_checks`/`pg_only`経由に書き換わっており、`identity_maintenance`の3つのCHECKは、以前は1回の`execute_unprepared`呼び出しにセミコロン区切りの`ALTER TABLE`文を3つまとめていたものが、いまは同じ効果を持つ3回の別々の呼び出しになっている。
 
-アプリケーション層では、`Hooks::after_context`(`src/app.rs`)が`DbHandle`やデフォルトの`Authenticator`を構築する前に`ctx.db.get_database_backend() != DatabaseBackend::Sqlite`を確認し、`AuthContext`の`FromRequestParts`実装(`src/controllers/extractors.rs`)も同じ条件を確認して、`services::auth::authenticate_sqlite`/`touch_last_used_sqlite`とPostgreSQL用の`Authenticator`のどちらを使うかを選ぶ。
+アプリケーション層では、`Hooks::after_context`(`src/app.rs`)が`DbHandle`やデフォルトの`Authenticator`を構築する前に`ctx.db.get_database_backend() != DatabaseBackend::Sqlite`を確認し、`AuthContext`/`Authorized<R>`/`AuditAuthorized`の`FromRequestParts`実装(`src/controllers/extractors.rs`)も同じ条件を確認して、`services::auth::authorize`/`services::auth::authenticate`の`..._sqlite`系関数とPostgreSQL用の`Authenticator`/`DbHandle`のどちらを使うかを選ぶ。
 `db::sqlite_generated_id`(`before_save`から呼ばれる。前述「単一テナントガード」を参照)も同様に`conn.get_database_backend()`を確認する。
-どの分岐も設定フラグや環境変数を読んで判定するのではなく、常にその場の接続から読み取っている。
+`db::require_min_sqlite_connections`(前述「`database.max_connections`はSQLite上で2以上が必須」を参照)は唯一の例外で、接続が存在する前に起動そのものを拒否しなければならないため、その場の接続ではなく設定値そのものを無条件に確認する。
+それ以外の分岐は、設定フラグや環境変数を読んで判定するのではなく、常にその場の接続から読み取っている。
 
 ## 現在のSQLite経路に関する注意点
 

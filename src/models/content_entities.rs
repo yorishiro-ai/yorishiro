@@ -16,17 +16,18 @@ pub type ContentEntities = Entity;
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
     /// Checks `!is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and `is_unchanged()` only matches the latter.
-    async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    ///
+    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
+    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        if !insert && !self.updated_at.is_set() {
-            let mut this = self;
+        let mut this = self;
+        this.id = crate::db::sqlite_generated_id(db, this.id);
+        if !insert && !this.updated_at.is_set() {
             this.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-            Ok(this)
-        } else {
-            Ok(self)
         }
+        Ok(this)
     }
 }
 
