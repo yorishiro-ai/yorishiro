@@ -22,7 +22,7 @@ Every variable listed here is read directly from the environment; there is no `c
 
 `PUT /hosted/workspace/embedding-key` points one workspace's own embedding work at a different provider than the deployment-wide one above, instead of every workspace sharing `YORISHIRO_EMBEDDING_BASE_URL`.
 Not part of the base edition: this is the same split as `PUT /hosted/workspace/llm-key`, which assigns LLM inference credentials per workspace already.
-Which workspace uses which compute backend is a paid-edition decision, the compute-offload work's first stage.
+Which workspace uses which compute backend is a paid-edition decision.
 
 | Field | Description |
 |---|---|

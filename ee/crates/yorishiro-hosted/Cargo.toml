@@ -9,9 +9,9 @@ edition = "2024"
 license-file = "../../LICENSE"
 publish = false
 
-# Both editions install their binary as `yorishiro-server`; see `ee/LICENSE` and
-# `.claude/rules/workspace-checklist.md` in yorishiro-specs for the on-disk-identical
-# packaging convention this name exists to support once packaging lands.
+# Not `yorishiro-hosted-server` or similar: the base binary is `yorishiro_core-cli` (see the root
+# Cargo.toml), a distinct name from this crate's own, so this one needs no edition qualifier of
+# its own to avoid colliding with it.
 [[bin]]
 name = "yorishiro-server"
 path = "src/bin/yorishiro_server.rs"
