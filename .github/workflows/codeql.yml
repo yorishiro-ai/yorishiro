@@ -32,6 +32,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # This job holds security-events: write, and CodeQL's rust extractor evaluates
+          # build.rs from the checked-out tree; persist-credentials: false keeps that
+          # write-scoped token out of reach of anything running as part of the checkout.
+          persist-credentials: false
 
       - uses: github/codeql-action/init@v4
         with:
