@@ -100,10 +100,11 @@ SQLite上では`embedding`を除いた列リストでクエリを組み立てて
 
 - **ベクトル類似検索**(`GET /api/search`、`Verified<ReadScope>`)—`content_entities.embedding`そのものを読むため、SQLiteにはまだ存在しない。前述の`Verified<R>`にSQLite用の分岐が無い理由は、実質的にこれである。
 - **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理)—`embedding`とは無関係な理由でブロックされている。この生SQLは`embedding`列を一切SELECTしていないが、`Statement::from_sql_and_values(DatabaseBackend::Postgres, ...)`をハードコードしたうえ、PostgreSQL専用の配列関数`unnest($2::uuid[])`を使っている。`embedding`のギャップが埋まる前から、SQLiteでは動く見込みが無かった。
-- **`content_entity_snapshots::snapshot`**(上書きされる前のエンティティのデータを記録する`INSERT ... SELECT`)と**`undo_job`**(そのスナップショットから復元する処理)—`snapshot`は`neighbors_batch`と同様、生のPostgres専用SQLである。`undo_job`は`content_entities::update`を経由せず`ActiveModel::update(conn)`を直接呼んでいるため、`create`/`update`がかつて直面していたのと同じ戻り値のデコード失敗にいまも当たる。
-  結果として`POST /api/migration-jobs/{id}/undo`はブロックされたままである。
+- **`content_entity_snapshots::snapshot`**(上書きされる前のエンティティのデータを記録する`INSERT ... SELECT`。`ee/`のfill-proposalバッチ確定処理からのみ呼ばれる)—`neighbors_batch`と同様、生のPostgres専用SQLであり、本セクションの修正の影響を受けない。
 
-ブロックされていないもの: エンティティCRUD(`POST`/`GET`/`PUT`/`DELETE /api/entities`)、エクスポート/インポート(`GET /api/export.jsonl`、`POST /api/import.jsonl`)、`GET /api/workspaces/{id}`の`entity_count`フィールド、リレーションの作成(`POST /api/relations`。両端のidについて`content_entities::get`を呼ぶ)。
+`POST /api/migration-jobs/{id}/undo`自体(`content_entities::undo_job`)には、もうSQLite用の例外は不要である。以前は`content_entities::update`を経由せず`ActiveModel::update(conn)`を直接呼んでおり、`create`/`update`がかつて直面していたのと同じ戻り値のデコード失敗に当たっていたが、いまは`update_and_fetch`と同じ修正である`active.update_without_returning(conn)`を使っている。スナップショットが存在すればSQLite上でも復元は動作するが、`snapshot`(前述)は`ee/`専用かつPostgres専用のままなので、base自体はスナップショットを一切書き込まない。
+
+ブロックされていないもの: エンティティCRUD(`POST`/`GET`/`PUT`/`DELETE /api/entities`)、エクスポート/インポート(`GET /api/export.jsonl`、`POST /api/import.jsonl`)、`GET /api/workspaces/{id}`の`entity_count`フィールド、`POST /api/migration-jobs/{id}/undo`、リレーションの作成(`POST /api/relations`。両端のidについて`content_entities::get`を呼ぶ)。
 `content_entities`に触れないため同じく影響を受けないもの: `GET`/`DELETE /api/relations/{id}`、`PUT /api/relations/{id}/status`、`GET /api/relations`(一覧)、スキーマ系(`GET`/`POST /api/schemas`、`GET /api/schemas/active/{name}`、`GET /api/schemas/{schema_id}`、テンプレート系)、`GET /api/audit-log`、`GET`/`PUT /api/system/maintenance`。
 `POST /api/schemas`を`template_id`付きボディで呼ぶ場合は、`content_entities`には触れないものの知っておく価値のある部分的な例外である。
 `identity_templates::resolve_template_definition`を`ctx.db`に対して呼び出しており、これはリクエスト自身のトランザクションが開いたままの状態で取得する2本目の接続である。

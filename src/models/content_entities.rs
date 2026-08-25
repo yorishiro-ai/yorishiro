@@ -826,6 +826,8 @@ pub async fn undo_job(
     let mut restored = 0i64;
     let mut missing = 0i64;
 
+    let is_sqlite = conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+
     for snap in &snapshots {
         // `snap.entity_id` is already workspace-scoped by the query above, so no extra filter is needed on the write.
         let active = ActiveModel {
@@ -835,8 +837,22 @@ pub async fn undo_job(
             schema_version: ActiveValue::Set(snap.schema_version),
             ..Default::default()
         };
-        match active.update(conn).await {
-            Ok(_) => restored += 1,
+        // `active.update(conn)` decodes its return value as a full `Model`, which fails on SQLite
+        // the same way `content_entities::update`'s own write used to (see `update_and_fetch`):
+        // SeaORM's `pgvector::Vector` decode support unconditionally errors on any SQLite row.
+        // `update_without_returning` sidesteps that decode; the caller here only needs the
+        // `Ok`/`RecordNotUpdated`/other-error outcome, not the row itself, so there's no read-back
+        // to add on top of it the way `update_and_fetch` needs one. It still calls `before_save`
+        // (unlike the raw `Entity::update(...)` builder `update_and_fetch` avoided using for the
+        // same `updated_at`-staleness reason), and still raises `DbErr::RecordNotUpdated` when no
+        // row matches, so the `match` below needs no branch of its own.
+        let result = if is_sqlite {
+            active.update_without_returning(conn).await.map(|_| ())
+        } else {
+            active.update(conn).await.map(|_| ())
+        };
+        match result {
+            Ok(()) => restored += 1,
             Err(DbErr::RecordNotUpdated) => missing += 1,
             Err(err) => return Err(err).internal(),
         }
@@ -973,5 +989,80 @@ mod sqlite_tests {
 
         let after_delete = count(&db, workspace_id).await.expect("count after delete");
         assert_eq!(after_delete, 0);
+    }
+
+    /// `undo_job` calls `ActiveModel::update(conn)` directly (not through `content_entities::update`),
+    /// so it needed its own SQLite branch rather than inheriting `update_and_fetch`'s. Regresses
+    /// both outcomes its `match` distinguishes: a snapshot whose entity still exists (`restored`)
+    /// and one whose entity was deleted since (`missing`, via `DbErr::RecordNotUpdated`).
+    #[tokio::test]
+    async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
+        let (db, workspace_id) = seeded_sqlite_db().await;
+
+        let input = CreateEntityInput {
+            schema_name: "notes".into(),
+            entity_type: "note".into(),
+            data: serde_json::json!({"title": "original"}),
+        };
+        let created = create(&db, workspace_id, input, None)
+            .await
+            .expect("create");
+
+        let schema_id = super::get(&db, workspace_id, created.id)
+            .await
+            .expect("get")
+            .schema_id;
+        let job_id = uuid::Uuid::now_v7();
+
+        // A snapshot for the entity that still exists: `undo_job` should restore it.
+        let existing_snapshot_id = uuid::Uuid::now_v7();
+        db.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "INSERT INTO content_entity_snapshots \
+                (id, job_id, workspace_id, entity_id, schema_id, schema_version, data) \
+             VALUES ($1, $2, $3, $4, $5, 1, $6)",
+            [
+                existing_snapshot_id.into(),
+                job_id.into(),
+                workspace_id.into(),
+                created.id.into(),
+                schema_id.into(),
+                serde_json::json!({"title": "restored"}).to_string().into(),
+            ],
+        ))
+        .await
+        .expect("insert snapshot for the existing entity");
+
+        // A snapshot for an entity that no longer exists: `undo_job` should count it as missing,
+        // not fail the whole batch.
+        let deleted_entity_id = uuid::Uuid::now_v7();
+        let missing_snapshot_id = uuid::Uuid::now_v7();
+        db.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "INSERT INTO content_entity_snapshots \
+                (id, job_id, workspace_id, entity_id, schema_id, schema_version, data) \
+             VALUES ($1, $2, $3, $4, $5, 1, $6)",
+            [
+                missing_snapshot_id.into(),
+                job_id.into(),
+                workspace_id.into(),
+                deleted_entity_id.into(),
+                schema_id.into(),
+                serde_json::json!({"title": "gone"}).to_string().into(),
+            ],
+        ))
+        .await
+        .expect("insert snapshot for the deleted entity");
+
+        let report = super::undo_job(&db, workspace_id, job_id)
+            .await
+            .expect("undo_job");
+        assert_eq!(report.restored, 1);
+        assert_eq!(report.missing, 1);
+
+        let restored = super::get(&db, workspace_id, created.id)
+            .await
+            .expect("get after undo");
+        assert_eq!(restored.data["title"], "restored");
     }
 }
