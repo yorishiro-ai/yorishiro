@@ -220,9 +220,15 @@ async fn insert_and_fetch(
 ///
 /// `active.id` must already be `ActiveValue::Unchanged`/`Set` to an existing row's id: unlike
 /// `insert_and_fetch`, this never generates one.
-/// `Entity::update(active).exec_without_returning(conn)` returns `DbErr::RecordNotUpdated` when
-/// no row matches, the same error `ActiveModelTrait::update` raises, so callers matching on that
-/// variant (`undo_job`) see no change in behavior.
+/// Uses `ActiveModelTrait::update_without_returning`, not `Entity::update(active)`
+/// (`insert_and_fetch`'s insert-side equivalent): `update_without_returning` still calls
+/// `ActiveModelBehavior::before_save` before executing (confirmed against `sea-orm` 2.0.2's
+/// source), unlike the raw `Entity::update(...)` builder, so `updated_at` still gets stamped on
+/// SQLite instead of silently staying stale. `Entity::insert(active)` has no such
+/// `_without_returning` trait method to reach for on the insert side, which is why
+/// `insert_and_fetch` calls `sqlite_generated_id` directly instead.
+/// Returns `DbErr::RecordNotUpdated` when no row matches, the same error `ActiveModelTrait::update`
+/// raises, so callers matching on that variant (`undo_job`) see no change in behavior.
 async fn update_and_fetch(
     conn: &impl ConnectionTrait,
     active: ActiveModel,
@@ -238,10 +244,7 @@ async fn update_and_fetch(
                 )));
             }
         };
-        Entity::update(active)
-            .exec_without_returning(conn)
-            .await
-            .internal()?;
+        active.update_without_returning(conn).await.internal()?;
         select_record_columns(conn, Entity::find().filter(Column::Id.eq(id)))
             .into_model::<EntityRecord>()
             .one(conn)
@@ -959,6 +962,12 @@ mod sqlite_tests {
         .await
         .expect("update");
         assert_eq!(updated.data["title"], "second");
+        assert!(
+            updated.updated_at > created.updated_at,
+            "updated_at should advance on update: created {:?}, updated {:?}",
+            created.updated_at,
+            updated.updated_at
+        );
 
         delete(&db, workspace_id, created.id).await.expect("delete");
 
