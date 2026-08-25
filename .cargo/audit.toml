@@ -5,10 +5,14 @@
 # paste (unmaintained): transitive dep of tokenizers. tokenizers hasn't
 # migrated to pastey yet. No security vulnerability, just maintenance status.
 # rsa (Marvin Attack): transitive dep of rmcp, no patched version exists
-# rkyv (uninit-vec read/write, RUSTSEC-2026-0235): Cargo.lock lists it as an
-# optional dependency of rust_decimal, but `cargo tree -p rust_decimal` shows
-# this workspace never enables rust_decimal's rkyv feature, so it is not part
-# of the compiled dependency graph.
+# rkyv (out-of-bounds read via rkyv::access/from_bytes on untrusted archives,
+# RUSTSEC-2026-0235): transitive dep of rust_decimal (pulled in by sea-orm and
+# by loco-rs via byte-unit), but rkyv support is one of rust_decimal's opt-in
+# features and nothing in this workspace enables it. `cargo tree -p
+# rust_decimal --target all -e features` shows only arrayvec and serde as
+# enabled deps; rkyv appears in Cargo.lock (which lists every optional dep
+# regardless of activation) but not in the compiled graph. Re-check this if
+# rust_decimal's requested features ever change.
 ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2023-0071", "RUSTSEC-2026-0235"]
 
 [yanked]
