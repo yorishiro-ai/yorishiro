@@ -27,7 +27,7 @@ loco-rs = { workspace = true }
 tokio.workspace = true
 axum.workspace = true
 async-trait.workspace = true
-jsonwebtoken = { version = "9" }
+jsonwebtoken = { version = "10" }
 serde.workspace = true
 serde_yaml_ng = { version = "0.10" }
 chrono.workspace = true
