@@ -151,6 +151,22 @@ pub struct DbHandle {
     pub identity: PgPool,
 }
 
+/// A UUIDv7 for a primary key `before_save` hook to set on SQLite, or `ActiveValue::NotSet` to leave the column alone.
+///
+/// PostgreSQL's `id UUID PRIMARY KEY DEFAULT uuidv7()` (see `migration/src/helpers.rs::uuidv7_pk`) has no SQLite equivalent, so on that backend every insert must supply its own id or hit `NOT NULL constraint failed`.
+/// Every `ActiveModelBehavior::before_save` for a `uuidv7_pk`-keyed entity calls this and assigns the result to `self.id` unconditionally: the `NotSet` case is exactly "leave whatever the caller already put there," so it is always safe to assign, not just on the SQLite branch.
+/// Callers that set `id` explicitly (e.g. `ee/`'s official-templates publisher inserting a fixed nil-UUID infrastructure tenant) are respected because this only fires when the field is still unset.
+pub fn sqlite_generated_id(
+    conn: &impl ConnectionTrait,
+    current: sea_orm::ActiveValue<Uuid>,
+) -> sea_orm::ActiveValue<Uuid> {
+    if current.is_not_set() && conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        sea_orm::ActiveValue::Set(Uuid::now_v7())
+    } else {
+        current
+    }
+}
+
 /// Serializes a transaction against others naming the same `key`, until it commits.
 ///
 /// The lock is transaction-scoped, so it releases on commit or rollback without an unlock call to forget.

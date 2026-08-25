@@ -65,17 +65,12 @@ pub async fn create_tenant(
         }
     }
 
-    let mut active = identity_tenants::ActiveModel {
+    let active = identity_tenants::ActiveModel {
         name: ActiveValue::Set(name.to_string()),
         max_workspaces: ActiveValue::Set(None),
         ..Default::default()
     };
-    // `id` has a uuidv7() column default on Postgres and no default at all on SQLite (see migration/src/helpers.rs::uuidv7_pk), so this is the one column create_tenant must set itself on that backend.
-    // Postgres is left on its column default, not switched to this: generating ids in the database is the existing behavior and this function has no reason to change it.
-    // This is the only insert path this single-tenant guard needs to run on SQLite; every other ActiveModel insert in this codebase has the same gap and is unaddressed here.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        active.id = ActiveValue::Set(Uuid::now_v7());
-    }
+    // `id` on SQLite is filled in by identity_tenants::ActiveModel's before_save (crate::db::sqlite_generated_id), not here.
     active.insert(conn).await.internal()
 }
 
@@ -213,7 +208,9 @@ pub async fn add_member(
 ) -> Result<(), YorishiroError> {
     use sea_orm::sea_query::OnConflict;
 
+    // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
     let active = identity_tenant_memberships::ActiveModel {
+        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         user_id: ActiveValue::Set(user_id),
         role: ActiveValue::Set(role.as_db_str().to_string()),

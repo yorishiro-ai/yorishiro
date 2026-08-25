@@ -5,12 +5,16 @@
 Yorishiroのマイグレーション(`migration/`)は、PostgreSQLだけでなくSQLite上でも正しいスキーマを生成する。
 本ドキュメントは、現時点で何がカバーされていて何がカバーされていないかを説明する。
 
-## 現状: スキーマと単一テナントガード
+## 現状: スキーマ、単一テナントガード、そして`/setup` → `/whoami`
 
-`src/db.rs`と`Hooks::after_context`(`src/app.rs`)は、いまもPostgreSQL専用の接続(生の`sqlx::PgPool`と、それをラップするSeaORMの`DatabaseConnection`)しか構築しないため、アプリケーション本体はまだSQLiteファイルに対してエンドツーエンドでは動作しない。
-現時点で存在し、テストで確認されているのは次の2つである。
-SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができること、そして`tenancy::create_tenant`がSQLiteの`DatabaseConnection`に対して呼ばれたとき、`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制すること。
-実際に動作するアプリケーション(2プール構成、RLSスコープ付きのリクエスト処理)をSQLiteファイルへ接続させる配線は、別の、後続の作業である。
+SQLiteのURLに対して`Migrator::up`を実行すると正しく完全なスキーマができ、`tenancy::create_tenant`は`YORISHIRO_MAX_TENANTS`とは無関係に単一テナントの上限を強制する。それに加えて、アプリケーション本体もいまやSQLiteファイルに対して実際に起動し、`POST /setup`と`GET /api/whoami`を実際に処理する。setupはそのデプロイメントの唯一のテナント・ワークスペース・ユーザー・APIキーを作成し、`/whoami`はそのキーを認証して解決されたアイデンティティを返す。
+テナントを作成しうるもう1つの経路である`POST /auth/signup`もSQLite上で動作し、上限に達すると2回目の`/setup`呼び出しと同様、`409`とSQLite固有の対処メッセージで拒否される。
+
+`Authorized<R>`、`AuditAuthorized`、`Verified<R>`のいずれかの抽出器を使う認証済みルートは、まだ移植されていない。これらはいまも無条件に`db_handle()`を呼び出しており、このバックエンドでは`DbHandle`が一切構築されないため(後述「バックエンド分岐ロジックの置き場所」を参照)、`DbHandle missing`で失敗する。
+SQLite用の分岐を持つのは`AuthContext`(スコープもトランザクションも持たない)だけである。
+
+`config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。`tests/`はいまもPostgreSQL専用のままである。
+`queue:`ブロックは無く(`ForegroundBlocking`ワーカー)、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
 
 ## SQLiteが想定する用途
 
@@ -34,10 +38,9 @@ SQLiteは同時に1つの書き込みトランザクションしか許さない�
 PostgreSQL上でロックが塞いでいるTOCTOUは、SQLite上では黙って矛盾した書き込みが通るのではなく、リトライ可能なエラーとして現れる形になる。
 この根拠の詳細、および1トランザクション内で複数行を書き込む他のロック呼び出し箇所もこれで説明がつく理由は、`lock_for_update`のドキュメントコメントを参照。
 
-`identity_tenants::ActiveModel`の`id`カラムは、PostgreSQLでは`uuidv7()`のデフォルト値を持つが、SQLiteでは(後述の通り)デフォルト値を一切持たない。
-そのため`create_tenant`は、SQLiteの分岐でのみ`id`を自分で設定し(`Uuid::now_v7()`)、PostgreSQL側はカラムのデフォルト値のまま変更しない。
-このコードベースの他のすべての`ActiveModel`によるINSERT箇所にも、SQLite上では同じデフォルト値欠如の問題があるが、このガードではそこまでは対応していない。
-一般的な修正は、`src/db.rs`のSQLite接続経路が実装されるときに合わせて行う。
+`uuidv7()`をデフォルト値に持つすべての`id`カラム(`identity_tenants`、`identity_workspaces`、`identity_users`、`identity_tenant_memberships`、`identity_api_keys`)は、`ActiveModelBehavior::before_save`を通じてSQLite上で自分のidを生成する。この`before_save`は`db::sqlite_generated_id(conn, self.id)`を呼び出し、`id`がすでに`Set`済みか、バックエンドがPostgreSQLの場合はno-op、それ以外は`Uuid::now_v7()`を返す。
+これは通常の`ActiveModel::insert()`/`.save()`呼び出しはすべてカバーするが、`Entity::insert(active).on_conflict(...).exec(conn)`はカバーしない。このビルダー経路は`before_save`を呼び出さないため(`sea-orm` 2.0.2のソースで確認済み)、これを使っている唯一の呼び出し箇所である`tenancy::add_member`は、フックに頼らず`id`を明示的に設定している。
+今後`on_conflict`を使うINSERTを追加する場合も、同様に明示的な対応が必要であり、`before_save`だけではカバーされない。
 
 ## PostgreSQL版スキーマとの違いとその理由
 
@@ -45,7 +48,7 @@ PostgreSQL固有の機能はSQLiteに対応物が無いため、近似で置き�
 
 - **ロール、GRANT、行レベルセキュリティ。** 単一テナント・単一ファイルのデータベースには分離すべき第二のテナントが存在しないため、ロールやポリシーが守るべき対象そのものが無い。
 - **`authenticate_api_key`(SECURITY DEFINER関数)。** PostgreSQL上でこの関数が存在するのは、未認証の呼び出し元からはRLSが隠すはずの行を読むためだけである。SQLiteにはRLSが無いので回避すべき対象も無く、アプリケーションはこのバックエンドでは`identity_api_keys`/`identity_workspaces`を直接クエリする。
-- **カラムのデフォルト値としての`uuidv7()`。** SQLiteにはこの関数が無いため、このバックエンドでは`id`カラムにデフォルト値を持たせない。すべてのINSERTはアプリケーション側でidを渡す必要がある。現時点でそれを実際に行っているのは`tenancy::create_tenant`(後述「単一テナントガード」)だけであり、このコードベースの他の`ActiveModel`によるINSERTはいまもPostgres専用のカラムデフォルトに依存しているため、更新されるまでは同じ理由でSQLiteに対して失敗する。
+- **カラムのデフォルト値としての`uuidv7()`。** SQLiteにはこの関数が無いため、このバックエンドでは`id`カラムにデフォルト値を持たせない。すべてのINSERTはアプリケーション側でidを渡す必要がある。`uuidv7_pk`でキーが振られた5つのエンティティが`before_save`経由でこれをどう扱っているかは、前述「単一テナントガード」を参照。
 
 SQLiteでも表現はできるが構文が異なるものは、バックエンドごとに同じ保証を2通りの書き方で実装している。
 
@@ -62,12 +65,16 @@ SQLiteでも表現はできるが構文が異なるものは、バックエン�
 
 ## バックエンド分岐ロジックの置き場所
 
-`migration/src/helpers.rs`に、バックエンドで条件分岐するヘルパー(`enable_rls_with_policy`、`grant`、`pg_only`、`sqlite_only`、`create_table_with_checks`、`uuidv7_pk`)がすべてまとまっており、それぞれが`manager.get_database_backend()`を確認する。
+`migration/src/helpers.rs`に、マイグレーション用のバックエンド条件分岐ヘルパー(`enable_rls_with_policy`、`grant`、`pg_only`、`sqlite_only`、`create_table_with_checks`、`uuidv7_pk`)がすべてまとまっており、それぞれが`manager.get_database_backend()`を確認する。
 各マイグレーションファイルはバックエンドを自分で判定するのではなく、これらのヘルパーを呼び出す形をとる。
 結果として生成されるPostgreSQLのスキーマ(すべてのテーブル、カラム、制約名、インデックス、ポリシー、GRANT)は、SQLite対応が入る前と変わっていない。
 一部の制約を発行するSQL文自体は`create_table_with_checks`/`pg_only`経由に書き換わっており、`identity_maintenance`の3つのCHECKは、以前は1回の`execute_unprepared`呼び出しにセミコロン区切りの`ALTER TABLE`文を3つまとめていたものが、いまは同じ効果を持つ3回の別々の呼び出しになっている。
 
-## 現在のSQLite出力に関する2つの注意点
+アプリケーション層では、`Hooks::after_context`(`src/app.rs`)が`DbHandle`やデフォルトの`Authenticator`を構築する前に`ctx.db.get_database_backend() != DatabaseBackend::Sqlite`を確認し、`AuthContext`の`FromRequestParts`実装(`src/controllers/extractors.rs`)も同じ条件を確認して、`services::auth::authenticate_sqlite`/`touch_last_used_sqlite`とPostgreSQL用の`Authenticator`のどちらを使うかを選ぶ。
+`db::sqlite_generated_id`(`before_save`から呼ばれる。前述「単一テナントガード」を参照)も同様に`conn.get_database_backend()`を確認する。
+どの分岐も設定フラグや環境変数を読んで判定するのではなく、常にその場の接続から読み取っている。
+
+## 現在のSQLite経路に関する注意点
 
 SQLiteは既定では外部キーを強制しない。
 接続側が自分で`PRAGMA foreign_keys = ON`を実行する必要がある。
@@ -75,3 +82,7 @@ SQLiteは既定では外部キーを強制しない。
 
 SQLite上の`CURRENT_TIMESTAMP`は、sea_queryが`timestamp_with_timezone_text`と名付けたカラムに対して、`YYYY-MM-DD HH:MM:SS`(オフセット無し)という形式でレンダリングされる。
 このカラムはその名前とは裏腹に、実体はただのSQLiteの`TEXT`カラムであり、PostgreSQLの`timestamptz`のようなタイムゾーン対応のストレージはこのバックエンドには存在しない。
+このカラムのデフォルト値経由で書き込まれた値と、アプリケーションが書き込んだ値(`chrono::Utc::now()`、例えば`touch_last_used_sqlite`による`last_used_at`の更新)は、同じカラムの中で異なるテキスト形式になる —`2026-08-24 14:27:08`と`2026-08-24T15:37:02.437013178+00:00`。パースすればどちらもタイムスタンプとして正しく比較できるが、文字列としては比較できない。このコードベースには現時点でこれらのカラムを生の文字列比較で並べ替えている箇所は無いが、将来そうするクエリを書く場合はまずパースが必要になる。
+
+`sqlx::postgres::PgPoolOptions::connect`は、`sqlite://`のURLに対してエラーを返さない —無期限にハングする(直接プローブして確認済み)。
+これが、`after_context`のPostgreSQLプール構築をSQLite上では試みて早期に失敗させるのではなく、丸ごとスキップしている理由である。このバックエンドでこのコード経路に実際に到達すると、診断可能なエラーを出す代わりに、ログ出力の無いままブート自体がハングしてしまう。

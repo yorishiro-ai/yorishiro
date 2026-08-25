@@ -114,9 +114,19 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let headers = header_pairs(parts);
 
         let app_ctx = AppContext::from_ref(state);
+
+        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to abstract over, so this authenticates directly against ctx.db instead of going through the Authenticator seam.
+        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
+                .await
+                .inspect_err(|err| log_auth_rejection(parts, err))?;
+            auth::touch_last_used_sqlite(&app_ctx.db, ctx.api_key_id).await;
+            return Ok(AuthContext(ctx));
+        }
+
+        let headers = header_pairs(parts);
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 

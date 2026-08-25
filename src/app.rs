@@ -44,30 +44,37 @@ impl Hooks for App {
         Ok(vec![])
     }
 
-    /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store`.
+    /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store` — PostgreSQL only.
     ///
     /// Loco's own database connection (`ctx.db`, a `sea_orm::DatabaseConnection`) is built from `sea_orm::ConnectOptions`, which has no `after_connect`/`after_release` hook.
     /// This deployment's row-level security depends on a `SET ROLE` per physical connection and `set_config(...)` per request, so that lifecycle is built separately here, on a hand-constructed `sqlx::PgPool`, and stored for handlers to retrieve via `ctx.shared_store.get_ref::<crate::db::DbHandle>()`.
+    ///
+    /// On SQLite, none of this runs: `sqlx::postgres::PgPoolOptions::connect` on a `sqlite://` URL doesn't error, it hangs indefinitely (confirmed by direct probe), so this whole block must not be reached at all rather than be expected to fail fast.
+    /// SQLite has no second tenant to isolate with RLS in the first place (see `docs/sqlite.md`), so `DbHandle`/`Authenticator` are simply not built for it: `crate::controllers::extractors` branches on `ctx.db.get_database_backend()` and authenticates directly against `ctx.db` instead of going through the `Authenticator` seam, which is a PostgreSQL/`ee/`-only concept on a deployment with no `ee/` and one backend.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
-        let database_url = ctx.config.database.uri.clone();
-        let tenant =
-            crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
+        if ctx.db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+            let database_url = ctx.config.database.uri.clone();
+            let tenant =
+                crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
+                    .await
+                    .map_err(|e| {
+                        loco_rs::Error::Message(format!("failed to build tenant pool: {e}"))
+                    })?;
+            // The identity pool connects as the migration role (bypassing RLS) for control-plane access: signup, setup, the admin CLI.
+            // No after_connect/after_release, since it never scopes to a tenant/workspace.
+            let identity = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(ctx.config.database.max_connections)
+                .connect(&database_url)
                 .await
                 .map_err(|e| {
-                    loco_rs::Error::Message(format!("failed to build tenant pool: {e}"))
+                    loco_rs::Error::Message(format!("failed to build identity pool: {e}"))
                 })?;
-        // The identity pool connects as the migration role (bypassing RLS) for control-plane access: signup, setup, the admin CLI.
-        // No after_connect/after_release, since it never scopes to a tenant/workspace.
-        let identity = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(ctx.config.database.max_connections)
-            .connect(&database_url)
-            .await
-            .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
-        ctx.shared_store
-            .insert(crate::db::DbHandle { tenant, identity });
-        // The authenticator seam: a deployment that needs a different authentication rule (a key naming its workspace per request, an external identity system) replaces this insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
-        ctx.shared_store
-            .insert(crate::services::auth::default_authenticator());
+            ctx.shared_store
+                .insert(crate::db::DbHandle { tenant, identity });
+            // The authenticator seam: a deployment that needs a different authentication rule (a key naming its workspace per request, an external identity system) replaces this insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
+            ctx.shared_store
+                .insert(crate::services::auth::default_authenticator());
+        }
         // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the error to the first search.
         let embedding_provider =
             crate::services::embedding::build_embedding_provider().map_err(|e| {
