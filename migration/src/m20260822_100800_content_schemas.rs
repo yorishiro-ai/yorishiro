@@ -123,7 +123,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Partial index: create_index has no WHERE-clause support, so raw SQL per the porting instructions.
+        // Partial index: create_index has no WHERE-clause support, so this uses raw SQL.
         // SQLite supports the same WHERE syntax on CREATE INDEX, so this runs unchanged on both backends.
         manager
             .get_connection()

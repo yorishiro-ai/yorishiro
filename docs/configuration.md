@@ -2,7 +2,7 @@
 
 **English** | [日本語](ja/configuration.md)
 
-This is not a full settings reference: it covers the embedding provider, the per-workspace search token quota, and `config/production.yaml`'s queue tuning, the areas the Loco rebuild's most recent slices touched.
+This is not a full settings reference: it covers the embedding provider, the per-workspace search token quota, and `config/production.yaml`'s queue tuning.
 Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings on this branch.
 
 ## Embedding provider
