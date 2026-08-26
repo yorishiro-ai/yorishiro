@@ -78,7 +78,7 @@ BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサ
 
 ## キューのバックエンドと調整(`config/development.yaml`、`config/production.yaml`)
 
-`queue.kind`は起動時に切り替え可能である。loco-rs は3種のキュープロバイダ(Postgres、SQLite、Redis/Valkey。`QueueConfig`の`#[serde(tag = "kind")]`バリアント)を持ち、それぞれ必要な設定項目が異なる(Redis だけが`queues`を持ち、Postgres/SQLite は SQL プール系の設定を共有しつつ異なる URI を指す)ためである。`development.yaml`・`production.yaml`とも、1つの固定形の中で個々のフィールドをテンプレート化するのではなく、`kind`ごとに`queue:`ブロック全体を Tera の`<% if %>`/`<% elif %>`/`<% endif %>`で切り替える。
+`queue.kind`は起動時に切り替え可能である。loco-rs は3種のキュープロバイダ(Postgres、SQLite、Redis/Valkey。`QueueConfig`の`#[serde(tag = "kind")]`バリアント)を持ち、それぞれ必要な設定項目が異なる(Redis だけが`queues`を持ち、Postgres/SQLite は SQL プール系の設定を共有しつつ異なる URI を指す)。この違いを1つの固定形で吸収するのは無理があるので、`development.yaml`・`production.yaml`とも`kind`ごとに`queue:`ブロック全体を、Tera の`<% if %>`/`<% elif %>`/`<% endif %>`で丸ごと切り替える形にした。
 
 | 変数 | 説明 |
 |---|---|
@@ -96,7 +96,7 @@ BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサ
 
 `cargo loco start --worker[=tag1,tag2]`(`yorishiro_core-cli`/`yorishiro_server` どちらでも同じ loco-rs 自身の CLI を共有するので同じ形で使える)は、HTTPサーバを起動せずキューのワーカーループだけを現在のプロセスで動かす。`--worker` を値なしで指定すると全てのタグ無しジョブを引き受け、`--worker=worker-class:official` はそのプロセスをそのタグのジョブに限定する(`WorkerClass::tag()`、`src/workers/embedding_sync.rs`)。別ホストの別プロセスであっても、自分の config がサーバと同じ `queue.uri`/`QUEUE_URL` と `database.uri`/`DATABASE_URL` を指してさえいれば足り、追加のネットワーク層や共有シークレット、ノード登録の手順は不要である。
 
-**ワーカー専用プロセスも、キュー接続だけでなくサーバと同じ config 一式を必要とする。** `Hooks::after_context`(src/app.rs)は loco-rs のどの StartMode でも無条件に実行され、これは `--worker` 専用プロセスも例外ではない。そのプロセスが実際にリクエストを処理するかどうかに関わらず、`DATABASE_URL` に対して RLS 対応のテナントプールと migration ロールの identity プールを構築し、embedding provider の設定が誤っていれば起動そのものを失敗させる(「Boot fails loudly ... rather than deferring the error to the first search」というコメント自体が、これが意図的な設計であることを明示している)。`EmbeddingSyncWorker::perform` は実際にこの両方を使う。エンティティを再取得するために `ctx.db` を読み、`resolve_embedding_provider` を呼ぶが、これにはサーバと同じ `YORISHIRO_EMBEDDING_*` 環境変数(またはワークスペース自身の割り当て)が必要である。キュー接続だけを設定したワーカーノードは、静かに失敗するのではなく起動時点で失敗する。ここで運用者が陥りやすい誤解は「ワーカーはキューだけ見ればいい」という思い込みで、それ以外の設定を省略してしまうことである。
+**ワーカー専用プロセスも、キュー接続だけでなくサーバと同じ config 一式を必要とする。** `Hooks::after_context`(src/app.rs)は loco-rs のどの StartMode でも無条件に実行され、これは `--worker` 専用プロセスも例外ではない。そのプロセスが実際にリクエストを処理するかどうかに関わらず、`DATABASE_URL` に対して RLS 対応のテナントプールと migration ロールの identity プールを構築し、embedding provider の設定が誤っていれば起動そのものを失敗させる(「Boot fails loudly ... rather than deferring the error to the first search」というコメント自体が、これが意図的な設計であることを明示している)。`EmbeddingSyncWorker::perform` は実際にこの両方を使う。エンティティを再取得するために `ctx.db` を読み、`resolve_embedding_provider` を呼ぶが、これにはサーバと同じ `YORISHIRO_EMBEDDING_*` 環境変数(またはワークスペース自身の割り当て)が必要である。だからキュー接続だけを設定したワーカーノードは、起動した瞬間に落ちる。「ワーカーはキューだけ見ればいい」という思い込みで他の設定を省いてしまう運用者にとっては、ここが一番踏みやすい落とし穴になる。
 
 **どの `WorkerClass` のタグにも購読するプロセスを、最低1つ残しておく必要がある。** `EmbeddingSyncWorker::tags()` 自身のドキュメントコメントがこの点をコード上で説明しているが、これは仮想的な将来のプロセスだけでなく、`--worker=tag1,tag2` で実際に起動するノードにも同様に当てはまる。稼働中の全ワーカープロセスがタグ限定で、`worker-class:tenant-private`・`worker-class:official`・`worker-class:shared` の全てを購読するプロセスが1つも無い場合、どのプロセスもカバーしていないクラスのジョブは `pg_loco_queue`/`sqlt_loco_queue` の中に永久に滞留し、誰にもデキューされない。`worker-class:official` 専用ノードを追加するデプロイは、`Shared` および他のどのクラスもカバーしていないプロセスがある場合、タグ無しで動くプロセス(値なしの `--worker`、あるいは `--server-and-worker`/`--all`)を最低1つ残す(または追加する)必要がある。
 
