@@ -48,6 +48,9 @@ Runs a BERT-family ONNX model in-process, with no external embedding service.
 |---|---|
 | `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file (default: `models/model.onnx`). Not bundled with the repository or fetched automatically; boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if either file is missing |
 | `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json` (default: `models/tokenizer.json`). Same missing-file behaviour as `YORISHIRO_ONNX_MODEL_PATH` |
+| `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`) |
+| `YORISHIRO_ONNX_POOLING` | `mean` (default) or `last_token` (also accepts `last-token`/`lasttoken`). An unrecognized value is rejected at boot rather than silently falling back to `mean`: reading a model with the wrong pooling doesn't fail, it just returns worse vectors, and defaulting quietly on a typo would hide exactly that degradation |
+| `YORISHIRO_ONNX_QUERY_INSTRUCTION` | Instruction text embedded into a search query only, never into a stored document, for asymmetric models that expect one on the query side (rendered as `Instruct: {instruction}\nQuery:{text}`). Unset by default, which makes this exactly a plain `embed` call, the right behaviour for a symmetric model. An empty string is treated the same as unset, not as "prefix with nothing": clearing the variable is how an operator turns the instruction back off |
 
 Building with this provider compiled in pulls in the `ort` crate, whose default `download-binaries` feature fetches an onnxruntime binary from `cdn.pyke.io` at build time; point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime if the build environment must be closed off.
 
