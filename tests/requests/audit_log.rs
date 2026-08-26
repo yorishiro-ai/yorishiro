@@ -36,7 +36,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
     let owner = tenancy::create_user(
         &ctx.db,
         &format!("owner-{tenant_name}@example.com"),
-        "hunter2-hunter2",
+        super::TEST_PASSWORD,
         None,
     )
     .await

@@ -10,6 +10,12 @@ mod system;
 mod template_library;
 mod workspaces;
 
+/// A fixed, non-secret password used only to satisfy `identity_users.password_hash`'s `NOT NULL` constraint in a request test's own fixture setup.
+/// Not read back by anything this suite asserts on.
+///
+/// Experiment (2026-08-26): extracted from a repeated literal into this single constant to test whether that clears CodeQL's `rust/hard-coded-cryptographic-value` finding, currently open on 23 direct-call sites that pass the literal straight into a typed function argument (`docs/ja` doesn't cover this; see the PR this constant was introduced in for the investigation).
+pub(crate) const TEST_PASSWORD: &str = "hunter2-hunter2";
+
 /// `after_context` opens two pools Loco's own request-test harness knows nothing about: the identity pool and the tenant pool.
 /// Leaving either open means a session survives on the throwaway test database, and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
 /// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
