@@ -85,7 +85,7 @@ MCPツールはコントローラと同じくエントリポイントである�
 
 ```sh
 make check          # cargo check --workspace
-make clippy         # cargo clippy --workspace --all-targets -- -D warnings
+make clippy         # cargo clippy --workspace --tests -- -D warnings
 make fmt-check      # cargo fmt --check
 make test           # cargo test --workspace
 ```

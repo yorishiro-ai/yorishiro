@@ -55,6 +55,9 @@ BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサ
 |---|---|
 | `YORISHIRO_ONNX_MODEL_PATH` | `.onnx`モデルファイルへのパス(既定: `models/model.onnx`)。リポジトリに同梱されず、自動取得もされない。このファイルまたは`YORISHIRO_ONNX_TOKENIZER_PATH`のいずれかが無いと、両方のパスを名指ししたメッセージとともに起動が失敗する |
 | `YORISHIRO_ONNX_TOKENIZER_PATH` | トークナイザの`tokenizer.json`へのパス(既定: `models/tokenizer.json`)。ファイル欠如時の挙動は`YORISHIRO_ONNX_MODEL_PATH`と同じ |
+| `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`) |
+| `YORISHIRO_ONNX_POOLING` | `mean`(既定)または`last_token`(`last-token`・`lasttoken`という表記も受け付ける)。未知の値は`mean`へ黙って倒すのではなく起動時点で拒否する。プーリングを間違えたままモデルを読んでも失敗はせず、ただ質の悪いベクトルが返るだけなので、黙って既定値に落としてしまうとその劣化に気づけなくなる |
+| `YORISHIRO_ONNX_QUERY_INSTRUCTION` | 検索クエリを埋め込む際にのみ付与する指示文で、保存対象のドキュメント側には一切付かない。クエリ側に指示を要求する非対称なモデル向け(実際には`Instruct: {instruction}\nQuery:{text}`という形でレンダリングされる)。既定は未設定で、この場合は素の`embed`呼び出しとまったく同じになり、対称なモデルにはこれが正しい挙動になる。空文字列も未設定と同じ扱いで、「空の指示を付ける」ではない。変数をクリアするというのは、運用者がこの指示を外すときの操作である |
 
 このプロバイダを組み込んでビルドすると`ort`クレートが入る。
 `ort`の既定機能`download-binaries`はビルド時に`cdn.pyke.io`からonnxruntimeバイナリを取得する。
