@@ -73,8 +73,9 @@ queue:
 queue:
   kind: Postgres
 
-  # Postgres connection URI
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/loco_development") %>
+  # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the
+  # application itself connects to, so a plain `cargo loco start` needs only one database running.
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/loco_development")) %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
 
