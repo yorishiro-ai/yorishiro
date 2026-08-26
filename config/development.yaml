@@ -74,8 +74,14 @@ queue:
   kind: Postgres
 
   # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the
-  # application itself connects to, so a plain `cargo loco start` needs only one database running.
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/loco_development")) %>
+  # application itself connects to (database.uri below), so a plain `cargo loco start` needs only
+  # one database running. The innermost literal default must match database.uri's own literal
+  # default exactly: the two were out of sync before this comment (queue.uri's leftover
+  # `loco_development`, an unrenamed cargo-loco-generate scaffold default, against database.uri's
+  # correctly renamed `yorishiro-core_development`), which meant a plain `cargo loco start` with no
+  # DATABASE_URL/QUEUE_URL set would have pointed the queue at a database the application itself
+  # never connects to. QUEUE_URL now works as documented, and both defaults name the same database.
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_development")) %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
 
