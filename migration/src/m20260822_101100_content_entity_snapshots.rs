@@ -56,7 +56,7 @@ impl MigrationTrait for Migration {
 
         let db = manager.get_connection();
 
-        // DESC ordering on created_at: create_index has no per-column sort-direction support, so raw SQL per the porting instructions.
+        // DESC ordering on created_at: create_index has no per-column sort-direction support, so this uses raw SQL.
         db.execute_unprepared(
             "CREATE INDEX entity_snapshots_entity_idx \
              ON content_entity_snapshots (workspace_id, entity_id, created_at DESC);",
