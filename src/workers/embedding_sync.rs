@@ -3,12 +3,15 @@
 //! Replaces the `tokio::spawn` this deployment used before a queue provider existed: that stand-in lost every in-flight sync on a process restart, a forced kill, or a provider outage past its own retry budget, leaving the entity's `embedding` column permanently `NULL` with nothing to retry it (see `tasks::resync_embeddings`'s doc comment for the operational recovery command that gap required).
 //! `pg_loco_queue` persists the job in Postgres, so a re-deployed or restarted process resumes it instead of losing it.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::error::YorishiroError;
 use crate::models::content_entities;
 use crate::services::embedding;
 
@@ -38,6 +41,69 @@ impl WorkerClass {
             Self::Shared => "worker-class:shared",
         }
     }
+
+    /// The `snake_case` wire form this type already serializes to/from (`#[serde(rename_all = "snake_case")]`), exposed as a plain string for `ee/`'s own persistence (`identity_workspace_worker_classes`).
+    /// Storing this same string rather than inventing a second representation means a value read from the database and one read off `EmbeddingSyncArgs`'s own queue payload are byte-identical, so an operator inspecting either sees the same thing.
+    #[must_use]
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::TenantPrivate => "tenant_private",
+            Self::Official => "official",
+            Self::Shared => "shared",
+        }
+    }
+
+    /// The inverse of [`Self::as_db_str`].
+    ///
+    /// # Errors
+    /// Returns an error if `value` is not one of the three known strings: a row written by a future variant this binary doesn't know about, or a hand-edited/corrupted value.
+    pub fn from_db_str(value: &str) -> Result<Self, YorishiroError> {
+        match value {
+            "tenant_private" => Ok(Self::TenantPrivate),
+            "official" => Ok(Self::Official),
+            "shared" => Ok(Self::Shared),
+            other => Err(YorishiroError::Internal(anyhow::anyhow!(
+                "unknown worker_class value: {other:?}"
+            ))),
+        }
+    }
+}
+
+/// Resolves a workspace's own worker-class assignment, if it has one.
+///
+/// A seam, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`]: a deployment can let a workspace pin its embedding-sync jobs to a tenant-private or official-node worker instead of the shared pool, without touching the callers that enqueue a job.
+/// [`DefaultWorkerClassResolver`] is the behaviour of every deployment that does not replace it: every workspace's jobs stay `Shared`.
+///
+/// `conn` is `ctx.db`, not the RLS-scoped tenant pool, for the same reason `WorkspaceEmbeddingResolver` takes it: a per-workspace worker-class assignment is deployment configuration (which compute a tenant pays for), read the same way `identity_workspace_llm_keys`/`identity_workspace_embedding_keys` are, not tenant content.
+///
+/// Returns `Ok(None)` when the workspace has no assignment of its own, so the caller falls back to [`WorkerClass::Shared`] rather than this seam deciding the fallback itself.
+#[async_trait]
+pub trait WorkerClassResolver: Send + Sync {
+    async fn resolve(
+        &self,
+        conn: &sea_orm::DatabaseConnection,
+        workspace_id: Uuid,
+    ) -> Result<Option<WorkerClass>, YorishiroError>;
+}
+
+/// This crate's own rule: no workspace has a worker-class assignment, so every job stays `Shared`.
+pub struct DefaultWorkerClassResolver;
+
+#[async_trait]
+impl WorkerClassResolver for DefaultWorkerClassResolver {
+    async fn resolve(
+        &self,
+        _conn: &sea_orm::DatabaseConnection,
+        _workspace_id: Uuid,
+    ) -> Result<Option<WorkerClass>, YorishiroError> {
+        Ok(None)
+    }
+}
+
+/// The resolver a deployment gets when it does not choose one.
+#[must_use]
+pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
+    Arc::new(DefaultWorkerClassResolver)
 }
 
 /// Only `workspace_id`/`entity_id`, not the `EntityRecord` itself: the record is re-read from the database inside `perform`, so a create-then-update (or create-then-delete) racing ahead of a still-queued job is picked up as the entity's current state rather than overwriting it with whatever was true at enqueue time.
@@ -169,5 +235,32 @@ mod tests {
             serde_json::to_value(WorkerClass::Shared).unwrap(),
             serde_json::json!("shared")
         );
+    }
+
+    /// `as_db_str`/`from_db_str` must round-trip every variant, and must agree with the `snake_case` serde wire form above: `ee/`'s `identity_workspace_worker_classes` stores this same string, so a row read from the database and a value read off a queued job's payload must be indistinguishable.
+    #[test]
+    fn db_str_round_trips_and_matches_the_serde_wire_form() {
+        for class in [
+            WorkerClass::TenantPrivate,
+            WorkerClass::Official,
+            WorkerClass::Shared,
+        ] {
+            let db_str = class.as_db_str();
+            assert_eq!(
+                WorkerClass::from_db_str(db_str).unwrap(),
+                class,
+                "as_db_str/from_db_str must round-trip {class:?}"
+            );
+            assert_eq!(
+                serde_json::to_value(class).unwrap(),
+                serde_json::json!(db_str),
+                "{class:?}'s db string must match its serde wire form"
+            );
+        }
+    }
+
+    #[test]
+    fn from_db_str_rejects_an_unknown_value() {
+        assert!(WorkerClass::from_db_str("not-a-real-class").is_err());
     }
 }

@@ -116,6 +116,27 @@ pub(crate) async fn resolve_embedding_provider(
     }
 }
 
+/// The `WorkerClass` `workspace_id`'s queued jobs should carry: its own assignment through the `WorkerClassResolver` seam if it has one, `WorkerClass::Shared` otherwise.
+pub(crate) async fn resolve_worker_class(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+) -> Result<crate::workers::embedding_sync::WorkerClass, ApiError> {
+    let resolver = ctx
+        .shared_store
+        .get::<Arc<dyn crate::workers::embedding_sync::WorkerClassResolver>>()
+        .ok_or_else(|| {
+            ApiError(YorishiroError::Internal(anyhow::anyhow!(
+                "WorkerClassResolver missing"
+            )))
+        })?;
+
+    Ok(resolver
+        .resolve(&ctx.db, workspace_id)
+        .await
+        .map_err(ApiError)?
+        .unwrap_or(crate::workers::embedding_sync::WorkerClass::Shared))
+}
+
 /// See `db_handle`'s doc comment: also used by `services::mcp`.
 pub(crate) fn search_token_limiter(
     ctx: &AppContext,

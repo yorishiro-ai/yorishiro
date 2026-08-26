@@ -91,3 +91,27 @@ BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサ
 `config/test.yaml`には`queue:`ブロック自体が無く(理由は`.claude/rules/testing.md`を参照)、ここでの説明はいずれも当てはまらない。
 
 `config/sqlite.yaml`(手動確認用のSQLite階層、`docs/ja/sqlite.md`)も`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を、他の2環境と同じ形で設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は、アプリ自身のSQLite接続とは独立した`sqlx::SqlitePool`を自前で張る。`db.rs`のRLS対応プール経由ではない(SQLiteにはそもそもRLSが無い)ので、これは同じファイルであれ別のファイルであれ、本当に独立したプールになる。実ファイルに対して直接計測した結果: アプリが同じファイルに対して書き込みトランザクションを開いたままの状態でキュー側から並行して書き込むと、失敗はせず、sqlx自身の既定値である5秒の`busy_timeout`を待った上でロック解放後に成功した。このコードベース自身の実装では、`EmbeddingSyncWorker`のenqueue呼び出しはリクエスト自身の書き込みトランザクションが既にコミットされた後にしか実行されないため、この状況が1つのリクエストの中で発生することはない。問題になり得るとすれば、最初のリクエストの書き込みトランザクションがまだ開いている間に、別のリクエストが本当に並行して走るケースだけであり、`content_entities::create`自体は1回の`INSERT`で完結する短いトランザクションなので、5秒という猶予には十分な余裕がある。
+
+## サーバとは別プロセス・別ホストでワーカーを動かす
+
+`cargo loco start --worker[=tag1,tag2]`(`yorishiro_core-cli`/`yorishiro_server` どちらでも同じ loco-rs 自身の CLI を共有するので同じ形で使える)は、HTTPサーバを起動せずキューのワーカーループだけを現在のプロセスで動かす。`--worker` を値なしで指定すると全てのタグ無しジョブを引き受け、`--worker=worker-class:official` はそのプロセスをそのタグのジョブに限定する(`WorkerClass::tag()`、`src/workers/embedding_sync.rs`)。別ホストの別プロセスであっても、自分の config がサーバと同じ `queue.uri`/`QUEUE_URL` と `database.uri`/`DATABASE_URL` を指してさえいれば足り、追加のネットワーク層や共有シークレット、ノード登録の手順は不要である。
+
+**ワーカー専用プロセスも、キュー接続だけでなくサーバと同じ config 一式を必要とする。** `Hooks::after_context`(src/app.rs)は loco-rs のどの StartMode でも無条件に実行され、これは `--worker` 専用プロセスも例外ではない。そのプロセスが実際にリクエストを処理するかどうかに関わらず、`DATABASE_URL` に対して RLS 対応のテナントプールと migration ロールの identity プールを構築し、embedding provider の設定が誤っていれば起動そのものを失敗させる(「Boot fails loudly ... rather than deferring the error to the first search」というコメント自体が、これが意図的な設計であることを明示している)。`EmbeddingSyncWorker::perform` は実際にこの両方を使う。エンティティを再取得するために `ctx.db` を読み、`resolve_embedding_provider` を呼ぶが、これにはサーバと同じ `YORISHIRO_EMBEDDING_*` 環境変数(またはワークスペース自身の割り当て)が必要である。キュー接続だけを設定したワーカーノードは、静かに失敗するのではなく起動時点で失敗する。ここで運用者が陥りやすい誤解は「ワーカーはキューだけ見ればいい」という思い込みで、それ以外の設定を省略してしまうことである。
+
+**どの `WorkerClass` のタグにも購読するプロセスを、最低1つ残しておく必要がある。** `EmbeddingSyncWorker::tags()` 自身のドキュメントコメントがこの点をコード上で説明しているが、これは仮想的な将来のプロセスだけでなく、`--worker=tag1,tag2` で実際に起動するノードにも同様に当てはまる。稼働中の全ワーカープロセスがタグ限定で、`worker-class:tenant-private`・`worker-class:official`・`worker-class:shared` の全てを購読するプロセスが1つも無い場合、どのプロセスもカバーしていないクラスのジョブは `pg_loco_queue`/`sqlt_loco_queue` の中に永久に滞留し、誰にもデキューされない。`worker-class:official` 専用ノードを追加するデプロイは、`Shared` および他のどのクラスもカバーしていないプロセスがある場合、タグ無しで動くプロセス(値なしの `--worker`、あるいは `--server-and-worker`/`--all`)を最低1つ残す(または追加する)必要がある。
+
+**複数のワーカープロセス・ホストで実際に何が並列化されるかは、キューのバックエンドによって異なる。** これは上記の `YORISHIRO_QUEUE_WORKERS` の行が1プロセス内の `num_workers` について既に説明しているのと同じ区別である。Postgres の `pg_loco_queue` へのデキューは `FOR UPDATE SKIP LOCKED` を使うため、複数のプロセス(1ホストでも複数ホストでも)は実際に異なるジョブを並行してデキューできる。SQLite の `sqlt_loco_queue` へのデキューは `BEGIN IMMEDIATE` を使い、これはファイルの唯一の書き込みロックを取得するため、同じ SQLite ファイルを指す2つ目のプロセスは、最初のプロセスの後ろに直列化される。SQLite バックエンドのキューに対して複数のワーカープロセスを動かすことは、耐障害性(最初のプロセスが落ちた場合に別のプロセスが引き継ぐ)は得られるが、スループットの向上にはならない。
+
+### ワークスペース自身のワーカークラス割り当て(有償版)
+
+`PUT /hosted/workspace/worker-class` は、1つのワークスペースの `EmbeddingSyncWorker` ジョブだけを、共有プールの代わりに `tenant_private` または `official` の計算資源に固定する。
+base版には含まれない。どのワークスペースがどの計算先を使うかは、既にワークスペース単位で LLM/embedding の認証情報を割り当てている(`PUT /hosted/workspace/llm-key`、`PUT /hosted/workspace/embedding-key`)のと同じ有償版の判断である。
+
+| フィールド | 説明 |
+|---|---|
+| `worker_class` | `tenant_private`・`official`・`shared` のいずれか |
+
+ここに何も設定していないワークスペースは、引き続き `shared` のままジョブを処理する。つまり何も設定しなければ、このエンドポイントが存在する前と同じ挙動のままである。
+`DELETE /hosted/workspace/worker-class` で、ワークスペースを `shared` に戻せる。
+キャッシュは無い。このエンドポイント経由の設定変更は、そのワークスペースに対して次にジョブが積まれた時点から即座に効く。何らかの遅延や再起動を待つ必要はない。
+ワークスペースを `tenant_private`/`official` に割り当てても、そのタグを実際に購読するワーカープロセスが動いていなければ、それ自体には何の効果もない(前述の「サーバとは別プロセス・別ホストでワーカーを動かす」参照)。ワークスペースにクラスを割り当てておき、それを実際に処理するノードは後から動かし始める、という順序も成立し、その間ジョブは単に滞留する。

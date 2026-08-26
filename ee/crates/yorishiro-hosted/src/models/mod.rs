@@ -13,3 +13,4 @@ pub mod oauth_users;
 pub mod origin;
 pub mod stripe_events;
 pub mod usage;
+pub mod worker_classes;

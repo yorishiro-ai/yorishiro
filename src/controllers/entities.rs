@@ -14,19 +14,26 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
 use crate::models::content_entities::{self, EntityRecord, UndoReport};
 use crate::models::identity_api_key_audit_log;
-use crate::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
+use crate::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker};
 
 /// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
 /// `perform_later` in `BackgroundQueue` mode only inserts a row into `pg_loco_queue` and returns; the embedding provider round trip happens later, inside `EmbeddingSyncWorker::perform`, on a worker process, not on this request's task.
 /// Runs on Loco's own `BackgroundQueue` (`pg_loco_queue`), so a process restart, a forced kill, or a provider outage that exhausts its own retries no longer silently loses the sync: the job survives in the queue table for the next worker run.
 /// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
-///
-/// `worker_class` is hardcoded to `Shared`: no workspace can register its own tenant-private or official compute yet (that registration is separate, not-yet-built work), so every job is one only a general-purpose worker process can claim.
 async fn enqueue_embedding_sync(ctx: &AppContext, workspace_id: Uuid, record: &EntityRecord) {
+    let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+        .await
+    {
+        Ok(worker_class) => worker_class,
+        Err(err) => {
+            tracing::warn!(entity_id = %record.id, error = %err.0, "failed to resolve worker class, defaulting to shared");
+            crate::workers::embedding_sync::WorkerClass::Shared
+        }
+    };
     let args = EmbeddingSyncArgs {
         workspace_id,
         entity_id: record.id,
-        worker_class: WorkerClass::Shared,
+        worker_class,
     };
     if let Err(err) = EmbeddingSyncWorker::perform_later(ctx, args).await {
         tracing::warn!(entity_id = %record.id, error = %err, "failed to enqueue embedding sync");

@@ -10,6 +10,7 @@ pub mod official_templates;
 pub mod origin;
 pub mod plan;
 pub mod tenant_auth;
+pub mod worker_class_resolver;
 
 /// Reads an environment variable, treating both "unset" and "set to an empty string" as absent.
 /// `env::var(...).ok()` alone would treat `FOO=` (set but empty) as present.

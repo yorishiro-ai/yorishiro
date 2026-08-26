@@ -89,6 +89,9 @@ impl Hooks for App {
         // Unlike the authenticator seam, this is inserted on every backend: it reads `ctx.db` directly (see the trait's own doc comment), which works on SQLite too, and a workspace-level assignment is not an RLS concept the way `Authenticator` is.
         ctx.shared_store
             .insert(crate::services::embedding::default_embedding_resolver());
+        // The per-workspace worker-class resolver seam, the same pattern as the embedding resolver above: a deployment that lets a workspace pin its jobs to a tenant-private or official-node worker replaces this insert with its own `Arc<dyn WorkerClassResolver>`.
+        ctx.shared_store
+            .insert(crate::workers::embedding_sync::default_worker_class_resolver());
         // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
         ctx.shared_store.insert(std::sync::Arc::new(
             crate::services::rate_limit::RateLimiter::search_tokens_from_env(),

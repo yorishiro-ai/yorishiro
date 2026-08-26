@@ -28,6 +28,7 @@ use yorishiro_core::app::App;
 use services::embedding_resolver::EmbeddingKeyResolver;
 use services::licence::LicenceState;
 use services::tenant_auth::TenantScopedAuthenticator;
+use services::worker_class_resolver::WorkerClassAssignmentResolver;
 
 pub struct HostedApp;
 
@@ -71,6 +72,17 @@ impl Hooks for HostedApp {
                 as std::sync::Arc<
                     dyn yorishiro_core::services::embedding::WorkspaceEmbeddingResolver,
                 >);
+        // The worker-class resolver seam: a workspace with its own row in
+        // identity_workspace_worker_classes pins its EmbeddingSyncWorker jobs to that class
+        // instead of WorkerClass::Shared (see WorkerClassResolver's own doc comment). Which
+        // compute a tenant's jobs run on is the same paid-edition decision that keeps
+        // embedding_keys/llm_keys in ee/: base only needs to be able to *receive* a class
+        // assignment per workspace.
+        ctx.shared_store
+            .insert(std::sync::Arc::new(WorkerClassAssignmentResolver)
+                as std::sync::Arc<
+                    dyn yorishiro_core::workers::embedding_sync::WorkerClassResolver,
+                >);
         Ok(ctx)
     }
 
@@ -86,6 +98,7 @@ impl Hooks for HostedApp {
             .add_route(controllers::oauth::routes())
             .add_route(controllers::origin::routes())
             .add_route(controllers::stripe::routes())
+            .add_route(controllers::worker_class::routes())
     }
 
     /// `controllers::mcp::mount` hardcodes a concrete `ServerHandler` type, so an ee-only MCP tool would mean re-implementing `mount` and its layers here.
