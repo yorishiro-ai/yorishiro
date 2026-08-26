@@ -1,0 +1,40 @@
+# Excludes rust/hard-coded-cryptographic-value repository-wide.
+#
+# That query fired on 23 open alerts, all a single fixed test password
+# ("hunter2-hunter2") passed as a direct literal argument in tests/ request
+# fixtures (see PR #232's own CodeQL-known-failure note for the first
+# instance of this). It does not fire on the same literal when it appears
+# inside a serde_json::json!{...} call instead of a direct typed argument,
+# which is why the alert count (23) never matched the literal's actual
+# occurrence count (30): the query's Rust sink recognition does not trace
+# through that macro's expansion.
+#
+# Two remediations were tried and rejected before this one:
+# - Extracting the literal into a single shared const (PR #235, closed
+#   unmerged) does not clear the alert; CodeQL just relocates it to the
+#   const's own declaration line, so the 23 call-site alerts would collapse
+#   into 1 declaration-site alert rather than 0. Confirmed empirically by
+#   diffing ref-scoped code-scanning API results before/after.
+# - Inline suppression (`// codeql[...]`) does not exist for Rust yet
+#   (github/codeql#21637 is open, unresolved as of this file's writing).
+#   Every other language CodeQL supports (C++, C#, Go, Java, Python, Ruby,
+#   Swift) has this and Rust does not, so there is no per-call-site
+#   "accept this one" option to reach for here.
+#
+# The cost of this exclusion: real hardcoded keys/passwords/IVs/salts in
+# src/ or ee/ production code would no longer be caught by this rule
+# either, repository-wide, not just in tests/. No other built-in CodeQL
+# Rust query covers the same ground (rust/cleartext-storage-database,
+# rust/cleartext-transmission, and rust/cleartext-logging all detect
+# sensitive-value dataflow into storage/network/logs, not a literal
+# assigned as a credential), and no secret-scanning tool (gitleaks,
+# trufflehog, etc.) runs in this repository's CI as of this file's
+# writing. That gap is accepted here, not solved by it.
+#
+# Revisit this exclusion if github/codeql#21637 ships inline suppression
+# for Rust: per-call-site suppression comments in the 23 test fixtures
+# would let this rule stay active for src/ and ee/ without re-litigating
+# the same 23 false positives every time a new test file is added.
+query-filters:
+  - exclude:
+      id: rust/hard-coded-cryptographic-value
