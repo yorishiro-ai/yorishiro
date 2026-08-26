@@ -96,9 +96,9 @@ SQLite上では`embedding`を除いた列リストでクエリを組み立てて
 
 まだブロックされているもの:
 
-- **ベクトル類似検索**(`GET /api/search`、`Verified<ReadScope>`)—`content_entities.embedding`そのものを読むため、SQLiteにはまだ存在しない。前述の`Verified<R>`にSQLite用の分岐が無い理由は、実質的にこれである。
-- **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理)—`embedding`とは無関係な理由でブロックされている。この生SQLは`embedding`列を一切SELECTしていないが、`Statement::from_sql_and_values(DatabaseBackend::Postgres, ...)`をハードコードしたうえ、PostgreSQL専用の配列関数`unnest($2::uuid[])`を使っている。`embedding`のギャップが埋まる前から、SQLiteでは動く見込みが無かった。
-- **`content_entity_snapshots::snapshot`**(上書きされる前のエンティティのデータを記録する`INSERT ... SELECT`。`ee/`の`infer_fill`が、モデルの推測を`content_entities`へ直接書き込む前に呼ぶ)—`neighbors_batch`と同様、生のPostgres専用SQLであり、本セクションの修正の影響を受けない。
+- **ベクトル類似検索**(`GET /api/search`、`Verified<ReadScope>`): `content_entities.embedding`そのものを読むため、SQLiteにはまだ存在しない。前述の`Verified<R>`にSQLite用の分岐が無い理由は、実質的にこれである。
+- **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理): `embedding`とは無関係な理由でブロックされている。この生SQLは`embedding`列を一切SELECTしていないが、`Statement::from_sql_and_values(DatabaseBackend::Postgres, ...)`をハードコードしたうえ、PostgreSQL専用の配列関数`unnest($2::uuid[])`を使っている。`embedding`のギャップが埋まる前から、SQLiteでは動く見込みが無かった。
+- **`content_entity_snapshots::snapshot`**(上書きされる前のエンティティのデータを記録する`INSERT ... SELECT`。`ee/`の`infer_fill`が、モデルの推測を`content_entities`へ直接書き込む前に呼ぶ): `neighbors_batch`と同様、生のPostgres専用SQLであり、本セクションの修正の影響を受けない。
 
 `POST /api/migration-jobs/{id}/undo`自体(`content_entities::undo_job`)には、もうSQLite用の例外は不要である。以前は`content_entities::update`を経由せず`ActiveModel::update(conn)`を直接呼んでおり、`create`/`update`がかつて直面していたのと同じ戻り値のデコード失敗に当たっていたが、いまは`update_and_fetch`と同じ修正である`active.update_without_returning(conn)`を使っている。スナップショットが存在すればSQLite上でも復元は動作するが、`snapshot`(前述)は`ee/`専用かつPostgres専用のままなので、base自体はスナップショットを一切書き込まない。
 
@@ -128,10 +128,10 @@ SQLiteは既定では外部キーを強制しない。
 
 SQLite上の`CURRENT_TIMESTAMP`は、sea_queryが`timestamp_with_timezone_text`と名付けたカラムに対して、`YYYY-MM-DD HH:MM:SS`(オフセット無し)という形式でレンダリングされる。
 このカラムはその名前とは裏腹に、実体はただのSQLiteの`TEXT`カラムであり、PostgreSQLの`timestamptz`のようなタイムゾーン対応のストレージはこのバックエンドには存在しない。
-このカラムのデフォルト値経由で書き込まれた値と、アプリケーションが書き込んだ値(`chrono::Utc::now()`、例えば`touch_last_used_sqlite`による`last_used_at`の更新)は、同じカラムの中で異なるテキスト形式になる —`2026-08-24 14:27:08`と`2026-08-24T15:37:02.437013178+00:00`。
+このカラムのデフォルト値経由で書き込まれた値と、アプリケーションが書き込んだ値(`chrono::Utc::now()`、例えば`touch_last_used_sqlite`による`last_used_at`の更新)は、同じカラムの中で異なるテキスト形式になる。前者は`2026-08-24 14:27:08`、後者は`2026-08-24T15:37:02.437013178+00:00`という形である。
 パースすればどちらもタイムスタンプとして正しく比較できるが、文字列としては比較できない。
 このコードベースには現時点でこれらのカラムを生の文字列比較で並べ替えている箇所は無いが、将来そうするクエリを書く場合はまずパースが必要になる。
 
-`sqlx::postgres::PgPoolOptions::connect`は、`sqlite://`のURLに対してエラーを返さない —無期限にハングする(直接プローブして確認済み)。
+`sqlx::postgres::PgPoolOptions::connect`は、`sqlite://`のURLに対してエラーを返さない。無期限にハングする(直接プローブして確認済み)。
 だからこそ`after_context`は、SQLite上ではPostgreSQLプールの構築自体を丸ごとスキップする。試みて早期に失敗させる、という選択肢は取れない。
 このバックエンドでこのコード経路に実際に到達すると、診断可能なエラーを出す代わりに、ログ出力の無いままブート自体がハングしてしまう。
