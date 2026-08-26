@@ -1,4 +1,4 @@
-//! This crate's `WorkerClassResolver`: a workspace with its own row in `identity_workspace_worker_classes` pins its `EmbeddingSyncWorker` jobs to that class instead of `WorkerClass::Shared`.
+//! This crate's `WorkerClassResolver`: a workspace with its own row in `identity_workspace_worker_classes` pins its embedding-sync jobs to that class instead of `WorkerClass::Shared`.
 
 use async_trait::async_trait;
 use uuid::Uuid;

@@ -1,4 +1,4 @@
-//! A workspace's own worker-class assignment: which compute its `EmbeddingSyncWorker` jobs run on.
+//! A workspace's own worker-class assignment: which compute its embedding-sync jobs run on.
 //!
 //! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `identity_workspace_llm_keys`/`identity_workspace_embedding_keys`.
 //!

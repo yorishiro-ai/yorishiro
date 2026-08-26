@@ -1,6 +1,6 @@
 //! Finding the entities `infer_fill` should consider.
 //!
-//! `infer_fill` writes a model's guess straight into `content_entities`, the same "compute and write immediately" shape `EmbeddingSyncWorker` uses: no separate proposal/confirm step, since a guess is reversible the same way any other write is, through base's own `content_entities::snapshot`/`undo_job` (`POST /api/migration-jobs/{job_id}/undo`).
+//! `infer_fill` writes a model's guess straight into `content_entities`, the same "compute and write immediately" shape the embedding-sync worker types use: no separate proposal/confirm step, since a guess is reversible the same way any other write is, through base's own `content_entities::snapshot`/`undo_job` (`POST /api/migration-jobs/{job_id}/undo`).
 
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde_json::Value;
