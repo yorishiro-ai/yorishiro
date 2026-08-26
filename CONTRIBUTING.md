@@ -1,5 +1,7 @@
 # Contributing
 
+**English** | [日本語](docs/ja/contributing.md)
+
 ## Where code goes
 
 The layout follows a standard MVC split, with Rust's module system standing in for directories.
@@ -67,7 +69,7 @@ Declaring `mod test_helpers;` in several files trips `clippy::duplicate_mod`.
 
 ```sh
 make check          # cargo check --workspace
-make clippy         # cargo clippy --workspace --all-targets -- -D warnings
+make clippy         # cargo clippy --workspace --tests -- -D warnings
 make fmt-check      # cargo fmt --check
 make test           # cargo test --workspace
 ```
