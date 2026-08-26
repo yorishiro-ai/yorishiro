@@ -6,3 +6,4 @@ pub mod marketplace;
 pub mod oauth;
 pub mod origin;
 pub mod stripe;
+pub mod worker_class;

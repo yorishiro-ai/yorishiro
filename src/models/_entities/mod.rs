@@ -21,4 +21,5 @@ pub mod identity_tenants;
 pub mod identity_users;
 pub mod identity_workspace_embedding_keys;
 pub mod identity_workspace_llm_keys;
+pub mod identity_workspace_worker_classes;
 pub mod identity_workspaces;

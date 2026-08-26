@@ -2,7 +2,7 @@
 
 [English](../sqlite.md) | **日本語**
 
-Yorishiroのマイグレーション(`migration/`)は、PostgreSQLだけでなくSQLite上でも正しいスキーマを生成する。
+Yorishiroのマイグレーション(`migration/`)は、PostgreSQLとSQLiteの両方で正しいスキーマを生成する。
 本ドキュメントは、現時点で何がカバーされていて何がカバーされていないかを説明する。
 
 ## 現状: スキーマ、単一テナントガード、そして大半の認証済みルート
@@ -29,33 +29,31 @@ RLS前提の2プール構成は、RLSを持たない単一テナントバック�
 別接続にしている理由はPostgreSQL版の`authorize`/`touch_last_used_on`と同じで、読み取り専用ハンドラはトランザクションをコミットせずに落とすため、そこで更新すると黙ってロールバックされてしまうからである。
 `max_connections: 1`だと、この2本目の接続取得には空いている接続が無く、`connect_timeout`を使い切ったうえで失敗するしかない。
 
-SQLite上で`max_connections`が2未満のまま起動しようとすると、起動そのものを拒否する(`db::require_min_sqlite_connections`、`Hooks::after_context`から呼ばれる)。
-負荷がかかったときに不定に失敗させるのではなく、である。
-このガードが入る前に実測した内容: `max_connections: 1`、`connect_timeout: 500`の状態で、読み取り専用ルート(`GET /api/relations`)は`200`のまま返った。
-失敗した`last_used_at`更新はbest-effortでログ警告のみだからである。
+SQLite上で`max_connections`が2未満のまま起動しようとすると、起動そのものを拒否する(`db::require_min_sqlite_connections`、`Hooks::after_context`から呼ばれる)。負荷がかかったときに不定な壊れ方をさせるより、その場で止めたほうがいい。
+このガードが入る前に実測した内容: `max_connections: 1`、`connect_timeout: 500`の状態で、読み取り専用ルート(`GET /api/relations`)は`200`のまま返った。失敗した`last_used_at`更新はbest-effortでログ警告のみだからである。
 一方、本物の書き込みのために2本目の接続を自身で必要とするルート(`PUT /api/system/maintenance`。保持中のトランザクションとは独立に`ctx.db`へ書き込む)は、約500ms後に`500`で失敗し、ログには`Failed to acquire connection from pool: Connection pool timed out`と記録された。
 `config/sqlite.yaml`は`max_connections: 10`で出荷されており、下限を十分に上回っている。
 
 ## SQLiteが想定する用途
 
 SQLiteは単一テナントに限定される。
-PostgreSQLの行レベルセキュリティのようなデータベース側で強制されるテナント間分離を持たないため、複数テナントのホスティングではなく、お試し利用や個人利用を想定している。
+PostgreSQLの行レベルセキュリティのようなデータベース側で強制されるテナント間分離を持たないので、想定用途はお試し利用や個人利用にとどめてあり、複数テナントのホスティングは対象外である。
 このエンジンで疑似的にマルチテナント分離を作るためのアプリケーションレベルのフィルタは、意図的に実装していない。
 1つのクエリでフィルタを書き漏らせばそれがそのまま黙ったテナント分離の破れになるためで、これはまさに行レベルセキュリティがPostgreSQL上で構造的に不可能にしている種類の失敗である。
 
 ## 単一テナントガード
 
-`tenancy::create_tenant`(`src/models/tenancy.rs`)は、PostgreSQL上では`YORISHIRO_MAX_TENANTS`を`count_tenants`と突き合わせて強制しており、その前に`db::lock_for_update`を取得することでカウント後にINSERTするまでの間のTOCTOUの隙を塞いでいる。
+`tenancy::create_tenant`(`src/models/tenancy.rs`)は、PostgreSQL上では`YORISHIRO_MAX_TENANTS`を`count_tenants`と突き合わせて強制する。その前に`db::lock_for_update`を取得し、カウントしてからINSERTするまでの間に生じるTOCTOUの隙を塞いでいる。
 SQLite上ではこの上限を`YORISHIRO_MAX_TENANTS`からはまったく読まない。
 上限は1に固定されており、このバックエンドでは環境変数は意図的に何の効果も持たない。
 `YORISHIRO_MAX_TENANTS`を上げるという行為は、設定可能なポリシーを緩めるものである。
 SQLite上でこの上限が存在するのは、分離の仕組み(RLS)そのものが無いからであって、ポリシーの都合ではないため、設定で回避できてはならない。
 
-`db::lock_for_update`(`src/db.rs`)は、SQLite上では代替ロックではなくno-opになる。
-SQLiteには`pg_advisory_xact_lock`に相当するものが無いためである。
-それでもこれは単なる便宜ではなく、レースに対して安全である。
-SQLiteは同時に1つの書き込みトランザクションしか許さないため、あるトランザクションが古いカウントを読んだあとに、別のトランザクションがその間に書き込んでコミット済みだった場合、その後のコミットは`SQLITE_BUSY`となり、2件目のテナントがコミットされるのではなく、トランザクション全体が失敗する。
-PostgreSQL上でロックが塞いでいるTOCTOUは、SQLite上では黙って矛盾した書き込みが通るのではなく、リトライ可能なエラーとして現れる形になる。
+`db::lock_for_update`(`src/db.rs`)は、SQLiteには`pg_advisory_xact_lock`に相当するものが無いため、このバックエンドでは代替ロックを用意せずno-opにしてある。
+それで安全性が損なわれるわけではない。
+SQLiteは同時に1つの書き込みトランザクションしか許さないので、あるトランザクションが古いカウントを読んだあとに別のトランザクションが先に書き込んでコミット済みだった場合、その後のコミットは`SQLITE_BUSY`で弾かれる。
+2件目のテナントが実際にコミットされてしまうことはなく、トランザクション全体がそのまま失敗する。
+つまり PostgreSQL 上でロックが塞いでいる TOCTOU は、SQLite 上ではリトライ可能なエラーという形で表面化する。矛盾した書き込みが黙って通ってしまうことはない。
 この根拠の詳細、および1トランザクション内で複数行を書き込む他のロック呼び出し箇所もこれで説明がつく理由は、`lock_for_update`のドキュメントコメントを参照。
 
 `uuidv7()`をデフォルト値に持つすべての`id`カラム(`identity_tenants`、`identity_workspaces`、`identity_users`、`identity_tenant_memberships`、`identity_api_keys`)は、`ActiveModelBehavior::before_save`を通じてSQLite上で自分のidを生成する。
@@ -66,7 +64,7 @@ PostgreSQL上でロックが塞いでいるTOCTOUは、SQLite上では黙って�
 
 ## PostgreSQL版スキーマとの違いとその理由
 
-PostgreSQL固有の機能はSQLiteに対応物が無いため、近似で置き換えるのではなく単純に省いている。
+PostgreSQL固有の機能はSQLiteに対応物が無い。近似で置き換えようとはせず、単純に省いてある。
 
 - **ロール、GRANT、行レベルセキュリティ。** 単一テナント・単一ファイルのデータベースには分離すべき第二のテナントが存在しないため、ロールやポリシーが守るべき対象そのものが無い。
 - **`authenticate_api_key`(SECURITY DEFINER関数)。** PostgreSQL上でこの関数が存在するのは、未認証の呼び出し元からはRLSが隠すはずの行を読むためだけである。SQLiteにはRLSが無いので回避すべき対象も無く、アプリケーションはこのバックエンドでは`identity_api_keys`/`identity_workspaces`を直接クエリする。
@@ -113,14 +111,14 @@ SQLite上では`embedding`を除いた列リストでクエリを組み立てて
 ## バックエンド分岐ロジックの置き場所
 
 `migration/src/helpers.rs`に、マイグレーション用のバックエンド条件分岐ヘルパー(`enable_rls_with_policy`、`grant`、`pg_only`、`sqlite_only`、`create_table_with_checks`、`uuidv7_pk`)がすべてまとまっており、それぞれが`manager.get_database_backend()`を確認する。
-各マイグレーションファイルはバックエンドを自分で判定するのではなく、これらのヘルパーを呼び出す形をとる。
+各マイグレーションファイルの側は、バックエンドを自分で判定せず、これらのヘルパーを呼び出すだけにしてある。
 結果として生成されるPostgreSQLのスキーマ(すべてのテーブル、カラム、制約名、インデックス、ポリシー、GRANT)は、SQLite対応が入る前と変わっていない。
 一部の制約を発行するSQL文自体は`create_table_with_checks`/`pg_only`経由に書き換わっており、`identity_maintenance`の3つのCHECKは、以前は1回の`execute_unprepared`呼び出しにセミコロン区切りの`ALTER TABLE`文を3つまとめていたものが、いまは同じ効果を持つ3回の別々の呼び出しになっている。
 
 アプリケーション層では、`Hooks::after_context`(`src/app.rs`)が`DbHandle`やデフォルトの`Authenticator`を構築する前に`ctx.db.get_database_backend() != DatabaseBackend::Sqlite`を確認し、`AuthContext`/`Authorized<R>`/`AuditAuthorized`の`FromRequestParts`実装(`src/controllers/extractors.rs`)も同じ条件を確認して、`services::auth::authorize`/`services::auth::authenticate`の`..._sqlite`系関数とPostgreSQL用の`Authenticator`/`DbHandle`のどちらを使うかを選ぶ。
 `db::sqlite_generated_id`(`before_save`から呼ばれる。前述「単一テナントガード」を参照)も同様に`conn.get_database_backend()`を確認する。
-`db::require_min_sqlite_connections`(前述「`database.max_connections`はSQLite上で2以上が必須」を参照)は唯一の例外で、接続が存在する前に起動そのものを拒否しなければならないため、その場の接続ではなく設定値そのものを無条件に確認する。
-それ以外の分岐は、設定フラグや環境変数を読んで判定するのではなく、常にその場の接続から読み取っている。
+唯一の例外が`db::require_min_sqlite_connections`(前述「`database.max_connections`はSQLite上で2以上が必須」を参照)で、これだけは設定値そのものを無条件に確認する。接続がまだ存在しない起動の時点で拒否を判断しなければならないので、その場の接続を見て判断するという他の分岐と同じやり方が使えない。
+それ以外の分岐はすべて、設定フラグや環境変数を読むのではなく、常にその場の接続から読み取っている。
 
 ## 現在のSQLite経路に関する注意点
 
@@ -135,5 +133,5 @@ SQLite上の`CURRENT_TIMESTAMP`は、sea_queryが`timestamp_with_timezone_text`�
 このコードベースには現時点でこれらのカラムを生の文字列比較で並べ替えている箇所は無いが、将来そうするクエリを書く場合はまずパースが必要になる。
 
 `sqlx::postgres::PgPoolOptions::connect`は、`sqlite://`のURLに対してエラーを返さない —無期限にハングする(直接プローブして確認済み)。
-これが、`after_context`のPostgreSQLプール構築をSQLite上では試みて早期に失敗させるのではなく、丸ごとスキップしている理由である。
+だからこそ`after_context`は、SQLite上ではPostgreSQLプールの構築自体を丸ごとスキップする。試みて早期に失敗させる、という選択肢は取れない。
 このバックエンドでこのコード経路に実際に到達すると、診断可能なエラーを出す代わりに、ログ出力の無いままブート自体がハングしてしまう。

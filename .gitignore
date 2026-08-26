@@ -3,6 +3,12 @@
 *.swo
 .env
 .env.local
+# config/sqlite.yaml's own default filenames (DATABASE_URL, QUEUE_URL) land in the repo root when
+# `cargo loco start -e sqlite` runs from here; never meant to be committed.
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 .cargo-cache
 .worktrees/
 /models
