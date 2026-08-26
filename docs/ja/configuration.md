@@ -77,16 +77,18 @@ BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサ
 `YORISHIRO_SEARCH_TOKENS_PER_MINUTE`は、同じ予算値でも英語より日本語の検索トラフィックをかなり多く通してから`422`を返し始めることになる。
 デプロイの検索トラフィックが日本語中心で、かつローカルONNXプロバイダを使っていない場合は、この偏りを踏まえて予算値を決めること。
 
-## キューの調整(`config/production.yaml`)
+## キューのバックエンドと調整(`config/development.yaml`、`config/production.yaml`)
 
-`config/production.yaml`の`queue:`ブロックは、`development.yaml`が固定値のまま持つ2つの設定を、環境変数として受け付ける。
-どちらもLoco自身の`queue`設定スキーマにある項目で、このコードベースが追加したものではない。
+`queue.kind`は起動時に切り替え可能である。loco-rs は3種のキュープロバイダ(Postgres、SQLite、Redis/Valkey。`QueueConfig`の`#[serde(tag = "kind")]`バリアント)を持ち、それぞれ必要な設定項目が異なる(Redis だけが`queues`を持ち、Postgres/SQLite は SQL プール系の設定を共有しつつ異なる URI を指す)ためである。`development.yaml`・`production.yaml`とも、1つの固定形の中で個々のフィールドをテンプレート化するのではなく、`kind`ごとに`queue:`ブロック全体を Tera の`<% if %>`/`<% elif %>`/`<% endif %>`で切り替える。
 
 | 変数 | 説明 |
 |---|---|
-| `YORISHIRO_QUEUE_WORKERS` | ジョブを並列に取り出すワーカー数(既定: `2`)。Postgresは`FOR UPDATE SKIP LOCKED`で行を確保するため、この値を上げると、このデプロイのPostgresバックエンドのキューでは実際に並列度が上がる |
+| `YORISHIRO_QUEUE_KIND` | `Postgres`(既定)、`Sqlite`、`Redis`のいずれか。`Redis`で起動するには`worker_redis`という Cargo feature のコンパイルが必要(このワークスペースの`Cargo.toml`で有効化済み)。無効のまま起動すると"No queue provider feature was selected and compiled"で失敗する |
+| `QUEUE_URL` | キューバックエンド自身の接続URI。`development.yaml`では`Postgres`のとき`DATABASE_URL`が既定値になる(このデプロイ自身の既定キュープロバイダと一致)。`production.yaml`はこのファイル自身の「暗黙のフォールバックを許さない」方針どおり、どの`kind`でも既定値なしで必須とする |
+| `YORISHIRO_QUEUE_WORKERS` | ジョブを並列に取り出すワーカー数(既定: `2`)。Postgresは`FOR UPDATE SKIP LOCKED`で行を確保するため、この値を上げるとそのバックエンドでは実際に並列度が上がる。SQLite は`BEGIN IMMEDIATE`により、この値に関わらずデキューが直列化される |
 | `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | ジョブが`processing`のまま留まってよい分数で、これを超えるとreaperがそのジョブを`Queued`へ戻す(既定: `30`)。Locoのreaperはopt-inで既定では無効。無効のままだと、実行中に落ちたワーカー(クラッシュ、強制終了)が持っていたジョブは`processing`のまま永久に残る。ほかの何もそのジョブを`processing`から動かさず、`fail_job`は`perform`自体がエラーを返したときにしか走らないためである。健全なジョブが正当にかかりうる最長時間より大きい値を設定すること。そうしないと、reaperはまだ本当に進行中の作業を戻してしまう |
 
-`development.yaml`はこれらの環境変数を読む代わりに、同じreaperを固定値(`num_workers: 2`、`age_minutes: 10`)で有効化している。
-ローカルの開発環境にはデプロイごとに調整する理由が無いためである。
-`config/test.yaml`には`queue:`ブロック自体が無く(理由は`.claude/rules/testing.md`を参照)、どちらの設定もそこには当てはまらない。
+`development.yaml`は`YORISHIRO_QUEUE_WORKERS`/`YORISHIRO_QUEUE_REAPER_AGE_MINUTES`を読む代わりに、同じreaperを固定値(`num_workers: 2`、`age_minutes: 10`)で有効化している。ローカルの開発環境にはデプロイごとに調整する理由が無いためである。`production.yaml`は両方とも読む。
+`config/test.yaml`には`queue:`ブロック自体が無く(理由は`.claude/rules/testing.md`を参照)、ここでの説明はいずれも当てはまらない。
+
+`config/sqlite.yaml`(手動確認用のSQLite階層、`docs/ja/sqlite.md`)も`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を、他の2環境と同じ形で設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は、アプリ自身のSQLite接続とは独立した`sqlx::SqlitePool`を自前で張る。`db.rs`のRLS対応プール経由ではない(SQLiteにはそもそもRLSが無い)ので、これは同じファイルであれ別のファイルであれ、本当に独立したプールになる。実ファイルに対して直接計測した結果: アプリが同じファイルに対して書き込みトランザクションを開いたままの状態でキュー側から並行して書き込むと、失敗はせず、sqlx自身の既定値である5秒の`busy_timeout`を待った上でロック解放後に成功した。このコードベース自身の実装では、`EmbeddingSyncWorker`のenqueue呼び出しはリクエスト自身の書き込みトランザクションが既にコミットされた後にしか実行されないため、この状況が1つのリクエストの中で発生することはない。問題になり得るとすれば、最初のリクエストの書き込みトランザクションがまだ開いている間に、別のリクエストが本当に並行して走るケースだけであり、`content_entities::create`自体は1回の`INSERT`で完結する短いトランザクションなので、5秒という猶予には十分な余裕がある。

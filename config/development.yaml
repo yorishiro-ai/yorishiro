@@ -44,9 +44,35 @@ workers:
 
   
 # Queue Configuration
+#
+# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis,
+# QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of
+# fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs
+# but point at different URIs), so a template conditional renders one whole alternative block rather than
+# templating individual fields inside a single fixed shape. Defaults to Postgres, matching this
+# deployment's default queue provider.
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Redis" %>
+queue:
+  kind: Redis
+  uri: <%= get_env(name="QUEUE_URL", default="redis://localhost:6379") %>
+  dangerously_flush: false
+  num_workers: 2
+  reaper:
+    age_minutes: 10
+    interval_seconds: 60
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Sqlite" %>
+queue:
+  kind: Sqlite
+  uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-queue.sqlite3?mode=rwc") %>
+  dangerously_flush: false
+  num_workers: 2
+  reaper:
+    age_minutes: 10
+    interval_seconds: 60
+<% else %>
 queue:
   kind: Postgres
-  
+
   # Postgres connection URI
   uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/loco_development") %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
@@ -60,7 +86,8 @@ queue:
   reaper:
     age_minutes: 10
     interval_seconds: 60
-  
+<% endif %>
+
 
 # Mailer Configuration.
 mailer:
