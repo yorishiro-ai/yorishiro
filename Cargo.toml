@@ -26,13 +26,15 @@ default-run = "yorishiro_core-cli"
 # enabled" when it was actually just the default, which invited exactly that misreading. Dropped
 # rather than kept-with-a-comment, since there is nothing this crate does to make it deliberate.
 #
-# `worker_redis` is NOT enabled: it is not loco-rs's default (unlike `worker`) and pulls in the
-# `redis` crate, needed only for a queue provider config using `kind: Redis`/Valkey, which this
-# deployment does not do yet. Booting with `kind: Redis` set without this feature fails at startup
-# with "No queue provider feature was selected and compiled". Enable it (or find this comment
-# gone) when Valkey support actually lands; until then the dependency and its ~6 additional crates
-# have nothing to justify carrying.
-loco-rs = { version = "1.1" }
+# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is now
+# environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue
+# provider needs to be compiled in regardless of which one an operator picks at boot, not only the
+# `kind: Postgres` this deployment happens to default to. Without this feature, booting with
+# `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
+# It is not loco-rs's own default (unlike `worker`), and pulls in the `redis` crate plus five more
+# transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust; Cargo.lock grew
+# from 1154 to 1181 lines when this was first measured).
+loco-rs = { version = "1.1", features = ["worker_redis"] }
 anyhow = { version = "1" }
 async-trait = { version = "0.1" }
 axum = { version = "0.8" }

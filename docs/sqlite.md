@@ -14,7 +14,7 @@ Setup creates the deployment's one tenant/workspace/user/API key; `/whoami` auth
 `Verified<R>` deliberately has no SQLite branch: its one caller (`search_entities`) calls `db_handle()` directly regardless, and the route is unreachable on SQLite since it depends on `content_entities.embedding` for vector similarity search, which doesn't exist on that backend (see "What's still blocked").
 
 `config/sqlite.yaml` is a manual-verification environment (`LOCO_ENV=sqlite`), not wired into any test suite; `tests/` stays PostgreSQL-only.
-It has no `queue:` block (`ForegroundBlocking` workers), and expects `YORISHIRO_MAX_TENANTS` to be set for the setup wizard to answer as enabled, the same requirement as any other environment.
+It configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as `development.yaml`/`production.yaml`: loco-rs's SQLite queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of `ctx.db`, confirmed empirically to work against a real file including under lock contention (see "Queue backend and tuning" in `docs/configuration.md` for the measurement). It also expects `YORISHIRO_MAX_TENANTS` to be set for the setup wizard to answer as enabled, the same requirement as any other environment.
 The SQLite cap itself ignores the variable's value once the wizard runs, but `wizard_enabled()` still checks that it's set at all before allowing `/setup` to run.
 
 ## `database.max_connections` must be at least 2 on SQLite

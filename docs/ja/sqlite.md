@@ -20,7 +20,7 @@ RLS前提の2プール構成は、RLSを持たない単一テナントバック�
 
 `config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
 `tests/`はいまもPostgreSQL専用のままである。
-`queue:`ブロックは無く(`ForegroundBlocking`ワーカー)、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。
+`development.yaml`・`production.yaml`と同じく`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は`ctx.db`とは独立した`sqlx::SqlitePool`を自前で張るが、ロック競合下も含め実ファイルに対して実測で動作を確認済みである(計測内容は`docs/ja/configuration.md`の「キューのバックエンドと調整」を参照)。また、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。
 ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
 
 ## `database.max_connections`はSQLite上で2以上が必須
