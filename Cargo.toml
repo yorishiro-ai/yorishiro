@@ -1,9 +1,7 @@
 [workspace]
 resolver = "2"
-# ".": this manifest is both the workspace root and the base package (yorishiro-core), the flat
-# layout this session's CLAUDE.md records as decided-2026-08-22, not carried forward from
-# master's crates/ split. ee/crates/yorishiro-hosted depends on it by path; the reverse
-# dependency must never appear, see CLAUDE.md's "Editions and the ee/ boundary".
+# ".": this manifest is both the workspace root and the base package (yorishiro-core), the flat layout this session's CLAUDE.md records as decided-2026-08-22, not carried forward from master's crates/ split.
+# ee/crates/yorishiro-hosted depends on it by path; the reverse dependency must never appear, see CLAUDE.md's "Editions and the ee/ boundary".
 members = [".", "ee/crates/yorishiro-hosted"]
 
 [package]
@@ -16,24 +14,14 @@ default-run = "yorishiro_core-cli"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace.dependencies]
-# Depended on identically (version and, where they take any, features) by both the root package
-# and ee/crates/yorishiro-hosted; each side pulls these with `workspace = true` rather than
-# repeating the specification, so the two can't drift out of sync the way loco-rs's version did
-# before this table existed.
+# Depended on identically (version and, where they take any, features) by both the root package and ee/crates/yorishiro-hosted; each side pulls these with `workspace = true` rather than repeating the specification, so the two can't drift out of sync the way loco-rs's version did before this table existed.
 #
-# `worker` used to be listed explicitly here; it is loco-rs's own default and was never doing
-# anything (`default-features = false` is not set), so the explicit listing read as "deliberately
-# enabled" when it was actually just the default, which invited exactly that misreading. Dropped
-# rather than kept-with-a-comment, since there is nothing this crate does to make it deliberate.
+# `worker` used to be listed explicitly here; it is loco-rs's own default and was never doing anything (`default-features = false` is not set), so the explicit listing read as "deliberately enabled" when it was actually just the default, which invited exactly that misreading.
+# Dropped rather than kept-with-a-comment, since there is nothing this crate does to make it deliberate.
 #
-# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is now
-# environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue
-# provider needs to be compiled in regardless of which one an operator picks at boot, not only the
-# `kind: Postgres` this deployment happens to default to. Without this feature, booting with
-# `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
-# It is not loco-rs's own default (unlike `worker`), and pulls in the `redis` crate plus five more
-# transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust; Cargo.lock grew
-# from 1154 to 1181 lines when this was first measured).
+# `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is now environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot, not only the `kind: Postgres` this deployment happens to default to.
+# Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
+# It is not loco-rs's own default (unlike `worker`), and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust; Cargo.lock grew from 1154 to 1181 lines when this was first measured).
 loco-rs = { version = "1.1", features = ["worker_redis"] }
 anyhow = { version = "1" }
 async-trait = { version = "0.1" }
@@ -48,12 +36,8 @@ sha2 = { version = "0.10" }
 sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tokio = { version = "1.45", default-features = false, features = ["rt-multi-thread"] }
 tracing = { version = "0.1" }
-# sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector
-# and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side
-# needs rather than the root's own narrower requirement. This does not cost ee/ anything at build
-# time: Cargo resolves one crate's features as the union across the whole workspace regardless of
-# which member's manifest declares which subset, so ee/'s build already carried this same union
-# before this table existed; only the declaration was split across two files, not the resolved set.
+# sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side needs rather than the root's own narrower requirement.
+# This does not cost ee/ anything at build time: Cargo resolves one crate's features as the union across the whole workspace regardless of which member's manifest declares which subset, so ee/'s build already carried this same union before this table existed; only the declaration was split across two files, not the resolved set.
 sea-orm = { version = "2.0", features = [
   "sqlx-sqlite",
   "sqlx-postgres",
@@ -104,10 +88,7 @@ reqwest.workspace = true
 # must be closed off.
 ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
-# `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature
-# (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so
-# `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter
-# (search.rs, sync.rs), without pinning a second, possibly-mismatched version.
+# `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter (search.rs, sync.rs), without pinning a second, possibly-mismatched version.
 pgvector = { version = "0.4", default-features = false }
 
 [[bin]]

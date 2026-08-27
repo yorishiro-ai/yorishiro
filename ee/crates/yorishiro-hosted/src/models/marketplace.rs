@@ -193,10 +193,8 @@ pub async fn list_versions(
 ///
 /// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`services::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
 ///
-/// Stays a hand-written `INSERT ... SELECT`, not `ActiveModel::insert`: the version number itself
-/// is computed by the same statement that inserts it, which is the concurrency guarantee above.
-/// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would
-/// reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
+/// Stays a hand-written `INSERT ... SELECT`, not `ActiveModel::insert`: the version number itself is computed by the same statement that inserts it, which is the concurrency guarantee above.
+/// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
     template_id: Uuid,

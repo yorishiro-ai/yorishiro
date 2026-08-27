@@ -48,10 +48,7 @@ impl Task for ResyncEmbeddings {
         .await
         .map_err(|err| Error::Message(err.to_string()))?;
 
-        // One query for every candidate's current row, instead of one per candidate: the
-        // embedding-provider call and the UPDATE it triggers still happen per entity below (an
-        // external HTTP call and a per-row write, neither of which batches the same way), but the
-        // read that feeds them does not need its own round trip per row.
+        // One query for every candidate's current row, instead of one per candidate: the embedding-provider call and the UPDATE it triggers still happen per entity below (an external HTTP call and a per-row write, neither of which batches the same way), but the read that feeds them does not need its own round trip per row.
         let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
         let records = content_entities::get_batch(&app_context.db, workspace_id, &candidate_ids)
             .await

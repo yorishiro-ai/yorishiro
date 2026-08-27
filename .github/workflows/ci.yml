@@ -1,10 +1,7 @@
 name: CI
 
-# Rewritten for the Loco rebuild's actual layout (root package + ee/crates/yorishiro-hosted +
-# migration/), replacing a version that still referenced master's pre-rebuild crates/ split
-# (crates/yorishiro-core, crates/yorishiro-server), ee/web's SPA, packaging/, and a Dockerfile,
-# none of which exist here. Deliberately minimal: cargo check/clippy/fmt-check/test against a
-# Postgres service, matching what `make check clippy fmt-check test` already runs locally.
+# Rewritten for the Loco rebuild's actual layout (root package + ee/crates/yorishiro-hosted + migration/), replacing a version that still referenced master's pre-rebuild crates/ split (crates/yorishiro-core, crates/yorishiro-server), ee/web's SPA, packaging/, and a Dockerfile, none of which exist here.
+# Deliberately minimal: cargo check/clippy/fmt-check/test against a Postgres service, matching what `make check clippy fmt-check test` already runs locally.
 # master's own ci.yml is untouched; it is correct for master's own structure.
 
 on:
@@ -62,32 +59,24 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # Request tests each create their own throwaway database via `CREATE DATABASE`, which
-      # copies `template1`: a fresh Postgres image's template1 carries neither extension, and
-      # every request test would fail migrating content_entities.embedding (pgvector) or the
-      # trigram index (pg_trgm) without this. See .claude/rules/testing.md.
+      # Request tests each create their own throwaway database via `CREATE DATABASE`, which copies `template1`: a fresh Postgres image's template1 carries neither extension, and every request test would fail migrating content_entities.embedding (pgvector) or the trigram index (pg_trgm) without this.
+      # See .claude/rules/testing.md.
       - name: Install pgvector and pg_trgm into template1
         run: |
           PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d template1 \
             -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
-      # sccache caches compiled objects by content hash, complementing rust-cache's file-level
-      # target/ caching. Installing it is separate from using it: the action exports SCCACHE_PATH
-      # and nothing else, so without the "Route rustc through sccache" step below sccache is
-      # present and never invoked, and without SCCACHE_GHA_ENABLED it caches to local disk on an
-      # ephemeral runner, which can never hit.
+      # sccache caches compiled objects by content hash, complementing rust-cache's file-level target/ caching.
+      # Installing it is separate from using it: the action exports SCCACHE_PATH and nothing else, so without the "Route rustc through sccache" step below sccache is present and never invoked, and without SCCACHE_GHA_ENABLED it caches to local disk on an ephemeral runner, which can never hit.
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # PRs can only ever restore from develop's cache and their own, never write back to
-          # develop's key, so only a push to develop needs to save.
+          # PRs can only ever restore from develop's cache and their own, never write back to develop's key, so only a push to develop needs to save.
           save-if: ${{ github.ref == 'refs/heads/develop' }}
 
-      # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache
-      # key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache a
-      # save-if run already wrote. Still before the first cargo invocation below, which is all
-      # sccache needs.
+      # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache a save-if run already wrote.
+      # Still before the first cargo invocation below, which is all sccache needs.
       - name: Route rustc through sccache
         run: |
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
@@ -102,10 +91,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --tests -- -D warnings
 
-      # Reaches migration/'s own tests (including the two SQLite-file migration tests, run with
-      # no DATABASE_URL and no feature flag: SeaORM's DatabaseConnection is runtime-polymorphic
-      # across backends here, so there is no compile-time "sqlite" feature to select the way
-      # master's pre-rebuild Engine-generic layer needed) because it runs against the whole
-      # workspace, not a single -p package.
+      # Reaches migration/'s own tests (including the two SQLite-file migration tests, run with no DATABASE_URL and no feature flag: SeaORM's DatabaseConnection is runtime-polymorphic across backends here, so there is no compile-time "sqlite" feature to select the way master's pre-rebuild Engine-generic layer needed) because it runs against the whole workspace, not a single -p package.
       - name: Test
         run: cargo test --workspace

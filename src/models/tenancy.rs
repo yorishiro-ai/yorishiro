@@ -426,10 +426,8 @@ pub async fn list_workspaces(
 /// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
 /// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
 ///
-/// Deliberately unpaginated: this drives sign-in, not a browsing UI, and its own caller
-/// (`resolve_login_workspace`) needs the true, complete set to tell "exactly one, resolve to it"
-/// from "more than one, the caller must say which." A default `LIMIT` here would silently hide a
-/// membership from a user who holds more workspaces than the page size, rather than list them.
+/// Deliberately unpaginated: this drives sign-in, not a browsing UI, and its own caller (`resolve_login_workspace`) needs the true, complete set to tell "exactly one, resolve to it" from "more than one, the caller must say which."
+/// A default `LIMIT` here would silently hide a membership from a user who holds more workspaces than the page size, rather than list them.
 pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,

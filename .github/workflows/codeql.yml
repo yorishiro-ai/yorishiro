@@ -1,12 +1,8 @@
 name: CodeQL
 
-# Replaces GitHub's default CodeQL setup, which analyzed javascript-typescript alongside rust:
-# this branch's tree carries zero .js/.ts/.tsx/.jsx files (ee/web, master's frontend, isn't part
-# of this rebuild yet), so that language's job always failed with "CodeQL could not process any
-# code written in JavaScript/TypeScript" rather than reporting a clean scan. rust is the only
-# language actually present, so it's the only one analyzed here. If a future SSR/UI PR adds
-# JS/TS back to the tree, add it to the matrix below in that same PR, so the workflow content and
-# the tree it's analyzing change together.
+# Replaces GitHub's default CodeQL setup, which analyzed javascript-typescript alongside rust: this branch's tree carries zero .js/.ts/.tsx/.jsx files (ee/web, master's frontend, isn't part of this rebuild yet), so that language's job always failed with "CodeQL could not process any code written in JavaScript/TypeScript" rather than reporting a clean scan.
+# rust is the only language actually present, so it's the only one analyzed here.
+# If a future SSR/UI PR adds JS/TS back to the tree, add it to the matrix below in that same PR, so the workflow content and the tree it's analyzing change together.
 
 on:
   push:

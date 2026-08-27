@@ -44,11 +44,7 @@ workers:
 
 # Queue Configuration
 #
-# `kind: Sqlite` points at its own file by default (`QUEUE_URL`, separate from `DATABASE_URL`):
-# both providers open independent connection pools regardless of whether they name the same file
-# or different ones, so sharing one file costs nothing beyond what the comment above already
-# measured, but pointing the queue at its own file is one less thing for a reader to reason about
-# when checking whether a given lock contention scenario is possible.
+# `kind: Sqlite` points at its own file by default (`QUEUE_URL`, separate from `DATABASE_URL`): both providers open independent connection pools regardless of whether they name the same file or different ones, so sharing one file costs nothing beyond what the comment above already measured, but pointing the queue at its own file is one less thing for a reader to reason about when checking whether a given lock contention scenario is possible.
 queue:
   kind: Sqlite
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-sqlite-queue.sqlite3?mode=rwc") %>

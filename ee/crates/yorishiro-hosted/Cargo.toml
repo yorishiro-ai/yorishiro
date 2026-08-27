@@ -2,26 +2,19 @@
 name = "yorishiro-hosted"
 version = "0.1.0"
 edition = "2024"
-# Not `license.workspace = true`: this manifest has no workspace-level license field to
-# inherit from (the root package's Cargo.toml carries no `[workspace.package]`), and even if
-# it did, `ee/` is not BUSL-1.1. `ee/LICENSE` adds a Competing Use restriction the rest of the
-# repository doesn't carry.
+# Not `license.workspace = true`: this manifest has no workspace-level license field to inherit from (the root package's Cargo.toml carries no `[workspace.package]`), and even if it did, `ee/` is not BUSL-1.1.
+# `ee/LICENSE` adds a Competing Use restriction the rest of the repository doesn't carry.
 license-file = "../../LICENSE"
 publish = false
 
-# Not `yorishiro-hosted-server` or similar: the base binary is `yorishiro_core-cli` (see the root
-# Cargo.toml), a distinct name from this crate's own, so this one needs no edition qualifier of
-# its own to avoid colliding with it.
+# Not `yorishiro-hosted-server` or similar: the base binary is `yorishiro_core-cli` (see the root Cargo.toml), a distinct name from this crate's own, so this one needs no edition qualifier of its own to avoid colliding with it.
 [[bin]]
 name = "yorishiro-server"
 path = "src/bin/yorishiro_server.rs"
 
 [dependencies]
 yorishiro-core = { path = "../../.." }
-# Relative, not path = "migration" like the root manifest's own dependency on the same crate:
-# this is not eligible for the workspace.dependencies table the way version-and-features-only
-# dependencies are, since a relative path is resolved from this manifest's own directory, and the
-# root's path = "migration" would not reach the same crate from here.
+# Relative, not path = "migration" like the root manifest's own dependency on the same crate: this is not eligible for the workspace.dependencies table the way version-and-features-only dependencies are, since a relative path is resolved from this manifest's own directory, and the root's path = "migration" would not reach the same crate from here.
 migration = { path = "../../../migration" }
 loco-rs = { workspace = true }
 tokio.workspace = true

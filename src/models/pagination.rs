@@ -1,9 +1,6 @@
 //! The `limit`/`offset` pair every `list` function takes, and the clamp it's checked against.
 //!
-//! Previously duplicated per table: `content_entities` and `content_relations` each defined their
-//! own `DEFAULT_LIST_LIMIT` (same value, `50`) and their own `.clamp(1, 200)` call, and
-//! `marketplace::list_marketplace` imported `content_entities`' copy rather than having a shared
-//! one of its own to reach for — a concept a specific table's module happened to own first.
+//! Previously duplicated per table: `content_entities` and `content_relations` each defined their own `DEFAULT_LIST_LIMIT` (same value, `50`) and their own `.clamp(1, 200)` call, and `marketplace::list_marketplace` imported `content_entities`' copy rather than having a shared one of its own to reach for — a concept a specific table's module happened to own first.
 
 /// Applies to every paginated list, not `search.rs`'s `DEFAULT_SEARCH_LIMIT`: vector/trigram
 /// search is a different kind of query (ranked by relevance, not a page over a stable order) and

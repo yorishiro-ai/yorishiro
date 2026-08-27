@@ -63,10 +63,8 @@ impl Hooks for HostedApp {
                 as std::sync::Arc<
                     dyn yorishiro_core::services::auth::Authenticator,
                 >);
-        // The embedding resolver seam: a workspace with its own row in identity_workspace_embedding_keys
-        // uses that provider instead of the deployment default (see WorkspaceEmbeddingResolver's own doc
-        // comment). Tenant-level assignment is the paid-edition decision, the same reasoning that keeps
-        // llm_keys in ee/: base only needs to be able to *receive* a different provider per workspace.
+        // The embedding resolver seam: a workspace with its own row in identity_workspace_embedding_keys uses that provider instead of the deployment default (see WorkspaceEmbeddingResolver's own doc comment).
+        // Tenant-level assignment is the paid-edition decision, the same reasoning that keeps llm_keys in ee/: base only needs to be able to *receive* a different provider per workspace.
         ctx.shared_store
             .insert(std::sync::Arc::new(EmbeddingKeyResolver)
                 as std::sync::Arc<
