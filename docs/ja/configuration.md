@@ -86,7 +86,7 @@ BERT系のONNXモデルをプロセス内で実行し、外部の埋め込みサ
 | 変数 | 説明 |
 |---|---|
 | `YORISHIRO_QUEUE_KIND` | `Sqlite`(`development.yaml`での既定。同ファイルのデータベース既定値に合わせてあり、未設定のまま起動してもPostgresを必要としない)、`Postgres`、`Redis`のいずれか。`Redis`で起動するには`worker_redis`という Cargo feature のコンパイルが必要(このワークスペースの`Cargo.toml`で有効化済み)。無効のまま起動すると"No queue provider feature was selected and compiled"で失敗する |
-| `QUEUE_URL` | キューバックエンド自身の接続URI。`development.yaml`では`Sqlite`のときキュー専用のSQLiteファイルが、`Postgres`のとき`DATABASE_URL`が既定値になる。`production.yaml`はこのファイル自身の「暗黙のフォールバックを許さない」方針どおり、どの`kind`でも既定値なしで必須とする |
+| `QUEUE_URL` | キューバックエンド自身の接続URI。`development.yaml`では、両者のバックエンドが一致していれば`DATABASE_URL`が既定値になる。したがって未設定のまま起動すればキューはデータベースと同じSQLiteファイルに入り、PostgreSQLのデプロイならキューも同じPostgreSQLインスタンスに入る。一致しない場合、つまりPostgreSQLの`DATABASE_URL`に対して`YORISHIRO_QUEUE_KIND=Sqlite`を明示した場合は、スキームの異なるURIを渡す代わりにキュー専用のSQLiteファイルにフォールバックする。`production.yaml`はこのファイル自身の「暗黙のフォールバックを許さない」方針どおり、どの`kind`でも既定値なしで必須とする |
 | `YORISHIRO_QUEUE_WORKERS` | ジョブを並列に取り出すワーカー数(既定: `2`)。Postgresは`FOR UPDATE SKIP LOCKED`で行を確保するため、この値を上げるとそのバックエンドでは実際に並列度が上がる。SQLite は`BEGIN IMMEDIATE`により、この値に関わらずデキューが直列化される |
 | `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | ジョブが`processing`のまま留まってよい分数で、これを超えるとreaperがそのジョブを`Queued`へ戻す(既定: `30`)。Locoのreaperはopt-inで既定では無効。無効のままだと、実行中に落ちたワーカー(クラッシュ、強制終了)が持っていたジョブは`processing`のまま永久に残る。ほかの何もそのジョブを`processing`から動かさず、`fail_job`は`perform`自体がエラーを返したときにしか走らないためである。健全なジョブが正当にかかりうる最長時間より大きい値を設定すること。そうしないと、reaperはまだ本当に進行中の作業を戻してしまう |
 
