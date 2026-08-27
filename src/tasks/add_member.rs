@@ -36,7 +36,7 @@ impl Task for AddMember {
             .await
             .map_err(|err| Error::Message(err.to_string()))?;
 
-        println!("membership added: user {user_id} is now {role_str} of tenant {tenant_id}");
+        println!("membership added: role updated to {role_str}");
         Ok(())
     }
 }
