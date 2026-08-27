@@ -72,7 +72,15 @@ queue:
   # Shares DATABASE_URL's file rather than taking one of its own, so an unconfigured start leaves one file behind instead of two.
   # Safe rather than merely tidy: both providers open independent connection pools whether or not they name the same file, so sharing costs nothing (config/sqlite.yaml carries the lock-contention measurement).
   # Falling back to DATABASE_URL also means pointing the database somewhere else moves the queue with it, the same way the Postgres branch below already behaves.
+  #
+  # The fallback is guarded on DATABASE_URL naming SQLite, because reaching this branch does not imply that it does: YORISHIRO_QUEUE_KIND=Sqlite selects it whatever the database is.
+  # Unguarded, that pairing handed a `postgres://` URI to SqliteConnectOptions and boot died with `SqliteError code 14: unable to open database file`, which is a combination that worked before the fallback existed.
+  # The Postgres branch needs no such guard only because its own literal is a `postgres://` one; the symmetry between the branches is in their shape, not in their safety.
+<% if get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first == "sqlite" %>
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc")) %>
+<% else %>
+  uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc") %>
+<% endif %>
   dangerously_flush: false
   num_workers: 2
   reaper:
