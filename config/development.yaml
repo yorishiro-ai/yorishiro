@@ -46,8 +46,12 @@ workers:
 # Queue Configuration
 #
 # YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Defaults to Sqlite, matching the database default below: an unconfigured start should not need a Postgres the database side is not using either.
-<% if get_env(name="YORISHIRO_QUEUE_KIND", default="Sqlite") == "Redis" %>
+# The default is derived from DATABASE_URL's scheme rather than fixed, so the queue follows the database whichever one an operator points at.
+# Unset, that is SQLite on both sides and an unconfigured start needs nothing installed.
+# With DATABASE_URL naming a PostgreSQL instance, the queue defaults to Postgres too.
+# Fixing it to Sqlite instead would have silently moved every existing PostgreSQL deployment's queue to a local file, since none of the launch paths here set YORISHIRO_QUEUE_KIND: not the Makefile, not ci.yml, not test/'s compose.
+# Setting the variable explicitly still overrides the derivation in either direction.
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL", default="redis://localhost:6379") %>
@@ -56,7 +60,7 @@ queue:
   reaper:
     age_minutes: 10
     interval_seconds: 60
-<% elif get_env(name="YORISHIRO_QUEUE_KIND", default="Sqlite") == "Sqlite" %>
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
 queue:
   kind: Sqlite
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-queue.sqlite3?mode=rwc") %>
