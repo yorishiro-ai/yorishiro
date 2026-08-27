@@ -5,7 +5,8 @@
 //!
 //! **There is no "subscribe to every `WorkerClass`" worker mode.** A worker started with no `--worker=<tags>` argument (bare `--worker`, or the worker half of `--server-and-worker`) does not dequeue every tagged job; confirmed against `loco-rs` 1.1.0's own dequeue SQL (`bgworker/pg.rs`'s `dequeue`, and the matching logic in `sqlt.rs`/`redis.rs`), an empty tag list makes the query `AND (tags IS NULL)`, so an untagged worker dequeues only *untagged* jobs.
 //! Every job this module enqueues always carries exactly one tag (its resolved `WorkerClass`'s own tag, via [`enqueue_for_class`]), so it is never untagged, so a bare `--worker` process run against this deployment dequeues none of these jobs, ever, not "the leftover ones nothing else claimed."
-//! A deployment that wants one process to cover every class must start it with every tag named explicitly: `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared`. There is no wildcard or "ignore tags" flag in `loco-rs` 1.1.0; a class added to [`WorkerClass`] in the future needs that class's tag added to every such command by hand, the same way it needs a fourth worker type added here (`enqueue_for_class`'s exhaustive match forces the latter to be noticed at compile time; the former has no equivalent enforcement and is an operational runbook concern, not a code one).
+//! A deployment that wants one process to cover every class must start it with every tag named explicitly: `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared`.
+//! There is no wildcard or "ignore tags" flag in `loco-rs` 1.1.0; a class added to [`WorkerClass`] in the future needs that class's tag added to every such command by hand, the same way it needs a fourth worker type added here (`enqueue_for_class`'s exhaustive match forces the latter to be noticed at compile time; the former has no equivalent enforcement and is an operational runbook concern, not a code one).
 
 use std::sync::Arc;
 
@@ -116,7 +117,8 @@ pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
 /// Only `workspace_id`/`entity_id`, not the `EntityRecord` itself: the record is re-read from the database inside `perform`, so a create-then-update (or create-then-delete) racing ahead of a still-queued job is picked up as the entity's current state rather than overwriting it with whatever was true at enqueue time.
 /// A deleted entity is simply not found when re-read, and the job is a no-op for it.
 ///
-/// No `model` field: `perform` already re-resolves the embedding provider from `workspace_id` via `WorkspaceEmbeddingResolver` on every run (the same live-lookup reasoning as not re-reading the entity at enqueue time), and `EmbeddingProvider` exposes no model identifier for a payload field to even mirror. Carrying one here would be a value nothing reads and nothing keeps in sync with the resolver's own answer.
+/// No `model` field: `perform` already re-resolves the embedding provider from `workspace_id` via `WorkspaceEmbeddingResolver` on every run (the same live-lookup reasoning as not re-reading the entity at enqueue time), and `EmbeddingProvider` exposes no model identifier for a payload field to even mirror.
+/// Carrying one here would be a value nothing reads and nothing keeps in sync with the resolver's own answer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
     pub workspace_id: Uuid,

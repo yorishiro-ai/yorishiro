@@ -15,7 +15,8 @@ use super::{AuthContext, authenticate};
 /// # Contract
 ///
 /// - **must** reject a key it cannot verify, by returning [`YorishiroError::Unauthenticated`].
-/// - **must** return a context whose `tenant_id` owns its `workspace_id`. The RLS session variables are set from both, so a mismatched pair silently produces a session that can see one tenant's workspace under another tenant's policies.
+/// - **must** return a context whose `tenant_id` owns its `workspace_id`.
+///   The RLS session variables are set from both, so a mismatched pair silently produces a session that can see one tenant's workspace under another tenant's policies.
 /// - **may** read `headers` for anything the key itself does not carry.
 #[async_trait]
 pub trait Authenticator: Send + Sync {

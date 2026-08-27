@@ -88,7 +88,8 @@ pub async fn set(
     Ok(())
 }
 
-/// Removes a workspace's credentials. Inference then refuses until one is configured again.
+/// Removes a workspace's credentials.
+/// Inference then refuses until one is configured again.
 pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -98,7 +99,8 @@ pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<()
     Ok(())
 }
 
-/// What is configured, for an endpoint to report. Never includes the key.
+/// What is configured, for an endpoint to report.
+/// Never includes the key.
 pub async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

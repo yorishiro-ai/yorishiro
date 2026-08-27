@@ -27,7 +27,8 @@ pub struct EmbeddingKeyDescription {
 }
 
 /// Refuses anything that is not `http://` or `https://`.
-/// Same reasoning as `llm_keys::check_scheme`: the value is interpolated into a request URL, and this rules out only what could never be an OpenAI-compatible endpoint. Not SSRF protection.
+/// Same reasoning as `llm_keys::check_scheme`: the value is interpolated into a request URL, and this rules out only what could never be an OpenAI-compatible endpoint.
+/// Not SSRF protection.
 fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
     if base_url.starts_with("http://") || base_url.starts_with("https://") {
         return Ok(());
@@ -124,7 +125,8 @@ pub async fn set(
     Ok(())
 }
 
-/// Removes a workspace's own assignment. It falls back to the deployment default afterward.
+/// Removes a workspace's own assignment.
+/// It falls back to the deployment default afterward.
 pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -134,7 +136,8 @@ pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<()
     Ok(())
 }
 
-/// What is configured, for an endpoint to report. Never includes the key.
+/// What is configured, for an endpoint to report.
+/// Never includes the key.
 pub async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

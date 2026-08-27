@@ -44,7 +44,8 @@ pub async fn set(
     Ok(())
 }
 
-/// Removes a workspace's own assignment. It falls back to `WorkerClass::Shared` afterward.
+/// Removes a workspace's own assignment.
+/// It falls back to `WorkerClass::Shared` afterward.
 pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))

@@ -640,7 +640,8 @@ mod tests {
 
     use super::create_tenant;
 
-    /// A fresh in-memory SQLite database, migrated. Each test gets its own, so nothing but the process-wide `YORISHIRO_MAX_TENANTS` env var is shared between them.
+    /// A fresh in-memory SQLite database, migrated.
+    /// Each test gets its own, so nothing but the process-wide `YORISHIRO_MAX_TENANTS` env var is shared between them.
     async fn sqlite_db() -> sea_orm::DatabaseConnection {
         let db = Database::connect("sqlite::memory:")
             .await

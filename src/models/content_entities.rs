@@ -212,15 +212,9 @@ async fn insert_and_fetch(
 ///
 /// `active.id` must already be `ActiveValue::Unchanged`/`Set` to an existing row's id: unlike
 /// `insert_and_fetch`, this never generates one.
-/// Uses `ActiveModelTrait::update_without_returning`, not `Entity::update(active)`
-/// (`insert_and_fetch`'s insert-side equivalent): `update_without_returning` still calls
-/// `ActiveModelBehavior::before_save` before executing (confirmed against `sea-orm` 2.0.2's
-/// source), unlike the raw `Entity::update(...)` builder, so `updated_at` still gets stamped on
-/// SQLite instead of silently staying stale. `Entity::insert(active)` has no such
-/// `_without_returning` trait method to reach for on the insert side, which is why
-/// `insert_and_fetch` calls `sqlite_generated_id` directly instead.
-/// Returns `DbErr::RecordNotUpdated` when no row matches, the same error `ActiveModelTrait::update`
-/// raises, so callers matching on that variant (`undo_job`) see no change in behavior.
+/// Uses `ActiveModelTrait::update_without_returning`, not `Entity::update(active)` (`insert_and_fetch`'s insert-side equivalent): `update_without_returning` still calls `ActiveModelBehavior::before_save` before executing (confirmed against `sea-orm` 2.0.2's source), unlike the raw `Entity::update(...)` builder, so `updated_at` still gets stamped on SQLite instead of silently staying stale.
+/// `Entity::insert(active)` has no such `_without_returning` trait method to reach for on the insert side, which is why `insert_and_fetch` calls `sqlite_generated_id` directly instead.
+/// Returns `DbErr::RecordNotUpdated` when no row matches, the same error `ActiveModelTrait::update` raises, so callers matching on that variant (`undo_job`) see no change in behavior.
 async fn update_and_fetch(
     conn: &impl ConnectionTrait,
     active: ActiveModel,
@@ -589,7 +583,8 @@ pub struct MigrationDryRun {
     /// The version everything would be brought to.
     pub active_version: i32,
     pub total_entities: i64,
-    /// Already on the active version. Nothing to do for these.
+    /// Already on the active version.
+    /// Nothing to do for these.
     pub current: i64,
     /// On an older version, but missing no field the active version requires: they validate as they stand and only their version marker is behind.
     pub behind_but_valid: i64,
@@ -878,9 +873,8 @@ mod sqlite_tests {
         list, update,
     };
 
-    /// A fresh in-memory SQLite database, migrated, with one tenant/workspace/schema seeded via
-    /// raw SQL (not through `tenancy`/`content_schemas`, to keep this test focused on
-    /// `content_entities` itself). Mirrors `tenancy.rs`'s own `sqlite_db()` test helper.
+    /// A fresh in-memory SQLite database, migrated, with one tenant/workspace/schema seeded via raw SQL (not through `tenancy`/`content_schemas`, to keep this test focused on `content_entities` itself).
+    /// Mirrors `tenancy.rs`'s own `sqlite_db()` test helper.
     async fn seeded_sqlite_db() -> (sea_orm::DatabaseConnection, uuid::Uuid) {
         let db = Database::connect("sqlite::memory:")
             .await
@@ -994,10 +988,8 @@ mod sqlite_tests {
         assert_eq!(after_delete, 0);
     }
 
-    /// `undo_job` calls `ActiveModel::update(conn)` directly (not through `content_entities::update`),
-    /// so it needed its own SQLite branch rather than inheriting `update_and_fetch`'s. Regresses
-    /// both outcomes its `match` distinguishes: a snapshot whose entity still exists (`restored`)
-    /// and one whose entity was deleted since (`missing`, via `DbErr::RecordNotUpdated`).
+    /// `undo_job` calls `ActiveModel::update(conn)` directly (not through `content_entities::update`), so it needed its own SQLite branch rather than inheriting `update_and_fetch`'s.
+    /// Regresses both outcomes its `match` distinguishes: a snapshot whose entity still exists (`restored`) and one whose entity was deleted since (`missing`, via `DbErr::RecordNotUpdated`).
     #[tokio::test]
     async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
         let (db, workspace_id) = seeded_sqlite_db().await;

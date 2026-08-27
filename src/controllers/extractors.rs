@@ -231,7 +231,8 @@ impl<R> Authorized<R> {
         &self.txn
     }
 
-    /// Commits the transaction. Every write handler must call this before returning `Ok`.
+    /// Commits the transaction.
+    /// Every write handler must call this before returning `Ok`.
     pub async fn commit(self) -> Result<(), ApiError> {
         self.txn
             .commit()

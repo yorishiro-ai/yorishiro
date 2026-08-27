@@ -3,7 +3,8 @@
 //! A workspace's schema is a copy of a template, and both sides can move after the copy is taken.
 //! Comparing against the base (the template as it stood when copied), not just upstream vs. local, is what tells an upstream addition apart from a local one: with only two sides both look like "present there, absent here", and following the template would silently delete the workspace's own fields.
 //!
-//! This module classifies. It does not apply anything: a conflict is a question for a person, and answering it by picking a side would invalidate whichever entities were written against the losing definition.
+//! This module classifies.
+//! It does not apply anything: a conflict is a question for a person, and answering it by picking a side would invalidate whichever entities were written against the losing definition.
 
 use std::collections::BTreeSet;
 

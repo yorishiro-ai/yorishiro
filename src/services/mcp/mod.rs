@@ -65,7 +65,8 @@ impl Authorized {
         &self.txn
     }
 
-    /// Commits the transaction. Every write handler must call this before returning `Ok`.
+    /// Commits the transaction.
+    /// Every write handler must call this before returning `Ok`.
     pub(super) async fn commit(self) -> Result<(), ErrorData> {
         self.txn
             .commit()
@@ -112,7 +113,8 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     .ok_or_else(|| ErrorData::invalid_request("missing or malformed Authorization header", None))
 }
 
-/// The sole entry point for every tool handler. Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
+/// The sole entry point for every tool handler.
+/// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
 /// Shares `services::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
 pub(super) async fn authorize(
@@ -165,7 +167,8 @@ pub(super) async fn verify(
     }
 }
 
-/// Converts a business-logic error into a tool call result (`is_error: true`). `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
+/// Converts a business-logic error into a tool call result (`is_error: true`).
+/// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(super) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let message = match err {
         YorishiroError::Internal(err) => {
@@ -201,7 +204,8 @@ pub(super) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
-/// Authenticates the caller and verifies scope, opening an RLS-scoped transaction. Expands to the `Authorized` value on success; on a scope-denied outcome it early-returns the tool result.
+/// Authenticates the caller and verifies scope, opening an RLS-scoped transaction.
+/// Expands to the `Authorized` value on success; on a scope-denied outcome it early-returns the tool result.
 /// A macro rather than a function because it early-returns from the enclosing handler (which must return `Result<CallToolResult, ErrorData>`).
 macro_rules! authorized {
     ($ctx:expr, $parts:expr, $scope:expr) => {
@@ -215,7 +219,8 @@ macro_rules! authorized {
 }
 pub(crate) use authorized;
 
-/// Connection-less counterpart to `authorized!`. Expands to the caller's `AuthContext` on success; on a scope-denied outcome it early-returns the tool result.
+/// Connection-less counterpart to `authorized!`.
+/// Expands to the caller's `AuthContext` on success; on a scope-denied outcome it early-returns the tool result.
 macro_rules! verified {
     ($ctx:expr, $parts:expr, $scope:expr) => {
         match $crate::services::mcp::verify($ctx, $parts, $scope).await? {
