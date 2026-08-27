@@ -7,7 +7,8 @@ use crate::models::tenancy::{self, MembershipRole};
 
 /// `cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner`
 ///
-/// `role` is one of `owner`/`admin`/`member`/`viewer`. `ttl_hours` is optional, defaulting to 72.
+/// `role` is one of `owner`/`admin`/`member`/`viewer`.
+/// `ttl_hours` is optional, defaulting to 72.
 /// This is the invite step of the real invite→signup→login path: a key minted directly instead carries no `user_id`, so writes made with it are unattributed.
 pub struct CreateInvite;
 

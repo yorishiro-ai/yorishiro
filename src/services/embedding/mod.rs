@@ -74,7 +74,8 @@ pub trait EmbeddingProvider: Send + Sync {
 /// This is why `conn` takes a `sea_orm::DatabaseConnection` rather than `DbHandle`: `DbHandle` does not exist on SQLite (see `Hooks::after_context`), and this seam must work on both backends, unlike `Authenticator`, which is a PostgreSQL/RLS-only concept by design.
 ///
 /// Returns `Ok(None)` when the workspace has no assignment of its own, so the caller falls back to the deployment default already held in `shared_store` rather than this seam constructing it: building the fallback (an ONNX model load can be hundreds of megabytes) is a cost only worth paying once, not on every call whether or not a workspace override exists.
-/// No caching: this runs once per call, same as `identity_workspace_llm_keys::get`. Acceptable for the same reason it is there: a metadata read, not the slow work.
+/// No caching: this runs once per call, same as `identity_workspace_llm_keys::get`.
+/// Acceptable for the same reason it is there: a metadata read, not the slow work.
 #[async_trait]
 pub trait WorkspaceEmbeddingResolver: Send + Sync {
     async fn resolve(

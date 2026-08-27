@@ -1,12 +1,10 @@
 use loco_rs::model::query::PageResponse;
 use ts_rs::TS;
 
-/// A page of results: the items, plus the framework's pagination metadata
-/// flattened alongside them.
+/// A page of results: the items, plus the framework's pagination metadata flattened alongside them.
 ///
-/// Field names must stay exactly `PagerMeta`'s (`page`, `page_size`,
-/// `total_pages`, `total_items`). Build it with [`Page::from_query`] rather
-/// than by hand, to keep the two in step.
+/// Field names must stay exactly `PagerMeta`'s (`page`, `page_size`, `total_pages`, `total_items`).
+/// Build it with [`Page::from_query`] rather than by hand, to keep the two in step.
 #[derive(serde::Serialize, serde::Deserialize, TS)]
 #[ts(export, export_to = "../frontend/src/bindings/")]
 pub struct Page<T: TS> {

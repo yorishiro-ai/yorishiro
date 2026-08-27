@@ -27,7 +27,8 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// A workspace with no schema yet. Entity writes are refused with a 422 that says so.
+/// A workspace with no schema yet.
+/// Entity writes are refused with a 422 that says so.
 pub const WORKSPACE_STATUS_SCHEMA_PENDING: &str = "schema_pending";
 
 /// A workspace that owns at least one schema.

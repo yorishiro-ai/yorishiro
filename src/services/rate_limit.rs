@@ -14,7 +14,8 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-/// Paths this guard applies to. Anything else passes through untouched.
+/// Paths this guard applies to.
+/// Anything else passes through untouched.
 fn is_guarded(path: &str) -> bool {
     matches!(
         path,

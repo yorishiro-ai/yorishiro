@@ -36,7 +36,8 @@ pub struct SetLlmKeyRequest {
     /// An OpenAI-compatible chat-completions endpoint, e.g. `https://api.openai.com/v1`.
     pub base_url: String,
     pub model: String,
-    /// Stored as given and never returned. `GET` reports only that one is configured.
+    /// Stored as given and never returned.
+    /// `GET` reports only that one is configured.
     pub api_key: String,
 }
 

@@ -9,7 +9,8 @@ use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::_entities::identity_tenant_billing::{ActiveModel, Column, Entity};
 
-/// A tenant's billing state. Absent for any tenant that has never been through checkout.
+/// A tenant's billing state.
+/// Absent for any tenant that has never been through checkout.
 #[derive(Debug, Clone)]
 pub struct TenantBillingRecord {
     pub tenant_id: Uuid,

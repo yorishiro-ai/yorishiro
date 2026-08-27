@@ -260,7 +260,8 @@ pub async fn update_template(
     active.update(conn).await.internal()?.try_into()
 }
 
-/// Deletes a template. Only the owning tenant may delete it.
+/// Deletes a template.
+/// Only the owning tenant may delete it.
 pub async fn delete_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,

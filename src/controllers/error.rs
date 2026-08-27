@@ -4,7 +4,8 @@ use axum::response::{IntoResponse, Response};
 
 use crate::error::YorishiroError;
 
-/// Newtype wrapper over `YorishiroError` for axum. The name is fixed; do not rename.
+/// Newtype wrapper over `YorishiroError` for axum.
+/// The name is fixed; do not rename.
 pub struct ApiError(pub YorishiroError);
 
 impl From<YorishiroError> for ApiError {
