@@ -39,12 +39,36 @@ impl Task for ListMembers {
         if members.is_empty() {
             println!("no members for tenant {tenant_id}");
         }
+
+        fn mask_uuid(uuid: &Uuid) -> String {
+            let s = uuid.to_string();
+            let tail_len = 8usize;
+            if s.len() <= tail_len {
+                return "***".to_string();
+            }
+            format!("***{}", &s[s.len() - tail_len..])
+        }
+
+        fn mask_email(email: &str) -> String {
+            match email.split_once('@') {
+                Some((local, domain)) => {
+                    let local_masked = if local.len() <= 2 {
+                        "**".to_string()
+                    } else {
+                        format!("{}***{}", &local[..1], &local[local.len() - 1..])
+                    };
+                    format!("{local_masked}@{domain}")
+                }
+                None => "***".to_string(),
+            }
+        }
+
         for member in members {
             println!(
                 "{}  {:<8} {}",
-                member.user_id,
+                mask_uuid(&member.user_id),
                 member.role.as_db_str(),
-                member.email,
+                mask_email(&member.email),
             );
         }
         Ok(())
