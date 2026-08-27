@@ -1,5 +1,6 @@
 //! Resolves a key that may be bound to a tenant rather than to one workspace.
-//! `ee/` never runs on SQLite, so this uses a plain Postgres pool.
+//! This uses a plain Postgres pool, because the paid edition is a PostgreSQL product: three queries elsewhere in this crate hardcode `DatabaseBackend::Postgres` and fail on any other backend.
+//! That is a statement about what is supported rather than what is prevented; `HostedApp::after_context` warns at boot on a SQLite database and lets the process continue, so a deployment can reach this code on the wrong backend if an operator chooses to.
 //!
 //! Base binds every key to exactly one workspace, which means a client working across several has to hold one key per workspace and swap between them.
 //! A key stored with a NULL `workspace_id` is instead bound to its tenant, and names the workspace per request with [`WORKSPACE_HEADER`].

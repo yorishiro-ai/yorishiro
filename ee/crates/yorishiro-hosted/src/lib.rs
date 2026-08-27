@@ -57,6 +57,20 @@ impl Hooks for HostedApp {
     /// An absent or invalid licence key does not fail boot.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         let ctx = App::after_context(ctx).await?;
+
+        // Warns and continues rather than refusing, which is deliberate and not an omission to tighten later.
+        // `db::require_min_sqlite_connections` refuses boot on a comparable misconfiguration, and the analogy does not carry: it refuses because `max_connections` below 2 deadlocks under load with no legible symptom, surfacing as intermittent 500s an operator cannot trace back to configuration.
+        // This one has a legible symptom the moment it is reached, so the operator keeps the choice.
+        //
+        // Three queries in this crate hardcode `DatabaseBackend::Postgres` and fail on any other backend at execution time, naming a query rather than the configuration that caused it: `models::origin::list_with_upstream_changes`, `models::marketplace::list_marketplace`, and `models::marketplace::insert_next_version`.
+        // Named by function rather than by line, since a line number goes stale and a function does not.
+        // `services::tenant_auth`'s own module doc has asserted that `ee/` never runs on SQLite since before anything checked it; this is that assertion becoming observable.
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            tracing::warn!(
+                "the paid edition is running against a SQLite database, which it does not support: browsing the marketplace, publishing a template version, and listing template-origin updates each run a PostgreSQL-only query and will fail when reached. Point DATABASE_URL at PostgreSQL, or use the base binary, which supports SQLite fully"
+            );
+        }
+
         ctx.shared_store.insert(LicenceState::from_env());
         ctx.shared_store
             .insert(std::sync::Arc::new(TenantScopedAuthenticator)
