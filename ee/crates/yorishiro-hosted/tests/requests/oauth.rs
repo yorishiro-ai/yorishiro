@@ -298,9 +298,9 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
                     "wrong ScopeInsufficient message: {message}"
                 );
             }
-            other => panic!(
+            _ => panic!(
                 "a new identity past the cap must be refused with ScopeInsufficient naming the \
-                 tenant limit, got: {other:?}"
+                 tenant limit"
             ),
         }
 
