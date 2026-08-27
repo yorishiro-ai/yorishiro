@@ -14,8 +14,11 @@ Setup creates the deployment's one tenant/workspace/user/API key; `/whoami` auth
 `Verified<R>` deliberately has no SQLite branch: its one caller (`search_entities`) calls `db_handle()` directly regardless, and the route is unreachable on SQLite since it depends on `content_entities.embedding` for vector similarity search, which doesn't exist on that backend (see "What's still blocked").
 
 `config/sqlite.yaml` is a manual-verification environment (`LOCO_ENV=sqlite`), not wired into any test suite; `tests/` stays PostgreSQL-only.
-It configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as `development.yaml`/`production.yaml`: loco-rs's SQLite queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of `ctx.db`, confirmed empirically to work against a real file including under lock contention (see "Queue backend and tuning" in `docs/configuration.md` for the measurement). It also expects `YORISHIRO_MAX_TENANTS` to be set for the setup wizard to answer as enabled, the same requirement as any other environment.
-The SQLite cap itself ignores the variable's value once the wizard runs, but `wizard_enabled()` still checks that it's set at all before allowing `/setup` to run.
+It configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as `development.yaml`/`production.yaml`: loco-rs's SQLite queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of `ctx.db`, confirmed empirically to work against a real file including under lock contention (see "Queue backend and tuning" in `docs/configuration.md` for the measurement).
+`YORISHIRO_MAX_TENANTS` has to resolve to a cap for the setup wizard to answer as enabled, and which entry point you start decides whether you supply it.
+The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so starting the SQLite tier with nothing configured gives you a working `POST /setup`; that is the ordinary case here.
+`ee/`'s binary sets nothing, so a paid-edition deployment needs the variable set explicitly before the wizard answers, and the test harness boots `App` without either binary's `main` and so behaves the same way.
+The SQLite cap itself ignores the variable's value once the wizard runs, but `wizard_enabled()` still checks that it resolves to a cap at all before allowing `/setup` to run.
 
 ## A worker started without tags drains nothing
 
