@@ -46,8 +46,8 @@ workers:
 # Queue Configuration
 #
 # YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Defaults to Postgres, matching this deployment's default queue provider.
-<% if get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Redis" %>
+# Defaults to Sqlite, matching the database default below: an unconfigured start should not need a Postgres the database side is not using either.
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default="Sqlite") == "Redis" %>
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL", default="redis://localhost:6379") %>
@@ -56,7 +56,7 @@ queue:
   reaper:
     age_minutes: 10
     interval_seconds: 60
-<% elif get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Sqlite" %>
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default="Sqlite") == "Sqlite" %>
 queue:
   kind: Sqlite
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-queue.sqlite3?mode=rwc") %>
@@ -126,7 +126,10 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_development") %>
+  # SQLite by default so a clone with nothing configured boots and works.
+  # Point DATABASE_URL at Postgres for anything needing RLS, multi-tenancy or vector search, none of which this backend has; docs/sqlite.md has the boundary.
+  # Every existing Postgres consumer already sets DATABASE_URL explicitly (the Makefile, ci.yml, test/'s compose, the release smoke job), so this default lands on none of them.
+  uri: <%= get_env(name="DATABASE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc") %>
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   # Set the timeout duration when acquiring a connection.
