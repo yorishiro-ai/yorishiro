@@ -11,10 +11,24 @@ name: CodeQL
 on:
   push:
     branches: [develop]
+    paths-ignore:
+      - "docs/**"
+      - "ee/docs/**"
+      - "**.md"
+      - ".github/dependabot.yml"
   pull_request:
     branches: [develop]
+    paths-ignore:
+      - "docs/**"
+      - "ee/docs/**"
+      - "**.md"
+      - ".github/dependabot.yml"
   schedule:
     - cron: "0 3 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   actions: read

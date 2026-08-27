@@ -16,6 +16,10 @@ on:
       - "**/Cargo.toml"
       - ".cargo/audit.toml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   checks: write
   contents: read

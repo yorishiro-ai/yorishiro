@@ -9,6 +9,10 @@ on:
     types: [opened, synchronize, reopened]
     branches: [develop, loco-rebuild]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
