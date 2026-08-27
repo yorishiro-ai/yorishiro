@@ -20,8 +20,13 @@ RLS前提の2プール構成は、RLSを持たない単一テナントバック�
 
 `config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
 `tests/`はいまもPostgreSQL専用のままである。
-`development.yaml`・`production.yaml`と同じく`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は`ctx.db`とは独立した`sqlx::SqlitePool`を自前で張るが、ロック競合下も含め実ファイルに対して実測で動作を確認済みである(計測内容は`docs/ja/configuration.md`の「キューのバックエンドと調整」を参照)。また、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。
-ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
+`development.yaml`・`production.yaml`と同じく`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は`ctx.db`とは独立した`sqlx::SqlitePool`を自前で張るが、ロック競合下も含め実ファイルに対して実測で動作を確認済みである(計測内容は`docs/ja/configuration.md`の「キューのバックエンドと調整」を参照)。
+セットアップウィザードが有効と判定されるには`YORISHIRO_MAX_TENANTS`が上限値として解決される必要があり、それを自分で渡すかどうかは起動するエントリポイントによって決まる。
+ベース版のバイナリ(`src/bin/main.rs`)は、運用者が設定していなければ`1`を設定する。
+したがってSQLite層を何も設定せずに起動しても`POST /setup`は動作し、こちらが通常のケースである。
+`ee/`のバイナリは何も設定しないため、有償版のデプロイではウィザードが応答する前にこの変数を明示的に設定する必要がある。
+テストハーネスもどちらのバイナリの`main`も経由せずに`App`を起動するため、同じ挙動になる。
+ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、上限値として解決されること自体はやはり確認する。
 
 ## タグを指定せずに起動したワーカーは何も処理しない
 

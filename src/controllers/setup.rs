@@ -1,7 +1,10 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
 //! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the deployment's first tenant/workspace from scratch: there is no one to invite from yet.
-//! Gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap (default 1; `0` means unlimited) rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
+//! Gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
+//! `0` means unlimited, and so does an unset variable as far as this module is concerned: both resolve to `Ok(None)` and disable the wizard.
+//! What differs is who arrives here with it unset, which is an edition-level default rather than anything this module decides.
+//! The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so a self-hosted deployment is single-tenant and the wizard is on; `ee/`'s binary sets nothing, so the paid edition defaults to unlimited and the wizard is off unless an operator asks for a cap.
 
 use axum::Json;
 use axum::extract::State;

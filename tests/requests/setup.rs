@@ -4,10 +4,15 @@ use yorishiro_core::app::App;
 
 use super::with_max_tenants;
 
-/// `config/test.yaml` sets no `YORISHIRO_MAX_TENANTS`, so the wizard is disabled by default (`max_tenants_from_env()` returns `Ok(None)` when unset): both endpoints must answer as if setup does not exist, rather than leaking whether a tenant exists on a deployment that never opted into the wizard at all.
+/// With no cap set, both endpoints must answer as if setup does not exist, rather than leaking whether a tenant exists on a deployment that never opted into the wizard at all.
+///
+/// This covers `App` rather than the shipped base binary, and the distinction matters since `src/bin/main.rs` gained its single-tenant default.
+/// `config/test.yaml` sets no `YORISHIRO_MAX_TENANTS`, and this harness boots `App` directly through `request_with_create_db` without going through any binary's `main`, so the prologue that would set the variable never runs here.
+/// A base deployment started from the binary therefore has the wizard *enabled*, which is the opposite of what this test asserts and is not a contradiction: the two exercise different entry points.
+/// Nothing in this suite invokes a binary, so the prologue itself is deliberately untested rather than overlooked; testing it would mean building a harness around `main` for four lines.
 #[tokio::test]
 #[serial]
-async fn setup_is_unreachable_when_the_wizard_is_not_enabled() {
+async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), 200);
