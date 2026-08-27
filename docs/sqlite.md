@@ -38,9 +38,11 @@ There is no wildcard, and this is not SQLite-specific: it applies to the Postgre
 ## Embedding jobs fail, and the entity write still succeeds, with no provider configured
 
 A deployment with `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` unset boots fine and serves entity CRUD fine.
-The first entity written against a schema with an `x-embed` field is where it surfaces: the enqueued job reaches `UnconfiguredEmbeddingProvider`, fails, and is marked `failed` in `sqlt_loco_queue`, logged with the two variables to set.
+The first entity written against a schema with an `x-embed` field is where it surfaces, once a worker subscribed to that job's `worker-class:*` tag actually picks it up.
+Without such a worker the job never reaches the provider at all: it stays `queued`, per the section above, and none of what follows happens.
+Given one, the job reaches `UnconfiguredEmbeddingProvider`, fails, and is marked `failed` in `sqlt_loco_queue`, logged with the two variables to set.
 
-```
+```text
 WARN embedding sync failed transiently, job will be marked failed for retry_failed
   error=embedding provider unreachable at : no embedding provider is configured:
         set YORISHIRO_EMBEDDING_BASE_URL and YORISHIRO_EMBEDDING_MODEL

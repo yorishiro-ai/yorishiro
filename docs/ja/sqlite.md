@@ -48,10 +48,12 @@ yorishiro_core-cli start --worker=worker-class:tenant-private,worker-class:offic
 ## 埋め込みプロバイダ未設定時、ジョブは失敗するがエンティティの書き込みは成功する
 
 `YORISHIRO_EMBEDDING_BASE_URL`・`YORISHIRO_EMBEDDING_MODEL`が未設定のデプロイでも、起動もエンティティのCRUDも問題なく動く。
-表面化するのは`x-embed`を持つフィールドを含むスキーマに対して最初のエンティティを書いた時点である。
-キューに入ったジョブが`UnconfiguredEmbeddingProvider`に到達して失敗し、`sqlt_loco_queue`上で`failed`となり、設定すべき2つの変数がログに残る。
+表面化するのは`x-embed`を持つフィールドを含むスキーマに対して最初のエンティティを書き、そのジョブの`worker-class:*`タグを購読しているワーカーが実際にそれを取り出した時点である。
+そのようなワーカーがいなければ、ジョブはプロバイダまで到達しない。
+前節のとおり`queued`のまま残り、以下に書くことは何も起こらない。
+ワーカーがいる場合は、ジョブが`UnconfiguredEmbeddingProvider`に到達して失敗し、`sqlt_loco_queue`上で`failed`となり、設定すべき2つの変数がログに残る。
 
-```
+```text
 WARN embedding sync failed transiently, job will be marked failed for retry_failed
   error=embedding provider unreachable at : no embedding provider is configured:
         set YORISHIRO_EMBEDDING_BASE_URL and YORISHIRO_EMBEDDING_MODEL
