@@ -69,14 +69,16 @@ queue:
 queue:
   kind: Postgres
 
-  # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the
-  # application itself connects to (database.uri below), so a plain `cargo loco start` needs only
-  # one database running. The innermost literal default must match database.uri's own literal
-  # default exactly: the two were out of sync before this comment (queue.uri's leftover
-  # `loco_development`, an unrenamed cargo-loco-generate scaffold default, against database.uri's
-  # correctly renamed `yorishiro-core_development`), which meant a plain `cargo loco start` with no
-  # DATABASE_URL/QUEUE_URL set would have pointed the queue at a database the application itself
-  # never connects to. QUEUE_URL now works as documented, and both defaults name the same database.
+  # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the application itself connects to (database.uri below), so a deployment that sets DATABASE_URL needs only one database running.
+  #
+  # The innermost literal no longer matches database.uri's, and cannot: this file's database default is SQLite and a Postgres queue cannot use a `sqlite://` URI.
+  # An earlier version of this comment required the two literals to match, after they drifted apart once (queue.uri kept an unrenamed `loco_development` scaffold default while database.uri had been renamed), pointing the queue at a database the application never connected to.
+  # That requirement described a file where both sides defaulted to Postgres, and it stopped being satisfiable when the database side moved to SQLite.
+  #
+  # So reaching this literal at all is a misconfiguration rather than a supported path: it needs YORISHIRO_QUEUE_KIND=Postgres set deliberately while DATABASE_URL is left unset, which asks for a Postgres queue alongside a SQLite database.
+  # It is left failing rather than papered over, matching production.yaml's own no-silent-fallback stance.
+  # Measured: the boot creates yorishiro.sqlite3, runs migrations into it, and then dies on `Any(Sqlx(PoolTimedOut))` when the queue cannot reach Postgres, so the failure is loud but leaves an initialized database file behind.
+  # Set DATABASE_URL alongside YORISHIRO_QUEUE_KIND=Postgres, which is what any deployment actually using a Postgres queue already does.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_development")) %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
