@@ -73,7 +73,7 @@ impl Hooks for HostedApp {
                     dyn yorishiro_core::services::embedding::WorkspaceEmbeddingResolver,
                 >);
         // The worker-class resolver seam: a workspace with its own row in
-        // identity_workspace_worker_classes pins its EmbeddingSyncWorker jobs to that class
+        // identity_workspace_worker_classes pins its embedding-sync jobs to that class
         // instead of WorkerClass::Shared (see WorkerClassResolver's own doc comment). Which
         // compute a tenant's jobs run on is the same paid-edition decision that keeps
         // embedding_keys/llm_keys in ee/: base only needs to be able to *receive* a class

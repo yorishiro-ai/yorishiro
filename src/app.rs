@@ -136,12 +136,19 @@ impl Hooks for App {
         )))
     }
 
+    /// Registers all three `WorkerClass` worker types, not just one: `Queue::register` keys a handler by `class_name()`, and `enqueue_for_class` enqueues under whichever of the three types matches the resolved `WorkerClass`, so a type left unregistered here would have jobs enqueue successfully but never dequeue (loco-rs has no "unregistered handler" error at enqueue time, only silence at dequeue time).
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
+        use crate::workers::embedding_sync::{
+            EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
+            EmbeddingSyncWorkerTenantPrivate,
+        };
         queue
-            .register(crate::workers::embedding_sync::EmbeddingSyncWorker::build(
-                ctx,
-            ))
-            .await
+            .register(EmbeddingSyncWorkerTenantPrivate::build(ctx))
+            .await?;
+        queue
+            .register(EmbeddingSyncWorkerOfficial::build(ctx))
+            .await?;
+        queue.register(EmbeddingSyncWorkerShared::build(ctx)).await
     }
 
     #[allow(unused_variables)]

@@ -1,6 +1,6 @@
 //! A workspace's own worker-class assignment.
 //!
-//! A workspace that wants its `EmbeddingSyncWorker` jobs to run on tenant-private or official-node compute instead of the shared pool assigns one here.
+//! A workspace that wants its embedding-sync jobs to run on tenant-private or official-node compute instead of the shared pool assigns one here.
 //! A workspace with none configured stays `WorkerClass::Shared`, so an existing deployment is unaffected until an operator sets one.
 
 use axum::Json;
