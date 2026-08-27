@@ -68,7 +68,11 @@ queue:
 <% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
 queue:
   kind: Sqlite
-  uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-queue.sqlite3?mode=rwc") %>
+
+  # Shares DATABASE_URL's file rather than taking one of its own, so an unconfigured start leaves one file behind instead of two.
+  # Safe rather than merely tidy: both providers open independent connection pools whether or not they name the same file, so sharing costs nothing (config/sqlite.yaml carries the lock-contention measurement).
+  # Falling back to DATABASE_URL also means pointing the database somewhere else moves the queue with it, the same way the Postgres branch below already behaves.
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc")) %>
   dangerously_flush: false
   num_workers: 2
   reaper:
