@@ -101,3 +101,5 @@ loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 rstest = { version = "0.25" }
 insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
+# Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
+tempfile = { version = "3" }

@@ -3,6 +3,7 @@ mod auth;
 mod entities;
 mod import;
 mod members;
+mod queue;
 mod schemas;
 mod search;
 mod setup;
@@ -13,7 +14,9 @@ mod workspaces;
 /// `after_context` opens two pools Loco's own request-test harness knows nothing about: the identity pool and the tenant pool.
 /// Leaving either open means a session survives on the throwaway test database, and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
 /// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
-/// `queue_provider` is not closed here: `config/test.yaml` has no `queue:` block, so it is always `None` in this environment.
+/// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
+/// `config/test.yaml` has no `queue:` block, so it is `None` for every test that boots through `request_with_create_db`.
+/// `queue.rs` is the exception, supplying its own SQLite queue config: that provider opens its own `sqlx::SqlitePool` against a file in a `TempDir` rather than a connection to the throwaway database, so it cannot hold the session that would fail `DROP DATABASE`, and the file goes with the `TempDir`.
 ///
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
