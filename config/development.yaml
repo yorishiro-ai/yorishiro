@@ -53,7 +53,7 @@ workers:
 # Setting the variable explicitly still overrides the derivation in either direction.
 #
 # The chain converts only `postgres` and `sqlite`, and that asymmetry is deliberate rather than an omission to tidy up.
-# Reaching the SQLite branch requires the derived value to equal `Sqlite` exactly, so every scheme the chain does not convert falls through to Postgres: `postgresql://` renders `Postgresql`, `mysql://` renders `mysql`, an unset DATABASE_URL renders `sqlite` from its own default, and only the last of those reaches SQLite.
+# With YORISHIRO_QUEUE_KIND unset, reaching the SQLite branch requires the derived value to equal `Sqlite` exactly, so every scheme the chain does not convert falls through to Postgres: `postgresql://` renders `Postgresql`, `mysql://` renders `mysql`, an unset DATABASE_URL renders `sqlite` from its own default, and only the last of those reaches SQLite.
 # Verified by boot rather than by reading: `postgresql://` and `mysql://` each create no SQLite queue file.
 # So adding `postgresql` to the conversion would change nothing, and the fallthrough is what makes an unanticipated scheme fail towards the shared backend rather than towards a local file no separate worker can see.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
@@ -84,8 +84,9 @@ queue:
   # An earlier version of this comment required the two literals to match, after they drifted apart once (queue.uri kept an unrenamed `loco_development` scaffold default while database.uri had been renamed), pointing the queue at a database the application never connected to.
   # That requirement described a file where both sides defaulted to Postgres, and it stopped being satisfiable when the database side moved to SQLite.
   #
-  # So reaching this literal at all is a misconfiguration rather than a supported path: it needs YORISHIRO_QUEUE_KIND=Postgres set deliberately while DATABASE_URL is left unset, which asks for a Postgres queue alongside a SQLite database.
-  # It is left failing rather than papered over, matching production.yaml's own no-silent-fallback stance.
+  # This branch itself is an ordinary path, reached whenever DATABASE_URL names a PostgreSQL instance, whether or not YORISHIRO_QUEUE_KIND is set: the derivation above sends the queue wherever the database went, and QUEUE_URL then falls back to DATABASE_URL, so both sides land on the same instance and this literal is never consulted.
+  # Reaching the literal takes YORISHIRO_QUEUE_KIND=Postgres set deliberately while DATABASE_URL is left unset, which asks for a Postgres queue alongside a SQLite database and is a misconfiguration rather than a supported path.
+  # That is left failing rather than papered over, matching production.yaml's own no-silent-fallback stance.
   # Measured: the boot dies on `Any(Sqlx(PoolTimedOut))` when the queue cannot reach Postgres, and leaves an empty `yorishiro.sqlite3` behind (4 KiB, zero tables): the queue pool is built before migrations run, so the file is created by opening a connection and nothing is written into it.
   # It is a harmless artifact to delete rather than a half-initialized database, and a corrected boot migrates it from scratch.
   # Set DATABASE_URL alongside YORISHIRO_QUEUE_KIND=Postgres, which is what any deployment actually using a Postgres queue already does.
