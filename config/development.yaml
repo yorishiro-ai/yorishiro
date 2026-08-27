@@ -51,6 +51,11 @@ workers:
 # With DATABASE_URL naming a PostgreSQL instance, the queue defaults to Postgres too.
 # Fixing it to Sqlite instead would have silently moved every existing PostgreSQL deployment's queue to a local file, since none of the launch paths here set YORISHIRO_QUEUE_KIND: not the Makefile, not ci.yml, not test/'s compose.
 # Setting the variable explicitly still overrides the derivation in either direction.
+#
+# The chain converts only `postgres` and `sqlite`, and that asymmetry is deliberate rather than an omission to tidy up.
+# Reaching the SQLite branch requires the derived value to equal `Sqlite` exactly, so every scheme the chain does not convert falls through to Postgres: `postgresql://` renders `Postgresql`, `mysql://` renders `mysql`, an unset DATABASE_URL renders `sqlite` from its own default, and only the last of those reaches SQLite.
+# Verified by boot rather than by reading: `postgresql://` and `mysql://` each create no SQLite queue file.
+# So adding `postgresql` to the conversion would change nothing, and the fallthrough is what makes an unanticipated scheme fail towards the shared backend rather than towards a local file no separate worker can see.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
