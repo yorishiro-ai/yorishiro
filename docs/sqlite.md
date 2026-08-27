@@ -13,7 +13,10 @@ Setup creates the deployment's one tenant/workspace/user/API key; `/whoami` auth
 `AuthContext`, `Authorized<R>`, and `AuditAuthorized` all have a SQLite branch (`src/controllers/extractors.rs`), authenticating and (for the latter two) opening a plain transaction directly against `ctx.db` rather than going through `DbHandle`/`TenantDb::begin_for_workspace`, since that Postgres-only two-pool RLS machinery has nothing to scope on a single-tenant backend with no RLS.
 `Verified<R>` deliberately has no SQLite branch: its one caller (`search_entities`) calls `db_handle()` directly regardless, and the route is unreachable on SQLite since it depends on `content_entities.embedding` for vector similarity search, which doesn't exist on that backend (see "What's still blocked").
 
-`config/sqlite.yaml` is a manual-verification environment (`LOCO_ENV=sqlite`), not wired into any test suite; `tests/` stays PostgreSQL-only.
+`config/development.yaml` also defaults to SQLite, for both the database and the queue, so a clone with nothing configured boots on this backend and serves the first-run wizard without `LOCO_ENV` being set at all.
+Setting `DATABASE_URL` to a PostgreSQL URI overrides that and is what any deployment needing RLS, more than one tenant, or vector search does.
+
+`config/sqlite.yaml` remains a separate manual-verification environment (`LOCO_ENV=sqlite`), not wired into any test suite; `tests/` stays PostgreSQL-only.
 It configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as `development.yaml`/`production.yaml`: loco-rs's SQLite queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of `ctx.db`, confirmed empirically to work against a real file including under lock contention (see "Queue backend and tuning" in `docs/configuration.md` for the measurement).
 `YORISHIRO_MAX_TENANTS` has to resolve to a cap for the setup wizard to answer as enabled, and which entry point you start decides whether you supply it.
 The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so starting the SQLite tier with nothing configured gives you a working `POST /setup`; that is the ordinary case here.

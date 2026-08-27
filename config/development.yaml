@@ -46,8 +46,17 @@ workers:
 # Queue Configuration
 #
 # YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Defaults to Postgres, matching this deployment's default queue provider.
-<% if get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Redis" %>
+# The default is derived from DATABASE_URL's scheme rather than fixed, so the queue follows the database whichever one an operator points at.
+# Unset, that is SQLite on both sides and an unconfigured start needs nothing installed.
+# With DATABASE_URL naming a PostgreSQL instance, the queue defaults to Postgres too.
+# Fixing it to Sqlite instead would have silently moved every existing PostgreSQL deployment's queue to a local file, since none of the launch paths here set YORISHIRO_QUEUE_KIND: not the Makefile, not ci.yml, not test/'s compose.
+# Setting the variable explicitly still overrides the derivation in either direction.
+#
+# The chain converts only `postgres` and `sqlite`, and that asymmetry is deliberate rather than an omission to tidy up.
+# With YORISHIRO_QUEUE_KIND unset, reaching the SQLite branch requires the derived value to equal `Sqlite` exactly, so every scheme the chain does not convert falls through to Postgres: `postgresql://` renders `Postgresql`, `mysql://` renders `mysql`, an unset DATABASE_URL renders `sqlite` from its own default, and only the last of those reaches SQLite.
+# Verified by boot rather than by reading: `postgresql://` and `mysql://` each create no SQLite queue file.
+# So adding `postgresql` to the conversion would change nothing, and the fallthrough is what makes an unanticipated scheme fail towards the shared backend rather than towards a local file no separate worker can see.
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL", default="redis://localhost:6379") %>
@@ -56,7 +65,7 @@ queue:
   reaper:
     age_minutes: 10
     interval_seconds: 60
-<% elif get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Sqlite" %>
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
 queue:
   kind: Sqlite
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-queue.sqlite3?mode=rwc") %>
@@ -69,14 +78,18 @@ queue:
 queue:
   kind: Postgres
 
-  # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the
-  # application itself connects to (database.uri below), so a plain `cargo loco start` needs only
-  # one database running. The innermost literal default must match database.uri's own literal
-  # default exactly: the two were out of sync before this comment (queue.uri's leftover
-  # `loco_development`, an unrenamed cargo-loco-generate scaffold default, against database.uri's
-  # correctly renamed `yorishiro-core_development`), which meant a plain `cargo loco start` with no
-  # DATABASE_URL/QUEUE_URL set would have pointed the queue at a database the application itself
-  # never connects to. QUEUE_URL now works as documented, and both defaults name the same database.
+  # QUEUE_URL overrides where this reads; unset, it falls back to the same DATABASE_URL the application itself connects to (database.uri below), so a deployment that sets DATABASE_URL needs only one database running.
+  #
+  # The innermost literal no longer matches database.uri's, and cannot: this file's database default is SQLite and a Postgres queue cannot use a `sqlite://` URI.
+  # An earlier version of this comment required the two literals to match, after they drifted apart once (queue.uri kept an unrenamed `loco_development` scaffold default while database.uri had been renamed), pointing the queue at a database the application never connected to.
+  # That requirement described a file where both sides defaulted to Postgres, and it stopped being satisfiable when the database side moved to SQLite.
+  #
+  # This branch itself is an ordinary path, reached whenever DATABASE_URL names a PostgreSQL instance, whether or not YORISHIRO_QUEUE_KIND is set: the derivation above sends the queue wherever the database went, and QUEUE_URL then falls back to DATABASE_URL, so both sides land on the same instance and this literal is never consulted.
+  # Reaching the literal takes YORISHIRO_QUEUE_KIND=Postgres set deliberately while DATABASE_URL is left unset, which asks for a Postgres queue alongside a SQLite database and is a misconfiguration rather than a supported path.
+  # That is left failing rather than papered over, matching production.yaml's own no-silent-fallback stance.
+  # Measured: the boot dies on `Any(Sqlx(PoolTimedOut))` when the queue cannot reach Postgres, and leaves an empty `yorishiro.sqlite3` behind (4 KiB, zero tables): the queue pool is built before migrations run, so the file is created by opening a connection and nothing is written into it.
+  # It is a harmless artifact to delete rather than a half-initialized database, and a corrected boot migrates it from scratch.
+  # Set DATABASE_URL alongside YORISHIRO_QUEUE_KIND=Postgres, which is what any deployment actually using a Postgres queue already does.
   uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_development")) %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
@@ -126,7 +139,10 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_development") %>
+  # SQLite by default so a clone with nothing configured boots and works.
+  # Point DATABASE_URL at Postgres for anything needing RLS, multi-tenancy or vector search, none of which this backend has; docs/sqlite.md has the boundary.
+  # Every existing Postgres consumer already sets DATABASE_URL explicitly (the Makefile, ci.yml, test/'s compose, the release smoke job), so this default lands on none of them.
+  uri: <%= get_env(name="DATABASE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc") %>
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   # Set the timeout duration when acquiring a connection.

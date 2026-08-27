@@ -18,7 +18,12 @@ RLS前提の2プール構成は、RLSを持たない単一テナントバック�
 `Verified<R>`だけは意図的にSQLite用の分岐を持たない。
 唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体がベクトル類似検索のために`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
 
-`config/sqlite.yaml`は手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
+`config/development.yaml`もデータベースとキューの両方をSQLiteに既定している。
+したがってクローンしただけで何も設定しなくてもこのバックエンドで起動し、`LOCO_ENV`を設定しなくても初回セットアップウィザードが動作する。
+`DATABASE_URL`にPostgreSQLのURIを設定すればそちらが優先される。
+RLS・複数テナント・ベクトル検索のいずれかを必要とするデプロイはそうする。
+
+`config/sqlite.yaml`は引き続き独立した手動検証用の環境(`LOCO_ENV=sqlite`)であり、どのテストスイートにも組み込まれていない。
 `tests/`はいまもPostgreSQL専用のままである。
 `development.yaml`・`production.yaml`と同じく`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は`ctx.db`とは独立した`sqlx::SqlitePool`を自前で張るが、ロック競合下も含め実ファイルに対して実測で動作を確認済みである(計測内容は`docs/ja/configuration.md`の「キューのバックエンドと調整」を参照)。
 セットアップウィザードが有効と判定されるには`YORISHIRO_MAX_TENANTS`が上限値として解決される必要があり、それを自分で渡すかどうかは起動するエントリポイントによって決まる。
