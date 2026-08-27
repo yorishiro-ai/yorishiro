@@ -1,16 +1,12 @@
 name: Windows (weekly)
 
-# This job is the only thing that builds Yorishiro on Windows. The release ships Linux packages
-# and a container image, so no job in release.yml compiles for Windows, and without this schedule
-# a Windows-only build regression would sit undetected for as long as nobody tried one.
+# This job is the only thing that builds Yorishiro on Windows.
+# The release ships Linux packages and a container image, so no job in release.yml compiles for Windows, and without this schedule a Windows-only build regression would sit undetected for as long as nobody tried one.
 #
-# Weekly rather than daily: no release depends on the answer, so a week-old signal is enough to
-# say whether the tree still builds there.
+# Weekly rather than daily: no release depends on the answer, so a week-old signal is enough to say whether the tree still builds there.
 #
-# Build-only, no test run: sqlx's query building here is entirely dynamic (sea-query +
-# query_as_with, no sqlx::query!/query_as! macros), so this compiles without a database. Running
-# the test suite would additionally require a Windows Postgres service, which is a heavier lift
-# for a check whose only job is "does this still build on Windows."
+# Build-only, no test run: sqlx's query building here is entirely dynamic (sea-query + query_as_with, no sqlx::query!/query_as! macros), so this compiles without a database.
+# Running the test suite would additionally require a Windows Postgres service, which is a heavier lift for a check whose only job is "does this still build on Windows."
 
 on:
   schedule:

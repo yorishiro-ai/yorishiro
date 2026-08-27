@@ -45,12 +45,8 @@ workers:
   
 # Queue Configuration
 #
-# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis,
-# QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of
-# fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs
-# but point at different URIs), so a template conditional renders one whole alternative block rather than
-# templating individual fields inside a single fixed shape. Defaults to Postgres, matching this
-# deployment's default queue provider.
+# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
+# Defaults to Postgres, matching this deployment's default queue provider.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Redis" %>
 queue:
   kind: Redis

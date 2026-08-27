@@ -34,11 +34,8 @@ jobs:
       tag: ${{ steps.commit.outputs.tag }}
 
     steps:
-      # workflow_dispatch runs against whatever ref the dispatcher selected, and the checkout
-      # below has no `ref:` pin, so without this guard, dispatching from a branch that is a
-      # fast-forward descendant of master would push that branch's content straight to master.
-      # Fail loudly rather than silently pinning `ref: master`, which would build something
-      # other than what the dispatcher chose.
+      # workflow_dispatch runs against whatever ref the dispatcher selected, and the checkout below has no `ref:` pin, so without this guard, dispatching from a branch that is a fast-forward descendant of master would push that branch's content straight to master.
+      # Fail loudly rather than silently pinning `ref: master`, which would build something other than what the dispatcher chose.
       - name: Require dispatch from master
         run: |
           if [ "$GITHUB_REF" != "refs/heads/master" ]; then
@@ -274,10 +271,8 @@ jobs:
           sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           nfpm --version
 
-      # Two package lines, one per edition: `yorishiro-ee` carries the paid features (inactive
-      # without a licence key) and is what most deployments want; `yorishiro-ce` holds no
-      # proprietary code and is therefore headless. They Conflict, since both would run a
-      # service against one database.
+      # Two package lines, one per edition: `yorishiro-ee` carries the paid features (inactive without a licence key) and is what most deployments want; `yorishiro-ce` holds no proprietary code and is therefore headless.
+      # They Conflict, since both would run a service against one database.
       - name: Package (deb and rpm)
         if: runner.os == 'Linux'
         env:
@@ -361,14 +356,10 @@ jobs:
             "${IMAGE}:${TAG}-amd64" \
             "${IMAGE}:${TAG}-arm64"
 
-  # Pulls the manifest that was just published and boots it against a real database. `ci.yml`'s
-  # package-smoke covers the same ground for a debug build on every PR, but nothing until now
-  # checks the actual release artifact: a release-profile-only fault, or a Dockerfile stage
-  # that only breaks in the published image, would otherwise ship unnoticed.
+  # Pulls the manifest that was just published and boots it against a real database.
+  # `ci.yml`'s package-smoke covers the same ground for a debug build on every PR, but nothing until now checks the actual release artifact: a release-profile-only fault, or a Dockerfile stage that only breaks in the published image, would otherwise ship unnoticed.
   #
-  # Runs before github-release deliberately: the GitHub Release is what marks a version as
-  # published (see `prepare`), so a failure here leaves the version resumable rather than
-  # looking complete.
+  # Runs before github-release deliberately: the GitHub Release is what marks a version as published (see `prepare`), so a failure here leaves the version resumable rather than looking complete.
   smoke:
     needs: [docker-manifest, prepare]
     runs-on: ubuntu-latest
@@ -465,13 +456,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Once yorishiro-core@$VERSION is uploaded, that version is burned on crates.io: yankable,
-      # never erasable (the same lesson the workspace checklist already carries for `yorishiro`
-      # itself). So catch a packaging fault in yorishiro-server *before* core goes out, not
-      # after. `crates/yorishiro-server/migrations` is a symlink to the workspace-root
-      # `migrations/`, which `include` only picks up if cargo actually resolves the link; count
-      # is the same "a glob matching nothing is not an error" shape `github-release`'s artifact
-      # check already guards against.
+      # Once yorishiro-core@$VERSION is uploaded, that version is burned on crates.io: yankable, never erasable (the same lesson the workspace checklist already carries for `yorishiro` itself).
+      # So catch a packaging fault in yorishiro-server *before* core goes out, not after.
+      # `crates/yorishiro-server/migrations` is a symlink to the workspace-root `migrations/`, which `include` only picks up if cargo actually resolves the link; count is the same "a glob matching nothing is not an error" shape `github-release`'s artifact check already guards against.
       - name: Confirm yorishiro-server packages its migrations before publishing anything
         run: |
           count=$(cargo package --list -p yorishiro-server | grep -c '^migrations/')

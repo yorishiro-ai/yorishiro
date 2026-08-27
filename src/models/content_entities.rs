@@ -168,18 +168,10 @@ fn select_record_columns(conn: &impl ConnectionTrait, select: Select<Entity>) ->
 
 /// Inserts `active` and returns the persisted row as an `EntityRecord`.
 ///
-/// `ActiveModelTrait::insert` (which `create` used before this existed) builds its return value
-/// by decoding a `content_entities::Model`, and SeaORM's `pgvector::Vector` `TryGetable` impl
-/// unconditionally errors on a SQLite row (`Vector unsupported by sqlx-sqlite`) regardless of
-/// whether the column has a value, so that path can never succeed on SQLite even though the insert
-/// itself would. `Entity::insert(active).exec_without_returning` sidesteps the `Model` decode
-/// entirely; `select_record_columns`'s follow-up read (which already excludes `embedding`) then
-/// fetches the row `EntityRecord` actually needs.
+/// `ActiveModelTrait::insert` (which `create` used before this existed) builds its return value by decoding a `content_entities::Model`, and SeaORM's `pgvector::Vector` `TryGetable` impl unconditionally errors on a SQLite row (`Vector unsupported by sqlx-sqlite`) regardless of whether the column has a value, so that path can never succeed on SQLite even though the insert itself would.
+/// `Entity::insert(active).exec_without_returning` sidesteps the `Model` decode entirely; `select_record_columns`'s follow-up read (which already excludes `embedding`) then fetches the row `EntityRecord` actually needs.
 ///
-/// `sqlite_generated_id` is called explicitly rather than relying on `ActiveModel`'s
-/// `before_save` hook: `Entity::insert(...).exec_without_returning(...)` doesn't call
-/// `ActiveModelBehavior::before_save` at all (only `ActiveModelTrait::insert`/`update` do), the
-/// same reason `tenancy::add_member` calls it directly for its own `on_conflict` insert.
+/// `sqlite_generated_id` is called explicitly rather than relying on `ActiveModel`'s `before_save` hook: `Entity::insert(...).exec_without_returning(...)` doesn't call `ActiveModelBehavior::before_save` at all (only `ActiveModelTrait::insert`/`update` do), the same reason `tenancy::add_member` calls it directly for its own `on_conflict` insert.
 async fn insert_and_fetch(
     conn: &impl ConnectionTrait,
     mut active: ActiveModel,
@@ -307,11 +299,8 @@ async fn check_entity_quota(
 
 /// Counts how many entities a workspace holds, for quota enforcement and workspace-detail summaries.
 ///
-/// `select_record_columns` isn't used here: `PaginatorTrait::count` builds its own `SELECT COUNT(*)`
-/// wrapping the query rather than projecting `Model`'s columns, but SeaORM still resolves that
-/// inner query against every column `Entity::find()` names, `embedding` included, which is what
-/// fails on SQLite. Excluding `embedding` from the column list sidesteps that the same way the
-/// other functions in this file do.
+/// `select_record_columns` isn't used here: `PaginatorTrait::count` builds its own `SELECT COUNT(*)` wrapping the query rather than projecting `Model`'s columns, but SeaORM still resolves that inner query against every column `Entity::find()` names, `embedding` included, which is what fails on SQLite.
+/// Excluding `embedding` from the column list sidesteps that the same way the other functions in this file do.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
     use super::_entities::content_entities::Column;
 
@@ -857,15 +846,9 @@ pub async fn undo_job(
             schema_version: ActiveValue::Set(snap.schema_version),
             ..Default::default()
         };
-        // `active.update(conn)` decodes its return value as a full `Model`, which fails on SQLite
-        // the same way `content_entities::update`'s own write used to (see `update_and_fetch`):
-        // SeaORM's `pgvector::Vector` decode support unconditionally errors on any SQLite row.
-        // `update_without_returning` sidesteps that decode; the caller here only needs the
-        // `Ok`/`RecordNotUpdated`/other-error outcome, not the row itself, so there's no read-back
-        // to add on top of it the way `update_and_fetch` needs one. It still calls `before_save`
-        // (unlike the raw `Entity::update(...)` builder `update_and_fetch` avoided using for the
-        // same `updated_at`-staleness reason), and still raises `DbErr::RecordNotUpdated` when no
-        // row matches, so the `match` below needs no branch of its own.
+        // `active.update(conn)` decodes its return value as a full `Model`, which fails on SQLite the same way `content_entities::update`'s own write used to (see `update_and_fetch`): SeaORM's `pgvector::Vector` decode support unconditionally errors on any SQLite row.
+        // `update_without_returning` sidesteps that decode; the caller here only needs the `Ok`/`RecordNotUpdated`/other-error outcome, not the row itself, so there's no read-back to add on top of it the way `update_and_fetch` needs one.
+        // It still calls `before_save` (unlike the raw `Entity::update(...)` builder `update_and_fetch` avoided using for the same `updated_at`-staleness reason), and still raises `DbErr::RecordNotUpdated` when no row matches, so the `match` below needs no branch of its own.
         let result = if is_sqlite {
             active.update_without_returning(conn).await.map(|_| ())
         } else {

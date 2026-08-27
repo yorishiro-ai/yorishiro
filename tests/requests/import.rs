@@ -46,11 +46,8 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     Setup { key }
 }
 
-/// A schema line is only present in the import file when the exporting workspace's own schema is
-/// being restored. An entity referencing a schema that already exists in the destination workspace
-/// (created directly, not via this import) has to fall through to a lookup by id instead, and that
-/// lookup is memoized (`import::import_jsonl`'s `schema_name_by_id` cache) since a batch of entities
-/// sharing one pre-existing schema is the common case.
+/// A schema line is only present in the import file when the exporting workspace's own schema is being restored.
+/// An entity referencing a schema that already exists in the destination workspace (created directly, not via this import) has to fall through to a lookup by id instead, and that lookup is memoized (`import::import_jsonl`'s `schema_name_by_id` cache) since a batch of entities sharing one pre-existing schema is the common case.
 ///
 /// Two entities against the same pre-existing schema exercises both the cache miss (first entity)
 /// and the cache hit (second entity), and asserts both actually land with the right entity_type

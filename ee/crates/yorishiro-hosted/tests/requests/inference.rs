@@ -368,10 +368,7 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
             .begin_for_workspace(setup.tenant_id, setup.workspace_id)
             .await
             .expect("begin tenant txn");
-        // "summary" has no declared type constraint that would reject a value, so a non-string
-        // answer for a field the schema does declare as a string is what actually gets refused:
-        // content_entities::update validates the merged data against the schema, and this shape
-        // does not match it.
+        // "summary" has no declared type constraint that would reject a value, so a non-string answer for a field the schema does declare as a string is what actually gets refused: content_entities::update validates the merged data against the schema, and this shape does not match it.
         let mut answers = serde_json::Map::new();
         answers.insert("title".to_string(), serde_json::json!(12345));
         let applied =
@@ -408,10 +405,7 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
 /// connection and calls `apply_answers` with a short `lock_timeout`, returning its result as a
 /// string (its `Err` message, or `"Ok(bool)"` if it somehow succeeded) for the caller to assert on.
 ///
-/// `yorishiro_app` is granted per-table (see loco-architecture.md), not the owner of any table, so
-/// it cannot DROP or REVOKE its own way into a failure; locking the table from a second connection
-/// is a failure `apply_answers` can genuinely hit without needing privileges the RLS role does not
-/// have.
+/// `yorishiro_app` is granted per-table (see loco-architecture.md), not the owner of any table, so it cannot DROP or REVOKE its own way into a failure; locking the table from a second connection is a failure `apply_answers` can genuinely hit without needing privileges the RLS role does not have.
 async fn apply_answers_with_content_entities_locked(
     request: &axum_test::TestServer,
     ctx: &loco_rs::app::AppContext,

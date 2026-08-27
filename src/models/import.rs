@@ -40,11 +40,7 @@ pub async fn import_jsonl(
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
     // Exported schema_ids are workspace-local to the source, so track name-by-old-id for schema lines this import has processed instead of re-querying the exported id.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
-    // A schema that already existed in the destination workspace before this import (not itself
-    // a schema line in this file) falls through to get_by_id below on every entity line that
-    // references it; memoized the same way migration_dry_run and recall_context cache a schema
-    // lookup, since a batch of entities sharing one pre-existing schema is the common case, not
-    // the exception.
+    // A schema that already existed in the destination workspace before this import (not itself a schema line in this file) falls through to get_by_id below on every entity line that references it; memoized the same way migration_dry_run and recall_context cache a schema lookup, since a batch of entities sharing one pre-existing schema is the common case, not the exception.
     let mut schema_name_by_id: HashMap<Uuid, String> = HashMap::new();
 
     for (line_no, line) in reader.lines().enumerate() {

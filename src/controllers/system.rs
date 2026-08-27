@@ -92,11 +92,7 @@ pub async fn set_maintenance(
     )
     .await?;
 
-    // Recorded on ctx.db, the same migration-role connection the write itself just went through:
-    // authorized.txn() is an RLS-scoped transaction this handler never commits (get_maintenance's
-    // sibling extractor exists only to gate the scope check, not to hold a connection this
-    // deployment-wide write needs), so writing the audit row there would silently discard it the
-    // same way an uncommitted write anywhere else in this codebase does.
+    // Recorded on ctx.db, the same migration-role connection the write itself just went through: authorized.txn() is an RLS-scoped transaction this handler never commits (get_maintenance's sibling extractor exists only to gate the scope check, not to hold a connection this deployment-wide write needs), so writing the audit row there would silently discard it the same way an uncommitted write anywhere else in this codebase does.
     identity_api_key_audit_log::record(
         &ctx.db,
         identity_api_key_audit_log::AuditActor {

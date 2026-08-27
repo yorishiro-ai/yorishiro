@@ -92,11 +92,8 @@ pub async fn apply_answers(
     {
         Ok(_) => Ok(true),
         Err(YorishiroError::NotFound { .. } | YorishiroError::ValidationFailed { .. }) => {
-            // The snapshot just taken now describes a change that never landed: the entity's data
-            // is unchanged, so undo restoring from it would be a no-op today, but the row still
-            // exists under job_id and would falsely attribute a *later*, unrelated edit to this
-            // job if that edit happens before an eventual undo. Removing it here keeps job_id's
-            // snapshot set limited to entities this call actually changed.
+            // The snapshot just taken now describes a change that never landed: the entity's data is unchanged, so undo restoring from it would be a no-op today, but the row still exists under job_id and would falsely attribute a *later*, unrelated edit to this job if that edit happens before an eventual undo.
+            // Removing it here keeps job_id's snapshot set limited to entities this call actually changed.
             yorishiro_core::models::content_entities::delete_snapshot(
                 conn,
                 workspace_id,
