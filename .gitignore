@@ -3,8 +3,10 @@
 *.swo
 .env
 .env.local
-# config/sqlite.yaml's own default filenames (DATABASE_URL, QUEUE_URL) land in the repo root when
-# `cargo loco start -e sqlite` runs from here; never meant to be committed.
+# Both SQLite configurations put their database file in the repo root when started from here:
+# development.yaml on an unconfigured `cargo loco start`, and sqlite.yaml under `-e sqlite`.
+# One file each rather than two, since the queue shares DATABASE_URL's file by default.
+# Never meant to be committed.
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal

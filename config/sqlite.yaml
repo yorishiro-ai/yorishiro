@@ -44,10 +44,18 @@ workers:
 
 # Queue Configuration
 #
-# `kind: Sqlite` points at its own file by default (`QUEUE_URL`, separate from `DATABASE_URL`): both providers open independent connection pools regardless of whether they name the same file or different ones, so sharing one file costs nothing beyond what the comment above already measured, but pointing the queue at its own file is one less thing for a reader to reason about when checking whether a given lock contention scenario is possible.
+# `kind: Sqlite` shares `DATABASE_URL`'s file rather than taking one of its own, so an unconfigured start creates one file instead of two.
+# That is safe rather than merely tidy, and the reason is the measurement this comment used to carry as an argument for splitting them: both providers open independent connection pools regardless of whether they name the same file or different ones, so sharing costs nothing beyond the lock contention already measured above.
+# Splitting them bought one less thing for a reader to reason about when checking a lock contention scenario, which is a real but smaller benefit than a first run leaving a single file behind.
+# `QUEUE_URL` still points the queue somewhere else for anyone who wants them separate.
+# The fallback is guarded on DATABASE_URL naming SQLite: this environment defaults to a SQLite database but an operator can point DATABASE_URL at PostgreSQL, and an unguarded fallback would hand that URI to the SQLite queue provider and fail boot.
 queue:
   kind: Sqlite
-  uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-sqlite-queue.sqlite3?mode=rwc") %>
+<% if get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first == "sqlite" %>
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite://yorishiro-sqlite.sqlite3?mode=rwc")) %>
+<% else %>
+  uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-sqlite.sqlite3?mode=rwc") %>
+<% endif %>
   dangerously_flush: false
   num_workers: 2
   reaper:
