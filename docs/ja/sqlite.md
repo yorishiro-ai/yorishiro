@@ -23,6 +23,48 @@ RLS前提の2プール構成は、RLSを持たない単一テナントバック�
 `development.yaml`・`production.yaml`と同じく`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を設定している。loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は`ctx.db`とは独立した`sqlx::SqlitePool`を自前で張るが、ロック競合下も含め実ファイルに対して実測で動作を確認済みである(計測内容は`docs/ja/configuration.md`の「キューのバックエンドと調整」を参照)。また、セットアップウィザードが有効と判定されるには他の環境と同様に`YORISHIRO_MAX_TENANTS`が設定されている必要がある。
 ウィザードが実際に走った後は、SQLiteの上限そのものはこの変数の値を無視するが、`wizard_enabled()`は`/setup`の実行を許可する前に、変数が設定されていること自体はやはり確認する。
 
+## タグを指定せずに起動したワーカーは何も処理しない
+
+キュープロバイダが動作することと、ジョブが実際に実行されることは別である。
+この実装がキューに入れるジョブはすべて`worker-class:*`のタグをちょうど1つ持つ一方、`--worker`(あるいは`--server-and-worker`や`-a`)で起動したワーカーはタグなしのジョブだけを購読するため、これらのジョブを1件も取り出さない。
+
+しかも、この状態はどこにも通知されない。
+書き込みは成功し、ジョブ行はタグ付きで`sqlt_loco_queue`に入り、ワーカーは起動してポーリング中だとログに出す。
+それでいてジョブは`queued`のまま永久に残り、どちら側にもエラーは出ない。
+実機のSQLite環境で計測した結果は次のとおりである。
+`EmbeddingSyncWorkerShared`のジョブ3件が`--server-and-worker`のプロセスでも素の`--worker`のプロセスでも`queued`のまま動かず、タグを明示した途端にただちに処理された。
+
+そのプロセスに担当させたいクラスは、すべて明示的に並べる。
+
+```sh
+yorishiro_core-cli start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared
+```
+
+どれを購読したかはワーカー自身の起動行でわかる。
+単なる`worker is online`ではなく`worker is online with tags: ...`と出る。
+ワイルドカードは存在しない。
+またこれはSQLite固有の話ではなくPostgreSQLのキューでもまったく同じであり、理由・複数プロセス構成・デプロイが購読し続けるべき範囲は`docs/ja/configuration.md`の「サーバとは別プロセス・別ホストでワーカーを動かす」が扱っている。
+
+## 埋め込みプロバイダ未設定時、ジョブは失敗するがエンティティの書き込みは成功する
+
+`YORISHIRO_EMBEDDING_BASE_URL`・`YORISHIRO_EMBEDDING_MODEL`が未設定のデプロイでも、起動もエンティティのCRUDも問題なく動く。
+表面化するのは`x-embed`を持つフィールドを含むスキーマに対して最初のエンティティを書き、そのジョブの`worker-class:*`タグを購読しているワーカーが実際にそれを取り出した時点である。
+そのようなワーカーがいなければ、ジョブはプロバイダまで到達しない。
+前節のとおり`queued`のまま残り、以下に書くことは何も起こらない。
+ワーカーがいる場合は、ジョブが`UnconfiguredEmbeddingProvider`に到達して失敗し、`sqlt_loco_queue`上で`failed`となり、設定すべき2つの変数がログに残る。
+
+```text
+WARN embedding sync failed transiently, job will be marked failed for retry_failed
+  error=embedding provider unreachable at : no embedding provider is configured:
+        set YORISHIRO_EMBEDDING_BASE_URL and YORISHIRO_EMBEDDING_MODEL
+```
+
+一方でエンティティの書き込み自体は`201`を返し、行はコミットされている。
+埋め込みはあくまで補助的な機能であり、直前の書き込みを妨げることは決してない。
+したがってジョブの失敗が意味するのは、そのエンティティにベクトルが付いていないことだけであって、何かが失われたわけではない。
+なお`x-embed`を持つフィールドが1つもないスキーマでは、そもそもプロバイダまで到達しない。
+埋め込む対象のテキストが存在しないため、プロバイダの設定有無にかかわらずジョブは何もせずに完了する。
+
 ## `database.max_connections`はSQLite上で2以上が必須
 
 `Authorized<R>`/`AuditAuthorized`は、リクエストの間ずっとトランザクション上で1本の接続を保持しつつ、`identity_api_keys.last_used_at`の更新は同じプールの別の独立した接続で行う。

@@ -17,6 +17,41 @@ Setup creates the deployment's one tenant/workspace/user/API key; `/whoami` auth
 It configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as `development.yaml`/`production.yaml`: loco-rs's SQLite queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of `ctx.db`, confirmed empirically to work against a real file including under lock contention (see "Queue backend and tuning" in `docs/configuration.md` for the measurement). It also expects `YORISHIRO_MAX_TENANTS` to be set for the setup wizard to answer as enabled, the same requirement as any other environment.
 The SQLite cap itself ignores the variable's value once the wizard runs, but `wizard_enabled()` still checks that it's set at all before allowing `/setup` to run.
 
+## A worker started without tags drains nothing
+
+The queue provider working is not enough to get a job run.
+Every job this deployment enqueues carries exactly one `worker-class:*` tag, and a worker started as plain `--worker` (or `--server-and-worker`, or `-a`) subscribes to untagged jobs only, so it dequeues none of them.
+
+Nothing reports this.
+The write succeeds, the job row lands in `sqlt_loco_queue` with its tag, the worker logs that it is online and polling, and the job simply stays `queued` forever with no error on either side.
+Measured on a live SQLite boot: three `EmbeddingSyncWorkerShared` jobs sat at `queued` across both a `--server-and-worker` process and a bare `--worker` one, and drained immediately once the tags were named.
+
+Name every class the process should cover:
+
+```sh
+yorishiro_core-cli start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared
+```
+
+The worker's own startup line tells you which it took, `worker is online with tags: ...` rather than a bare `worker is online`.
+There is no wildcard, and this is not SQLite-specific: it applies to the PostgreSQL queue identically, and "Running workers on a separate process or host" in `docs/configuration.md` covers the reasoning, the multi-process case, and what a deployment must keep subscribed.
+
+## Embedding jobs fail, and the entity write still succeeds, with no provider configured
+
+A deployment with `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` unset boots fine and serves entity CRUD fine.
+The first entity written against a schema with an `x-embed` field is where it surfaces, once a worker subscribed to that job's `worker-class:*` tag actually picks it up.
+Without such a worker the job never reaches the provider at all: it stays `queued`, per the section above, and none of what follows happens.
+Given one, the job reaches `UnconfiguredEmbeddingProvider`, fails, and is marked `failed` in `sqlt_loco_queue`, logged with the two variables to set.
+
+```text
+WARN embedding sync failed transiently, job will be marked failed for retry_failed
+  error=embedding provider unreachable at : no embedding provider is configured:
+        set YORISHIRO_EMBEDDING_BASE_URL and YORISHIRO_EMBEDDING_MODEL
+```
+
+The entity write itself still returns `201` and the row is committed.
+Embedding is auxiliary and never blocks the write it follows, so a failed job means the entity has no vector, not that anything was lost.
+A schema with no `x-embed` field never reaches the provider at all: there is no text to embed, so the job completes as a no-op whether or not a provider is configured.
+
 ## `database.max_connections` must be at least 2 on SQLite
 
 `Authorized<R>`/`AuditAuthorized` hold one connection open on a transaction for the whole request while separately touching `identity_api_keys.last_used_at` on a second, independent connection from the same pool: kept separate for the same reason PostgreSQL's `authorize`/`touch_last_used_on` do: a read-only handler drops its transaction without committing, and updating `last_used_at` there would silently roll back with it.
