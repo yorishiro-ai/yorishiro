@@ -167,6 +167,27 @@ pub fn sqlite_generated_id(
     }
 }
 
+/// The `updated_at` value a `before_save` hook should carry into an update, given what the caller already set.
+///
+/// Returns `Set(now)` for an update that has not named its own timestamp, and the value untouched otherwise.
+/// Every table with an application-maintained `updated_at` calls this, so the rule is written once rather than seven times.
+///
+/// Checks `is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, not `Unchanged`, and `is_unchanged()` only matches the latter.
+/// A caller that sets the column deliberately (a backfill, an import preserving original timestamps) is never overwritten.
+///
+/// `insert` is a parameter rather than an assumption because the two cases genuinely differ: an insert takes the column's own database default, except where there is none.
+/// `content_schemas` is that exception and passes `false` here on both paths, since SQLite refuses a non-constant default on a column added to an existing table; see its own `before_save`.
+pub fn stamped_updated_at(
+    insert: bool,
+    current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
+) -> sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>> {
+    if !insert && !current.is_set() {
+        sea_orm::ActiveValue::Set(chrono::Utc::now().into())
+    } else {
+        current
+    }
+}
+
 /// Rejects boot outright when `database.max_connections` is below 2, on SQLite only.
 ///
 /// `authorize_sqlite`/`authorize_audit_sqlite` (`services/auth/authorize.rs`) hold a transaction open on `ctx.db` for the lifetime of an `Authorized<R>`/`AuditAuthorized` request while also touching `last_used_at` on a second, independent connection from that same pool — the same reason Postgres's `authorize`/`authorize_audit` use `touch_last_used_on`'s own short-lived connection rather than the request's own transaction: a read-only handler drops its transaction without committing, and updating `last_used_at` there would silently roll back with it.
