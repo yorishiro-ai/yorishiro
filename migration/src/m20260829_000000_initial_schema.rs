@@ -13,12 +13,6 @@ fn detach_body(now: &str) -> String {
     )
 }
 
-/// The trigger body as it stood before this migration, for `down()` to restore.
-const DETACH_BODY_UNSTAMPED: &str = "UPDATE content_schemas \
-        SET origin_status = 'detached' \
-      WHERE origin_template_id = OLD.id \
-        AND origin_status = 'linked';";
-
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -39,7 +33,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // ---- from m20260822_100000_tenants ----
+        // identity_tenants
         // Idempotent (`duplicate_object` swallowed): every `GRANT ... TO yorishiro_app` in a later migration, and every RLS-scoped connection's `after_connect` (`src/db.rs`), requires this role to already exist.
         // PostgreSQL 16+ doesn't let even the role's creator `SET ROLE` to it automatically, so the migration also grants membership to itself right after creating it.
         // A superuser migration role masks a missing grant here (it can `SET ROLE` regardless of membership), so verify this on a non-superuser role.
@@ -80,7 +74,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260822_100100_users ----
+        // identity_users
         // password_hash is nullable: a user may be OAuth-provisioned instead of password-based.
         let table = Table::create()
             .table(Alias::new("identity_users"))
@@ -126,7 +120,7 @@ impl MigrationTrait for Migration {
 
         // No RLS and no GRANT for this table: identity_users is a control-plane table reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, so yorishiro_app has no business touching it directly.
 
-        // ---- from m20260822_100200_tenant_memberships ----
+        // identity_tenant_memberships
         let table = Table::create()
             .table(Alias::new("identity_tenant_memberships"))
             .if_not_exists()
@@ -195,7 +189,7 @@ impl MigrationTrait for Migration {
 
         // No GRANT: identity_tenant_memberships is control-plane data, reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, same reasoning as identity_tenants and identity_users.
 
-        // ---- from m20260822_100300_workspaces ----
+        // identity_workspaces
         let mut table = Table::create()
             .table(Alias::new("identity_workspaces"))
             .if_not_exists()
@@ -215,7 +209,7 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Alias::new("embedding_model")).text())
             .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
             // Circular reference: a schema also names its workspace.
-            // No foreign_key constraint here on Postgres since content_schemas may not exist yet when this migration runs; that FK is added later in m20260822_100800_content_schemas once it is guaranteed to exist.
+            // No foreign_key constraint here on Postgres since content_schemas may not exist yet when this migration runs; that FK is added further down, once that table exists.
             .col(ColumnDef::new(Alias::new("schema_id")).uuid())
             .col(helpers::created_at())
             .foreign_key(
@@ -290,7 +284,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260822_100400_api_keys ----
+        // identity_api_keys
         manager
             .create_table(
                 Table::create()
@@ -383,7 +377,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260822_100500_invites ----
+        // identity_invites
         let table = Table::create()
             .table(Alias::new("identity_invites"))
             .if_not_exists()
@@ -448,7 +442,7 @@ impl MigrationTrait for Migration {
         // No GRANT: identity_invites is control-plane, same as identity_tenants, identity_users and identity_tenant_memberships.
         // The admin CLI creates invites as the schema owner during provisioning, before any request-scoped role needs to touch this table.
 
-        // ---- from m20260822_100600_templates ----
+        // identity_templates
         let [created_at, updated_at] = helpers::timestamps();
         manager
             .create_table(
@@ -544,7 +538,7 @@ impl MigrationTrait for Migration {
         //
         // No GRANT either, for the same reason: yorishiro_app is never the role that reaches this table, so there is nothing to grant it.
 
-        // ---- from m20260822_100700_maintenance ----
+        // identity_maintenance
         let table = Table::create()
             .table(Alias::new("identity_maintenance"))
             .if_not_exists()
@@ -607,7 +601,7 @@ impl MigrationTrait for Migration {
         // GRANT is SELECT only: yorishiro_app reads the maintenance flag on every request but never writes it (writes go through the migration-role/admin path instead).
         helpers::grant(manager, "SELECT", "identity_maintenance").await?;
 
-        // ---- from m20260822_100800_content_schemas ----
+        // content_schemas
         manager
             .create_table(
                 Table::create()
@@ -678,10 +672,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // The circular half (old DDL lines 216-217): identity_workspaces.schema_id was added as a plain column with no FK by m20260822_110500_workspaces, since content_schemas did not exist yet at that point.
+        // The circular half: `identity_workspaces.schema_id` is created as a plain column with no FK above, since content_schemas did not exist yet at that point.
         // content_schemas exists now, so the FK it deferred is added here.
         //
-        // No-op on SQLite: that backend doesn't resolve FK targets at DDL time, so m20260822_100300_workspaces already declared this FK inline in its own CREATE TABLE instead of deferring it.
+        // No-op on SQLite: that backend doesn't resolve FK targets at DDL time, so the FK is declared inline in its own CREATE TABLE instead of deferring it.
         helpers::pg_only(
             manager,
             "ALTER TABLE identity_workspaces \
@@ -790,7 +784,7 @@ impl MigrationTrait for Migration {
         // The old DDL granted this table via a schema-wide "GRANT ... ON ALL TABLES IN SCHEMA content", now individualized per-table since every table shares one schema after the public-schema unification.
         helpers::grant(manager, "SELECT, INSERT, UPDATE, DELETE", "content_schemas").await?;
 
-        // ---- from m20260822_100900_content_entities ----
+        // content_entities
         let [created_at, updated_at] = helpers::timestamps();
 
         manager
@@ -909,7 +903,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260822_101000_content_relations ----
+        // content_relations
         let table = Table::create()
             .table(Alias::new("content_relations"))
             .if_not_exists()
@@ -1011,7 +1005,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260822_101100_content_entity_snapshots ----
+        // content_entity_snapshots
         manager
             .create_table(
                 Table::create()
@@ -1086,11 +1080,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // `m20260822_101200_authenticate_api_key` is deliberately absent.
-        // It created `authenticate_api_key(bytea)` and `(bytea, uuid)` without the `audit` column, and the migration that followed dropped both by exact signature and recreated them with it.
-        // Writing that first version here would be work immediately undone, so only the final definitions appear, further down.
-
-        // ---- from m20260823_100000_tenant_billing ----
+        // identity_tenant_billing
         let [created_at, updated_at] = helpers::timestamps();
         manager
             .create_table(
@@ -1137,7 +1127,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260823_100100_stripe_processed_events ----
+        // identity_stripe_processed_events
         manager
             .create_table(
                 Table::create()
@@ -1176,7 +1166,7 @@ impl MigrationTrait for Migration {
         // yorishiro_app gets no GRANT at all here, matching identity_tenants/identity_tenant_billing: this table is reached only through ctx.db (the migration-role connection, the Stripe webhook handler's only DB access), never a tenant-scoped request connection.
         // No RLS either: unlike tenant_billing this table has no tenant_id column to scope a policy on (it's keyed by Stripe's own event id), and it is never reached by anything but ctx.db regardless.
 
-        // ---- from m20260823_100200_marketplace ----
+        // identity_template_versions
         manager
             .create_table(
                 Table::create()
@@ -1322,7 +1312,7 @@ impl MigrationTrait for Migration {
 
         // No RLS, no GRANT to yorishiro_app on either table, matching identity_templates itself: both are read in exactly the same paths (the repository layer, as the owner role, scoping by tenant in the query) and are never reached through the tenant pool.
 
-        // ---- from m20260823_100300_workspace_llm_keys ----
+        // identity_workspace_llm_keys
         let [created_at, updated_at] = helpers::timestamps();
         manager
             .create_table(
@@ -1357,7 +1347,7 @@ impl MigrationTrait for Migration {
         // No RLS and no GRANT, deliberately, matching identity_templates: yorishiro_app is never the role that reaches this table.
         // Reads and writes go through the migration-role pool (ctx.db), which is what keeps a workspace's credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
-        // ---- from m20260823_100500_entity_column_preferences ----
+        // columns
         let [created_at, updated_at] = helpers::timestamps();
         let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
 
@@ -1443,7 +1433,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260823_100600_api_key_audit_flag ----
+        // identity_api_key_audit_log
         // Independent of `scope`, deliberately: `scope` stays the four-way ordered read/write/schema/migration ladder (`ApiKeyScope`'s derived `Ord`), and folding audit into that ladder above `migration` would let an audit-reading key also run a batch migration and flip maintenance mode, which nobody asked for.
         // A separate boolean composes with any scope instead: a key is `scope=read, audit=true` to read the log without write access, or any other scope plus audit, entirely independent of where that scope sits in the ladder.
         manager
@@ -1453,7 +1443,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // ---- from m20260823_100700_api_key_audit_log ----
+        // identity_api_key_audit_log
         let table = Table::create()
             .table(Alias::new("identity_api_key_audit_log"))
             .if_not_exists()
@@ -1547,7 +1537,6 @@ impl MigrationTrait for Migration {
         // yorishiro_app can append new rows and read them back, but has no way to alter or remove what has already landed.
         helpers::grant(manager, "SELECT, INSERT", "identity_api_key_audit_log").await?;
 
-        // ---- from m20260823_100800_authenticate_api_key_audit_flag ----
         // Both overloads, with `audit` in the returned column list.
         // The incremental history created them without that column and dropped and recreated them one file later, because `RETURNS TABLE`'s column list cannot be widened with ALTER FUNCTION; there is no earlier version to drop here, so they are simply created in their final shape.
         // `authenticate` (services::auth) needs `audit` to populate `AuthContext`, which is what `require_audit` reads to decide whether a key may reach the audit-log read endpoint.
@@ -1599,7 +1588,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // ---- from m20260825_100000_workspace_embedding_keys ----
+        // identity_workspace_embedding_keys
         let [created_at, updated_at] = helpers::timestamps();
         manager
             .create_table(
@@ -1645,7 +1634,7 @@ impl MigrationTrait for Migration {
         // No RLS and no GRANT, deliberately, matching identity_workspace_llm_keys: yorishiro_app is never the role that reaches this table.
         // Reads and writes go through the migration-role pool (ctx.db), which keeps a workspace's embedding credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
-        // ---- from m20260826_100000_workspace_worker_classes ----
+        // identity_workspace_worker_classes
         let [created_at, updated_at] = helpers::timestamps();
         manager
             .create_table(
@@ -1683,7 +1672,6 @@ impl MigrationTrait for Migration {
         // through the migration-role pool (ctx.db), keeping which compute a workspace's jobs run on
         // off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
-        // ---- from m20260828_100000_audit_schema_fixes ----
         // 1. `identity_workspace_worker_classes.worker_class` accepted any string.
         //
         // Its siblings carry this constraint (`identity_tenant_memberships.role`, `identity_api_keys.scope`, the audit log's `action`), for the reason `action`'s own migration states: a CHECK is what stops a typo'd value from silently becoming a fourth thing nothing filters on.
@@ -1707,7 +1695,7 @@ impl MigrationTrait for Migration {
         // RESTRICT keeps today's behaviour, where the only way to delete such a user is to delete or re-author every template they ever wrote.
         // Losing the authorship attribution is the acceptable half of that trade; losing the template is not.
         //
-        // **PostgreSQL only, and this is a real gap rather than an engine detail.** `identity_templates` exists on SQLite too: `m20260822_100600_templates.rs` creates it unconditionally, and that file's `pg_only`/`sqlite_only` calls cover the `tags` column's type and a GIN index, not the table itself.
+        // **PostgreSQL only, and this is a real gap rather than an engine detail.** `identity_templates` exists on SQLite too: it is created unconditionally above, and the `pg_only`/`sqlite_only` calls cover the `tags` column's type and a GIN index, not the table itself.
         // SQLite cannot alter a foreign key's action in place, so `created_by` keeps NO ACTION there and deleting a user who authored a template still fails with `FOREIGN KEY constraint failed` (measured directly against a SQLite file, not inferred).
         // Closing it means the same table rebuild the CHECK above declines, for the same reason.
         helpers::pg_only(
@@ -1771,7 +1759,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         // SQLite has no CREATE OR REPLACE for triggers, so the existing one is dropped first.
-        // The name and `AFTER DELETE` timing are carried over unchanged from `m20260822_100800_content_schemas.rs`, so this replaces that trigger rather than adding a second one beside it.
+        // `AFTER DELETE` rather than `BEFORE`: SQLite's `OLD` is valid inside the trigger body either way, and `AFTER` avoids racing the row's own deletion.
         helpers::sqlite_only(
             manager,
             "DROP TRIGGER IF EXISTS templates_detach_schema_origins",
@@ -1795,288 +1783,53 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // ---- reverse of m20260828_100000_audit_schema_fixes ----
-        // Both triggers go back to their unstamped form *before* the column is dropped, so the reversal never leaves a trigger writing a column that no longer exists.
-        helpers::pg_only(
-            manager,
-            &format!(
-                "CREATE OR REPLACE FUNCTION detach_orphaned_schema_origin() RETURNS TRIGGER AS $$
-                 BEGIN
-                   {DETACH_BODY_UNSTAMPED}
-                   RETURN OLD;
-                 END;
-                 $$ LANGUAGE plpgsql SECURITY DEFINER;"
-            ),
-        )
-        .await?;
-
-        helpers::sqlite_only(
-            manager,
-            "DROP TRIGGER IF EXISTS templates_detach_schema_origins",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            &format!(
-                "CREATE TRIGGER templates_detach_schema_origins
-                 AFTER DELETE ON identity_templates
-                 FOR EACH ROW
-                 BEGIN
-                   {DETACH_BODY_UNSTAMPED}
-                 END;"
-            ),
-        )
-        .await?;
-
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(Alias::new("content_schemas"))
-                    .drop_column(Alias::new("updated_at"))
-                    .to_owned(),
-            )
-            .await?;
-
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_templates \
-             DROP CONSTRAINT fk_identity_templates_created_by",
-        )
-        .await?;
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_templates \
-             ADD CONSTRAINT fk_identity_templates_created_by \
-             FOREIGN KEY (created_by) REFERENCES identity_users(id)",
-        )
-        .await?;
-
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_workspace_worker_classes \
-             DROP CONSTRAINT identity_workspace_worker_classes_worker_class_check",
-        )
-        .await?;
-
-        // ---- reverse of m20260826_100000_workspace_worker_classes ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_workspace_worker_classes"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260825_100000_workspace_embedding_keys ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_workspace_embedding_keys"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260823_100800_authenticate_api_key_audit_flag ----
-        // The incremental history recreated the pre-`audit` overloads here, because this reversal only undid the widening.
-        // There is no pre-`audit` version in this migration, so reversing it drops the functions outright: `up()` is what created them, and nothing preceded it.
+        // Everything this migration created, in an order that never drops a table another still references.
+        // The incremental history reversed each file in turn, which meant restoring intermediate states: a pre-`audit` `authenticate_api_key`, an unstamped detach trigger, a foreign key without its `ON DELETE`.
+        // None of those states exists any more, so reversing this migration is simply removing what it made.
+        //
+        // Triggers and policies go with their tables; the two functions and the role do not, so they are named.
         helpers::pg_only(
             manager,
             "DROP FUNCTION IF EXISTS authenticate_api_key(bytea); \
-             DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid);",
+             DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid); \
+             DROP FUNCTION IF EXISTS detach_orphaned_schema_origin() CASCADE;",
         )
         .await?;
 
-        // ---- reverse of m20260823_100700_api_key_audit_log ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_api_key_audit_log"))
-                    .to_owned(),
-            )
-            .await?;
+        for table in [
+            "content_relations",
+            "content_entity_snapshots",
+            "content_entity_column_preferences",
+            "content_entities",
+            "content_schemas",
+            "identity_api_key_audit_log",
+            "identity_api_keys",
+            "identity_invites",
+            "identity_template_reviews",
+            "identity_template_versions",
+            "identity_templates",
+            "identity_workspace_worker_classes",
+            "identity_workspace_embedding_keys",
+            "identity_workspace_llm_keys",
+            "identity_stripe_processed_events",
+            "identity_tenant_billing",
+            "identity_maintenance",
+            "identity_workspaces",
+            "identity_tenant_memberships",
+            "identity_users",
+            "identity_tenants",
+        ] {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(Alias::new(table))
+                        .if_exists()
+                        .to_owned(),
+                )
+                .await?;
+        }
 
-        // ---- reverse of m20260823_100600_api_key_audit_flag ----
-        manager
-            .get_connection()
-            .execute_unprepared("ALTER TABLE identity_api_keys DROP COLUMN audit;")
-            .await?;
-
-        // ---- reverse of m20260823_100500_entity_column_preferences ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("content_entity_column_preferences"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260823_100300_workspace_llm_keys ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_workspace_llm_keys"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260823_100200_marketplace ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_template_reviews"))
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_template_versions"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260823_100100_stripe_processed_events ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_stripe_processed_events"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260823_100000_tenant_billing ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_tenant_billing"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_101100_content_entity_snapshots ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("content_entity_snapshots"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_101000_content_relations ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("content_relations"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100900_content_entities ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("content_entities"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100800_content_schemas ----
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_workspaces DROP CONSTRAINT IF EXISTS fk_identity_workspaces_schema_id;",
-        )
-        .await?;
-        helpers::pg_only(
-            manager,
-            "DROP TRIGGER IF EXISTS templates_detach_schema_origins ON identity_templates;",
-        )
-        .await?;
-        helpers::pg_only(
-            manager,
-            "DROP FUNCTION IF EXISTS detach_orphaned_schema_origin();",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            "DROP TRIGGER IF EXISTS templates_detach_schema_origins;",
-        )
-        .await?;
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("content_schemas"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100700_maintenance ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_maintenance"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100600_templates ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_templates"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100500_invites ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_invites"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100400_api_keys ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_api_keys"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100300_workspaces ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_workspaces"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100200_tenant_memberships ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_tenant_memberships"))
-                    .to_owned(),
-            )
-            .await?;
-
-        // ---- reverse of m20260822_100100_users ----
-        manager
-            .drop_table(Table::drop().table(Alias::new("identity_users")).to_owned())
-            .await?;
-
-        // ---- reverse of m20260822_100000_tenants ----
-        manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("identity_tenants"))
-                    .to_owned(),
-            )
-            .await?;
-
+        // The role outlives the schema on purpose: it is created idempotently by `up()`, other databases in the same cluster may still be using it, and dropping a role that owns objects elsewhere fails anyway.
         Ok(())
     }
 }
