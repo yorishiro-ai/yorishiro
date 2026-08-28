@@ -6,10 +6,18 @@ Loco's own layout, not the pre-rebuild `http/*`: controllers in `src/controllers
 Route mounting is a one-line `src/controllers/mcp.rs::mount()`, called from `Hooks::after_routes` in `app.rs`: `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not something `Routes`/`AppRoutes` can carry, and `after_routes` is Loco's own documented hook for exactly this (custom Axum logic after Loco's own routes are built).
 MCP middleware (rate limiting, request-body limits on the `/mcp` route specifically) hasn't come up yet; decide when it does, don't assume `http/middleware/` still applies.
 
-- Use the `authorized!` / `verified!` macros for every MCP handler that needs auth.
-  Do not inline the `authorize().await? + match AuthzOutcome` pattern.
-- Use the `mcp_try!` macro to wrap fallible repository/service calls that should return a tool-level error on failure.
-  Do not hand-roll `match call.await { Ok(x) => ..., Err(e) => Ok(err_to_tool_result(e)) }`.
+- **A tool handler's early exits are written at the call site, not hidden in a macro.**
+  Authorization is `match super::authorize(...).await? { AuthzOutcome::Authorized(a) => a, AuthzOutcome::ScopeDenied(denied) => return Ok(denied) }`, and a fallible repository call is `match call.await { Ok(value) => value, Err(err) => return Ok(err_to_tool_result(err)) }`.
+  This replaces the `authorized!` / `verified!` / `mcp_try!` macros, which read as plain assignments at their 52 call sites while each could end the function.
+  The REST side expresses the same authorization as a type in the handler's signature (`Authorized<WriteScope>`), where a reader sees it without reading anything else; the MCP side cannot do that, so it spells the exit out instead.
+- **The denial is an `Ok`, and that is not an accident to be tidied away.**
+  A scope denial and a business-logic error are both successful tool results carrying `is_error: true`, which is what an MCP client expects; only a protocol-level failure (`ErrorData`) is an `Err`.
+  Returning a denial as `Err` would change what clients see.
+- **These exits cannot become a single `?`.**
+  That would need the handler to return `Result<CallToolResult, SomeToolExit>`, and `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.0.1`, `handler/server/router/tool.rs:202`), so anything else fails to compile inside `#[tool]`.
+  Confirmed by building it: the attempt fails with `E0271`, expecting `Result<CallToolResult, ErrorData>`.
+  `rmcp` does have an `IntoCallToolResult for Result<T, E>` that would map an `Err` payload to a successful `is_error: true` response, but the `#[tool]` attribute never reaches it.
+  Revisit only if `rmcp` relaxes that function type.
 
 ## Router integration (`ee/`)
 

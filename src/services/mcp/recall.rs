@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
+use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 use crate::services::auth::ApiKeyScope;
 
@@ -34,7 +34,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
         let query = recall::RecallQuery {
@@ -42,9 +45,13 @@ impl YorishiroMcpServer {
             full: args.full.unwrap_or(false),
             depth: args.depth.unwrap_or(DEFAULT_RECALL_DEPTH),
         };
-        let context = mcp_try!(
-            recall::recall_context(authorized.txn(), workspace_id, args.entity_id, query).await
-        );
+        let context =
+            match recall::recall_context(authorized.txn(), workspace_id, args.entity_id, query)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(context)
     }
 }

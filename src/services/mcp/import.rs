@@ -8,7 +8,7 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
+use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::import;
 use crate::services::auth::ApiKeyScope;
 
@@ -32,21 +32,26 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ImportJsonlArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Schema);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Schema).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let tenant_id = authorized.ctx.tenant_id;
         let workspace_id = authorized.ctx.workspace_id;
         let imported_by = authorized.ctx.user_id;
-        let result = mcp_try!(
-            import::import_jsonl(
-                authorized.txn(),
-                tenant_id,
-                workspace_id,
-                imported_by,
-                args.jsonl.as_bytes()
-            )
-            .await
-        );
+        let result = match import::import_jsonl(
+            authorized.txn(),
+            tenant_id,
+            workspace_id,
+            imported_by,
+            args.jsonl.as_bytes(),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         authorized.commit().await?;
         ok_json(result)
     }
