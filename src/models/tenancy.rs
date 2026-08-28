@@ -653,7 +653,7 @@ mod tests {
     use sea_orm::Database;
     use serial_test::serial;
 
-    use super::create_tenant;
+    use super::{MembershipRole, create_invite, create_tenant};
 
     /// A fresh in-memory SQLite database, migrated.
     /// Each test gets its own, so nothing but the process-wide `YORISHIRO_MAX_TENANTS` env var is shared between them.
@@ -712,5 +712,33 @@ mod tests {
             );
         })
         .await;
+    }
+
+    /// `create_invite` builds its `ActiveModel` with `..Default::default()`, so `id` reaches the insert `NotSet`.
+    /// PostgreSQL fills it from the column's `uuidv7()` default; SQLite has no such default, and this table's `before_save` was the one `uuidv7_pk` table whose hook never called `db::sqlite_generated_id`, so the insert failed with `NOT NULL constraint failed: identity_invites.id`.
+    ///
+    /// The whole suite this guards is PostgreSQL-only (`request_with_create_db` issues `CREATE DATABASE`), which is why the gap survived: nothing exercised this path on the backend that has it.
+    #[tokio::test]
+    #[serial]
+    async fn an_invite_gets_an_id_on_sqlite() {
+        let db = sqlite_db().await;
+        let tenant = create_tenant(&db, "invite tenant")
+            .await
+            .expect("create tenant");
+
+        let (invite, _token) = create_invite(
+            &db,
+            tenant.id,
+            "invitee@example.com",
+            MembershipRole::Member,
+            chrono::Duration::days(7),
+        )
+        .await
+        .expect("create invite on sqlite");
+
+        assert!(
+            !invite.id.is_nil(),
+            "the invite must carry a generated id, not a nil UUID"
+        );
     }
 }

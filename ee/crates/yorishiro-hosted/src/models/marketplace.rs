@@ -1,4 +1,6 @@
-//! The template marketplace: `identity_templates` (owned by base) and the two tables this crate's own migration adds to support it, `identity_template_versions` and `identity_template_reviews`.
+//! The template marketplace: `identity_templates`, `identity_template_versions` and `identity_template_reviews`.
+//!
+//! All three are created by the one schema migration in the root `migration` crate; this crate has never had a migration crate of its own, and the tables are base-owned even though only `ee/` reads them.
 //!
 //! Record shapes, input DTOs, and the reads live here.
 //! A write that is a genuine decision (ownership, status validation, version numbering under lock, a rating range) stays in `services::marketplace`, which calls into this module for the insert/update itself.

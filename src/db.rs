@@ -177,6 +177,9 @@ pub fn sqlite_generated_id(
 ///
 /// `insert` is a parameter rather than an assumption because the two cases genuinely differ: an insert takes the column's own database default, except where there is none.
 /// `content_schemas` is that exception and passes `false` here on both paths, since SQLite refuses a non-constant default on a column added to an existing table; see its own `before_save`.
+///
+/// There is no counterpart for `created_at`, and its absence is the point rather than an omission: `migration/src/helpers.rs::created_at` gives that column `NOT NULL DEFAULT now()` on both backends, so an insert already carries the right value and nothing in application code should be able to move it.
+/// `updated_at` needs this only because the value has to change on every later write, which a column default cannot express.
 pub fn stamped_updated_at(
     insert: bool,
     current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
