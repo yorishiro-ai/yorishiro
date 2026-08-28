@@ -2,11 +2,13 @@
 #
 # This is the production environment.
 # It differs from development in one deliberate way: anything that is a secret or an address takes no default.
-# `get_env(name="X")` with no `default` fails at startup if `X` is unset, which is what you want — a production app that silently falls back to a development secret or a localhost database is worse than one that refuses to boot.
+# `get_env(name="X")` with no `default` fails at startup if `X` is unset, which is what you want: a production app that silently falls back to a development secret or a localhost database is worse than one that refuses to boot.
 #
-# The variables this file requires:
-#   DATABASE_URL, JWT_SECRET, HOST, and the MAILER_* / REDIS_URL set below,
-#   depending on which features you generated.
+# Three variables are required, and nothing else is:
+#   DATABASE_URL, QUEUE_URL, HOST.
+#
+# Everything else this file reads has a default, or is opt-in and renders only when you set it.
+# A variable is required here only when this deployment genuinely cannot run without it, since a required variable for a feature nothing uses is a boot failure with no remedy but to invent a value.
 
 # Application logging configuration
 logger:
@@ -100,6 +102,11 @@ queue:
 
 
 # Mailer Configuration.
+#
+# Opt-in: the whole block renders only when MAILER_HOST is set to something non-empty.
+# Nothing in this application sends mail today, and `Config.mailer` is an `Option`, so an absent block is a supported state rather than a missing one.
+# It has to be a template conditional rather than variables with defaults: `boot.rs` builds an `EmailSender` from this block whenever `smtp.enable` is true and propagates the failure, so a rendered block pointing at a placeholder host would fail the boot exactly where an unset variable used to.
+<% if get_env(name="MAILER_HOST", default="") != "" %>
 mailer:
   # SMTP mailer configuration.
   smtp:
@@ -116,6 +123,7 @@ mailer:
       password: <%= get_env(name="MAILER_PASSWORD") %>
     # Override the SMTP hello name (default is the machine's hostname)
     # hello_name:
+<% endif %>
 
 # Initializers Configuration
 # initializers:
@@ -151,11 +159,8 @@ database:
   dangerously_recreate: false
 
 # Authentication Configuration
-auth:
-  # JWT authentication
-  jwt:
-    # Secret key for token generation and verification. Required: a secret
-    # committed to the repository is a secret your users can forge tokens with.
-    secret: <%= get_env(name="JWT_SECRET") %>
-    # Token expiration time in seconds
-    expiration: 604800 # 7 days
+#
+# Deliberately absent, not merely unset.
+# This block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`.
+# A `JWT_SECRET` here would therefore be a required secret configuring a token type nothing mints or verifies.
+# Restore this block only alongside code that actually issues a JWT.

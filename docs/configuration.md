@@ -106,6 +106,24 @@ That estimate is calibrated for English, where roughly 4 bytes make one token; J
 In other words, outside the local ONNX provider, a Japanese search query is charged against the budget at well under its real cost: `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` admits noticeably more Japanese-language search traffic per minute than English before this quota starts returning `422`.
 Size the budget with that skew in mind if the deployment's search traffic is mostly Japanese and not running the local ONNX provider.
 
+## What `config/production.yaml` requires
+
+Three variables, and nothing else:
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | The database connection URI. No default, since there is no safe one for a production database |
+| `QUEUE_URL` | The queue backend's own URI, required on every `queue.kind` (see the section below) |
+| `HOST` | The externally reachable hostname or address this deployment answers on |
+
+Everything else this file reads either has a default or is opt-in.
+
+**The mailer block is opt-in and renders only when `MAILER_HOST` is set to a non-empty value.** Nothing in this application sends mail, and `Config.mailer` is an `Option`, so an absent block is a supported state. It is a template conditional rather than variables with defaults for a specific reason: loco-rs builds an `EmailSender` from this block whenever `smtp.enable` is true and fails the boot if that construction fails, so a block rendered against a placeholder host would fail exactly where an unset variable used to. Once you do set `MAILER_HOST`, `MAILER_USER` and `MAILER_PASSWORD` become required, which is the intended behaviour: opting in to mail means supplying credentials for it.
+
+**There is no `auth:` block, deliberately.** That block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`. `JWT_SECRET` is therefore not a variable this deployment reads at all.
+
+`config/development.yaml` requires nothing: it boots against an empty environment, creating its own SQLite file.
+
 ## Queue backend and tuning (`config/development.yaml`, `config/production.yaml`)
 
 `queue.kind` is switchable at boot, since loco-rs ships three queue providers (Postgres, `SQLite`, Redis/Valkey, `QueueConfig`'s `#[serde(tag = "kind")]` variants) and each needs a different set of fields (Redis alone takes `queues`; Postgres/`SQLite` share the SQL-pool knobs but point at different URIs). Both `development.yaml` and `production.yaml` template a whole alternative `queue:` block per `kind` (a Tera `<% if %>`/`<% elif %>`/`<% endif %>`) rather than templating individual fields inside one fixed shape.
