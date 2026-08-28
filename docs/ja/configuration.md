@@ -26,6 +26,9 @@
 埋め込みがNULLのエンティティは、どの時点でもエラーを出さない。
 検索結果の質が落ちるだけなので、報告を待つよりも復元の直後に確認しておく方がよい。
 
+`resync_embeddings`はPostgreSQL専用である。
+SQLiteではベクトル検索が移植されていないため、`content_entities`に`embedding`カラム自体が存在しない(`docs/sqlite.md`を参照)。
+
 | 変数 | 説明 |
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local`でローカルONNXプロバイダを選択する(後述)。それ以外の値、または未設定の場合はOpenAI互換プロバイダを選択する |

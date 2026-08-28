@@ -17,6 +17,8 @@ Creating or replacing an entity queues a background job that generates its vecto
 
 An entity with a NULL embedding produces no error at any point. Search simply returns worse results for it, so this is worth checking after a restore rather than waiting for a report.
 
+`resync_embeddings` is PostgreSQL-only: `content_entities` has no `embedding` column at all on SQLite, since vector search is not ported to that backend (see `docs/sqlite.md`).
+
 | Variable | Description |
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` selects the local ONNX provider (see below). Anything else, or unset, selects the OpenAI-compatible provider |
