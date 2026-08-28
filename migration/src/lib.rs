@@ -26,6 +26,7 @@ mod m20260823_100700_api_key_audit_log;
 mod m20260823_100800_authenticate_api_key_audit_flag;
 mod m20260825_100000_workspace_embedding_keys;
 mod m20260826_100000_workspace_worker_classes;
+mod m20260828_100000_audit_schema_fixes;
 
 pub struct Migrator;
 
@@ -56,6 +57,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260823_100800_authenticate_api_key_audit_flag::Migration),
             Box::new(m20260825_100000_workspace_embedding_keys::Migration),
             Box::new(m20260826_100000_workspace_worker_classes::Migration),
+            Box::new(m20260828_100000_audit_schema_fixes::Migration),
             // inject-above (do not remove this comment)
         ]
     }

@@ -28,6 +28,7 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub origin_snapshot: Option<Json>,
     pub created_at: DateTimeWithTimeZone,
+    pub updated_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

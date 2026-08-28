@@ -5,8 +5,10 @@
 It just calls `TenantDb::connect(url, max_connections)` against a real test database the same way `Hooks::after_context` does.
 `config/test.yaml`'s `database.uri` already reads `DATABASE_URL` with `auto_migrate: true`, so `cargo test` against a scratch Postgres runs converge and gets a role-and-RLS-correct connection with no bridge, no `#[path]`, no `autotests = false`.
 `TenantDb::new(pool)` still exists (it bypasses `after_connect`, so it skips `SET ROLE`) but nothing calls it and nothing should: `connect` is the only path a test needs.
-In `ee/`, shared test helpers (`tests/test_helpers.rs`) are declared **once**, in `tests/lib.rs`, and reached elsewhere with `use crate::tests::test_helpers;`.
-Declaring `mod test_helpers;` in several files trips `clippy::duplicate_mod`.
+**Test layout, as it actually is**: each crate's integration tests are one binary rooted at `tests/mod.rs`, which declares the submodules (`mod requests;`, `mod models;`, `mod tasks;`). Shared helpers live in the submodule that owns them and are reached by path: `close_app_pools` sits in `tests/requests/mod.rs` and `tests/models/*` calls it as `crate::requests::close_app_pools`.
+There is no `tests/lib.rs` and no `tests/test_helpers.rs`, in either crate; a previous version of this rule described both, and neither has ever existed here.
+
+`close_app_pools` is currently duplicated byte-for-byte between base's `tests/requests/mod.rs` and `ee/`'s. Whether to factor it out is undecided: `ee/`'s test binary cannot reach base's test module (a `tests/` binary is not part of the library's public surface), so sharing it means moving it into one of the two crates' `src/` behind a test-only feature, which is a larger change than the duplication currently costs.
 
 **A boot failure inside `request_with_create_db` surfaces as a `DROP DATABASE` panic during `loco_rs`'s own cleanup, not as the actual boot error.**
 `after_context` opens the identity pool eagerly, before `db::converge` runs; if `converge` then fails, that pool still holds a session on the throwaway test database, and `loco_rs::testing::db::PostgresTest::cleanup_db`'s `DROP DATABASE` fails with "being accessed by other users", panics, and the real `H::boot` error is swallowed (`loco_rs-1.1.0/src/testing/request.rs:218`, inside the `Err(err)` arm).

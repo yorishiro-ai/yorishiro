@@ -62,8 +62,8 @@ Request tests boot the app with `loco_rs::testing::request::request_with_create_
 **Every one of them must call `close_app_pools` before its closure returns**, or teardown panics even on a passing test: the app opens pools Loco's harness does not know about, and none of them close on their own.
 `tests/requests/mod.rs` holds that helper and is the pattern to copy.
 
-In `ee/`, shared test helpers are declared once, in `tests/lib.rs`, and reached with `use crate::tests::test_helpers;`.
-Declaring `mod test_helpers;` in several files trips `clippy::duplicate_mod`.
+Each crate's integration tests are one binary rooted at `tests/mod.rs`, which declares the submodules (`mod requests;`, `mod models;`, `mod tasks;`).
+Shared helpers live in the submodule that owns them and are reached by path: `close_app_pools` is in `tests/requests/mod.rs`, and `tests/models/*` calls it as `crate::requests::close_app_pools`.
 
 ## Before you push
 
