@@ -30,6 +30,7 @@ logger:
   # This replaces loco's whitelist rather than extending it, so the framework's own modules are repeated here: drop `loco_rs` and the queue, routing and `listening on` lines go with it, drop `sea_orm_migration` and migration progress does.
   # It also replaces `level:` above, which loco does not read at all when this is set, so the level is written here per environment rather than templated.
   # Add a crate to this workspace and its name belongs on this line, or it is silent for the same reason with nothing in the symptom to suggest why.
+  # `RUST_LOG` overrides this entirely when set: loco tries `EnvFilter::try_from_default_env()` before reading this key at all (`logger.rs:193`), so a platform that injects `RUST_LOG` restores the silence described above while this file still says otherwise. Measured: `RUST_LOG=loco_rs=info` against this config gives zero lines from either application crate.
   override_filter: loco_rs=info,sea_orm_migration=info,tower_http=info,sqlx::query=info,yorishiro_core=info,yorishiro_hosted=info
 
 # Web server configuration
