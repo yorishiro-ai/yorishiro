@@ -1,5 +1,6 @@
 //! Embedding provider abstraction.
 
+mod model_fetch;
 pub mod onnx;
 pub mod openai;
 pub mod sync;
@@ -137,13 +138,13 @@ pub fn model_name_from_env() -> String {
 /// `YORISHIRO_EMBEDDING_PROVIDER=local` selects the local ONNX provider (needs `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH`, no external service).
 /// Otherwise, `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with [`UnconfiguredEmbeddingProvider`] rather than failing.
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
-pub fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
+pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "768".into())
         .parse()?;
 
     if std::env::var("YORISHIRO_EMBEDDING_PROVIDER").as_deref() == Ok("local") {
-        return build_local_onnx_provider(dimensions);
+        return build_local_onnx_provider(dimensions).await;
     }
 
     let base_url = std::env::var("YORISHIRO_EMBEDDING_BASE_URL").ok();
@@ -177,16 +178,21 @@ pub fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Embedding
 /// `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH` default to `models/model.onnx`/`models/tokenizer.json`; `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` defaults to 512.
 /// `YORISHIRO_ONNX_POOLING` is rejected rather than defaulted on an unknown value: reading a model with the wrong pooling does not fail, it just returns worse vectors.
 /// `YORISHIRO_ONNX_QUERY_INSTRUCTION` empty is treated as unset: an operator clearing the variable means "no prefix", not "prefix with nothing".
-fn build_local_onnx_provider(
+///
+/// The model files are fetched on first use when, and only when, neither path variable is set and nothing is at the default path; see [`resolve_onnx_paths`].
+async fn build_local_onnx_provider(
     dimensions: usize,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let max_sequence_length: usize = std::env::var("YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH")
         .unwrap_or_else(|_| "512".into())
         .parse()?;
-    let model_path =
-        std::env::var("YORISHIRO_ONNX_MODEL_PATH").unwrap_or_else(|_| "models/model.onnx".into());
-    let tokenizer_path = std::env::var("YORISHIRO_ONNX_TOKENIZER_PATH")
-        .unwrap_or_else(|_| "models/tokenizer.json".into());
+    let Some((model_path, tokenizer_path)) = resolve_onnx_paths().await? else {
+        return Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
+            dimensions,
+        }));
+    };
+    let model_path = model_path.display().to_string();
+    let tokenizer_path = tokenizer_path.display().to_string();
     let pooling = match std::env::var("YORISHIRO_ONNX_POOLING") {
         Ok(value) => onnx::Pooling::parse(&value)?,
         Err(_) => onnx::Pooling::default(),
@@ -206,11 +212,57 @@ fn build_local_onnx_provider(
     .map_err(|err| {
         anyhow::anyhow!(
             "{err}\n\nthe local ONNX embedding provider needs '{model_path}' and \
-             '{tokenizer_path}': these are not bundled in the repository, and must be fetched \
-             separately, or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an OpenAI-compatible \
-             endpoint instead"
+             '{tokenizer_path}', or set YORISHIRO_EMBEDDING_PROVIDER=openai to use an \
+             OpenAI-compatible endpoint instead"
         )
     })?;
     tracing::info!(provider = "local", %model_path, dimensions, ?pooling, "embedding provider configured");
     Ok(std::sync::Arc::new(provider))
+}
+
+/// The model and tokenizer paths the local provider should load, fetching them on first use if that is what this deployment needs.
+///
+/// Three cases, in order:
+///
+/// 1. Either path variable is set: use both paths as given and fetch nothing, even if a file is missing.
+///    An operator who names a path has told us where the file is, so a typo there must fail loudly.
+///    Downloading half a gigabyte to a different location because their path was wrong is worse than refusing to start, and it would leave them debugging a provider that loaded bytes they never pointed at.
+///    This asymmetry against the fetching branch below is deliberate, not an omission left to be tidied up later by unifying the two.
+/// 2. Nothing is set and the default `models/` path already holds the files: use them, fetch nothing.
+///    A deployment that placed the files there by hand keeps working exactly as before.
+/// 3. Nothing is set and nothing is at the default path: fetch into the cache directory under `HOME`, which is both where the download lands and where a later start looks first, so only the first start pays for it.
+///
+/// `Ok(None)` is case 3 with no resolvable `HOME`, which degrades to [`UnconfiguredEmbeddingProvider`] rather than failing.
+/// That is the one degrading path here, and it differs from a failed fetch on whether a retry could ever help: an unresolvable `HOME` is a permanent property of the deployment, so no restart fixes it and the useful answer is a log naming the two variables an operator can set.
+/// A network failure or a digest mismatch fails the start instead, so a supervisor's `Restart=on-failure` retries a transient outage and heals by itself, and so that unverified model bytes are never loaded, which is the whole reason the digests are checked.
+/// Degrading is right for the unset-provider case [`UnconfiguredEmbeddingProvider`] was built for, but `YORISHIRO_EMBEDDING_PROVIDER=local` is explicit operator intent to run embeddings, so quietly serving a deployment whose search is dead would answer a request nobody made.
+async fn resolve_onnx_paths() -> anyhow::Result<Option<(std::path::PathBuf, std::path::PathBuf)>> {
+    let configured_model = std::env::var("YORISHIRO_ONNX_MODEL_PATH").ok();
+    let configured_tokenizer = std::env::var("YORISHIRO_ONNX_TOKENIZER_PATH").ok();
+    if configured_model.is_some() || configured_tokenizer.is_some() {
+        return Ok(Some((
+            configured_model
+                .unwrap_or_else(|| "models/model.onnx".into())
+                .into(),
+            configured_tokenizer
+                .unwrap_or_else(|| "models/tokenizer.json".into())
+                .into(),
+        )));
+    }
+
+    let default_model = std::path::PathBuf::from("models/model.onnx");
+    let default_tokenizer = std::path::PathBuf::from("models/tokenizer.json");
+    if default_model.exists() && default_tokenizer.exists() {
+        return Ok(Some((default_model, default_tokenizer)));
+    }
+
+    match model_fetch::ensure_model_files().await? {
+        Some(paths) => Ok(Some(paths)),
+        None => {
+            tracing::warn!(
+                "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files are missing and HOME does not resolve, so there is nowhere to fetch them to: set YORISHIRO_ONNX_MODEL_PATH and YORISHIRO_ONNX_TOKENIZER_PATH to files this deployment already has. Continuing with no embedding provider; search and recall will error."
+            );
+            Ok(None)
+        }
+    }
 }

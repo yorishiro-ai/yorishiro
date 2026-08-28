@@ -46,11 +46,29 @@ Runs a BERT-family ONNX model in-process, with no external embedding service.
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file (default: `models/model.onnx`). Not bundled with the repository or fetched automatically; boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if either file is missing |
-| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json` (default: `models/tokenizer.json`). Same missing-file behaviour as `YORISHIRO_ONNX_MODEL_PATH` |
+| `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file. Unset, the model is fetched automatically on first use (see below); set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if it does not |
+| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_ONNX_MODEL_PATH`: fetched automatically when unset, required to exist when set |
 | `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`) |
 | `YORISHIRO_ONNX_POOLING` | `mean` (default) or `last_token` (also accepts `last-token`/`lasttoken`). An unrecognized value is rejected at boot rather than silently falling back to `mean`: reading a model with the wrong pooling doesn't fail, it just returns worse vectors, and defaulting quietly on a typo would hide exactly that degradation |
 | `YORISHIRO_ONNX_QUERY_INSTRUCTION` | Instruction text embedded into a search query only, never into a stored document, for asymmetric models that expect one on the query side (rendered as `Instruct: {instruction}\nQuery:{text}`). Unset by default, which makes this exactly a plain `embed` call, the right behaviour for a symmetric model. An empty string is treated the same as unset, not as "prefix with nothing": clearing the variable is how an operator turns the instruction back off |
+
+#### Fetching the model
+
+The model and tokenizer are not in the repository: the model alone is about 522 MiB.
+When neither `YORISHIRO_ONNX_MODEL_PATH` nor `YORISHIRO_ONNX_TOKENIZER_PATH` is set and nothing is at the default `models/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/` and verified against a SHA256 built into the binary.
+That directory is also where later starts look first, so only the first one pays the download.
+`nomic-ai/nomic-embed-text-v1.5` is pinned to a fixed revision rather than a branch, so the bytes behind those digests cannot change underneath a deployment.
+
+The download blocks whatever triggered it, and the log line before it says so.
+That is usually a server start, but not always: `cargo loco task create_workspace` and `cargo loco task resync_embeddings` build an embedding provider too, so either can be what pulls 522 MiB on a fresh machine, and a task that appears to be sitting still is most likely doing this.
+
+Setting either path variable turns the fetch off entirely, for both files.
+An operator naming a path has said where the file is, so a wrong path there fails the start rather than downloading half a gigabyte to somewhere else.
+Placing the files at the default `models/` path by hand also works and is never overwritten.
+
+Two failures are treated differently, on whether starting again could help.
+A download that fails, or whose bytes do not match the expected digest, fails the start: a network outage is transient, so a supervisor configured to restart retries it and the deployment heals itself, while a digest mismatch at a pinned revision means corruption or tampering and is exactly what verification exists to stop.
+If `HOME` does not resolve at all there is nowhere to fetch to, no restart changes that, and the deployment starts with no embedding provider, logging a message naming both path variables; search and recall then error until one is set.
 
 Building with this provider compiled in pulls in the `ort` crate, whose default `download-binaries` feature fetches an onnxruntime binary from `cdn.pyke.io` at build time; point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime if the build environment must be closed off.
 
