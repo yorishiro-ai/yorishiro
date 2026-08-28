@@ -73,6 +73,10 @@ SQLite is scoped to a single tenant.
 It has no database-enforced isolation between tenants the way PostgreSQL's row-level security does, so it is meant for trying Yorishiro out or for a single person's own use, not for hosting multiple tenants.
 The application-level filtering that would be needed to fake multi-tenant isolation on this engine is deliberately not implemented: a single missed filter in one query would be a silent isolation break, which is exactly what row-level security exists to make structurally impossible on PostgreSQL.
 
+This is the base edition only.
+The paid edition is a PostgreSQL product: three of its queries hardcode that backend and fail when reached, so browsing the marketplace, publishing a template version, and listing template-origin updates each break on SQLite.
+Starting it against a SQLite database logs a warning naming those and then continues, because the choice is left to the operator rather than refused; nothing here supports running the paid edition on this backend.
+
 ## The single-tenant guard
 
 `tenancy::create_tenant` (`src/models/tenancy.rs`) enforces `YORISHIRO_MAX_TENANTS` against `count_tenants` on PostgreSQL, taking `db::lock_for_update` first to close the count-then-insert TOCTOU gap.
