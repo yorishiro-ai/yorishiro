@@ -1,6 +1,5 @@
 pub use super::_entities::identity_workspace_llm_keys::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type IdentityWorkspaceLlmKeys = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

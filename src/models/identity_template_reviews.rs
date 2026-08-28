@@ -1,6 +1,5 @@
 pub use super::_entities::identity_template_reviews::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type IdentityTemplateReviews = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

@@ -1,6 +1,5 @@
 pub use super::_entities::content_entity_column_preferences::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type ContentEntityColumnPreferences = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

@@ -10,8 +10,6 @@ pub use super::_entities::content_entities::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, ValidationDetail, YorishiroError};
 use crate::metaschema;
 
-pub type ContentEntities = Entity;
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
@@ -143,7 +141,7 @@ pub fn validate_data(
 /// Restricts a `content_entities` query to every column `EntityRecord` needs, excluding `embedding`, on SQLite.
 /// A no-op on PostgreSQL: that backend's `content_entities` table genuinely has an `embedding` column, so the ordinary `Model`-shaped query stays unrestricted there.
 ///
-/// SQLite's `content_entities` table has no `embedding` column at all (see `migration/src/m20260822_100900_content_entities.rs`'s `helpers::pg_only` around that column), so any query built from the generated `Entity`/`Model` unconditionally references it and fails with `no such column: content_entities.embedding` on that backend, whether or not the caller ever reads the field.
+/// SQLite's `content_entities` table has no `embedding` column at all (see `migration/src/m20260829_000000_initial_schema.rs`'s `helpers::pg_only` around that column), so any query built from the generated `Entity`/`Model` unconditionally references it and fails with `no such column: content_entities.embedding` on that backend, whether or not the caller ever reads the field.
 /// Every caller of `content_entities`'s query functions gets the same `EntityRecord` either way; only the column list sent to the database differs.
 fn select_record_columns(conn: &impl ConnectionTrait, select: Select<Entity>) -> Select<Entity> {
     use super::_entities::content_entities::Column;

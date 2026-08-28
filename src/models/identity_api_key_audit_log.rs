@@ -1,7 +1,7 @@
 //! Records of authorization-gated operations: who did it, when, against which workspace, and what.
 //!
 //! Starts with the operations `ApiKeyScope::Migration` already gates (`content_entities::undo_job`, `identity_maintenance::set`), not every write in the system: those are exactly the ones an operator most needs an after-the-fact record of, since a `Migration`-scoped key can rewrite stored data or take the whole deployment down for other callers.
-//! A new audited operation is added by extending [`AuditAction`], not by writing ad hoc `INSERT`s elsewhere: `action`'s CHECK constraint (`migration/src/m20260823_100700_api_key_audit_log.rs`) only allows what this enum's `as_db_str()` can produce, so the two stay in lockstep by construction.
+//! A new audited operation is added by extending [`AuditAction`], not by writing ad hoc `INSERT`s elsewhere: `action`'s CHECK constraint (`migration/src/m20260829_000000_initial_schema.rs`) only allows what this enum's `as_db_str()` can produce, so the two stay in lockstep by construction.
 //!
 //! Append-only by construction, not just convention: `yorishiro_app` holds `SELECT, INSERT` on this table and nothing else (see the migration's own comment), so there is no code path, correct or buggy, that can update or delete a row once written.
 
@@ -12,8 +12,6 @@ use uuid::Uuid;
 
 pub use super::_entities::identity_api_key_audit_log::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
-
-pub type IdentityApiKeyAuditLog = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

@@ -1,15 +1,13 @@
 //! Deployment-wide maintenance state.
 //!
 //! One row, read on every request that could be refused and written only by an operator.
-//! The request role has SELECT only on this table (`migration/src/m20260822_100700_maintenance.rs`), so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
+//! The request role has SELECT only on this table (`migration/src/m20260829_000000_initial_schema.rs`), so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
 
 pub use super::_entities::identity_maintenance::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ResultExt, YorishiroError};
-
-pub type IdentityMaintenance = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

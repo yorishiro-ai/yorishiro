@@ -69,7 +69,7 @@ impl Authenticator for TenantScopedAuthenticator {
 
         let key_hash = yorishiro_core::services::auth::hash_key(presented_key);
 
-        // The two-argument overload the identity migration adds (m20260822_101200).
+        // The two-argument overload of the `authenticate_api_key` SECURITY DEFINER function the schema migration creates.
         // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
         let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
             "SELECT id, workspace_id, tenant_id, scope, user_id, audit \

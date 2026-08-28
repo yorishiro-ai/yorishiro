@@ -9,8 +9,6 @@ pub use super::_entities::content_schemas::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff, validate_definition};
 
-pub type ContentSchemas = Entity;
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.

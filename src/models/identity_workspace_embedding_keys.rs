@@ -1,6 +1,5 @@
 pub use super::_entities::identity_workspace_embedding_keys::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type IdentityWorkspaceEmbeddingKeys = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

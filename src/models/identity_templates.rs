@@ -11,8 +11,6 @@ use serde::Serialize;
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::MetaSchemaDefinition;
 
-pub type IdentityTemplates = Entity;
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
