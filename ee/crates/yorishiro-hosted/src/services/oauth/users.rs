@@ -3,7 +3,10 @@
 //!
 //! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `models::oauth_users`, since `oauth_provider`/`oauth_subject_id` are columns this repo's own migration adds and `yorishiro_core`'s `identity_users` model knows nothing about the OAuth-specific lookups over them.
 
-use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, PaginatorTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    PaginatorTrait,
+};
 use uuid::Uuid;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::models::_entities::identity_tenants;
@@ -35,11 +38,12 @@ pub struct ProvisionedLogin {
 /// `embedding` must be the deployment's actual model and width: the `content_entities.embedding` index is a fixed width, so a workspace stamped with the wrong one would fail every entity write's dimension check.
 ///
 /// The whole first-login path (user row, tenant, workspace, membership) runs in one transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`: a crash partway through rolls everything back rather than leaving an orphaned user row with no tenant membership, and the lock also serializes concurrent first logins for the same identity.
+/// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` so that requirement is enforced by the signature: every advisory lock taken here and in the `create_workspace` it calls is transaction-scoped, and handed a pool each one would be released before the work it guards.
 ///
 /// `YORISHIRO_MAX_TENANTS` is enforced here too, so auto-provisioning through SSO cannot bypass a deployment's tenant cap.
 /// The check is not race-free against a *different* identity's first login landing between the count and the insert, since this function's lock is keyed per-identity, not globally; closing it fully is not worth a global lock on every OAuth login for a race window this narrow.
 pub async fn find_or_create(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseTransaction,
     provider: &str,
     subject_id: &str,
     email: Option<&str>,

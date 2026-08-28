@@ -6,7 +6,7 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 use yorishiro_core::YorishiroError;
 use yorishiro_core::db::DbHandle;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
+use yorishiro_core::models::tenancy;
 use yorishiro_core::services::auth;
 use yorishiro_core::services::auth::Authenticator;
 
@@ -81,7 +81,7 @@ pub(crate) async fn authenticate_tenant_admin(
     let user_id = auth_ctx.user_id.ok_or(YorishiroError::Unauthenticated)?;
     tenancy::get_membership_role(&ctx.db, auth_ctx.tenant_id, user_id)
         .await?
-        .filter(|role| matches!(role, MembershipRole::Owner | MembershipRole::Admin))
+        .filter(|role| role.administers_tenant())
         .ok_or_else(|| YorishiroError::ScopeInsufficient {
             message: "the hosted dashboard is restricted to tenant owners/admins".into(),
             hint: "ask a tenant owner to grant you the admin role".into(),

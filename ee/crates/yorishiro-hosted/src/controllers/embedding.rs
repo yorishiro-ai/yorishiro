@@ -12,25 +12,12 @@ use sea_orm::EntityTrait;
 use serde::Deserialize;
 use yorishiro_core::controllers::ApiError;
 use yorishiro_core::error::YorishiroError;
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro_core::services::auth::{ApiKeyScope, require_scope};
 
 use crate::models::embedding_keys::{self, EmbeddingKeyDescription};
 use crate::services::authz;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly, matching `inference.rs`'s own `require_scope`.
-fn require_scope(
-    ctx: &yorishiro_core::services::auth::AuthContext,
-    needed: ApiKeyScope,
-) -> Result<(), YorishiroError> {
-    if ctx.scope < needed {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: format!("this endpoint needs the {needed:?} scope or higher"),
-            hint: "issue a key with a higher scope".into(),
-        });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SetEmbeddingKeyRequest {
     /// An OpenAI-compatible embeddings endpoint, e.g. `https://api.openai.com/v1`.

@@ -11,22 +11,12 @@ use loco_rs::controller::Routes;
 use serde::Deserialize;
 use yorishiro_core::controllers::ApiError;
 use yorishiro_core::error::{ResultExt, YorishiroError};
-use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
+use yorishiro_core::services::auth::{ApiKeyScope, require_scope};
 
 use crate::models::entity_columns::{self, ColumnPreference};
 use crate::services::authz;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
-fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
-    if ctx.scope < needed {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: format!("this endpoint needs the {needed:?} scope or higher"),
-            hint: "issue a key with a higher scope".into(),
-        });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SetColumnsRequest {
     /// Field names from the schema, in the order they should be displayed.
