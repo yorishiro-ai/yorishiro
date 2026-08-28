@@ -1,6 +1,6 @@
 # Yorishiro (依り代)
 
-**English** | [日本語](docs/ja/README.md)
+**English** (a Japanese translation of this README is not written yet; `docs/ja/` carries the Japanese documentation that does exist)
 
 An MCP-native, multi-tenant knowledge store with user-defined schemas.
 
@@ -115,7 +115,7 @@ flowchart TD
 
 ## Quick start
 
-See [docs/setup.md](docs/setup.md) for the full guide, including the prebuilt binary and background/systemd operation.
+A full setup guide covering the prebuilt binary and background/systemd operation is not written yet.
 The fastest path, with Docker:
 
 1. Fetch the embedding model (the default local ONNX provider needs no external service):
@@ -163,20 +163,18 @@ The default artifact is `yorishiro-server`, and without a licence key its paid A
 It is still not the same as the community binary: `ee/` is on disk, and the Web UI is served either way, since the SPA is not licence-gated.
 `yorishiro-ce-server` exists for a deployment that cannot have proprietary code on disk at all: a distribution policy, a redistribution requirement, an audit that reads the package rather than the configuration.
 
-The paid half documents itself in [`ee/README.md`](ee/README.md) ([日本語](ee/docs/ja/README.md)).
+The paid half has no README of its own on this branch; `ee/LICENSE` states its terms, and `ee/crates/yorishiro-hosted/` is where its code lives.
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [docs/setup.md](docs/setup.md) | Full setup guide: startup, endpoints, tenant/workspace/user/API key provisioning, auth & scopes |
-| [docs/schema.md](docs/schema.md) | Meta-schema guide for defining entity types and relations |
-| [docs/api.md](docs/api.md) | REST API and MCP tool reference |
-| [docs/embedding-providers.md](docs/embedding-providers.md) | Configuring embedding providers (`local` ONNX / `openai`-compatible) |
-| [docs/configuration.md](docs/configuration.md) | Environment variable / `config.yml` reference |
-| [docs/deployment.md](docs/deployment.md) | Production deployment guide |
-| [docs/operations.md](docs/operations.md) | Operational notes: backups, rate limiting, observability |
+| [docs/configuration.md](docs/configuration.md) | Environment variables: embedding providers, the search token quota, queue tuning, logging |
+| [docs/sqlite.md](docs/sqlite.md) | The SQLite tier: what it supports, what it does not, and why |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Where code goes, how `tests/` mirrors `src/`, what to run before pushing |
+
+Not written on this branch: a setup guide, a meta-schema guide, a REST/MCP API reference, a deployment guide and operational notes.
+Their subjects are covered where they are implemented rather than in prose, so `docs/configuration.md` and the doc comments are what to read until those documents exist.
 
 ## Development
 

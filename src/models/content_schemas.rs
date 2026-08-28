@@ -14,12 +14,17 @@ pub type ContentSchemas = Entity;
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
         this.id = crate::db::sqlite_generated_id(db, this.id);
+        // Joins the seven models that already stamp this here, for the reason this table specifically needs it: the `origin_status` trigger rewrites rows in place when an upstream template changes, so a schema row can change without any code path touching it.
+        // Only on update, and only when the caller has not set it: an insert takes the column's own default, and a caller that sets it deliberately (a backfill, an import preserving original timestamps) is not overwritten.
+        if !insert && !this.updated_at.is_set() {
+            this.updated_at = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().into()));
+        }
         Ok(this)
     }
 }

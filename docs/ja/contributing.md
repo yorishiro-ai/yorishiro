@@ -78,8 +78,9 @@ MCPツールはコントローラと同じくエントリポイントである�
 アプリはLocoのハーネスが把握していないプールを開いており、そのどれも自力では閉じないためである。
 `tests/requests/mod.rs`にそのヘルパーがあり、これが踏襲すべきパターンである。
 
-`ee/`では、共有テストヘルパーは`tests/lib.rs`で1度だけ宣言し、`use crate::tests::test_helpers;`で参照する。
-複数のファイルで`mod test_helpers;`を宣言すると`clippy::duplicate_mod`に引っかかる。
+各クレートの結合テストは`tests/mod.rs`を起点とする1つのバイナリで、そこからサブモジュール(`mod requests;`、`mod models;`、`mod tasks;`)を宣言する。
+共有ヘルパーはそれを持つサブモジュールに置き、パスで参照する。
+`close_app_pools`は`tests/requests/mod.rs`にあり、`tests/models/*`からは`crate::requests::close_app_pools`として呼ぶ。
 
 ## push前に
 
