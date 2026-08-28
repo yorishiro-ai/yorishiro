@@ -77,6 +77,9 @@ impl Authorized {
 
 /// `authorize` splits its outcome into two kinds rather than a single failure case: a protocol-level failure (`Err`) and a scope-insufficient business outcome (`Ok` variant).
 /// The former is a dead end an agent can't usefully retry (missing/invalid API key); the latter is information an agent can act on.
+///
+/// Handlers match on this directly rather than through a macro, so the `return` that ends the call on a denial is visible where it happens.
+/// It cannot collapse into the `Err` side of the handler's own `Result`: `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.0.1`, `handler/server/router/tool.rs:202`), and `ErrorData` is the protocol-level failure, which is not what a denial is.
 pub(super) enum AuthzOutcome {
     Authorized(Authorized),
     ScopeDenied(CallToolResult),
@@ -203,47 +206,3 @@ pub(super) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
         .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
-
-/// Authenticates the caller and verifies scope, opening an RLS-scoped transaction.
-/// Expands to the `Authorized` value on success; on a scope-denied outcome it early-returns the tool result.
-/// A macro rather than a function because it early-returns from the enclosing handler (which must return `Result<CallToolResult, ErrorData>`).
-macro_rules! authorized {
-    ($ctx:expr, $parts:expr, $scope:expr) => {
-        match $crate::services::mcp::authorize($ctx, $parts, $scope).await? {
-            $crate::services::mcp::AuthzOutcome::Authorized(authorized) => authorized,
-            $crate::services::mcp::AuthzOutcome::ScopeDenied(result) => {
-                return ::core::result::Result::Ok(result);
-            }
-        }
-    };
-}
-pub(crate) use authorized;
-
-/// Connection-less counterpart to `authorized!`.
-/// Expands to the caller's `AuthContext` on success; on a scope-denied outcome it early-returns the tool result.
-macro_rules! verified {
-    ($ctx:expr, $parts:expr, $scope:expr) => {
-        match $crate::services::mcp::verify($ctx, $parts, $scope).await? {
-            $crate::services::mcp::VerifyOutcome::Verified(ctx) => ctx,
-            $crate::services::mcp::VerifyOutcome::ScopeDenied(result) => {
-                return ::core::result::Result::Ok(result);
-            }
-        }
-    };
-}
-pub(crate) use verified;
-
-/// Unwraps a repository/service call's `Ok` value, or early-returns the tool-level error result for its `Err` value.
-/// A macro rather than a function because it early-returns from the enclosing handler.
-/// Only fits call sites whose `Err` arm is exactly `Ok(err_to_tool_result(err))`.
-macro_rules! mcp_try {
-    ($expr:expr) => {
-        match $expr {
-            ::core::result::Result::Ok(val) => val,
-            ::core::result::Result::Err(err) => {
-                return ::core::result::Result::Ok($crate::services::mcp::err_to_tool_result(err));
-            }
-        }
-    };
-}
-pub(crate) use mcp_try;

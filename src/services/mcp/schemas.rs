@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, authorized, err_to_tool_result, mcp_try, ok_json};
+use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::error::YorishiroError;
 use crate::metaschema::MetaSchemaDefinition;
 use crate::models::content_schemas;
@@ -66,11 +66,17 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let summaries = mcp_try!(content_schemas::list(authorized.txn(), workspace_id, page).await);
+        let summaries = match content_schemas::list(authorized.txn(), workspace_id, page).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(summaries)
     }
 
@@ -82,12 +88,19 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetActiveSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = mcp_try!(
-            content_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name).await
-        );
+        let record =
+            match content_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(record)
     }
 
@@ -99,12 +112,22 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = mcp_try!(
-            content_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await
-        );
+        let record = match content_schemas::get_by_id(
+            authorized.txn(),
+            workspace_id,
+            args.schema_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(record)
     }
 
@@ -117,7 +140,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Schema);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Schema).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let mut origin_template_id = None;
         let mut origin_snapshot = None;
@@ -150,14 +176,17 @@ impl YorishiroMcpServer {
                 }
             },
             (None, Some(template_id)) => {
-                let (definition, origin) = mcp_try!(
-                    crate::models::identity_templates::resolve_template_definition(
+                let (definition, origin) =
+                    match crate::models::identity_templates::resolve_template_definition(
                         &self.ctx.db,
                         authorized.ctx.tenant_id,
                         &template_id,
                     )
                     .await
-                );
+                    {
+                        Ok(value) => value,
+                        Err(err) => return Ok(err_to_tool_result(err)),
+                    };
                 origin_template_id = origin;
                 origin_snapshot = origin.map(|_| definition.clone());
                 definition
@@ -166,17 +195,19 @@ impl YorishiroMcpServer {
 
         let tenant_id = authorized.ctx.tenant_id;
         let workspace_id = authorized.ctx.workspace_id;
-        let (record, diff) = mcp_try!(
-            content_schemas::create_schema(
-                authorized.txn(),
-                tenant_id,
-                workspace_id,
-                definition,
-                origin_template_id,
-                origin_snapshot,
-            )
-            .await
-        );
+        let (record, diff) = match content_schemas::create_schema(
+            authorized.txn(),
+            tenant_id,
+            workspace_id,
+            definition,
+            origin_template_id,
+            origin_snapshot,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         authorized.commit().await?;
         ok_json(serde_json::json!({
             "schema": record,
@@ -193,7 +224,10 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let _authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(_authorized) => _authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         ok_json(crate::templates::list_templates())
     }
@@ -208,13 +242,22 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityTypeJsonSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = mcp_try!(
-            content_schemas::get_active_schema(authorized.txn(), workspace_id, &args.schema_name)
-                .await
-        );
+        let record = match content_schemas::get_active_schema(
+            authorized.txn(),
+            workspace_id,
+            &args.schema_name,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
 
         match record.definition.entity_types.get(&args.entity_type) {
             Some(entity_type_def) => ok_json(crate::metaschema::entity_type_to_json_schema(

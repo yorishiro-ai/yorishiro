@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
+use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::content_entities;
 use crate::services::auth::ApiKeyScope;
 
@@ -69,7 +69,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Write);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let input = content_entities::CreateEntityInput {
             schema_name: args.schema_name,
@@ -79,9 +82,12 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.ctx.workspace_id;
         let created_by = authorized.ctx.user_id;
-        let record = mcp_try!(
-            content_entities::create(authorized.txn(), workspace_id, input, created_by).await
-        );
+        let record =
+            match content_entities::create(authorized.txn(), workspace_id, input, created_by).await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         authorized.commit().await?;
         // Same enqueue the REST handler does, and for the same reason: an entity written without it keeps `embedding` NULL forever and is reachable only through the `pg_trgm` fuzzy fallback, so the transport a write arrived on must not decide whether it becomes searchable.
         crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)
@@ -95,10 +101,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = mcp_try!(content_entities::get(authorized.txn(), workspace_id, args.id).await);
+        let record = match content_entities::get(authorized.txn(), workspace_id, args.id).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(record)
     }
 
@@ -108,20 +120,25 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Write);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
         let updated_by = authorized.ctx.user_id;
-        let record = mcp_try!(
-            content_entities::update(
-                authorized.txn(),
-                workspace_id,
-                args.id,
-                args.data,
-                updated_by
-            )
-            .await
-        );
+        let record = match content_entities::update(
+            authorized.txn(),
+            workspace_id,
+            args.id,
+            args.data,
+            updated_by,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         authorized.commit().await?;
         // The data changed, so the stored vector no longer matches it; re-syncing is the same follow-up the REST update handler performs.
         crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)
@@ -135,10 +152,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Write);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Write).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        mcp_try!(content_entities::delete(authorized.txn(), workspace_id, args.id).await);
+        match content_entities::delete(authorized.txn(), workspace_id, args.id).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         authorized.commit().await?;
         ok_json(serde_json::json!({ "deleted": true }))
     }
@@ -149,7 +172,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let query = content_entities::ListEntitiesQuery {
             entity_type: args.entity_type,
@@ -159,7 +185,10 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let records = mcp_try!(content_entities::list(authorized.txn(), workspace_id, query).await);
+        let records = match content_entities::list(authorized.txn(), workspace_id, query).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(records)
     }
 
@@ -175,11 +204,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let drift =
-            mcp_try!(content_entities::drift(authorized.txn(), workspace_id, args.id).await);
+        let drift = match content_entities::drift(authorized.txn(), workspace_id, args.id).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(drift)
     }
 
@@ -195,12 +229,19 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationDryRunArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let report = mcp_try!(
-            content_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name).await
-        );
+        let report =
+            match content_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(report)
     }
 }

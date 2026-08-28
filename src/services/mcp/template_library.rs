@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, authorized, mcp_try, ok_json};
+use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::identity_templates;
 use crate::services::auth::ApiKeyScope;
 
@@ -39,12 +39,18 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let tenant_id = authorized.ctx.tenant_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let templates =
-            mcp_try!(identity_templates::list_templates(&self.ctx.db, tenant_id, page).await);
+            match identity_templates::list_templates(&self.ctx.db, tenant_id, page).await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(templates)
     }
 
@@ -57,11 +63,17 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = authorized!(&self.ctx, &parts, ApiKeyScope::Read);
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let tenant_id = authorized.ctx.tenant_id;
         let template =
-            mcp_try!(identity_templates::get_template(&self.ctx.db, tenant_id, args.id).await);
+            match identity_templates::get_template(&self.ctx.db, tenant_id, args.id).await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(template)
     }
 }

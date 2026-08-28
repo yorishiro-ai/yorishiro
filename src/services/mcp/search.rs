@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{YorishiroMcpServer, mcp_try, ok_json, verified};
+use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::controllers::extractors::{db_handle, resolve_embedding_provider, search_token_limiter};
 use crate::models::search;
 use crate::services::auth::ApiKeyScope;
@@ -38,7 +38,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth_ctx = verified!(&self.ctx, &parts, ApiKeyScope::Read);
+        let auth_ctx = match super::verify(&self.ctx, &parts, ApiKeyScope::Read).await? {
+            VerifyOutcome::Verified(auth_ctx) => auth_ctx,
+            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
 
         let default = search::SearchQuery::default();
         let query = search::SearchQuery {
@@ -47,36 +50,57 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let provider = mcp_try!(
-            resolve_embedding_provider(&self.ctx, auth_ctx.workspace_id)
-                .await
-                .map_err(|err| err.0)
-        );
-        let limiter = mcp_try!(search_token_limiter(&self.ctx).map_err(|err| err.0));
+        let provider = match resolve_embedding_provider(&self.ctx, auth_ctx.workspace_id)
+            .await
+            .map_err(|err| err.0)
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
+        let limiter = match search_token_limiter(&self.ctx).map_err(|err| err.0) {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         // Charged before embedding, same as the REST adapter: the budget bounds embedding work, and this tool does exactly as much of it as `GET /api/search`.
-        mcp_try!(charge_search_tokens(
+        match charge_search_tokens(
             &limiter,
             provider.as_ref(),
             auth_ctx.workspace_id,
             &args.query_text,
-        ));
+        ) {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
 
         // Embedding generation happens before acquiring a DB connection: don't hold a pool connection while waiting on the provider's HTTP round trip.
-        let vector = mcp_try!(search::embed_query(provider.as_ref(), &args.query_text).await);
+        let vector = match search::embed_query(provider.as_ref(), &args.query_text).await {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
 
         let workspace_id = auth_ctx.workspace_id;
-        let db = mcp_try!(db_handle(&self.ctx).map_err(|err| err.0));
+        let db = match db_handle(&self.ctx).map_err(|err| err.0) {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
-        let txn = mcp_try!(
-            db.tenant
-                .begin_for_workspace(auth_ctx.tenant_id, workspace_id)
-                .await
-                .map_err(|err| crate::error::YorishiroError::Internal(err.into()))
-        );
+        let txn = match db
+            .tenant
+            .begin_for_workspace(auth_ctx.tenant_id, workspace_id)
+            .await
+            .map_err(|err| crate::error::YorishiroError::Internal(err.into()))
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
 
-        let hits = mcp_try!(
-            search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query).await
-        );
+        let hits =
+            match search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(hits)
     }
 }
