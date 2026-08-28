@@ -11,6 +11,21 @@
 
 `build_embedding_provider`(`src/services/embedding/mod.rs`)が、埋め込みの書き込み(`sync_embedding`)と検索(`GET /api/search`、MCPツールの`search_entities`)の両方で使うプロバイダを選択・設定する。
 
+### 埋め込みが生成されるタイミング
+
+エンティティの作成と置換は、いずれのトランスポートでもベクトルを生成するバックグラウンドジョブを登録する。
+`POST /api/entities`と`PUT /api/entities/{id}`、そしてMCPツールの`create_entity`と`update_entity`が対象になる。
+ジョブの登録は書き込み自体のトランザクションがコミットされた後なので、埋め込みプロバイダへの往復が書き込みの待ち時間に加算されることはない。
+
+**`import_jsonl`だけは例外で、これはどちらのトランスポートでも変わらない。**
+バックアップから復元したエンティティは埋め込みジョブが登録されないまま書き込まれる。
+そのため`embedding IS NULL`のままとなり、何かが値を埋めるまでは`pg_trgm`によるあいまい検索でしか到達できない。
+インポート後は`cargo loco task resync_embeddings workspace_id:<uuid>`を実行すること。
+同じコマンドは、埋め込みプロバイダの障害がジョブ自身の再試行回数を超えて続いたために同期が失敗したエンティティの復旧にも使える。
+
+埋め込みがNULLのエンティティは、どの時点でもエラーを出さない。
+検索結果の質が落ちるだけなので、報告を待つよりも復元の直後に確認しておく方がよい。
+
 | 変数 | 説明 |
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local`でローカルONNXプロバイダを選択する(後述)。それ以外の値、または未設定の場合はOpenAI互換プロバイダを選択する |

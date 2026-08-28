@@ -9,6 +9,14 @@ Every variable listed here is read directly from the environment; there is no `c
 
 `build_embedding_provider` (`src/services/embedding/mod.rs`) selects and configures the provider used for both writing embeddings (`sync_embedding`) and search (`GET /api/search`, the `search_entities` MCP tool).
 
+### When an embedding is generated
+
+Creating or replacing an entity queues a background job that generates its vector, on both transports: `POST /api/entities` and `PUT /api/entities/{id}`, and the `create_entity` and `update_entity` MCP tools. The job is enqueued only after the write's own transaction has committed, so the embedding provider round trip never adds its latency to the write.
+
+**`import_jsonl` is the exception, on either transport.** A restored backup's entities are written with no embedding job queued, so they stay `embedding IS NULL` and are reachable only through the `pg_trgm` fuzzy fallback until something fills them in. Run `cargo loco task resync_embeddings workspace_id:<uuid>` after an import; the same command recovers entities whose background sync failed against an embedding provider outage that outlasted the job's own retries.
+
+An entity with a NULL embedding produces no error at any point. Search simply returns worse results for it, so this is worth checking after a restore rather than waiting for a report.
+
 | Variable | Description |
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` selects the local ONNX provider (see below). Anything else, or unset, selects the OpenAI-compatible provider |

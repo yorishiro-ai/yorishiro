@@ -83,6 +83,9 @@ impl YorishiroMcpServer {
             content_entities::create(authorized.txn(), workspace_id, input, created_by).await
         );
         authorized.commit().await?;
+        // Same enqueue the REST handler does, and for the same reason: an entity written without it keeps `embedding` NULL forever and is reachable only through the `pg_trgm` fuzzy fallback, so the transport a write arrived on must not decide whether it becomes searchable.
+        crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)
+            .await;
         ok_json(record)
     }
 
@@ -120,6 +123,9 @@ impl YorishiroMcpServer {
             .await
         );
         authorized.commit().await?;
+        // The data changed, so the stored vector no longer matches it; re-syncing is the same follow-up the REST update handler performs.
+        crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)
+            .await;
         ok_json(record)
     }
 

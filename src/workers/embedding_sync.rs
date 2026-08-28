@@ -229,6 +229,32 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loc
     result.map(|_job_id| ())
 }
 
+/// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
+/// `perform_later` in `BackgroundQueue` mode only inserts a row into `pg_loco_queue` and returns; the embedding provider round trip happens later, inside whichever `WorkerClass` worker type's `perform` dequeues the job (see [`enqueue_for_class`]), on a worker process, not on this request's task.
+/// Runs on Loco's own `BackgroundQueue` (`pg_loco_queue`), so a process restart, a forced kill, or a provider outage that exhausts its own retries no longer silently loses the sync: the job survives in the queue table for the next worker run.
+/// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
+///
+/// This lives here rather than beside one transport's handlers because both of them need it: every entity write that does not call this leaves `content_entities.embedding` NULL forever, and such an entity is reachable only through the `pg_trgm` fuzzy fallback, so the symptom is search quietly returning worse results rather than any error.
+pub(crate) async fn enqueue_after_write(ctx: &AppContext, workspace_id: Uuid, entity_id: Uuid) {
+    let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+        .await
+    {
+        Ok(worker_class) => worker_class,
+        Err(err) => {
+            tracing::warn!(entity_id = %entity_id, error = %err.0, "failed to resolve worker class, defaulting to shared");
+            WorkerClass::Shared
+        }
+    };
+    let args = EmbeddingSyncArgs {
+        workspace_id,
+        entity_id,
+        worker_class,
+    };
+    if let Err(err) = enqueue_for_class(ctx, args).await {
+        tracing::warn!(entity_id = %entity_id, error = %err, "failed to enqueue embedding sync");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
