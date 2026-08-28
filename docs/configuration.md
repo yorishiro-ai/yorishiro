@@ -57,7 +57,11 @@ Runs a BERT-family ONNX model in-process, with no external embedding service.
 The model and tokenizer are not in the repository: the model alone is about 522 MiB.
 When neither `YORISHIRO_ONNX_MODEL_PATH` nor `YORISHIRO_ONNX_TOKENIZER_PATH` is set and nothing is at the default `models/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/` and verified against a SHA256 built into the binary.
 That directory is also where later starts look first, so only the first one pays the download.
-A later start checks the cached file's size rather than rehashing it, since re-reading 522 MiB on every start would make a one-off cost permanent; a file of the wrong size is removed and fetched again, so a truncated or corrupted cache repairs itself rather than being loaded as though it were sound.
+
+Verification happens at download time, not at every read.
+A file only reaches that directory by passing both checks and then being moved into place atomically, so a later start treats what is already there as the product of that earlier verified download rather than hashing 522 MiB again on every start.
+It does check the cached file's size, which is free and catches a truncated file; one of the wrong size is removed and fetched again, so that case repairs itself rather than being loaded as though it were sound.
+Files you supply yourself, at `models/` or through either path variable, are not checked at all: no digest can be pinned for a model of your choosing, and it may deliberately be a different one.
 `nomic-ai/nomic-embed-text-v1.5` is pinned to a fixed revision rather than a branch, so the bytes behind those digests cannot change underneath a deployment.
 
 The download blocks whatever triggered it, and the log line before it says so.

@@ -83,9 +83,16 @@ pub(super) async fn ensure_model_files() -> anyhow::Result<Option<(PathBuf, Path
 async fn ensure_file(dir: &Path, artifact: &Artifact) -> anyhow::Result<PathBuf> {
     let destination = dir.join(artifact.local_name);
     if destination.exists() {
-        // A file here passed its digest before the rename that put it here, but that was some earlier start: nothing has looked at it since, and a truncated or corrupted cache file would otherwise be loaded unverified on every start from now on.
-        // The length is checked rather than the digest because this runs on every start: re-reading 522 MiB through SHA256 each time would turn a one-off first-start cost into a permanent one, while `stat` is free and catches truncation, which is what an interrupted write actually leaves behind.
-        // Full-digest verification on this path is deliberately not done here; the rename is the boundary where the bytes were attested.
+        // The size is checked, and deliberately not the digest. Do not "fix" this into a re-verification: the reasons it is not one are the whole point.
+        //
+        // The digest guards the wire, not the disk. This destination only ever receives bytes that already passed both length and SHA256, moved in by an atomic rename within one filesystem, so the mechanism cannot itself produce a bad file here.
+        // Getting one needs an outside writer or disk corruption, and corruption that mangles an ONNX protobuf fails loudly in `LocalOnnxProvider::load` regardless.
+        // The quiet case, a valid but different model swapped in, needs someone holding the service user's write access, and they could as easily set `YORISHIRO_ONNX_MODEL_PATH` or replace the `models/` files, neither of which is checked at all.
+        //
+        // Re-hashing only this tier would also invert the design: files an operator placed themselves are deliberately unverified, since a custom model cannot match a digest pinned to nomic's, so re-checking at read time the one tier that was already verified at write time, at 522 MiB on every single start forever, would spend the cost exactly where it buys least.
+        //
+        // The size check earns its place at a different price: `stat` is free, and it catches truncation, which is what an interrupted write actually leaves behind.
+        // Anything past that is not worth paying for on every start.
         match std::fs::metadata(&destination) {
             Ok(meta) if meta.len() == artifact.size => return Ok(destination),
             Ok(meta) => {
