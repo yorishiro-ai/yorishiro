@@ -33,8 +33,11 @@ jobs:
         with:
           cache-directories: ~/.cache/ort.pyke.io
 
+      # `yorishiro-hosted` is the package; `yorishiro-server` is a [[bin]] inside it, and naming
+      # the bin here made this job fail on every run with "package ID specification
+      # `yorishiro-server` did not match any packages".
+      #
       # The library, not the binary: this job exists to catch Windows-only compile breakage, and
-      # the binary additionally embeds `ee/web/dist`, which would drag a node/pnpm stage onto a
-      # Windows runner for no extra coverage. `release.yml` builds the full binary for Windows.
+      # building the lib of the crate that sits on top of `yorishiro-core` compiles both.
       - name: Build
-        run: cargo build --release --lib -p yorishiro-server
+        run: cargo build --release --lib -p yorishiro-hosted

@@ -8,7 +8,11 @@ use crate::services::embedding;
 
 /// `cargo loco task resync_embeddings workspace_id:<uuid>`
 ///
-/// Re-syncs embeddings for entities whose `embedding` column is still NULL: an operational recovery command for entities that fell out of search due to a failed background sync (a transient embedding API outage, or the process exiting while `spawn_embedding_sync`'s task was still in flight, see `controllers::entities`'s doc comment on that gap).
+/// Re-syncs embeddings for entities whose `embedding` column is still NULL: an operational recovery command for entities that fell out of search because no sync ever completed for them.
+///
+/// Two things leave an entity in that state. A sync that was enqueued but never succeeded (an embedding provider outage that outlasts the job's own retries), and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the `pg_trgm` fuzzy fallback.
+///
+/// PostgreSQL only. `content_entities` has no `embedding` column at all on SQLite (vector search is not ported to that backend), so the `embedding IS NULL` query below cannot run there.
 pub struct ResyncEmbeddings;
 
 #[derive(Debug, FromQueryResult)]

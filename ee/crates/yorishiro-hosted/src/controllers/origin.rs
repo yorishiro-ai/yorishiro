@@ -16,23 +16,13 @@ use yorishiro_core::controllers::ApiError;
 use yorishiro_core::error::{ResultExt, YorishiroError};
 use yorishiro_core::metaschema::VersioningDiff;
 use yorishiro_core::models::content_schemas::{SchemaRecord, UpstreamChange};
-use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
+use yorishiro_core::services::auth::{ApiKeyScope, require_scope};
 
 use crate::models::origin as origin_model;
 use crate::services::merge::MergePlan;
 use crate::services::{authz, origin};
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
-fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
-    if ctx.scope < needed {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: format!("this endpoint needs the {needed:?} scope or higher"),
-            hint: "issue a key with a higher scope".into(),
-        });
-    }
-    Ok(())
-}
-
 /// The response of a merge, matching the community edition's schema-creation response shape so a client written against that response shape needs no change.
 #[derive(Debug, Serialize)]
 pub struct MergeResponse {

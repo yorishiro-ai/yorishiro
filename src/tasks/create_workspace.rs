@@ -31,8 +31,14 @@ impl Task for CreateWorkspace {
             .map_err(|err| Error::Message(err.to_string()))?;
         let dimensions = provider.dimensions() as i32;
 
+        // `create_workspace` holds a transaction-scoped advisory lock across its count and insert, so it takes a transaction rather than the pool.
+        let txn = app_context
+            .db
+            .begin()
+            .await
+            .map_err(|err| Error::Message(err.to_string()))?;
         let workspace = tenancy::create_workspace(
-            &app_context.db,
+            &txn,
             tenant_id,
             name,
             None,
@@ -41,6 +47,9 @@ impl Task for CreateWorkspace {
         )
         .await
         .map_err(|err| Error::Message(err.to_string()))?;
+        txn.commit()
+            .await
+            .map_err(|err| Error::Message(err.to_string()))?;
 
         println!("workspace id: {}", workspace.id);
         Ok(())

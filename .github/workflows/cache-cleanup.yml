@@ -3,7 +3,7 @@ name: Cache Cleanup
 on:
   pull_request:
     types: [closed]
-    branches: [master]
+    branches: [develop]
 
 permissions:
   actions: write

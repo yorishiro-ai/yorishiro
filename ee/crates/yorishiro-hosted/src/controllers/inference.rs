@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use yorishiro_core::controllers::ApiError;
 use yorishiro_core::error::{ResultExt, YorishiroError};
-use yorishiro_core::services::auth::{ApiKeyScope, AuthContext};
+use yorishiro_core::services::auth::{ApiKeyScope, require_scope};
 
 use crate::models::entity_fill;
 use crate::models::llm_keys::{self, LlmKeyDescription};
@@ -21,16 +21,6 @@ use crate::services::inference::InferenceClient;
 use crate::services::licence::LicenceState;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
-fn require_scope(ctx: &AuthContext, needed: ApiKeyScope) -> Result<(), YorishiroError> {
-    if ctx.scope < needed {
-        return Err(YorishiroError::ScopeInsufficient {
-            message: format!("this endpoint needs the {needed:?} scope or higher"),
-            hint: "issue a key with a higher scope".into(),
-        });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SetLlmKeyRequest {
     /// An OpenAI-compatible chat-completions endpoint, e.g. `https://api.openai.com/v1`.

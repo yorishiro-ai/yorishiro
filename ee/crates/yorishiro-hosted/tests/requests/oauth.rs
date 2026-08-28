@@ -4,7 +4,7 @@
 use axum::http::header;
 use hmac::{Hmac, Mac};
 use loco_rs::testing::prelude::*;
-use sea_orm::{ActiveValue, EntityTrait};
+use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;
 use sha2::Sha256;
 use yorishiro_core::models::_entities::identity_tenants;
@@ -278,8 +278,10 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
         unsafe {
             std::env::set_var("YORISHIRO_MAX_TENANTS", "1");
         }
+        // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
+        let txn = ctx.db.begin().await.expect("begin");
         let result = oauth::find_or_create(
-            &ctx.db,
+            &txn,
             "oidc",
             "a-brand-new-subject",
             Some("newcomer@example.com"),
@@ -287,6 +289,8 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             ("test-model", 768),
         )
         .await;
+        // The call is expected to be refused, so there is nothing to commit; dropping rolls back.
+        drop(txn);
         unsafe {
             std::env::remove_var("YORISHIRO_MAX_TENANTS");
         }
@@ -315,8 +319,10 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 #[serial]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
     request_with_create_db::<HostedApp, _, _>(|_request, ctx| async move {
+        // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
+        let txn = ctx.db.begin().await.expect("begin");
         let provisioned = oauth::find_or_create(
-            &ctx.db,
+            &txn,
             "oidc",
             "a-first-login-subject",
             Some("firstlogin@example.com"),
@@ -325,6 +331,8 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         )
         .await
         .expect("first login provisioning");
+        // The assertions below read these rows back through `ctx.db`, so an uncommitted transaction would leave them invisible.
+        txn.commit().await.expect("commit provisioning");
 
         let workspace = yorishiro_core::models::_entities::identity_workspaces::Entity::find_by_id(
             provisioned.workspace_id,

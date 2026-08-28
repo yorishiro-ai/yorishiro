@@ -38,24 +38,6 @@ fn to_preference(
     }
 }
 
-/// Reads the stored preference for one entity type.
-///
-/// `None` means the workspace has never chosen, which is different from having chosen nothing: the caller falls back to the schema's own first few fields rather than rendering a table with no columns.
-pub async fn get(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    entity_type: &str,
-) -> Result<Option<ColumnPreference>, YorishiroError> {
-    let row = Entity::find()
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .filter(Column::EntityType.eq(entity_type))
-        .one(conn)
-        .await
-        .internal()?;
-
-    Ok(row.map(to_preference))
-}
-
 /// Every stored preference in the workspace, so a caller can switch entity types without a round trip each time.
 pub async fn list(
     conn: &impl ConnectionTrait,
