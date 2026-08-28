@@ -64,11 +64,18 @@ That is usually a server start, but not always: `cargo loco task create_workspac
 
 Setting either path variable turns the fetch off entirely, for both files.
 An operator naming a path has said where the file is, so a wrong path there fails the start rather than downloading half a gigabyte to somewhere else.
+Each variable defaults independently, so setting only one leaves the other at its `models/` default.
+
 Placing the files at the default `models/` path by hand also works and is never overwritten.
+Both must be there: if exactly one is present the start fails, naming the file that is there and the one that is missing, rather than fetching around it.
+A lone file at that path is a half-finished setup, and quietly ignoring it would embed with a different model than the one deliberately placed there, which can disagree with the vectors already indexed while everything still looks healthy.
 
 Two failures are treated differently, on whether starting again could help.
 A download that fails, or whose bytes do not match the expected digest, fails the start: a network outage is transient, so a supervisor configured to restart retries it and the deployment heals itself, while a digest mismatch at a pinned revision means corruption or tampering and is exactly what verification exists to stop.
 If `HOME` does not resolve at all there is nowhere to fetch to, no restart changes that, and the deployment starts with no embedding provider, logging a message naming both path variables; search and recall then error until one is set.
+
+A download that is killed partway leaves a `.partial.` file behind in the cache directory, which a later start removes once it has gone six hours without being written to.
+The age requirement is what keeps that sweep away from a download still in progress, so two processes starting together do not delete each other's work.
 
 Building with this provider compiled in pulls in the `ort` crate, whose default `download-binaries` feature fetches an onnxruntime binary from `cdn.pyke.io` at build time; point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime if the build environment must be closed off.
 

@@ -101,6 +101,8 @@ async fn ensure_file(dir: &Path, artifact: &Artifact) -> anyhow::Result<PathBuf>
         artifact.description
     );
 
+    sweep_stale_partials(dir, artifact);
+
     // The temp file sits in the destination's own directory rather than the system temp directory, because `rename` is only atomic within a filesystem.
     // The pid suffix keeps a server and a worker starting together from writing the same partial file; both verify identical bytes, so whichever renames last is harmless.
     let temp = dir.join(format!(
@@ -123,6 +125,42 @@ async fn ensure_file(dir: &Path, artifact: &Artifact) -> anyhow::Result<PathBuf>
 
     tracing::info!(destination = %destination.display(), "fetched the {}", artifact.description);
     Ok(destination)
+}
+
+/// How long a `.partial.` file must have gone untouched before a sweep will remove it.
+///
+/// Long enough that an in-flight download is never a candidate: the sweep only ever looks at files whose mtime has not moved for this long, and a live download writes continuously.
+const STALE_PARTIAL_AGE: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// Removes abandoned temp files left by earlier killed downloads.
+///
+/// A killed download leaves `<name>.partial.<pid>`, and the next start has a different pid, so without this nothing ever reuses or removes it: on a deployment whose network keeps dropping mid-fetch, that is 522 MiB of dead bytes per attempt, accumulating forever.
+///
+/// The age check is what keeps this away from a download that is still running.
+/// Two processes starting together (a server and a worker, or `--server-and-worker` alongside a task) each write their own pid-suffixed file, and a sweep that removed a live one would fail the other's rename with `ENOENT`.
+/// Requiring [`STALE_PARTIAL_AGE`] of no writes means an in-flight download is never a candidate, since it is writing continuously; anything that old belongs to a process that is gone.
+/// Even in the case where that is somehow wrong, the consequence is bounded: the rename fails, that start fails with it, and under a supervisor's restart the next attempt finds the destination already there or fetches it cleanly.
+///
+/// Every failure here is ignored: a directory that cannot be read, or a file that cannot be removed, must not stop a fetch that is otherwise fine.
+fn sweep_stale_partials(dir: &Path, artifact: &Artifact) {
+    let prefix = format!("{}.partial.", artifact.local_name);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+            .is_ok_and(|age| age >= STALE_PARTIAL_AGE);
+        if stale {
+            tracing::info!(path = %entry.path().display(), "removing an abandoned partial download");
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Streams `url` into `temp` and checks the result against `artifact`'s expected length and digest.
@@ -216,6 +254,46 @@ mod tests {
     fn revision_is_a_full_commit_sha() {
         assert_eq!(REVISION.len(), 40);
         assert!(REVISION.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    /// The sweep must remove an abandoned partial while leaving a freshly written one alone, since a live download's temp file looks exactly like an abandoned one apart from its age.
+    #[test]
+    fn the_sweep_removes_only_partials_old_enough_to_be_abandoned() {
+        let dir = std::env::temp_dir().join(format!("yorishiro-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("cannot create test dir");
+
+        let in_flight = dir.join(format!("{}.partial.999999", TOKENIZER.local_name));
+        let unrelated = dir.join(TOKENIZER.local_name);
+        let other_artifact = dir.join(format!("{}.partial.1", MODEL.local_name));
+        for path in [&in_flight, &unrelated, &other_artifact] {
+            std::fs::write(path, b"x").expect("cannot write fixture");
+        }
+
+        let abandoned = dir.join(format!("{}.partial.12345", TOKENIZER.local_name));
+        std::fs::write(&abandoned, b"x").expect("cannot write fixture");
+        // Backdating the mtime is what makes this a test of the age rule rather than of the filename prefix alone.
+        let long_ago =
+            std::time::SystemTime::now() - STALE_PARTIAL_AGE - std::time::Duration::from_secs(60);
+        std::fs::File::open(&abandoned)
+            .expect("cannot open fixture")
+            .set_modified(long_ago)
+            .expect("cannot backdate fixture");
+
+        sweep_stale_partials(&dir, &TOKENIZER);
+
+        assert!(!abandoned.exists(), "an abandoned partial must be removed");
+        assert!(
+            in_flight.exists(),
+            "a partial still being written must survive"
+        );
+        assert!(unrelated.exists(), "the real file must never be touched");
+        assert!(
+            other_artifact.exists(),
+            "another artifact's partial is not this sweep's to remove"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Fetches the real tokenizer over the network and checks the whole download-verify-rename sequence, including that a wrong digest is rejected and leaves nothing behind.
