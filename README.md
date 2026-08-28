@@ -163,7 +163,7 @@ The default artifact is `yorishiro-server`, and without a licence key its paid A
 It is still not the same as the community binary: `ee/` is on disk, and the Web UI is served either way, since the SPA is not licence-gated.
 `yorishiro-ce-server` exists for a deployment that cannot have proprietary code on disk at all: a distribution policy, a redistribution requirement, an audit that reads the package rather than the configuration.
 
-The paid half has no README of its own on this branch; `ee/LICENSE` states its terms, and `ee/crates/yorishiro-hosted/` is where its code lives.
+The paid half has no README of its own on this branch. `ee/LICENSE` sets out the intended terms and says at the top of the file that it is a draft not yet settled by counsel, and `ee/crates/yorishiro-hosted/` is where its code lives.
 
 ## Documentation
 

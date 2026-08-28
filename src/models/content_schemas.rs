@@ -14,15 +14,16 @@ pub type ContentSchemas = Entity;
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
         this.id = crate::db::sqlite_generated_id(db, this.id);
-        // Joins the seven models that already stamp this here, for the reason this table specifically needs it: the `origin_status` trigger rewrites rows in place when an upstream template changes, so a schema row can change without any code path touching it.
-        // Only on update, and only when the caller has not set it: an insert takes the column's own default, and a caller that sets it deliberately (a backfill, an import preserving original timestamps) is not overwritten.
-        if !insert && !this.updated_at.is_set() {
+        // Stamped on insert as well as update, unlike the seven models that stamp only on update: those tables' `updated_at` columns carry a database default on both backends, and this one cannot.
+        // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `content_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
+        // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
+        if !this.updated_at.is_set() {
             this.updated_at = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().into()));
         }
         Ok(this)
@@ -292,8 +293,13 @@ pub async fn create_schema(
     };
 
     if previous.is_some() {
+        // `update_many` is a builder call and never runs `ActiveModelBehavior::before_save`, so `updated_at` is set explicitly here or archiving a schema version would leave its timestamp stale.
         Entity::update_many()
             .col_expr(Column::Status, Expr::value("archived"))
+            .col_expr(
+                Column::UpdatedAt,
+                Expr::value(chrono::Utc::now().fixed_offset()),
+            )
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Name.eq(&name))
             .filter(Column::Status.eq("active"))
