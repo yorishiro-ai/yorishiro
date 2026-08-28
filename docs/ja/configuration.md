@@ -184,6 +184,12 @@ locoは既定のフィルタを、固定のモジュールホワイトリスト�
 `yorishiro_core`だけを挙げるのは代替案にならない。
 同じ欠陥を逆向きにするだけで、`yorishiro_hosted`が沈黙し、ライセンスキーが検証されたかどうかを伝える行も失われる。
 
+**`RUST_LOG`はこの設定をすべて上書きする。**
+locoは`override_filter`を読むより先に`EnvFilter::try_from_default_env()`を試す(`logger.rs:193`)。
+そのため`RUST_LOG`を注入するプラットフォーム上では、この設定ファイルの記述に関わらず前述の沈黙が戻る。
+実測では、同梱の設定に対して`RUST_LOG=loco_rs=info`を与えると、サーバは正常に起動したままアプリケーション側2クレートのログが1行も出なくなる。
+環境で`RUST_LOG`を設定する場合は、その値自体に`yorishiro_core`と`yorishiro_hosted`を含めること。
+
 ## キューのバックエンドと調整(`config/development.yaml`、`config/production.yaml`)
 
 `queue.kind`は起動時に切り替え可能である。loco-rs は3種のキュープロバイダ(Postgres、SQLite、Redis/Valkey。`QueueConfig`の`#[serde(tag = "kind")]`バリアント)を持ち、それぞれ必要な設定項目が異なる(Redis だけが`queues`を持ち、Postgres/SQLite は SQL プール系の設定を共有しつつ異なる URI を指す)。この違いを1つの固定形で吸収するのは無理があるので、`development.yaml`・`production.yaml`とも`kind`ごとに`queue:`ブロック全体を、Tera の`<% if %>`/`<% elif %>`/`<% endif %>`で丸ごと切り替える形にした。

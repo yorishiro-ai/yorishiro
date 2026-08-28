@@ -138,6 +138,8 @@ loco builds its default filter from a fixed module whitelist plus **one** entry 
 
 Naming only `yorishiro_core` instead of both is not an alternative fix: it reverses the same defect, silencing `yorishiro_hosted` including the licence line that reports whether a key validated.
 
+**`RUST_LOG` overrides all of this.** loco tries `EnvFilter::try_from_default_env()` before it looks at `override_filter` at all (`logger.rs:193`), so a deployment whose platform injects `RUST_LOG` gets the silence back while this configuration still says otherwise. Measured: `RUST_LOG=loco_rs=info` against the shipped config produces zero lines from either application crate, with the server booting normally. If `RUST_LOG` is set in your environment, it has to name both `yorishiro_core` and `yorishiro_hosted` itself.
+
 ## Queue backend and tuning (`config/development.yaml`, `config/production.yaml`)
 
 `queue.kind` is switchable at boot, since loco-rs ships three queue providers (Postgres, `SQLite`, Redis/Valkey, `QueueConfig`'s `#[serde(tag = "kind")]` variants) and each needs a different set of fields (Redis alone takes `queues`; Postgres/`SQLite` share the SQL-pool knobs but point at different URIs). Both `development.yaml` and `production.yaml` template a whole alternative `queue:` block per `kind` (a Tera `<% if %>`/`<% elif %>`/`<% endif %>`) rather than templating individual fields inside one fixed shape.
