@@ -83,7 +83,31 @@ pub(super) async fn ensure_model_files() -> anyhow::Result<Option<(PathBuf, Path
 async fn ensure_file(dir: &Path, artifact: &Artifact) -> anyhow::Result<PathBuf> {
     let destination = dir.join(artifact.local_name);
     if destination.exists() {
-        return Ok(destination);
+        // A file here passed its digest before the rename that put it here, but that was some earlier start: nothing has looked at it since, and a truncated or corrupted cache file would otherwise be loaded unverified on every start from now on.
+        // The length is checked rather than the digest because this runs on every start: re-reading 522 MiB through SHA256 each time would turn a one-off first-start cost into a permanent one, while `stat` is free and catches truncation, which is what an interrupted write actually leaves behind.
+        // Full-digest verification on this path is deliberately not done here; the rename is the boundary where the bytes were attested.
+        match std::fs::metadata(&destination) {
+            Ok(meta) if meta.len() == artifact.size => return Ok(destination),
+            Ok(meta) => {
+                // Removing it rather than failing: a bad cache file is the case a retry can actually fix, so refetching heals it in place instead of needing an operator to find and delete the file first.
+                tracing::warn!(
+                    path = %destination.display(),
+                    found = meta.len(),
+                    expected = artifact.size,
+                    "cached {} is the wrong size; removing it and fetching again",
+                    artifact.description
+                );
+                std::fs::remove_file(&destination).map_err(|err| {
+                    anyhow::anyhow!(
+                        "failed to remove the corrupt cached file {}: {err}",
+                        destination.display()
+                    )
+                })?;
+            }
+            Err(err) => {
+                anyhow::bail!("failed to read {}: {err}", destination.display());
+            }
+        }
     }
 
     std::fs::create_dir_all(dir)
@@ -316,6 +340,26 @@ mod tests {
             .await
             .expect("second call failed");
         assert_eq!(again, path);
+
+        // A cached file of the wrong length must be replaced rather than returned: it passed its digest before some earlier rename, but nothing has looked at it since, and loading it would embed against corrupt bytes with every status still healthy.
+        std::fs::write(&path, b"truncated").expect("cannot truncate the cached file");
+        let repaired = ensure_file(&dir, &TOKENIZER)
+            .await
+            .expect("a corrupt cached file must be refetched, not returned");
+        assert_eq!(repaired, path);
+        assert_eq!(
+            std::fs::metadata(&path)
+                .expect("refetched file missing")
+                .len(),
+            TOKENIZER.size,
+            "the corrupt cached file should have been replaced by a complete one"
+        );
+        assert_eq!(
+            hex_encode(&Sha256::digest(
+                std::fs::read(&path).expect("refetched file unreadable")
+            )),
+            TOKENIZER.sha256
+        );
 
         // A digest that does not match the bytes must fail and leave no partial file to be mistaken for a good one later.
         let corrupt = Artifact {
