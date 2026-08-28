@@ -5,8 +5,8 @@
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::hash;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, SqlErr,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, SqlErr,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -475,13 +475,23 @@ pub async fn get_workspace_tenant(
         .ok_or_else(|| YorishiroError::not_found("workspace not found"))
 }
 
+/// The advisory-lock key serializing every operation that counts a tenant's workspaces before writing.
+/// `create_workspace` and `delete_workspace` share it deliberately: both decide from a count that the other invalidates, so they have to serialize against each other and not merely against themselves.
+fn workspace_count_lock_key(tenant_id: Uuid) -> String {
+    format!("workspace-count:{tenant_id}")
+}
+
 /// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
 /// `None` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
 ///
 /// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a later write produced by a different model can be refused where it happens rather than at query time.
 /// `None` leaves the workspace on "whatever the deployment is configured for".
+///
+/// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` because this takes `db::lock_for_update` before counting, and `pg_advisory_xact_lock` is transaction-scoped: handed a pool the lock would be released by the end of its own implicit transaction, before the count and insert it is meant to guard.
+/// Taking the transaction in the signature makes passing a pool a compile error instead of a lock that silently does nothing.
+/// It shares `delete_workspace`'s per-tenant lock key, so a create and a delete racing on the same tenant serialize against each other rather than each counting a total the other is about to change.
 pub async fn create_workspace(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseTransaction,
     tenant_id: Uuid,
     name: &str,
     max_entities: Option<i32>,
@@ -500,6 +510,9 @@ pub async fn create_workspace(
         .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
 
     if let Some(max) = tenant.max_workspaces {
+        crate::db::lock_for_update(conn, &workspace_count_lock_key(tenant_id))
+            .await
+            .internal()?;
         let count = identity_workspaces::Entity::find()
             .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
             .count(conn)
@@ -577,8 +590,10 @@ pub async fn get_workspace(
 /// Deletes a workspace, refusing to remove a tenant's last one.
 ///
 /// `db::lock_for_update` serializes concurrent deletes against the same tenant before counting its workspaces, so two requests racing to delete the tenant's last two workspaces cannot both see a spare one and proceed: a plain `DELETE ... WHERE EXISTS (another workspace)` reads a snapshot each transaction takes independently, which is exactly the race this avoids.
+///
+/// `conn` is a `&DatabaseTransaction` for the same reason `create_workspace`'s is: the advisory lock this takes is transaction-scoped, so handed a pool it would be released before the count and delete it guards, and the signature is what stops a caller from passing one.
 pub async fn delete_workspace(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseTransaction,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::identity_workspaces;
@@ -591,7 +606,7 @@ pub async fn delete_workspace(
             YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
         })?;
 
-    crate::db::lock_for_update(conn, &format!("workspace-delete:{}", workspace.tenant_id))
+    crate::db::lock_for_update(conn, &workspace_count_lock_key(workspace.tenant_id))
         .await
         .internal()?;
 

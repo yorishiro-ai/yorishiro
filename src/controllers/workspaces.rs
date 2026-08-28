@@ -6,7 +6,7 @@ use axum::routing::{delete, get, post};
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,7 +14,7 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::identity_workspaces;
 use crate::models::tenancy;
 use crate::models::{content_entities, content_relations, content_schemas};
@@ -70,8 +70,10 @@ pub async fn create_workspace(
     let embedding_model = crate::services::embedding::model_name_from_env();
     let dimensions = provider.dimensions() as i32;
 
+    // `create_workspace` takes a transaction-scoped advisory lock to close the gap between counting a tenant's workspaces and inserting one, so it has to be handed a transaction rather than the pool.
+    let txn = ctx.db.begin().await.internal()?;
     let workspace = tenancy::create_workspace(
-        &ctx.db,
+        &txn,
         auth.tenant_id,
         &body.name,
         body.max_entities,
@@ -79,6 +81,7 @@ pub async fn create_workspace(
         Some((&embedding_model, dimensions)),
     )
     .await?;
+    txn.commit().await.internal()?;
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
@@ -127,7 +130,10 @@ pub async fn delete_workspace(
 ) -> Result<StatusCode, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
     get_workspace_in_tenant(&ctx, auth.tenant_id, id).await?;
-    tenancy::delete_workspace(&ctx.db, id).await?;
+    // Passing `&ctx.db` here used to release `delete_workspace`'s advisory lock at the end of its own implicit transaction, before the count and delete it guards; the lock only holds on a transaction.
+    let txn = ctx.db.begin().await.internal()?;
+    tenancy::delete_workspace(&txn, id).await?;
+    txn.commit().await.internal()?;
     Ok(StatusCode::NO_CONTENT)
 }
 
