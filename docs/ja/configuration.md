@@ -163,6 +163,27 @@ loco-rsは`smtp.enable`が真であればこのブロックから`EmailSender`�
 `config/development.yaml`は何も必要としない。
 空の環境で起動し、SQLiteのファイルを自分で作成する。
 
+## ログ
+
+`config/*.yaml`はすべて`logger.override_filter`を明示的に設定している。
+これは調整のためではなく、設定しなければ機能しないためである。
+
+locoは既定のフィルタを、固定のモジュールホワイトリストと、`Hooks::app_name()`から取る**1つだけ**のアプリケーションクレート名から組み立てる(`loco-rs-1.1.0/src/logger.rs:192-210`)。
+このワークスペースにはアプリケーションクレートが2つあり、`yorishiro-server`は`HostedApp`で起動するので、その`app_name()`は`yorishiro_hosted`になる。
+既定のままでは、有償版の配備において`yorishiro_core`のログが一切出力されなかった。
+埋め込みワーカーの警告も、認証経路のログも出ない。
+イベントは発行されており、フィルタが捨てていた。
+
+`override_filter`で両方のクレート名を挙げるとこれが解消する。
+間違えやすい点が3つある。
+
+- **locoのホワイトリストを拡張するのではなく置き換える。** 値の中にフレームワーク自身のモジュールを書いているのはそのためである。`loco_rs`を外すとキュー・ルーティング・`listening on`のログが消え、`sea_orm_migration`を外すとマイグレーションの進行状況が消える。
+- **`logger.level`も置き換える。** この設定があるとlocoは`level`を読まない。したがってレベルはフィルタの値の中に環境ごとに直接書いてあり、`LOG_LEVEL`では変更できない。
+- **このワークスペースにクレートを追加したら、すべての`config/*.yaml`のこの行にも追加すること。** そうしないとそのクレートのログは黙って出なくなり、症状からフィルタを疑う手がかりは何も無い。
+
+`yorishiro_core`だけを挙げるのは代替案にならない。
+同じ欠陥を逆向きにするだけで、`yorishiro_hosted`が沈黙し、ライセンスキーが検証されたかどうかを伝える行も失われる。
+
 ## キューのバックエンドと調整(`config/development.yaml`、`config/production.yaml`)
 
 `queue.kind`は起動時に切り替え可能である。loco-rs は3種のキュープロバイダ(Postgres、SQLite、Redis/Valkey。`QueueConfig`の`#[serde(tag = "kind")]`バリアント)を持ち、それぞれ必要な設定項目が異なる(Redis だけが`queues`を持ち、Postgres/SQLite は SQL プール系の設定を共有しつつ異なる URI を指す)。この違いを1つの固定形で吸収するのは無理があるので、`development.yaml`・`production.yaml`とも`kind`ごとに`queue:`ブロック全体を、Tera の`<% if %>`/`<% elif %>`/`<% endif %>`で丸ごと切り替える形にした。

@@ -10,9 +10,15 @@ logger:
   level: <%= get_env(name="LOG_LEVEL", default="debug") %>
   # Define the logging format. options: compact, pretty or json
   format: compact
-  # By default the logger has filtering only logs that came from your code or logs that came from `loco` framework. to see all third party libraries
-  # Uncomment the line below to override to see all third party libraries you can enable this config and override the logger filters.
-  # override_filter: trace
+  # `override_filter` rather than loco's default, because this workspace has two application crates and the default admits exactly one.
+  # loco builds its filter from a fixed module whitelist plus a single `H::app_name()` entry (`loco-rs-1.1.0/src/logger.rs:192-210`), and both `Hooks` impls return their own `env!("CARGO_CRATE_NAME")`.
+  # `yorishiro-server` boots `HostedApp`, so that filter named `yorishiro_hosted` and nothing for `yorishiro_core`: every event from the base crate was dropped, including the embedding worker's warnings and the auth paths, on every paid-edition deployment.
+  # Naming only `yorishiro_core` instead is not a fix but the same defect reversed, and it loses the licence line that tells an operator whether their key validated.
+  #
+  # This replaces loco's whitelist rather than extending it, so the framework's own modules are repeated here: drop `loco_rs` and the queue, routing and `listening on` lines go with it, drop `sea_orm_migration` and migration progress does.
+  # It also replaces `level:` above, which loco does not read at all when this is set, so the level is written here per environment rather than templated.
+  # Add a crate to this workspace and its name belongs on this line, or it is silent for the same reason with nothing in the symptom to suggest why.
+  override_filter: loco_rs=debug,sea_orm_migration=debug,tower_http=debug,sqlx::query=debug,yorishiro_core=debug,yorishiro_hosted=debug
 
 # Web server configuration
 server:

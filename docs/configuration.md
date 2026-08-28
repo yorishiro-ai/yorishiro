@@ -124,6 +124,20 @@ Everything else this file reads either has a default or is opt-in.
 
 `config/development.yaml` requires nothing: it boots against an empty environment, creating its own SQLite file.
 
+## Logging
+
+Every `config/*.yaml` sets `logger.override_filter` explicitly, and that is load-bearing rather than tuning.
+
+loco builds its default filter from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`). This workspace has two application crates, and `yorishiro-server` boots `HostedApp`, whose `app_name()` is `yorishiro_hosted`. Under that default, nothing from `yorishiro_core` was logged at all on a paid-edition deployment: not the embedding worker's warnings, not the auth paths, nothing. The events were emitted and dropped by the filter.
+
+`override_filter` names both crates, which fixes it. Three things follow that are easy to get wrong:
+
+- **It replaces loco's whitelist rather than extending it.** The framework's own modules are repeated in the value for that reason. Remove `loco_rs` and the queue, routing and `listening on` lines disappear; remove `sea_orm_migration` and migration progress does.
+- **It replaces `logger.level` too**, which loco does not read when this is set. The level is therefore written into the filter value per environment, and `LOG_LEVEL` does not change it.
+- **A crate added to this workspace must be added to this line**, in every `config/*.yaml`. Its logs are otherwise silently absent, and nothing in the symptom points at the filter.
+
+Naming only `yorishiro_core` instead of both is not an alternative fix: it reverses the same defect, silencing `yorishiro_hosted` including the licence line that reports whether a key validated.
+
 ## Queue backend and tuning (`config/development.yaml`, `config/production.yaml`)
 
 `queue.kind` is switchable at boot, since loco-rs ships three queue providers (Postgres, `SQLite`, Redis/Valkey, `QueueConfig`'s `#[serde(tag = "kind")]` variants) and each needs a different set of fields (Redis alone takes `queues`; Postgres/`SQLite` share the SQL-pool knobs but point at different URIs). Both `development.yaml` and `production.yaml` template a whole alternative `queue:` block per `kind` (a Tera `<% if %>`/`<% elif %>`/`<% endif %>`) rather than templating individual fields inside one fixed shape.
