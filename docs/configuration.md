@@ -46,11 +46,41 @@ Runs a BERT-family ONNX model in-process, with no external embedding service.
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file (default: `models/model.onnx`). Not bundled with the repository or fetched automatically; boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if either file is missing |
-| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json` (default: `models/tokenizer.json`). Same missing-file behaviour as `YORISHIRO_ONNX_MODEL_PATH` |
+| `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file. Unset, the model is fetched automatically on first use (see below); set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if it does not |
+| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_ONNX_MODEL_PATH`: fetched automatically when unset, required to exist when set |
 | `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`) |
 | `YORISHIRO_ONNX_POOLING` | `mean` (default) or `last_token` (also accepts `last-token`/`lasttoken`). An unrecognized value is rejected at boot rather than silently falling back to `mean`: reading a model with the wrong pooling doesn't fail, it just returns worse vectors, and defaulting quietly on a typo would hide exactly that degradation |
 | `YORISHIRO_ONNX_QUERY_INSTRUCTION` | Instruction text embedded into a search query only, never into a stored document, for asymmetric models that expect one on the query side (rendered as `Instruct: {instruction}\nQuery:{text}`). Unset by default, which makes this exactly a plain `embed` call, the right behaviour for a symmetric model. An empty string is treated the same as unset, not as "prefix with nothing": clearing the variable is how an operator turns the instruction back off |
+
+#### Fetching the model
+
+The model and tokenizer are not in the repository: the model alone is about 522 MiB.
+When neither `YORISHIRO_ONNX_MODEL_PATH` nor `YORISHIRO_ONNX_TOKENIZER_PATH` is set and nothing is at the default `models/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/` and verified against a SHA256 built into the binary.
+That directory is also where later starts look first, so only the first one pays the download.
+
+Verification happens at download time, not at every read.
+A file only reaches that directory by passing both checks and then being moved into place atomically, so a later start treats what is already there as the product of that earlier verified download rather than hashing 522 MiB again on every start.
+It does check the cached file's size, which is free and catches a truncated file; one of the wrong size is removed and fetched again, so that case repairs itself rather than being loaded as though it were sound.
+Files you supply yourself, at `models/` or through either path variable, are not checked at all: no digest can be pinned for a model of your choosing, and it may deliberately be a different one.
+`nomic-ai/nomic-embed-text-v1.5` is pinned to a fixed revision rather than a branch, so the bytes behind those digests cannot change underneath a deployment.
+
+The download blocks whatever triggered it, and the log line before it says so.
+That is usually a server start, but not always: `cargo loco task create_workspace` and `cargo loco task resync_embeddings` build an embedding provider too, so either can be what pulls 522 MiB on a fresh machine, and a task that appears to be sitting still is most likely doing this.
+
+Setting either path variable turns the fetch off entirely, for both files.
+An operator naming a path has said where the file is, so a wrong path there fails the start rather than downloading half a gigabyte to somewhere else.
+Each variable defaults independently, so setting only one leaves the other at its `models/` default.
+
+Placing the files at the default `models/` path by hand also works and is never overwritten.
+Both must be there: if exactly one is present the start fails, naming the file that is there and the one that is missing, rather than fetching around it.
+A lone file at that path is a half-finished setup, and quietly ignoring it would embed with a different model than the one deliberately placed there, which can disagree with the vectors already indexed while everything still looks healthy.
+
+Two failures are treated differently, on whether starting again could help.
+A download that fails, or whose bytes do not match the expected digest, fails the start: a network outage is transient, so a supervisor configured to restart retries it and the deployment heals itself, while a digest mismatch at a pinned revision means corruption or tampering and is exactly what verification exists to stop.
+If `HOME` does not resolve at all there is nowhere to fetch to, no restart changes that, and the deployment starts with no embedding provider, logging a message naming both path variables; search and recall then error until one is set.
+
+A download that is killed partway leaves a `.partial.` file behind in the cache directory, which a later start removes once it has gone six hours without being written to.
+The age requirement is what keeps that sweep away from a download still in progress, so two processes starting together do not delete each other's work.
 
 Building with this provider compiled in pulls in the `ort` crate, whose default `download-binaries` feature fetches an onnxruntime binary from `cdn.pyke.io` at build time; point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime if the build environment must be closed off.
 

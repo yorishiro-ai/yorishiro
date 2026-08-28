@@ -27,6 +27,7 @@ impl Task for CreateWorkspace {
         let embedding_model = crate::services::embedding::model_name_from_env();
 
         let provider = crate::services::embedding::build_embedding_provider()
+            .await
             .map_err(|err| Error::Message(err.to_string()))?;
         let dimensions = provider.dimensions() as i32;
 

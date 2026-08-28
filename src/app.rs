@@ -80,8 +80,9 @@ impl Hooks for App {
                 .insert(crate::services::auth::default_authenticator());
         }
         // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the error to the first search.
-        let embedding_provider =
-            crate::services::embedding::build_embedding_provider().map_err(|e| {
+        let embedding_provider = crate::services::embedding::build_embedding_provider()
+            .await
+            .map_err(|e| {
                 loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
             })?;
         ctx.shared_store.insert(embedding_provider);
