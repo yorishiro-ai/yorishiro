@@ -47,7 +47,8 @@ Verification for any new write handler must include a follow-up read confirming 
 `TenantDb::begin_for_workspace(tenant_id, workspace_id)` begins a transaction on that wrapped connection and sets `app.current_tenant`/`app.current_workspace` transaction-locally (`set_config(..., true)`), so RLS policies see them for every statement on that transaction, entity API and raw SQL alike, and they disappear automatically at commit or rollback with no `after_release` reset needed for the GUCs specifically.
 Both pools are constructed in `Hooks::after_context` (`src/app.rs`) and stored as `db::DbHandle` in `ctx.shared_store`, retrieved via `ctx.shared_store.get_ref::<db::DbHandle>()`.
 `Authorized<R>`'s extractor calls `begin_for_workspace` and hands the handler the resulting `DatabaseTransaction`.
-`SessionLock` (session-scoped `pg_advisory_lock`, used where a caller needs the same lock held across steps that can't share one transaction) is the one thing that still has no SeaORM equivalent and stays on the raw `sqlx::PgPool` permanently: `begin`/entity API re-acquire a connection per call or pin one only for a transaction's lifetime, and neither expresses "hold this one connection across steps with no enclosing transaction."
+There is no session-scoped advisory lock helper: `SessionLock` existed for the shape where a caller needs one lock held across steps that cannot share a transaction, and was removed unused, since every lock this codebase actually takes is `db::lock_for_update` inside one transaction.
+Reintroducing it means the raw `sqlx::PgPool` again, because SeaORM's `DatabaseConnection` re-acquires a connection per call and a transaction pins one only for its own lifetime, so neither expresses "hold this connection across steps with no enclosing transaction".
 See <https://github.com/yotsunagi/yorishiro/issues/221> for the design history.
 
 **Decided (2026-08-24): the migration crate targets SQLite as well as PostgreSQL; nothing else does yet.**

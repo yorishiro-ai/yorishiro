@@ -161,7 +161,7 @@ async fn resolve_tenant_by_customer(
 ///
 /// Idempotency and ordering are enforced inside one transaction (see `identity_stripe_processed_events`, `is_event_processed`/`is_stale_for_customer`): a duplicate delivery, or a delayed delivery older than one already applied for the same customer, is accepted (so Stripe doesn't retry it forever) but not re-applied.
 ///
-/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly: `db::lock_for_update(&txn, ...)` is a transaction-scoped advisory lock that releases on commit or rollback with no separate connection to leak, unlike `db::SessionLock`.
+/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly: `db::lock_for_update(&txn, ...)` is a transaction-scoped advisory lock that releases on commit or rollback with no separate connection to leak.
 async fn apply_stripe_event(
     ctx: &AppContext,
     config: &StripeConfig,
