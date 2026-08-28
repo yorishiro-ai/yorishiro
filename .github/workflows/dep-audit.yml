@@ -21,9 +21,10 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
-          # This workflow runs on a schedule against master, never on a PR, so it's always safe to save.
-          # Pin the condition anyway for consistency with ci.yml's own `save-if`.
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          # This workflow runs on a schedule, never on a PR, so it's always safe to save.
+          # A scheduled run's `github.ref` is the default branch, so the condition names develop:
+          # pinned to master it was permanently false and this cache was never written.
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
       - name: Route rustc through sccache
         run: |
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"

@@ -1,9 +1,10 @@
 core:
   - changed-files:
-      - any-glob-to-any-file: "crates/yorishiro-core/**"
+      - any-glob-to-any-file: ["src/**", "Cargo.toml"]
 server:
   - changed-files:
-      - any-glob-to-any-file: "crates/yorishiro-server/**"
+      - any-glob-to-any-file: "ee/crates/yorishiro-hosted/src/bin/**"
+# `ee/web` is deferred, not abandoned: this rule starts matching when the SPA lands.
 web-ui:
   - changed-files:
       - any-glob-to-any-file: "ee/web/**"
@@ -15,7 +16,7 @@ docs:
       - any-glob-to-any-file: "docs/**"
 migrations:
   - changed-files:
-      - any-glob-to-any-file: "migrations/**"
+      - any-glob-to-any-file: "migration/**"
 ci:
   - changed-files:
       - any-glob-to-any-file: ".github/**"

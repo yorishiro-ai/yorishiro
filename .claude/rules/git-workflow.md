@@ -17,7 +17,7 @@
   2. If the branch is behind develop, rebase first: `git fetch origin develop && git rebase origin/develop`
 - Every PR must pass CI (check + security) before merge.
   **`ci.yml`, `security.yml`, `doc-check.yml`, and `codeql.yml` all trigger on `develop` (and `loco-rebuild`)**, confirmed against each workflow's own `on:` block: a `develop`-based PR runs `check`, `doc-check`, and `Analyze (rust)` on every push, and `security` additionally when `Cargo.toml`/`Cargo.lock` changes (it's path-filtered).
-  `cache-cleanup.yml` is the one workflow still scoped to `branches: [master]` only, since it cleans up caches on a merged PR's branch and this repository's release/master flow hasn't caught up to `develop` yet; it does not gate a `develop` PR's merge.
+  `cache-cleanup.yml` triggers on a closed PR against `develop`, retargeted from `master` once it became clear master takes no more PRs and the job had therefore stopped firing at all; it cleans up a merged PR branch's caches and does not gate a merge.
   Check a workflow's own `on:` block before assuming it runs (or doesn't) on a `develop`-based PR — this list can drift again.
 - Merge commit is the usual strategy, not squash: PRs whose commits carry their own measurement record (an actual run's numbers, a confirmed CI log, an empirical check) merge with a merge commit, so that record stays in `develop`'s history rather than collapsing into a synthesized summary.
   Squash is for a change with no such record to preserve — a single mechanical edit (a dependency bump, swapping one CI action for another) where one clean commit is more useful than the several commits it was made from.
