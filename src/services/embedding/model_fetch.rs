@@ -26,7 +26,7 @@ struct Artifact {
     /// SHA256 of the file's bytes.
     ///
     /// Taken by downloading each file at [`REVISION`] and running `sha256sum` on it, never transcribed from a response header.
-    /// The headers cannot be trusted for this: `model.onnx` answers with two different 64-hex values (`x-linked-etag` on the 302 and `etag` on the 200) and nothing says which is the content digest — it is the 302's — while `tokenizer.json`'s ETag is a 40-hex Git blob SHA1 matching neither, since it is small enough not to go through LFS.
+    /// The headers cannot be trusted for this. `model.onnx` answers with two different 64-hex values (`x-linked-etag` on the 302 and `etag` on the 200), and nothing in the response says which is the content digest; it is the 302's. `tokenizer.json`'s ETag matches neither, being a 40-hex Git blob SHA1, since it is small enough not to go through LFS.
     /// Updating [`REVISION`] means re-measuring these the same way.
     sha256: &'static str,
     /// Expected length in bytes, checked before hashing.

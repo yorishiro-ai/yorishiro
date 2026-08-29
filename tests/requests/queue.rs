@@ -1,7 +1,7 @@
 //! Covers the enqueue side of the background queue: that `enqueue_for_class` puts a row in the queue at all, and that each `WorkerClass` carries its own tag.
 //!
 //! Nothing else in this suite exercises a queue backend.
-//! `config/test.yaml` sets `workers.mode: ForegroundBlocking`, under which `perform_later` calls `perform` inline and never touches a queue, so every job body is covered on every run and the enqueue path would otherwise be covered by nothing — a change breaking it ships through a green suite.
+//! `config/test.yaml` sets `workers.mode: ForegroundBlocking`, under which `perform_later` calls `perform` inline and never touches a queue, so every job body is covered on every run and the enqueue path would otherwise be covered by nothing: a change breaking it ships through a green suite.
 //!
 //! **What this does not cover: the dequeue-side tag filter.**
 //! A change can break both the enqueue join tested here and the `WHERE` clause that decides which tags a running worker takes, and only the first is reachable from a test.

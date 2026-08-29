@@ -86,7 +86,7 @@ impl Hooks for App {
         Ok(vec![])
     }
 
-    /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store` — PostgreSQL only.
+    /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store`, on PostgreSQL only.
     ///
     /// Loco's own database connection (`ctx.db`, a `sea_orm::DatabaseConnection`) is built from `sea_orm::ConnectOptions`, which has no `after_connect`/`after_release` hook.
     /// This deployment's row-level security depends on a `SET ROLE` per physical connection and `set_config(...)` per request, so that lifecycle is built separately here, on a hand-constructed `sqlx::PgPool`, and stored for handlers to retrieve via `ctx.shared_store.get_ref::<crate::db::DbHandle>()`.

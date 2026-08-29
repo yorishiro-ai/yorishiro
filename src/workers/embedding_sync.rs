@@ -7,7 +7,7 @@
 //! dequeue query `AND (tags IS NULL)` (confirmed against `loco-rs` 1.1.0's `bgworker/pg.rs`, and the
 //! matching logic in `sqlt.rs`/`redis.rs`), so a bare `--worker` process dequeues only *untagged*
 //! jobs. Every job this module enqueues carries exactly one tag, so such a process takes none of
-//! them — not "the leftover ones nothing else claimed".
+//! them, rather than taking "the leftover ones nothing else claimed".
 //!
 //! Covering every class in one process means naming every tag:
 //! `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared`.
@@ -146,7 +146,7 @@ pub struct EmbeddingSyncArgs {
 /// A transient one (`ProviderBusy`, `ProviderUnreachable`, or `Internal`) propagates as `Err`, which
 /// is what `Failed` plus `retry_failed` exist for. Reporting them `Ok` would let a whole provider
 /// outage mark itself `Completed` with every embedding still `NULL` and nothing recording that
-/// anything went wrong — indistinguishable from jobs that never needed to run.
+/// anything went wrong, which is indistinguishable from jobs that never needed to run.
 ///
 /// Shared by all three `WorkerClass` worker types below: the only difference between `EmbeddingSyncWorkerTenantPrivate`/`Official`/`Shared` is which tag `tags()` returns, so this function is the single place the actual sync logic lives rather than being copy-pasted three times.
 async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> loco_rs::Result<()> {

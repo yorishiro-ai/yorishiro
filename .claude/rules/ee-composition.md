@@ -22,7 +22,7 @@ What a deployment serves is decided at runtime, and `tests/requests/licence_gate
 
 **Which routes are gated is narrower than "everything under `ee/`".**
 `marketplace` and `inference::gated_routes` (`infer-fill` alone) carry the gate.
-`oauth` and `stripe` are gated by configuration instead and deliberately carry no licence check — `oauth` because it is opt-in by setting an issuer URL, `stripe` because the webhook is how a licence gets bought.
+`oauth` and `stripe` are gated by configuration instead and deliberately carry no licence check: `oauth` because it is opt-in by setting an issuer URL, `stripe` because the webhook is how a licence gets bought.
 The rest (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`, and `inference`'s `/workspace/llm-key` routes) serve without a licence.
 
 **Licence tests** live in `tests/licence.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing.

@@ -29,7 +29,7 @@ A route registered on both sides is therefore a startup crash rather than a comp
 
 ## Visibility and dead code
 
-- Everything compiles into one crate, `ee/` included, so a workspace-wide grep settles whether a `pub` item is called — but it has to cover `ee/`, which is the only caller of much of what `src/` exposes.
+- Everything compiles into one crate, `ee/` included, so a workspace-wide grep settles whether a `pub` item is called. It has to cover `ee/`, which is the only caller of much of what `src/` exposes.
 - An item reached only from `ee/` needs no special visibility: `crate::` reaches it either way. `pub` on such an item therefore says "part of this crate's external surface", which is a claim worth checking rather than a formality.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
 - `Authenticator` (`services/auth`) is meant to be a seam, not an internal detail, once every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`Verified<R>` extractors, both MCP entry points): a new authenticated entry point must resolve through that seam rather than call `authenticate` directly, or a REST route and an MCP tool could end up disagreeing about who the caller is.
