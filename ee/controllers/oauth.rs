@@ -5,7 +5,8 @@
 //!
 //! They are also opt-in within a licensed deployment: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing.
 //! A set issuer with a missing `client_id`/`client_secret` is a different case, `Err`, and answers `500` naming the misconfiguration rather than either `404`.
-//! `status` is the exception and always answers `200` once past the gate, which is what makes it the route `licence_gate.rs` tests the gate with: its `404` can only come from the gate.
+//! `status` is the exception: past the gate it answers `200` whether or not OAuth is configured, and `500` on that same partial-configuration error, but never `404`.
+//! That is what makes it the route `licence_gate.rs` tests the gate with, since its `404` can only come from the gate, while `authorize` and `callback` produce one of their own whenever the issuer is unset.
 
 use crate::YorishiroError;
 use crate::controllers::ApiError;

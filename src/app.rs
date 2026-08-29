@@ -233,7 +233,7 @@ impl Hooks for App {
             .add_route(controllers::whoami::routes())
             .add_route(controllers::workspaces::routes())
             // The paid edition's routes, mounted unconditionally; see this function's doc comment
-            // for why only two of them carry the gate.
+            // for which of them carry the gate and why.
             .add_route(crate::ee::controllers::dashboard::routes())
             .add_route(crate::ee::controllers::embedding::routes())
             .add_route(crate::ee::controllers::entity_columns::routes())
