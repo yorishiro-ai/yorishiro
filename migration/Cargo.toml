@@ -26,3 +26,4 @@ features = [
 [dev-dependencies]
 tokio = { version = "1.45", features = ["rt-multi-thread", "macros"] }
 tempfile = "3"
+serial_test = { workspace = true }
