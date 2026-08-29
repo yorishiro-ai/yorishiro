@@ -162,13 +162,11 @@ Configuration decides what is enabled, not which artifact you installed.
 | Web UI | Served either way, since the SPA is not licence-gated | |
 | Licence | [BUSL-1.1](LICENSE), plus [`ee/LICENSE`](ee/LICENSE) for the `ee/` directory | |
 
-The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a
-valid licence key is configured. The check runs per request rather than at startup, so a key
-that expires while the process runs stops unlocking those surfaces without a restart.
+The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a valid licence key is configured.
+The check runs per request rather than at startup, so a key that expires while the process runs stops unlocking those surfaces without a restart.
 
-`ee/LICENSE` covers the `ee/` directory, and the root [BUSL-1.1](LICENSE) covers the
-repository excluding it. `ee/LICENSE` states at the top of the file that it is a draft not
-yet settled by counsel.
+`ee/LICENSE` covers the `ee/` directory, and the root [BUSL-1.1](LICENSE) covers the repository excluding it.
+`ee/LICENSE` states at the top of the file that it is a draft not yet settled by counsel.
 
 ## Documentation
 

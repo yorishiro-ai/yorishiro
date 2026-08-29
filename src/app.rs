@@ -147,10 +147,11 @@ impl Hooks for App {
             .insert(crate::ee::services::licence::LicenceState::from_env());
 
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            // The three queries named here hardcode `DatabaseBackend::Postgres` and would otherwise
-            // fail at execution time naming a query rather than the configuration behind it. Nothing
-            // else reports the paid edition's state at boot on this backend, since
-            // `TenantScopedAuthenticator` below is deliberately not installed.
+            // The three features named here are `ee::models::origin::list_with_upstream_changes`,
+            // `ee::models::marketplace::list_marketplace` and `insert_next_version`, each of which
+            // hardcodes `DatabaseBackend::Postgres` and would otherwise fail at execution time
+            // naming a query rather than the configuration behind it. Nothing else reports the paid
+            // edition's state at boot here, since `TenantScopedAuthenticator` below is not installed.
             tracing::warn!(
                 "some paid features are unavailable on SQLite: browsing the marketplace, publishing \
                  a template version, and listing template-origin updates each run a PostgreSQL-only \

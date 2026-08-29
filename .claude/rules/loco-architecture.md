@@ -25,7 +25,8 @@ Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 
 **Migrations**: one file, `migration/src/m20260829_000000_initial_schema.rs`, holding the whole schema.
 
-A new table is added to that file rather than beside it, **only while no deployment has applied it**. Once any deployment has, a second file is the only correct answer, since editing an applied migration changes a schema someone is already running while leaving that deployment on the old one.
+A new table is added to that file rather than beside it, **only while no deployment has applied it**.
+Once any deployment has, a second file is the only correct answer, since editing an applied migration changes a schema someone is already running while leaving that deployment on the old one.
 
 `seaql_migrations`'s row count does not answer this and must not be used as the test: a database that has applied this migration also holds exactly one row, so the count cannot separate "never applied" from "applied once". The question is whether a deployment exists that has run it, which is a fact about deployments rather than about any one database, and answering it means knowing where this schema is running.
 
