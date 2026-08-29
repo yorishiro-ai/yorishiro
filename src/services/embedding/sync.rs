@@ -128,7 +128,7 @@ pub async fn sync_embedding_for_record(
     .await
 }
 
-/// The dimension count a workspace's vectors are expected to have, or `None` when it was created before the stamp existed and therefore takes the deployment's.
+/// The dimension count a workspace's vectors are expected to have, or `None` for a workspace carrying no stamp of its own, which takes the deployment's.
 async fn workspace_embedding_dimensions(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

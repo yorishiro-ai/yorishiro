@@ -49,7 +49,7 @@ pub struct EmbeddingKeyConfig {
 
 /// Stores or replaces a workspace's own embedding provider assignment.
 ///
-/// `expected_dimensions` is the workspace's own stamped `identity_workspaces.embedding_dimensions`, when it has one: a workspace created before this assignment existed carries the deployment default's dimension count, and pointing it at a provider that produces a different width would leave existing vectors and any newly-embedded ones at different widths in the same column, discovered only when `sync_embedding`'s own write-time guard (`services/embedding/sync.rs`) rejects a write.
+/// `expected_dimensions` is the workspace's own stamped `identity_workspaces.embedding_dimensions`, when it has one; a workspace carrying no stamp takes the deployment default's dimension count. Pointing either at a provider that produces a different width would leave existing vectors and any newly-embedded ones at different widths in the same column, discovered only when `sync_embedding`'s own write-time guard (`services/embedding/sync.rs`) rejects a write.
 /// Checking here, at the point an operator assigns the provider, surfaces the same mismatch immediately instead of on the next entity write.
 #[allow(clippy::too_many_arguments)]
 pub async fn set(

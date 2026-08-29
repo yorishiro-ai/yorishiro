@@ -85,7 +85,7 @@ pub struct InferFillReport {
 
 /// `POST /hosted/schemas/active/{name}/infer-fill`
 ///
-/// Writes each accepted guess straight to `content_entities`, the same "compute and write immediately" shape the embedding-sync worker types use, in place of the earlier propose/confirm workflow: a guess is reversible the same way any other entity write is, through base's own `content_entities::snapshot`/`undo_job`, so holding it in a separate table pending a second request added a step with no reversibility this deployment didn't already have another way.
+/// Writes each accepted guess straight to `content_entities`, the same "compute and write immediately" shape the embedding-sync worker types use, rather than holding proposals in a separate table for a second confirming request: a guess is reversible the same way any other entity write is, through base's own `content_entities::snapshot`/`undo_job`, so that extra step would buy no reversibility this deployment does not already have.
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

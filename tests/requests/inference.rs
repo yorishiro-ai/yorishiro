@@ -283,8 +283,7 @@ async fn create_entity(
 /// `apply_answers` writes a model's already-resolved answer straight into `content_entities`, with
 /// no separate confirm step, and the snapshot it takes is readable by base's own, unchanged
 /// `POST /api/migration-jobs/{job_id}/undo`: this is `infer_fill`'s own write path, factored out
-/// so it is testable without a real or stubbed LLM endpoint, matching how this file tested
-/// `fill_proposals::confirm` directly before `infer_fill` absorbed it.
+/// so it is testable without a real or stubbed LLM endpoint.
 #[tokio::test]
 #[serial]
 async fn apply_answers_writes_directly_and_undo_reverses_it() {

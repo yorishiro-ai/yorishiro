@@ -160,7 +160,7 @@ fn select_record_columns(conn: &impl ConnectionTrait, select: Select<Entity>) ->
 
 /// Inserts `active` and returns the persisted row as an `EntityRecord`.
 ///
-/// `ActiveModelTrait::insert` (which `create` used before this existed) builds its return value by decoding a `content_entities::Model`, and SeaORM's `pgvector::Vector` `TryGetable` impl unconditionally errors on a SQLite row (`Vector unsupported by sqlx-sqlite`) regardless of whether the column has a value, so that path can never succeed on SQLite even though the insert itself would.
+/// `ActiveModelTrait::insert` builds its return value by decoding a `content_entities::Model`, and SeaORM's `pgvector::Vector` `TryGetable` impl unconditionally errors on a SQLite row (`Vector unsupported by sqlx-sqlite`) regardless of whether the column has a value, so that path can never succeed on SQLite even though the insert itself would.
 /// `Entity::insert(active).exec_without_returning` sidesteps the `Model` decode entirely; `select_record_columns`'s follow-up read (which already excludes `embedding`) then fetches the row `EntityRecord` actually needs.
 ///
 /// `sqlite_generated_id` is called explicitly rather than relying on `ActiveModel`'s `before_save` hook: `Entity::insert(...).exec_without_returning(...)` doesn't call `ActiveModelBehavior::before_save` at all (only `ActiveModelTrait::insert`/`update` do), the same reason `tenancy::add_member` calls it directly for its own `on_conflict` insert.
@@ -833,9 +833,9 @@ pub async fn undo_job(
             schema_version: ActiveValue::Set(snap.schema_version),
             ..Default::default()
         };
-        // `active.update(conn)` decodes its return value as a full `Model`, which fails on SQLite the same way `content_entities::update`'s own write used to (see `update_and_fetch`): SeaORM's `pgvector::Vector` decode support unconditionally errors on any SQLite row.
+        // `active.update(conn)` decodes its return value as a full `Model`, which cannot succeed on SQLite: SeaORM's `pgvector::Vector` decode support unconditionally errors on any row from that backend. `update_and_fetch` takes the same route for the same reason.
         // `update_without_returning` sidesteps that decode; the caller here only needs the `Ok`/`RecordNotUpdated`/other-error outcome, not the row itself, so there's no read-back to add on top of it the way `update_and_fetch` needs one.
-        // It still calls `before_save` (unlike the raw `Entity::update(...)` builder `update_and_fetch` avoided using for the same `updated_at`-staleness reason), and still raises `DbErr::RecordNotUpdated` when no row matches, so the `match` below needs no branch of its own.
+        // It still calls `before_save` (unlike the raw `Entity::update(...)` builder, which skips it and would leave `updated_at` stale), and still raises `DbErr::RecordNotUpdated` when no row matches, so the `match` below needs no branch of its own.
         let result = if is_sqlite {
             active.update_without_returning(conn).await.map(|_| ())
         } else {
@@ -919,10 +919,10 @@ mod sqlite_tests {
         (db, workspace_id)
     }
 
-    /// Exercises every `content_entities` query function against SQLite: `create` (regresses the
-    /// `pgvector::Vector` decode failure `ActiveModelTrait::insert` hit before `insert_and_fetch`
-    /// existed), `get`, `get_batch`, `list`, `export_all`, `count`, `update` (same regression as
-    /// `create`, for `ActiveModelTrait::update`), and `delete`.
+    /// Exercises every `content_entities` query function against SQLite: `create` (guards the
+    /// `pgvector::Vector` decode failure `ActiveModelTrait::insert` hits on this backend),
+    /// `get`, `get_batch`, `list`, `export_all`, `count`, `update` (the same failure, for
+    /// `ActiveModelTrait::update`), and `delete`.
     #[tokio::test]
     async fn content_entities_crud_on_sqlite() {
         let (db, workspace_id) = seeded_sqlite_db().await;
@@ -980,8 +980,8 @@ mod sqlite_tests {
         assert_eq!(after_delete, 0);
     }
 
-    /// `undo_job` calls `ActiveModel::update(conn)` directly (not through `content_entities::update`), so it needed its own SQLite branch rather than inheriting `update_and_fetch`'s.
-    /// Regresses both outcomes its `match` distinguishes: a snapshot whose entity still exists (`restored`) and one whose entity was deleted since (`missing`, via `DbErr::RecordNotUpdated`).
+    /// `undo_job` calls `ActiveModel::update(conn)` directly rather than going through `content_entities::update`, so it carries its own SQLite branch instead of inheriting `update_and_fetch`'s.
+    /// Guards both outcomes its `match` distinguishes: a snapshot whose entity still exists (`restored`) and one whose entity was deleted since (`missing`, via `DbErr::RecordNotUpdated`).
     #[tokio::test]
     async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
         let (db, workspace_id) = seeded_sqlite_db().await;

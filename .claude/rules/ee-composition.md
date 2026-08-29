@@ -1,22 +1,32 @@
-# `ee/` composition on the Loco rebuild
+# `ee/` composition
 
-**Decided (2026-08-22): base stays flat, `ee/crates/yorishiro-hosted` is the one added workspace member.**
-Master's `crates/yorishiro-core`/`crates/yorishiro-server` split does not exist on this branch, and `ee/crates/yorishiro-hosted` there depended on both, so neither `git merge master` nor copying `ee/` wholesale produces something that compiles against the rebuilt layout.
-The root `Cargo.toml`'s `[workspace] members` lists `"."` (the root package is `yorishiro-core` itself) and `"ee/crates/yorishiro-hosted"`.
-This is an architectural call made without the user's sign-off in the moment; it does not block work, but it is vetoable, and if overturned the alternative is restoring the `crates/` split master used.
+**`ee/` is a module of the application crate, not a package of its own.**
+`src/lib.rs` declares it with `#[path = "../ee/mod.rs"]`, so the files stay at the repository root where `ee/LICENSE` scopes them ("everything under the `ee/` directory") while compiling into the same crate as everything in `src/`.
+The root `Cargo.toml`'s `[workspace] members` lists `"."` and `"migration"`; there is one binary, `yorishiro`.
 
-**The seam is Loco's own `Hooks` trait, not the five sqlx-era contracts that died with the sqlx layer.**
-`ee/crates/yorishiro-hosted/src/lib.rs` defines `HostedApp`, a second `Hooks` impl distinct from `yorishiro_core::app::App`.
-Every method delegates to the matching associated fn on `App` first (`App::routes(ctx)`, `App::after_context(ctx).await`, and so on), because `Hooks`'s methods take no `self`, so they compose by direct call rather than trait inheritance.
-`ee/`-only behaviour is layered around that call, not duplicated inside it: `HostedApp::after_context` calls `App::after_context` for the RLS pool and authenticator seam, then resolves and stores the licence state on top.
-The bin `ee/crates/yorishiro-hosted/src/bin/yorishiro_server.rs` calls `cli::main::<HostedApp, Migrator>()`, mirroring `yorishiro-core`'s own `bin/main.rs` with `HostedApp` in place of `App`.
-`yorishiro_core::error::YorishiroError` is re-exported at the crate root (`pub use error::YorishiroError;` in `src/lib.rs`), giving `ee/` code (and anything else outside the crate) a short import path to it.
+One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module whitelist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
 
-**The licence gate**: `ee/crates/yorishiro-hosted/src/services/licence.rs` verifies a signed licence key (`ee/LICENSE`, `keys/licence-public.pem`).
-Booting with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: paid features are disabled" and serves every base route unchanged; booting with a valid key logs "licence key accepted: paid features are enabled".
-Tests: `ee/crates/yorishiro-hosted/tests/licence.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing.
-The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, not a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
-The edition boundary is checked at its own layer, not assumed: `grep -ac YORISHIRO_LICENSE_KEY target/debug/yorishiro_core-cli` must answer 0, and the same grep against `target/debug/yorishiro-server` must answer 1, confirming the licence string exists only in the binary that should carry it.
+**There is one `Hooks` impl, `app::App`.**
+`ee/`-only wiring is layered inside its methods rather than composed from a second impl: `after_context` installs the licence state, the tenant-scoped authenticator (PostgreSQL only) and the two resolver seams after building base's own pools; `routes()` adds the paid edition's route groups after the community ones; `register_tasks` registers `ee/`'s two tasks alongside base's.
+`YorishiroError` is re-exported at the crate root (`pub use error::YorishiroError;`), so `ee/` code reaches it as `crate::YorishiroError`.
 
-**The config-file fallback (`licence_key_from_config` in `licence.rs`) is currently dead.**
-It reads `config.yml`/`YORISHIRO_CONFIG_PATH`, master's pre-rebuild server config convention; the Loco rebuild resolves `config/{environment}.yaml` instead and defines no `license_key:` field there, so this function always returns `None` until a Loco config field is wired up for it, and only the `YORISHIRO_LICENSE_KEY` environment variable is live.
+**The licence gate is a per-request layer, not a compilation boundary.**
+`ee/services/licence.rs` verifies a signed licence key against `ee/keys/licence-public.pem`.
+`app::licence_gate` reads that state on every request and answers 404 on the routes it is attached to, applied through `Routes::layer` so it reaches exactly those routes and cannot leak onto the community ones.
+Per request rather than at boot is deliberate: `LicenceState::is_active` compares `exp` against the current clock, so a key that lapses while the process runs stops unlocking paid features without a restart, which a route set decided once at boot could not express.
+
+Booting with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: paid features are disabled" and serves every community route unchanged; booting with a valid key logs "licence key accepted: paid features are enabled".
+
+**One binary carries both editions**, so a deployment cannot be identified by which artifact it installed and there is no on-disk separation to assert against.
+What a deployment serves is decided at runtime, and `tests/requests/licence_gate.rs` is where that is checked: gated routes answer 404 unlicensed and are served licensed, ungated ones stay reachable in both boots.
+
+**Which routes are gated is narrower than "everything under `ee/`".**
+`marketplace` and `inference::gated_routes` (`infer-fill` alone) carry the gate.
+`oauth` and `stripe` are gated by configuration instead and deliberately carry no licence check — `oauth` because it is opt-in by setting an issuer URL, `stripe` because the webhook is how a licence gets bought.
+The rest (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`, and `inference`'s `/workspace/llm-key` routes) serve without a licence.
+
+**Licence tests** live in `tests/licence.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing.
+The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
+
+**The config-file fallback (`licence_key_from_config` in `licence.rs`) is dead code.**
+It reads `config.yml`/`YORISHIRO_CONFIG_PATH`; this application resolves `config/{environment}.yaml` and defines no `license_key:` field there, so the function always returns `None` and only the `YORISHIRO_LICENSE_KEY` environment variable is live.

@@ -11,11 +11,10 @@ mod system;
 mod template_library;
 mod workspaces;
 
-// The paid edition's own request suites. These lived in a second test binary under
-// `ee/crates/yorishiro-hosted/tests/` while `ee/` was its own crate; one crate means one
-// integration-test binary, so they join this module list instead.
-// `hosted_setup` is that tree's own `setup.rs` under a non-colliding name: both trees
-// declared `mod setup;` in this very module, which cannot coexist here.
+// The paid edition's own request suites, in this module list because one crate means one
+// integration-test binary.
+// `hosted_setup` is `ee/`'s own setup suite under a non-colliding name: base's `setup` is
+// already declared above, and two modules of that name cannot coexist here.
 mod dashboard;
 mod embedding;
 mod entity_columns;

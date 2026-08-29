@@ -10,7 +10,7 @@ use yorishiro::models::tenancy;
 /// Eight concurrent `create_workspace` calls against a tenant with one workspace slot left must produce exactly one workspace, not eight.
 ///
 /// The racers go through a `Barrier` rather than `tokio::join!`: joined futures on a single-threaded runtime interleave only at their own await points and reliably let the first one finish its count-and-insert before the second starts, so the gap never opens and the test passes against the unfixed code, proving nothing.
-/// Releasing all eight from a barrier on a multi-threaded runtime makes them contend for real, which is what makes the missing lock observable: before `create_workspace` took `db::lock_for_update`, every racer's `SELECT count(*)` read the same pre-insert snapshot, all eight saw a free slot, and all eight inserted.
+/// Releasing all eight from a barrier on a multi-threaded runtime makes them contend for real, which is what makes a missing lock observable: without `db::lock_for_update` in `create_workspace`, every racer's `SELECT count(*)` reads the same pre-insert snapshot, all eight see a free slot, and all eight insert.
 ///
 /// This is the gate `testing.md` requires: a deliberate violation, not a happy-path assertion. Reverting the `lock_for_update` call in `create_workspace` fails this test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]

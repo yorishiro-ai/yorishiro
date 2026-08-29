@@ -31,7 +31,7 @@ fn sign_state(payload: &str) -> String {
     format!("{payload}.{signature}")
 }
 
-/// `OAuthConfig::from_env` reads process env vars directly on every request (this branch has no DI seam for it, see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
+/// `OAuthConfig::from_env` reads process env vars directly on every request, with no DI seam for it (see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
 /// `#[serial]` on every test in this suite makes that safe.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     // SAFETY: serialized by every test in this binary being #[serial] on the default key.
@@ -76,7 +76,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
     .await;
 }
 
-/// An issuer set with no `client_id`/`client_secret` is a misconfiguration, not "unconfigured": `OAuthConfig::from_env` used to panic here (it read once at boot, so a panic was a fail-fast startup failure); read per-request instead, it must report `500` rather than crash the task handling the request, and must not be silently treated as `enabled: false`.
+/// An issuer set with no `client_id`/`client_secret` is a misconfiguration, not "unconfigured": since `OAuthConfig::from_env` is read per request rather than once at boot, it must report `500` rather than panic and crash the task handling the request, and must not be silently treated as `enabled: false`.
 #[tokio::test]
 #[serial]
 async fn status_errors_loudly_when_partially_configured() {

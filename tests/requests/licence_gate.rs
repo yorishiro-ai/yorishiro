@@ -174,9 +174,9 @@ async fn an_expired_licence_closes_the_gate_again() {
         install_licence(&ctx, 60 * 60);
         let licensed = request.get(GATED[0]).await.status_code();
         // 401 here rather than 200: the request carries no API key, and the point is only that the
-        // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters —
+        // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters:
         // a bare `assert_ne!(.., 404)` also holds when the gate is disabled entirely, so it would
-        // pass with the mechanism removed (confirmed by running exactly that).
+        // pass with the mechanism removed.
         assert_eq!(
             licensed, 401,
             "an active licence must let the request reach authentication; got {licensed}"

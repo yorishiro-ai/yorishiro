@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 /// The public half of the signing key, compiled in.
 /// Rotating it means replacing this file and cutting a release; keys signed by the previous private key stop verifying at that point.
-// Resolved from this file's own directory (`ee/services/`), so the key stays beside the code it
-// verifies for rather than moving under `src/` with the crate that now compiles it.
+// Resolved from this file's own directory (`ee/services/`), so the key stays inside `ee/` beside
+// the code it verifies for.
 const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../keys/licence-public.pem");
 
 /// What a licence key asserts.

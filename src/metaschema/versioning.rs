@@ -54,9 +54,8 @@ pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> Versionin
 
 /// Whether an upper bound got stricter: a lower ceiling, or a ceiling where there was none.
 ///
-/// Comparing the two `Option`s directly does not express this.
-/// `Option`'s ordering places `None` below every `Some`, so `Some(10) < None` is false, and adding a ceiling where there was none read as compatible; `None < Some(10)` is true, so *removing* one read as breaking.
-/// Both backwards.
+/// Comparing the two `Option`s directly does not express this, and gets both directions backwards.
+/// `Option`'s ordering places `None` below every `Some`: `Some(10) < None` is false, so adding a ceiling where there was none would read as compatible, while `None < Some(10)` is true, so *removing* one would read as breaking.
 fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
         // A ceiling where there was none: anything above it was valid a moment ago.
@@ -522,7 +521,7 @@ mod tests {
     /// A schema author who tightens one of these and is told the change is compatible will overwrite the live version in place, and existing records stop validating with no new version to roll back to.
     ///
     /// `maximum`/`maxLength`/`maxItems` are here for a reason that the "raised its minimum" cases do not share: those three compare `new < old`, and `Option`'s ordering puts `None` *below* every `Some`, so `Some(10) < None` is false.
-    /// Adding a ceiling where there was none went undetected.
+    /// A naive comparison therefore misses a ceiling added where there was none, which is exactly what this asserts against.
     #[test]
     fn tightening_a_constraint_is_breaking() {
         for (label, old_attrs, new_attrs) in [

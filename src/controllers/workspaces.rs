@@ -130,7 +130,7 @@ pub async fn delete_workspace(
 ) -> Result<StatusCode, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
     get_workspace_in_tenant(&ctx, auth.tenant_id, id).await?;
-    // Passing `&ctx.db` here used to release `delete_workspace`'s advisory lock at the end of its own implicit transaction, before the count and delete it guards; the lock only holds on a transaction.
+    // A transaction, not `&ctx.db`: `delete_workspace`'s advisory lock only holds for a transaction's lifetime, so passing the pool would release it at the end of each statement's own implicit transaction, before the count and delete it guards.
     let txn = ctx.db.begin().await.internal()?;
     tenancy::delete_workspace(&txn, id).await?;
     txn.commit().await.internal()?;

@@ -14,7 +14,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 const WEBHOOK_SECRET: &str = "whsec_test";
 
-/// `StripeConfig::from_env` reads process env vars directly (this branch has no DI seam for it, unlike master's `HostedState`), so tests configure the webhook the same way production does: by setting the vars for the duration of the request.
+/// `StripeConfig::from_env` reads process env vars directly, with no DI seam for it, so tests configure the webhook the same way production does: by setting the vars for the duration of the request.
 /// `#[serial]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     // SAFETY: serialized by every test in this binary being #[serial] on the default key.
