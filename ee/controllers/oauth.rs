@@ -62,7 +62,7 @@ pub struct OAuthStatus {
 }
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
-/// Unlike the other two routes, this one always returns `200` (`enabled: false` when unconfigured) rather than `404`, since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
+/// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
 async fn status() -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_env()?.is_some(),
