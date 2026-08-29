@@ -64,7 +64,7 @@ A schema with no `x-embed` field never reaches the provider at all: there is no 
 At `max_connections: 1` that second acquire has no free connection to get and can only wait out `connect_timeout` before failing.
 
 Booting with `max_connections` below 2 on SQLite is refused outright (`db::require_min_sqlite_connections`, called from `Hooks::after_context`), rather than left to fail unpredictably under load.
-Measured at `max_connections: 1` with `connect_timeout: 500`: a read-only route (`GET /api/relations`) still returned `200`, since the failed `last_used_at` update is best-effort and only logs a warning.
+Measured with that guard bypassed, at `max_connections: 1` with `connect_timeout: 500`, which is what the guard exists to keep a deployment from reaching: a read-only route (`GET /api/relations`) still returned `200`, since the failed `last_used_at` update is best-effort and only logs a warning.
 A route that itself needs a second connection for a real write (`PUT /api/system/maintenance`, which writes through `ctx.db` independently of the held transaction) failed with `500` after roughly 500ms, logged as `Failed to acquire connection from pool: Connection pool timed out`.
 `config/sqlite.yaml` ships with `max_connections: 10`, well above the minimum.
 

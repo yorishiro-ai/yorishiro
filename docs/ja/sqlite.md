@@ -89,7 +89,8 @@ WARN embedding sync failed transiently, job will be marked failed for retry_fail
 
 SQLite上で`max_connections`が2未満のまま起動しようとすると、起動そのものを拒否する(`db::require_min_sqlite_connections`、`Hooks::after_context`から呼ばれる)。
 負荷がかかったときに不定な壊れ方をさせるより、その場で止めたほうがいい。
-`max_connections: 1`、`connect_timeout: 500`での実測は次のとおりである。
+このガードを迂回して`max_connections: 1`、`connect_timeout: 500`で計測した結果は次のとおりである。
+これはまさに、ガードがデプロイを到達させないようにしている状態である。
 読み取り専用ルート(`GET /api/relations`)は`200`のまま返った。
 失敗した`last_used_at`更新はbest-effortでログ警告のみだからである。
 一方、本物の書き込みのために2本目の接続を自身で必要とするルート(`PUT /api/system/maintenance`。保持中のトランザクションとは独立に`ctx.db`へ書き込む)は、約500ms後に`500`で失敗し、ログには`Failed to acquire connection from pool: Connection pool timed out`と記録された。

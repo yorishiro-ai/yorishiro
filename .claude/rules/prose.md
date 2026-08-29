@@ -15,7 +15,7 @@ So does one inside a quoted error message or a URL.
 ## Never hard-wrap prose
 
 **One sentence is one line.**
-Break after a sentence-ending `.` in English and after `。` in Japanese.
+Break after a sentence-ending `.`, `?` or `!` in English, and after `。` in Japanese.
 
 The reader's viewport decides where a sentence wraps.
 A diff then shows the sentence that changed rather than the six lines that shifted under it.
@@ -33,7 +33,7 @@ A comment block holding a list, a table, a fence or indented code keeps its line
 
 ## Fixing these mechanically is banned
 
-A script that unwraps paragraphs cut a parenthetical in half at a `。` inside brackets, and six agents given the same instructions reproduced it in three files.
+A `。` or `.` inside brackets ends no sentence, but a script matching on punctuation alone cuts the parenthetical in half there, and the same instructions reproduce the same cut wherever they run.
 Edit prose by hand, and check the shape of the result: a line whose brackets do not close is a break in the wrong place, and no whitespace-stripped comparison can see it.
 
 ## The two checks feed each other

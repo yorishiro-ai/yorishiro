@@ -72,10 +72,11 @@ pub struct AuditActor {
 /// rollback loses both together, while `set_maintenance` records on `ctx.db`, the migration-role
 /// connection its own write already uses.
 ///
-/// This table's RLS policy is strict: a `conn` that has not set `app.current_workspace` to
-/// `actor.workspace_id` (and is not the migration role, which the policy does not apply to) has its
-/// row silently rejected by the `USING` clause rather than erroring. An `Authorized<R>` handler gets
-/// that for free from `TenantDb::begin_for_workspace`.
+/// This table's RLS policy is `USING`-only, which PostgreSQL also applies as the implicit
+/// `WITH CHECK` on an insert, so a `conn` that has not set `app.current_workspace` to
+/// `actor.workspace_id` (and is not the migration role, which the policy does not apply to) fails
+/// the insert with a policy violation. An `Authorized<R>` handler gets the right scoping for free
+/// from `TenantDb::begin_for_workspace`.
 pub async fn record(
     conn: &impl ConnectionTrait,
     actor: AuditActor,

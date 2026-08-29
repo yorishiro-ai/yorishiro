@@ -37,7 +37,7 @@ flowchart TD
     Core --> DB
 ```
 
-The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: the same API routes, without `ee/` in front of them.
+Without a licence key, the inner subgraph is what a deployment serves on its own: the same API routes, with the paid surfaces answering `404`.
 It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
