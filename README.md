@@ -168,6 +168,9 @@ The check runs per request rather than at startup, so a key that expires while t
 The Stripe webhook is one of those surfaces, so a deployment with no valid licence does not receive Stripe events.
 An operator running billing needs the licence key configured for the webhook to be reachable at all, and a key that lapses stops deliveries the same way it closes any other paid route.
 
+OAuth/OIDC login is another, so an unlicensed deployment cannot serve SSO login.
+Anyone who signs in that way needs a password credential for `POST /auth/login` instead, which is worth checking before a licence is allowed to lapse.
+
 `ee/LICENSE` covers the `ee/` directory, and the root [BUSL-1.1](LICENSE) covers the repository excluding it.
 `ee/LICENSE` states at the top of the file that it is a draft not yet settled by counsel.
 

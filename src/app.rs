@@ -198,15 +198,15 @@ impl Hooks for App {
     /// The community routes first, then the paid edition's on top, which is the shape the product
     /// describes: `ee/` adds paths rather than replacing any.
     ///
-    /// `marketplace`, `stripe` and `inference::gated_routes` take the gate. `oauth` is gated by
-    /// configuration instead, and the rest serve without a licence; `ee-composition.md` records why
-    /// each falls where it does, and widening that set is a product decision rather than something
-    /// to inherit from where a layer is attached.
+    /// `marketplace`, `stripe`, `oauth` and `inference::gated_routes` take the gate, and the rest
+    /// serve without a licence; `ee-composition.md` records why each falls where it does, and
+    /// widening that set is a product decision rather than something to inherit from where a layer
+    /// is attached.
     ///
-    /// `stripe` is gated because billing is a paid-edition feature, which is a decision about what
-    /// the feature is rather than about what protects it: the webhook still verifies its Stripe
-    /// signature and still needs a configured secret, and neither of those made it a community
-    /// route.
+    /// `stripe` and `oauth` are gated because billing and SSO login are paid-edition features, which
+    /// is a decision about what each feature is rather than about what protects it. Both still need
+    /// their own configuration to do anything, and the webhook still verifies its Stripe signature;
+    /// neither of those made them community routes.
     ///
     /// `inference` is two route groups because the licence line runs through the middle of it:
     /// `infer-fill` spends an LLM call and is gated, while the `/workspace/llm-key` routes beside it
@@ -240,7 +240,7 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::inference::routes())
             .add_route(crate::ee::controllers::inference::gated_routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::marketplace::routes().layer(gate.clone()))
-            .add_route(crate::ee::controllers::oauth::routes())
+            .add_route(crate::ee::controllers::oauth::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::origin::routes())
             .add_route(crate::ee::controllers::stripe::routes().layer(gate))
             .add_route(crate::ee::controllers::worker_class::routes())

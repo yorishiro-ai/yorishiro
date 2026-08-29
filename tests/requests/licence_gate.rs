@@ -4,27 +4,29 @@
 //! application twice, once with no licence and once with a valid one, and compare what the router
 //! actually serves. Asserting only the licensed side would pass just as well with the gate deleted.
 //!
-//! The routes fall into four groups, and the reason each is here differs:
+//! The routes fall into three groups, and the reason each is here differs:
 //!
-//! **Gated** (`marketplace`, and `inference::gated_routes`) must answer 404 unlicensed and something
-//! other than 404 licensed.
+//! **Gated** (`marketplace`, `oauth`, and `inference::gated_routes`) must answer 404 unlicensed and
+//! something other than 404 licensed.
+//!
+//! A route only belongs in that list when its 404 can come from nothing but the gate. `oauth`
+//! qualifies through `/auth/oauth/status` specifically: `authorize` and `callback` answer 404 of
+//! their own accord when `YORISHIRO_OAUTH_ISSUER_URL` is unset, which is how a test process boots,
+//! so either of those would keep passing with the gate deleted. `status` answers 200 whether or not
+//! OAuth is configured (that is the point of it: a client has to be able to tell "not configured"
+//! from "not present"), so its 404 has exactly one possible source.
 //!
 //! **Ungated inside a gated controller** (`/api/workspace/llm-key`) sits in `inference` beside a
 //! gated route without being gated itself, because storing a credential is not a paid action while
 //! spending it on an inference call is. A layer applies per `Routes`, so this group exists to keep
 //! the two apart.
 //!
-//! **Config-gated** (`oauth`) is deliberately absent from these assertions. It already answers 404
-//! when its own configuration is unset, which is the state a test process boots in, so "404 without
-//! a licence" would hold for it whether or not a licence gate existed at all: the assertion would
-//! keep passing with the mechanism it claims to check deleted.
-//!
-//! `stripe` carries the gate but cannot join `GATED` either, for two reasons that are both about
-//! telling the gate apart from something else. Its webhook is POST-only, so the GET these lists use
-//! would answer 404 by method alone; and it answers 404 unconfigured, which is how a test process
-//! boots. `stripe_webhook_is_gated` below therefore POSTs, and asserts the licensed side answers
-//! 501 (the handler's own "no secret configured") rather than merely "not 404": 501 is a status only
-//! the handler produces, so it cannot be reached unless the request got past the gate.
+//! `stripe` carries the gate but cannot join `GATED`, for two reasons that are both about telling
+//! the gate apart from something else. Its webhook is POST-only, so the GET these lists use would
+//! answer 404 by method alone; and it answers 404 unconfigured, which is how a test process boots.
+//! `stripe_webhook_is_gated` below therefore POSTs, and asserts the licensed side answers 501 (the
+//! handler's own "no secret configured") rather than merely "not 404": 501 is a status only the
+//! handler produces, so it cannot be reached unless the request got past the gate.
 //!
 //! **Ungated** (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`) must stay
 //! reachable in *both* boots. Nothing in the current code can make these 404 for licence reasons:
@@ -66,6 +68,11 @@ fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
 const GATED: &[&str] = &[
     // marketplace.rs: `.prefix("api/marketplace").add("/", get(list_marketplace))`
     "/api/marketplace",
+    // oauth.rs: `.prefix("auth/oauth").add("/status", get(status))`
+    // `status` rather than `authorize`/`callback`: those two answer 404 unconfigured, so only this
+    // one's 404 is attributable to the gate. `oauth_login_is_gated` asserts the licensed side
+    // reaches 200, which this list's `!= 404` alone would not pin.
+    "/auth/oauth/status",
 ];
 
 /// Routes inside a gated controller that are deliberately NOT gated.
@@ -219,6 +226,39 @@ async fn stripe_webhook_is_gated() {
             licensed, 501,
             "an active licence must let the request reach the handler, which then refuses for want \
              of a configured secret; got {licensed}"
+        );
+
+        close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// `oauth`'s gate, asserted from both sides with the licensed half pinned to an exact status.
+///
+/// `GATED` already covers the unlicensed 404 for this path. What it cannot express is that the
+/// licensed answer is specifically 200: its `assert_ne!(.., 404)` would also hold if `status` began
+/// erroring, or if the route were replaced by something else entirely. `status` returns 200
+/// unconditionally once past the gate, reporting `enabled: false` when OAuth is unconfigured (which
+/// a test process is), so 200 here means the request reached the handler and nothing else.
+///
+/// This is the half that catches a gate applied too broadly: without it, a change that gated every
+/// paid route would still pass the unlicensed assertions.
+#[tokio::test]
+#[serial]
+async fn oauth_login_is_gated() {
+    request_with_create_db::<App, _, _>(|request, ctx| async move {
+        let unlicensed = request.get("/auth/oauth/status").await.status_code();
+        assert_eq!(
+            unlicensed, 404,
+            "OAuth login must answer 404 with no licence; got {unlicensed}"
+        );
+
+        install_licence(&ctx, 60 * 60);
+        let licensed = request.get("/auth/oauth/status").await.status_code();
+        assert_eq!(
+            licensed, 200,
+            "an active licence must let the request reach `status`, which answers 200 whether or \
+             not OAuth is configured; got {licensed}"
         );
 
         close_app_pools(&ctx).await;

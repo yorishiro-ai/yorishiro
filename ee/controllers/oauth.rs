@@ -1,8 +1,11 @@
 //! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login`.
 //!
-//! All three routes are enterprise-only *and* opt-in within the enterprise binary: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing, matching how an unconfigured Stripe webhook secret is handled.
+//! All three routes carry the licence gate, so an unlicensed deployment answers `404` to every one of them before any of the below runs.
+//! SSO login is a paid-edition feature, which is a decision about what the feature is; needing configuration on top of that does not make it a community route.
+//!
+//! They are also opt-in within a licensed deployment: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing.
 //! A set issuer with a missing `client_id`/`client_secret` is a different case, `Err`, and answers `500` naming the misconfiguration rather than either `404`.
-//! There is deliberately no licence gate here: OAuth is opt-in-by-configuration, not a licensed feature to unlock separately from setting it up.
+//! `status` is the exception and always answers `200` once past the gate, which is what makes it the route `licence_gate.rs` tests the gate with: its `404` can only come from the gate.
 
 use crate::YorishiroError;
 use crate::controllers::ApiError;
