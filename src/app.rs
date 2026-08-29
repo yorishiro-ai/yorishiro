@@ -206,11 +206,15 @@ impl Hooks for App {
     /// Which of the paid edition's routes are licence-gated is a three-way split, not a binary one,
     /// and the two ungated groups are ungated for different reasons.
     ///
-    /// `inference` and `marketplace` carry the gate: these are the surfaces that previously called
-    /// `LicenceState::require_active` in their own handlers. Attaching the layer here is equivalent
-    /// rather than a widening — every one of `marketplace`'s handlers already routed through its
-    /// `licensed_tenant` helper, and `inference`'s two routes checked before authenticating, which
-    /// is the order the layer reproduces.
+    /// `marketplace` and `inference::gated_routes` carry the gate: these are the surfaces that
+    /// previously called `LicenceState::require_active` in their own handlers, and attaching the
+    /// layer reproduces exactly that set rather than widening it.
+    ///
+    /// The split inside `inference` is why it has two route groups. A layer applies to a whole
+    /// `Routes`, but the check it replaces was written per handler: `infer-fill` called it and the
+    /// three `/workspace/llm-key` routes beside it never did — storing a key has never needed a
+    /// licence, only spending it on an inference call has. Leaving them in one group would have
+    /// silently gated three routes that serve without a licence today.
     ///
     /// `oauth` and `stripe` are gated by *configuration* instead, and deliberately carry no licence
     /// check: `oauth` because it is opt-in by setting an issuer URL rather than a feature to unlock
@@ -245,7 +249,8 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::dashboard::routes())
             .add_route(crate::ee::controllers::embedding::routes())
             .add_route(crate::ee::controllers::entity_columns::routes())
-            .add_route(crate::ee::controllers::inference::routes().layer(gate.clone()))
+            .add_route(crate::ee::controllers::inference::routes())
+            .add_route(crate::ee::controllers::inference::gated_routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::marketplace::routes().layer(gate))
             .add_route(crate::ee::controllers::oauth::routes())
             .add_route(crate::ee::controllers::origin::routes())

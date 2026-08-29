@@ -18,7 +18,6 @@ use crate::ee::models::entity_fill;
 use crate::ee::models::llm_keys::{self, LlmKeyDescription};
 use crate::ee::services::authz;
 use crate::ee::services::inference::InferenceClient;
-use crate::ee::services::licence::LicenceState;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
 #[derive(Debug, Deserialize)]
@@ -174,17 +173,29 @@ async fn infer_fill(
     }))
 }
 
+/// Managing the workspace's own LLM credentials.
+///
+/// Split from [`gated_routes`] rather than sharing one `Routes` with it, because the licence gate
+/// is applied per `Routes` and these three are not gated: storing a key has never required a
+/// licence, only spending it on an inference call has. Merging the two back together would quietly
+/// extend the gate over these, which is a product decision rather than a routing detail.
+///
+/// The `hosted` prefix is repeated rather than factored out, so the paths a client sees are
+/// identical to when both groups lived in one `Routes`.
 pub fn routes() -> Routes {
-    Routes::new()
-        .prefix("hosted")
-        .add(
-            "/workspace/llm-key",
-            axum::routing::put(set_llm_key)
-                .get(get_llm_key)
-                .delete(delete_llm_key),
-        )
-        .add(
-            "/schemas/active/{name}/infer-fill",
-            axum::routing::post(infer_fill),
-        )
+    Routes::new().prefix("hosted").add(
+        "/workspace/llm-key",
+        axum::routing::put(set_llm_key)
+            .get(get_llm_key)
+            .delete(delete_llm_key),
+    )
+}
+
+/// The route this module's licence gate covers: the server calls an LLM here, which is what makes
+/// it a paid feature. See [`routes`] for why the two groups are separate.
+pub fn gated_routes() -> Routes {
+    Routes::new().prefix("hosted").add(
+        "/schemas/active/{name}/infer-fill",
+        axum::routing::post(infer_fill),
+    )
 }

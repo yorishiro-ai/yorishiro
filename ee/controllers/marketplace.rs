@@ -16,7 +16,6 @@ use crate::ee::models::marketplace::{
     TemplateReviewRecord, TemplateVersionRecord,
 };
 use crate::ee::services::authz;
-use crate::ee::services::licence::LicenceState;
 use crate::ee::services::marketplace;
 
 /// Authentication for every route in this module.
