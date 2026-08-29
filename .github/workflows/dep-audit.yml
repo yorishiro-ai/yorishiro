@@ -68,6 +68,11 @@ jobs:
       # rather than omitting the key, so the validity check below still passes when every
       # member is current.
       #
+      # Reporting on more than one member introduces a state a single-member run could not reach:
+      # a report that is well-formed but covers only some of them. "A report exists" and "the
+      # report is complete" are separate claims, and the step below checks both, because
+      # conflating them is what lets a partial answer read as a clean one.
+      #
       # `!cancelled()` rather than the default `success()` so a broken audit doesn't also suppress
       # the outdated report: the two checks are independent, and the issue-filing steps below
       # gate on their own step's output, so each half still reports whatever it collected.
@@ -78,8 +83,27 @@ jobs:
         run: |
           status=0
           cargo outdated --workspace --root-deps-only --format json > /tmp/outdated.json || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::cargo outdated exited $status -- see the step log above. Not reporting this as 'nothing outdated'."
+            exit 1
+          fi
           if ! jq -se 'length > 0 and all(.[]; has("dependencies"))' /tmp/outdated.json >/dev/null 2>&1; then
-            echo "::error::cargo outdated did not produce a report (exit $status) -- see the step log above. Not reporting this as 'nothing outdated'."
+            echo "::error::cargo outdated did not produce a report -- see the step log above. Not reporting this as 'nothing outdated'."
+            exit 1
+          fi
+
+          # The report has to cover every workspace member, not merely be well-formed.
+          # `--workspace` writes one object per member as it goes, so a failure partway through
+          # leaves a non-empty report describing only the members it reached, and the check above
+          # accepts that: each object it did write is valid. Comparing the two sets is what
+          # separates "complete" from "as far as it got".
+          #
+          # The expected set comes from `cargo metadata` rather than a hardcoded count, so adding
+          # a third member does not silently pass a report that covers two of them.
+          expected=$(cargo metadata --no-deps --format-version 1 | jq -c '[.packages[].name] | sort')
+          reported=$(jq -sc '[.[].crate_name] | sort' /tmp/outdated.json)
+          if [ "$expected" != "$reported" ]; then
+            echo "::error::cargo outdated covered $reported but this workspace has $expected -- the report is incomplete. Not reporting this as 'nothing outdated'."
             exit 1
           fi
 
