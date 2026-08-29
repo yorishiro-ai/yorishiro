@@ -1796,6 +1796,21 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
+        // `identity_workspaces.schema_id` references `content_schemas`, which references
+        // `identity_workspaces` back: the circularity `up()` breaks by adding this one
+        // constraint after both tables exist. Dropping in dependency order cannot break it,
+        // because neither table can go first, so the constraint is removed before the loop
+        // rather than left for the table drop to trip over.
+        //
+        // Postgres only, matching `up()`: SQLite declares this FK inline in the table itself,
+        // so there is no separate constraint to drop and the table drop carries it away.
+        helpers::pg_only(
+            manager,
+            "ALTER TABLE identity_workspaces \
+             DROP CONSTRAINT IF EXISTS fk_identity_workspaces_schema_id",
+        )
+        .await?;
+
         for table in [
             "content_relations",
             "content_entity_snapshots",
