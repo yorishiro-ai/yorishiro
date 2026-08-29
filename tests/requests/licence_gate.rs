@@ -50,10 +50,8 @@ fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
 
 /// One representative gated route, with a method that reaches the layer.
 ///
-/// Authentication is deliberately not set up: the gate runs before the handler, so an unlicensed
-/// deployment answers 404 to an unauthenticated caller for the licence reason rather than 401 for
-/// the authentication one. That ordering is what keeps an unlicensed deployment un-probeable, and
-/// asserting it here is what pins it.
+/// Authentication is deliberately not set up: 404 rather than 401 to an unauthenticated caller is
+/// what pins the gate's ordering (see `app::licence_gate` for why that ordering matters).
 ///
 /// Every path in this file is a GET that a route actually declares. A path with no route answers 404
 /// for that reason alone, which would make the unlicensed assertions pass with the gate deleted:
@@ -153,12 +151,8 @@ async fn gated_routes_are_served_with_a_licence() {
     .await;
 }
 
-/// The reason the gate is a per-request layer rather than a boot-time route set.
-///
-/// A licence whose `exp` has already passed is not merely absent: it verified once and then
-/// lapsed. `LicenceState::is_active` compares against the current clock on every call, so the gate
-/// closes again with no restart. A conditional `add_route` decided at boot could not express this:
-/// the route would stay mounted for the life of the process.
+/// A key that verified and then lapsed closes the gate again with no restart, which is the property
+/// `app::licence_gate` is a per-request layer to keep.
 #[tokio::test]
 #[serial]
 async fn an_expired_licence_closes_the_gate_again() {
