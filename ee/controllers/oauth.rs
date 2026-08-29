@@ -1,8 +1,12 @@
 //! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login`.
 //!
-//! All three routes are enterprise-only *and* opt-in within the enterprise binary: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing, matching how an unconfigured Stripe webhook secret is handled.
+//! All three routes carry the licence gate, so an unlicensed deployment answers `404` to every one of them before any of the below runs.
+//! SSO login is a paid-edition feature, which is a decision about what the feature is; needing configuration on top of that does not make it a community route.
+//!
+//! They are also opt-in within a licensed deployment: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing.
 //! A set issuer with a missing `client_id`/`client_secret` is a different case, `Err`, and answers `500` naming the misconfiguration rather than either `404`.
-//! There is deliberately no licence gate here: OAuth is opt-in-by-configuration, not a licensed feature to unlock separately from setting it up.
+//! `status` is the exception: past the gate it answers `200` whether or not OAuth is configured, and `500` on that same partial-configuration error, but never `404`.
+//! That is what makes it the route `licence_gate.rs` tests the gate with, since its `404` can only come from the gate, while `authorize` and `callback` produce one of their own whenever the issuer is unset.
 
 use crate::YorishiroError;
 use crate::controllers::ApiError;
@@ -58,7 +62,7 @@ pub struct OAuthStatus {
 }
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
-/// Unlike the other two routes, this one always returns `200` (`enabled: false` when unconfigured) rather than `404`, since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
+/// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
 async fn status() -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_env()?.is_some(),

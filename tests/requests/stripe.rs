@@ -8,11 +8,27 @@ use sha2::Sha256;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::models::billing;
+use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::identity_tenants;
 
 type HmacSha256 = Hmac<Sha256>;
 
 const WEBHOOK_SECRET: &str = "whsec_test";
+
+/// The webhook carries the licence gate, so an unlicensed process answers 404 to every request in
+/// this file before any of it reaches the handler.
+/// Each test installs a licence for the same reason `marketplace.rs` does, and by the same means:
+/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the
+/// test process booted with.
+/// What the gate itself does is asserted in `licence_gate.rs`, not here.
+fn licence(ctx: &loco_rs::app::AppContext) {
+    ctx.shared_store
+        .insert(LicenceState::licensed(LicenceClaims {
+            sub: "acme-corp".into(),
+            plan: "enterprise".into(),
+            exp: Utc::now().timestamp() + 60 * 60,
+        }));
+}
 
 /// `StripeConfig::from_env` reads process env vars directly, with no DI seam for it, so tests configure the webhook the same way production does: by setting the vars for the duration of the request.
 /// `#[serial]` on every test in this suite makes that safe.
@@ -89,6 +105,7 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 async fn a_duplicate_event_id_is_not_reapplied() {
     with_stripe_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             billing::link_stripe_customer(&ctx.db, tenant_id, "cus_1")
                 .await
@@ -148,6 +165,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 async fn a_cancellation_returns_the_tenant_to_free() {
     with_stripe_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
                 .await
@@ -204,6 +222,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[serial]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
         let response = request
             .post("/api/stripe/webhook")
@@ -228,6 +247,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 async fn a_tampered_payload_is_rejected() {
     with_stripe_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let body = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_t");
             let now = Utc::now().timestamp();
             let signature = sign(WEBHOOK_SECRET, now, &body);

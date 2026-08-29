@@ -1,8 +1,8 @@
 //! The template marketplace: templates shared between tenants, their published versions, and what other tenants thought of them.
 //!
 //! These routes gate on the licence: no key means `GET /api/marketplace` and its siblings answer 404.
-//! Not every paid route is gated this way, so this is not a property of being under `ee/`: `stripe`'s webhook stays reachable unlicensed on purpose, since buying a licence goes through it, and it is protected by its signature and by requiring configuration instead.
-//! Which routes carry the gate is decided in `app.rs`, not by where a route is mounted.
+//! Not every route under `ee/` is gated, so this does not follow from living here or from sharing the `api/` prefix with the community edition.
+//! Which routes carry the gate is decided in `app.rs`, and that is the list to read.
 
 use crate::controllers::ApiError;
 use axum::Json;

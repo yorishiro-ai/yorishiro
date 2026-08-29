@@ -21,9 +21,17 @@ Booting with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: paid fe
 What a deployment serves is decided at runtime, and `tests/requests/licence_gate.rs` is where that is checked: gated routes answer 404 unlicensed and are served licensed, ungated ones stay reachable in both boots.
 
 **Which routes are gated is narrower than "everything under `ee/`".**
-`marketplace` and `inference::gated_routes` (`infer-fill` alone) carry the gate.
-`oauth` and `stripe` are gated by configuration instead and deliberately carry no licence check: `oauth` because it is opt-in by setting an issuer URL, `stripe` because the webhook is how a licence gets bought.
+`marketplace`, `stripe`, `oauth` and `inference::gated_routes` (`infer-fill` alone) carry the gate.
 The rest (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`, and `inference`'s `/workspace/llm-key` routes) serve without a licence.
+
+**`stripe` and `oauth` are gated because billing and SSO login are paid-edition features.**
+This decides the question the way `editions.md` says to decide it, by what each feature is rather than by what protects it.
+An earlier version of this file argued the other way for both: that the Stripe webhook must stay open because buying a licence goes through it, and that `oauth` needed no gate because it is opt-in by setting an issuer URL.
+Both were considered and rejected, as claims about what a route depends on rather than about what it is, which is the shape of argument `editions.md` rules out.
+Neither route lost a protection it had: the webhook still verifies its Stripe signature, and both still do nothing until their own configuration is set.
+
+The consequences are meant, not incidental.
+A deployment that has not bought a licence cannot receive Stripe webhooks, and cannot serve OAuth login either, so anyone who signs in that way needs a password credential for `POST /auth/login` instead.
 
 **Licence tests** live in `tests/licence.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing.
 The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.

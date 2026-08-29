@@ -8,8 +8,24 @@ use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;
 use sha2::Sha256;
 use yorishiro::app::App;
+use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::ee::services::oauth;
 use yorishiro::models::_entities::identity_tenants;
+
+/// The OAuth routes carry the licence gate, so an unlicensed process answers 404 to all three before
+/// any handler runs.
+/// Every test here installs a licence for the same reason `marketplace.rs` and `stripe.rs` do, and by
+/// the same means: `shared_store.insert` is keyed by `TypeId`, so this overwrites the
+/// `LicenceState::from_env()` the test process booted with.
+/// What the gate itself does is asserted in `licence_gate.rs`, not here.
+fn licence(ctx: &loco_rs::app::AppContext) {
+    ctx.shared_store
+        .insert(LicenceState::licensed(LicenceClaims {
+            sub: "acme-corp".into(),
+            plan: "enterprise".into(),
+            exp: chrono::Utc::now().timestamp() + 60 * 60,
+        }));
+}
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
 /// Loopback, not a public hostname, so `discovery::require_https_or_loopback`'s `http://` exemption applies without needing a TLS-terminating stub server.
@@ -49,11 +65,13 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     result
 }
 
-/// `GET /auth/oauth/status` always answers 200, whether or not OAuth is configured: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
+/// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
+/// The third state, an issuer set with no `client_id`/`client_secret`, answers 500 instead and belongs to `status_errors_loudly_when_partially_configured` below.
 #[tokio::test]
 #[serial]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
         assert_eq!(disabled.status_code(), 200);
         assert_eq!(
@@ -81,6 +99,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[serial]
 async fn status_errors_loudly_when_partially_configured() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         // SAFETY: serialized by every test in this binary being #[serial] on the default key.
         unsafe {
             std::env::set_var("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
@@ -108,6 +127,7 @@ async fn status_errors_loudly_when_partially_configured() {
 #[serial]
 async fn authorize_and_callback_404_when_unconfigured() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let authorize = request.get("/auth/oauth/authorize").await;
         assert_eq!(
             authorize.status_code(),
@@ -136,6 +156,7 @@ async fn authorize_and_callback_404_when_unconfigured() {
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     with_oauth_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let response = request.get("/auth/oauth/authorize").await;
             assert_eq!(
                 response.status_code(),
@@ -157,6 +178,7 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
     with_oauth_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let response = request
                 .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
                 .await;
@@ -193,6 +215,7 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
     with_oauth_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let missing_state = request.get("/auth/oauth/callback?code=abc").await;
             assert_eq!(missing_state.status_code(), 302);
             assert_eq!(
@@ -220,6 +243,7 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 async fn callback_rejects_a_state_with_a_bad_signature() {
     with_oauth_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
             let response = request
                 .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
                 .await;
@@ -239,6 +263,7 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 async fn callback_rejects_an_expired_state() {
     with_oauth_env(async {
         request_with_create_db::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
             let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
             let state = sign_state(&format!("{issued_at}.deadbeef.verifier"));
 
@@ -266,6 +291,7 @@ async fn callback_rejects_an_expired_state() {
 #[serial]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        licence(&ctx);
         let existing_tenant = identity_tenants::ActiveModel {
             name: ActiveValue::Set("existing".into()),
             ..Default::default()
@@ -319,6 +345,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 #[serial]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let provisioned = oauth::find_or_create(
