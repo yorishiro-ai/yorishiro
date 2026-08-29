@@ -14,19 +14,32 @@ use serial_test::serial;
 
 /// A throwaway database, dropped and recreated so each run starts from nothing.
 ///
-/// Returns `None` when `DATABASE_URL` is unset or is not PostgreSQL, which is how these tests skip rather than fail on a machine without one.
+/// Returns `None` only when `DATABASE_URL` is unset or names something other than PostgreSQL, which is how these tests skip on a machine with no database.
+/// A `DATABASE_URL` that is present but unusable panics rather than returning `None`: skipping there would report success for tests that never ran, which is the failure this file exists to prevent elsewhere.
 async fn scratch_db(name: &str) -> Option<sea_orm_migration::sea_orm::DatabaseConnection> {
     let base = std::env::var("DATABASE_URL").ok()?;
     if !base.starts_with("postgres://") {
         return None;
     }
 
-    // Swap only the path, so a password or host containing the database's name is not rewritten.
-    let (prefix, _) = base.rsplit_once('/')?;
-    let admin_url = format!("{prefix}/postgres");
-    let target_url = format!("{prefix}/{name}");
+    // Split the path from the query, so `?sslmode=require` and friends survive onto both derived
+    // URLs. Dropping them silently produced a connection failure that the old `.ok()?` turned into
+    // a skip, so an SSL-requiring server reported two passing tests that had not run.
+    let (without_query, query) = match base.split_once('?') {
+        Some((head, q)) => (head, format!("?{q}")),
+        None => (base.as_str(), String::new()),
+    };
+    // Rewrite only the last path segment, so a password or host containing the database's name is left alone.
+    let prefix = without_query
+        .rsplit_once('/')
+        .expect("DATABASE_URL has no database path segment")
+        .0;
+    let admin_url = format!("{prefix}/postgres{query}");
+    let target_url = format!("{prefix}/{name}{query}");
 
-    let admin = Database::connect(&admin_url).await.ok()?;
+    let admin = Database::connect(&admin_url)
+        .await
+        .expect("connect to the admin database named by DATABASE_URL");
     for sql in [
         format!("DROP DATABASE IF EXISTS {name}"),
         format!("CREATE DATABASE {name}"),

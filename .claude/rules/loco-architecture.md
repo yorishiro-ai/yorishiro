@@ -28,8 +28,9 @@ Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 
 The twenty-four incremental files this replaced recorded the order the schema was built in, which is worth keeping only while some deployment might be part-way through that order. None is, and this is explicitly not backward compatible: a database carrying the old history cannot apply this file, and is recreated rather than upgraded.
 
-A new table is added to that file rather than beside it, unless a deployment exists that has already applied it — at which point a second file is the only correct answer, since editing an applied migration changes a schema someone is already running.
-`seaql_migrations`'s row count is what settles which case you are in: one row and the file is still editable, more than one and it is not.
+A new table is added to that file rather than beside it, **only while no deployment has applied it**. Once any deployment has, a second file is the only correct answer, since editing an applied migration changes a schema someone is already running while leaving that deployment on the old one.
+
+`seaql_migrations`'s row count does not answer this and must not be used as the test: a database that has applied this migration also holds exactly one row, so the count cannot separate "never applied" from "applied once". The question is whether a deployment exists that has run it, which is a fact about deployments rather than about any one database, and answering it means knowing where this schema is running.
 
 `cargo loco generate migration <Name>` still writes the file and registers it in `lib.rs`, and is the way to start a second migration when that day comes; it produces an empty scaffold, so the schema itself is written by hand either way.
 Column definitions use `loco_rs::schema`'s `ColType` helpers where they fit; drop to raw `sea_query::ColumnDef` (see `migration/src/helpers.rs`'s `uuidv7_pk()`) for anything `ColType` can't express, rather than fighting the abstraction.
