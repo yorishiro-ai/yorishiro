@@ -118,17 +118,21 @@ fn is_active_at_treats_exp_as_exclusive_of_the_expiry_instant() {
     assert!(!state.is_active_at(1001));
 }
 
+/// A state carrying no claims is inactive at every instant, which is what an absent or
+/// unverifiable key resolves to. The expiry boundary is covered above; this covers the other way
+/// a licence fails to be active.
 #[test]
-fn require_active_is_ok_only_while_licensed_and_unexpired() {
+fn a_state_with_no_claims_is_never_active() {
     let unlicensed = LicenceState::default();
-    assert!(unlicensed.require_active().is_err());
+    assert!(!unlicensed.is_active_at(0));
+    assert!(!unlicensed.is_active_at(chrono::Utc::now().timestamp()));
 
     let licensed = LicenceState::licensed(LicenceClaims {
         sub: "test-customer".into(),
         plan: "enterprise".into(),
         exp: chrono::Utc::now().timestamp() + 3600,
     });
-    assert!(licensed.require_active().is_ok());
+    assert!(licensed.is_active());
 }
 
 #[test]

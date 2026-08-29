@@ -155,17 +155,4 @@ impl LicenceState {
     pub fn is_active_at(&self, now: i64) -> bool {
         self.claims.as_ref().is_some_and(|c| c.exp > now)
     }
-
-    /// The error a gated endpoint returns when no active licence is held.
-    ///
-    /// 404 rather than 402 or 403, matching the setup wizard's answer for a capability this deployment does not offer: the endpoint is genuinely not being served here.
-    /// The message names the reason, because the operator is the one who can fix it.
-    pub fn require_active(&self) -> Result<(), YorishiroError> {
-        if self.is_active() {
-            return Ok(());
-        }
-        Err(YorishiroError::not_found(
-            "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
-        ))
-    }
 }

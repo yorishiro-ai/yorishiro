@@ -49,6 +49,10 @@ async fn licence_gate(
         return next.run(request).await;
     }
 
+    // 404 rather than 402 or 403, matching the setup wizard's answer for a capability this
+    // deployment does not offer: the endpoint is genuinely not being served here. The message names
+    // the reason, because the operator is the one who can fix it.
+    //
     // Rendered through `ApiError` so the body matches every other error this application emits
     // rather than being formatted a second way.
     crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
