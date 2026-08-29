@@ -5,7 +5,8 @@
 It just calls `TenantDb::connect(url, max_connections)` against a real test database the same way `Hooks::after_context` does.
 `config/test.yaml`'s `database.uri` already reads `DATABASE_URL` with `auto_migrate: true`, so `cargo test` against a scratch Postgres runs converge and gets a role-and-RLS-correct connection with no bridge, no `#[path]`, no `autotests = false`.
 `TenantDb::new(pool)` still exists (it bypasses `after_connect`, so it skips `SET ROLE`) but nothing calls it and nothing should: `connect` is the only path a test needs.
-**Test layout, as it actually is**: each crate's integration tests are one binary rooted at `tests/mod.rs`, which declares the submodules (`mod requests;`, `mod models;`, `mod tasks;`). Shared helpers live in the submodule that owns them and are reached by path: `close_app_pools` sits in `tests/requests/mod.rs` and `tests/models/*` calls it as `crate::requests::close_app_pools`.
+**Test layout**: the integration tests are one binary rooted at `tests/mod.rs`, which declares the submodules (`mod requests;`, `mod models;`, `mod tasks;`).
+Shared helpers live in the submodule that owns them and are reached by path: `close_app_pools` sits in `tests/requests/mod.rs` and `tests/models/*` calls it as `crate::requests::close_app_pools`.
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`, in either crate; a previous version of this rule described both, and neither has ever existed here.
 
 `close_app_pools` has one definition, in `tests/requests/mod.rs`: one crate means one integration-test binary, so every suite reaches it by path.

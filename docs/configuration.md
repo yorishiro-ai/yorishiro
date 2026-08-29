@@ -125,7 +125,8 @@ Everything else this file reads either has a default or is opt-in.
 It is a template conditional rather than variables with defaults for a specific reason: loco-rs builds an `EmailSender` from this block whenever `smtp.enable` is true and fails the boot if that construction fails, so a block rendered against a placeholder host would fail where an unset variable would not.
 Once you do set `MAILER_HOST`, `MAILER_USER` and `MAILER_PASSWORD` become required, which is the intended behaviour: opting in to mail means supplying credentials for it.
 
-**There is no `auth:` block, deliberately.** That block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`. `JWT_SECRET` is therefore not a variable this deployment reads at all.
+**There is no `auth:` block, deliberately.** That block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`.
+`JWT_SECRET` is therefore not a variable this deployment reads at all.
 
 `config/development.yaml` requires nothing: it boots against an empty environment, creating its own SQLite file.
 

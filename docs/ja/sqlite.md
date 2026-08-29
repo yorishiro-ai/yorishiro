@@ -186,8 +186,8 @@ SQLite上では`embedding`を除いた列リストでクエリを組み立てて
 
 `migration/src/helpers.rs`に、マイグレーション用のバックエンド条件分岐ヘルパー(`enable_rls_with_policy`、`grant`、`pg_only`、`sqlite_only`、`create_table_with_checks`、`uuidv7_pk`)がすべてまとまっており、それぞれが`manager.get_database_backend()`を確認する。
 各マイグレーションファイルの側は、バックエンドを自分で判定せず、これらのヘルパーを呼び出すだけにしてある。
-結果として生成されるPostgreSQLのスキーマ(すべてのテーブル、カラム、制約名、インデックス、ポリシー、GRANT)は、SQLite対応が入る前と変わっていない。
-一部の制約を発行するSQL文自体は`create_table_with_checks`/`pg_only`経由に書き換わっており、`identity_maintenance`の3つのCHECKは、以前は1回の`execute_unprepared`呼び出しにセミコロン区切りの`ALTER TABLE`文を3つまとめていたものが、いまは同じ効果を持つ3回の別々の呼び出しになっている。
+これらのヘルパーが生成するPostgreSQLのスキーマ(すべてのテーブル、カラム、制約名、インデックス、ポリシー、GRANT)は、PostgreSQL専用のマイグレーションが出力するものとまったく同じである。
+一部の制約は直接のSQL文ではなく`create_table_with_checks`/`pg_only`経由で発行され、`identity_maintenance`の3つのCHECKは、セミコロン区切りの`ALTER TABLE`文を3つまとめた1回の`execute_unprepared`ではなく、3回の別々の呼び出しになっている。
 
 アプリケーション層では、`Hooks::after_context`(`src/app.rs`)が`DbHandle`やデフォルトの`Authenticator`を構築する前に`ctx.db.get_database_backend() != DatabaseBackend::Sqlite`を確認し、`AuthContext`/`Authorized<R>`/`AuditAuthorized`の`FromRequestParts`実装(`src/controllers/extractors.rs`)も同じ条件を確認して、`services::auth::authorize`/`services::auth::authenticate`の`..._sqlite`系関数とPostgreSQL用の`Authenticator`/`DbHandle`のどちらを使うかを選ぶ。
 `db::sqlite_generated_id`(`before_save`から呼ばれる。前述「単一テナントガード」を参照)も同様に`conn.get_database_backend()`を確認する。

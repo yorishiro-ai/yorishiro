@@ -28,7 +28,8 @@ Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 A new table is added to that file rather than beside it, **only while no deployment has applied it**.
 Once any deployment has, a second file is the only correct answer, since editing an applied migration changes a schema someone is already running while leaving that deployment on the old one.
 
-`seaql_migrations`'s row count does not answer this and must not be used as the test: a database that has applied this migration also holds exactly one row, so the count cannot separate "never applied" from "applied once". The question is whether a deployment exists that has run it, which is a fact about deployments rather than about any one database, and answering it means knowing where this schema is running.
+`seaql_migrations`'s row count does not answer this and must not be used as the test: a database that has applied this migration also holds exactly one row, so the count cannot separate "never applied" from "applied once".
+The question is whether a deployment exists that has run it, which is a fact about deployments rather than about any one database, and answering it means knowing where this schema is running.
 
 `cargo loco generate migration <Name>` writes the file and registers it in `lib.rs`, and is the way to start a second migration when that day comes; it produces an empty scaffold, so the schema itself is written by hand either way.
 Column definitions use `loco_rs::schema`'s `ColType` helpers where they fit; drop to raw `sea_query::ColumnDef` (see `migration/src/helpers.rs`'s `uuidv7_pk()`) for anything `ColType` can't express, rather than fighting the abstraction.
@@ -107,7 +108,8 @@ Eight functions query the table directly (`count`, `get`, `get_batch`, `list`, `
 Writes need a second, unrelated mechanism: `ActiveModelTrait::insert`/`update` decode their return value as a full `Model`, and SeaORM's `TryGetable` impl for `pgvector::Vector` unconditionally errors on any SQLite row (`Vector unsupported by sqlx-sqlite`, confirmed in `sea-orm` 2.0.2's source), whether or not the column exists or the value is set.
 That is a type-decode failure rather than the "no such column" query failure, so a column list does not fix it.
 `insert_and_fetch` uses `Entity::insert(active).exec_without_returning` (a row count, not a `Model`) plus a `select_record_columns` read-back; that builder path skips `before_save`, so it calls `db::sqlite_generated_id` directly.
-`update_and_fetch` and `undo_job` use `active.update_without_returning(conn)`, which **does** call `before_save` (confirmed against `sea-orm` 2.0.2's source), so `updated_at` is still stamped. The raw `Entity::update(...)` builder would skip it, and `content_entities::update`'s own `ActiveModel` literal never sets that column itself.
+`update_and_fetch` and `undo_job` use `active.update_without_returning(conn)`, which **does** call `before_save` (confirmed against `sea-orm` 2.0.2's source), so `updated_at` is still stamped.
+The raw `Entity::update(...)` builder would skip it, and `content_entities::update`'s own `ActiveModel` literal never sets that column itself.
 `undo_job` needs no read-back: its `match` only distinguishes `Ok`/`DbErr::RecordNotUpdated`/other-error to decide `restored` vs. `missing`, and `update_without_returning` returns those on exactly the same conditions `update` did.
 `delete` needs no branch at all: `Entity::delete_many()...exec()` returns a bare row count with no column decode.
 
