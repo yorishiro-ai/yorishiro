@@ -63,13 +63,13 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         let setup = setup(&ctx).await;
 
         let missing = request
-            .get("/hosted/workspace/embedding-key")
+            .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(missing.status_code(), 404, "response: {:?}", missing.text());
 
         let put = request
-            .put("/hosted/workspace/embedding-key")
+            .put("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1/",
@@ -81,7 +81,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         assert_eq!(put.status_code(), 204, "response: {:?}", put.text());
 
         let get = request
-            .get("/hosted/workspace/embedding-key")
+            .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(get.status_code(), 200, "response: {:?}", get.text());
@@ -98,13 +98,13 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         );
 
         let delete = request
-            .delete("/hosted/workspace/embedding-key")
+            .delete("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(delete.status_code(), 204, "response: {:?}", delete.text());
 
         let after_delete = request
-            .get("/hosted/workspace/embedding-key")
+            .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
@@ -127,7 +127,7 @@ async fn a_non_http_base_url_is_refused() {
             "embed.example.com/v1",
         ] {
             let put = request
-                .put("/hosted/workspace/embedding-key")
+                .put("/api/workspace/embedding-key")
                 .add_header("Authorization", format!("Bearer {}", setup.key))
                 .json(&serde_json::json!({
                     "base_url": bad_url,
@@ -171,7 +171,7 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
             .expect("stamp workspace dimensions");
 
         let put = request
-            .put("/hosted/workspace/embedding-key")
+            .put("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({
                 "base_url": "https://embed.example.com/v1",
@@ -185,7 +185,7 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
 
         // Refused, so nothing was stored: GET still reports unconfigured.
         let get = request
-            .get("/hosted/workspace/embedding-key")
+            .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(get.status_code(), 404, "response: {:?}", get.text());

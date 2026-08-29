@@ -32,7 +32,7 @@ pub struct SetEmbeddingKeyRequest {
     pub send_dimensions_param: bool,
 }
 
-/// `PUT /hosted/workspace/embedding-key`
+/// `PUT /api/workspace/embedding-key`
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -62,7 +62,7 @@ async fn set_embedding_key(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `GET /hosted/workspace/embedding-key`
+/// `GET /api/workspace/embedding-key`
 async fn get_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -77,7 +77,7 @@ async fn get_embedding_key(
     Ok(Json(described))
 }
 
-/// `DELETE /hosted/workspace/embedding-key`
+/// `DELETE /api/workspace/embedding-key`
 async fn delete_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -89,8 +89,8 @@ async fn delete_embedding_key(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().prefix("hosted").add(
-        "/workspace/embedding-key",
+    Routes::new().prefix("api/workspace").add(
+        "/embedding-key",
         axum::routing::put(set_embedding_key)
             .get(get_embedding_key)
             .delete(delete_embedding_key),

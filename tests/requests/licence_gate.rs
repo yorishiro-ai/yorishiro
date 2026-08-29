@@ -9,7 +9,7 @@
 //! **Gated** (`marketplace`, and `inference::gated_routes`) must answer 404 unlicensed and something
 //! other than 404 licensed.
 //!
-//! **Ungated inside a gated controller** (`/hosted/workspace/llm-key`) sits in `inference` beside a
+//! **Ungated inside a gated controller** (`/api/workspace/llm-key`) sits in `inference` beside a
 //! gated route without being gated itself, because storing a credential is not a paid action while
 //! spending it on an inference call is. A layer applies per `Routes`, so this group exists to keep
 //! the two apart.
@@ -57,8 +57,8 @@ fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
 /// for that reason alone, which would make the unlicensed assertions pass with the gate deleted:
 /// the exact failure this file exists to rule out. Checked against each controller's own `routes()`.
 const GATED: &[&str] = &[
-    // marketplace.rs: `.prefix("hosted").add("/marketplace", get(list_marketplace))`
-    "/hosted/marketplace",
+    // marketplace.rs: `.prefix("api/marketplace").add("/", get(list_marketplace))`
+    "/api/marketplace",
 ];
 
 /// Routes inside a gated controller that are deliberately NOT gated.
@@ -66,12 +66,12 @@ const GATED: &[&str] = &[
 /// Asserted separately from `UNGATED` because the failure they catch is specific: collapsing
 /// `inference`'s two route groups into one would gate them, and nothing else in this file would
 /// notice.
-const UNGATED_INSIDE_A_GATED_CONTROLLER: &[&str] = &["/hosted/workspace/llm-key"];
+const UNGATED_INSIDE_A_GATED_CONTROLLER: &[&str] = &["/api/workspace/llm-key"];
 
 /// One per ungated controller. These must be served in both boots.
 const UNGATED: &[&str] = &[
-    // dashboard.rs: `.prefix("hosted").add("/tenant/overview", get(tenant_overview))`
-    "/hosted/tenant/overview",
+    // dashboard.rs: `.prefix("api/tenant").add("/overview", get(tenant_overview))`
+    "/api/tenant/overview",
     // origin.rs: `.prefix("api/schemas").add("/upstream-changes", get(list_upstream_changes))`
     "/api/schemas/upstream-changes",
 ];

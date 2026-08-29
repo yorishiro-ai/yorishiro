@@ -38,7 +38,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
             let api_key = setup_body["api_key"].as_str().unwrap();
 
             let response = request
-                .get("/hosted/tenant/overview")
+                .get("/api/tenant/overview")
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await;
             assert_eq!(
@@ -67,7 +67,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
 #[serial]
 async fn tenant_overview_requires_authentication() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
-        let response = request.get("/hosted/tenant/overview").await;
+        let response = request.get("/api/tenant/overview").await;
         assert_eq!(
             response.status_code(),
             401,

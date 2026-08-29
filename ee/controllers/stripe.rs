@@ -292,6 +292,6 @@ async fn apply_stripe_event(
 
 pub fn routes() -> Routes {
     Routes::new()
-        .prefix("hosted")
-        .add("/stripe/webhook", post(stripe_webhook))
+        .prefix("api/stripe")
+        .add("/webhook", post(stripe_webhook))
 }

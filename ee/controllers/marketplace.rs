@@ -1,6 +1,6 @@
 //! The template marketplace: templates shared between tenants, their published versions, and what other tenants thought of them.
 //!
-//! These routes gate on the licence: no key means `GET /hosted/marketplace` and its siblings answer 404, the same way an unlicensed deployment cannot reach `/hosted/stripe`.
+//! These routes gate on the licence: no key means `GET /api/marketplace` and its siblings answer 404, the same way an unlicensed deployment cannot reach `/api/stripe`.
 
 use crate::controllers::ApiError;
 use axum::Json;
@@ -31,7 +31,7 @@ async fn licensed_tenant(
     authz::authenticate_tenant(ctx, headers).await
 }
 
-/// `GET /hosted/marketplace`: community-visible templates from every tenant, ordered by name then id.
+/// `GET /api/marketplace`: community-visible templates from every tenant, ordered by name then id.
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -43,7 +43,7 @@ async fn list_marketplace(
     Ok(Json(listings))
 }
 
-/// `GET /hosted/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
+/// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
 async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -56,7 +56,7 @@ async fn list_versions(
     Ok(Json(versions))
 }
 
-/// `POST /hosted/marketplace/{id}/versions`: publish the next version of your own template.
+/// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
 async fn publish_version(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -68,7 +68,7 @@ async fn publish_version(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-/// `GET /hosted/marketplace/{id}/reviews`
+/// `GET /api/marketplace/{id}/reviews`
 async fn list_reviews(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -81,7 +81,7 @@ async fn list_reviews(
     Ok(Json(reviews))
 }
 
-/// `POST /hosted/marketplace/{id}/reviews`: leave or replace this tenant's review.
+/// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
 async fn submit_review(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -106,7 +106,7 @@ pub struct ForkResponse {
     pub template_id: Uuid,
 }
 
-/// `POST /hosted/marketplace/{id}/fork`: copy a published version into your own library.
+/// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
 async fn fork_template(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -130,7 +130,7 @@ pub struct SetVisibilityRequest {
     pub visibility: String,
 }
 
-/// `PUT /hosted/marketplace/{id}/visibility`: list your own template, or take it back down.
+/// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
 async fn set_visibility(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -144,19 +144,16 @@ async fn set_visibility(
 
 pub fn routes() -> Routes {
     Routes::new()
-        .prefix("hosted")
-        .add("/marketplace", axum::routing::get(list_marketplace))
+        .prefix("api/marketplace")
+        .add("/", axum::routing::get(list_marketplace))
         .add(
-            "/marketplace/{id}/versions",
+            "/{id}/versions",
             axum::routing::get(list_versions).post(publish_version),
         )
         .add(
-            "/marketplace/{id}/reviews",
+            "/{id}/reviews",
             axum::routing::get(list_reviews).post(submit_review),
         )
-        .add("/marketplace/{id}/fork", axum::routing::post(fork_template))
-        .add(
-            "/marketplace/{id}/visibility",
-            axum::routing::put(set_visibility),
-        )
+        .add("/{id}/fork", axum::routing::post(fork_template))
+        .add("/{id}/visibility", axum::routing::put(set_visibility))
 }

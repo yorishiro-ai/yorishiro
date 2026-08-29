@@ -99,7 +99,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
             let signature = sign(WEBHOOK_SECRET, now, &body);
 
             let first = request
-                .post("/hosted/stripe/webhook")
+                .post("/api/stripe/webhook")
                 .add_header("stripe-signature", format!("t={now},v1={signature}"))
                 .bytes(body.clone().into())
                 .await;
@@ -114,7 +114,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
             billing::set_plan(&ctx.db, tenant_id, "free").await.unwrap();
 
             let retry = request
-                .post("/hosted/stripe/webhook")
+                .post("/api/stripe/webhook")
                 .add_header("stripe-signature", format!("t={now},v1={signature}"))
                 .bytes(body.into())
                 .await;
@@ -158,7 +158,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
             let now = Utc::now().timestamp();
             let up_sig = sign(WEBHOOK_SECRET, now, &up_body);
             let up = request
-                .post("/hosted/stripe/webhook")
+                .post("/api/stripe/webhook")
                 .add_header("stripe-signature", format!("t={now},v1={up_sig}"))
                 .bytes(up_body.into())
                 .await;
@@ -168,7 +168,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
             let now = Utc::now().timestamp();
             let del_sig = sign(WEBHOOK_SECRET, now, &del_body);
             let del = request
-                .post("/hosted/stripe/webhook")
+                .post("/api/stripe/webhook")
                 .add_header("stripe-signature", format!("t={now},v1={del_sig}"))
                 .bytes(del_body.into())
                 .await;
@@ -206,7 +206,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
         let response = request
-            .post("/hosted/stripe/webhook")
+            .post("/api/stripe/webhook")
             .add_header("stripe-signature", "t=1000,v1=deadbeef")
             .bytes(body.into())
             .await;
@@ -235,7 +235,7 @@ async fn a_tampered_payload_is_rejected() {
             let tampered =
                 subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_other");
             let response = request
-                .post("/hosted/stripe/webhook")
+                .post("/api/stripe/webhook")
                 .add_header("stripe-signature", format!("t={now},v1={signature}"))
                 .bytes(tampered.into())
                 .await;

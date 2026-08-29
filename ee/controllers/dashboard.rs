@@ -1,4 +1,4 @@
-//! `GET /hosted/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
+//! `GET /api/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
 
 use crate::error::ResultExt;
 use crate::models::_entities::identity_tenants;
@@ -69,6 +69,6 @@ async fn tenant_overview(
 
 pub fn routes() -> Routes {
     Routes::new()
-        .prefix("hosted")
-        .add("/tenant/overview", get(tenant_overview))
+        .prefix("api/tenant")
+        .add("/overview", get(tenant_overview))
 }

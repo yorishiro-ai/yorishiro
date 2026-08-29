@@ -40,9 +40,9 @@ SQLiteではベクトル検索が移植されていないため、`content_entit
 
 ### ワークスペース自身の埋め込みプロバイダ(有償版)
 
-`PUT /hosted/workspace/embedding-key`は、どのワークスペースもデプロイ全体で同じ`YORISHIRO_EMBEDDING_BASE_URL`を共有する代わりに、1つのワークスペースの埋め込み処理だけを上記のデプロイ全体共通のものとは別のプロバイダに向ける。
+`PUT /api/workspace/embedding-key`は、どのワークスペースもデプロイ全体で同じ`YORISHIRO_EMBEDDING_BASE_URL`を共有する代わりに、1つのワークスペースの埋め込み処理だけを上記のデプロイ全体共通のものとは別のプロバイダに向ける。
 base版には含まれない。
-これは既にワークスペース単位でLLM推論の認証情報を割り当てている`PUT /hosted/workspace/llm-key`と同じ切り分けで、どのワークスペースがどの計算先を使うかは有償版の判断である。
+これは既にワークスペース単位でLLM推論の認証情報を割り当てている`PUT /api/workspace/llm-key`と同じ切り分けで、どのワークスペースがどの計算先を使うかは有償版の判断である。
 
 | フィールド | 説明 |
 |---|---|
@@ -54,7 +54,7 @@ base版には含まれない。
 
 ここに何も設定していないワークスペースは、引き続きデプロイ全体共通のプロバイダ(`YORISHIRO_EMBEDDING_BASE_URL`など)を使う。
 つまり割り当てを行わないデプロイは、このエンドポイントの影響を受けない。
-`DELETE /hosted/workspace/embedding-key`で、ワークスペースをそのデプロイ既定値に戻せる。
+`DELETE /api/workspace/embedding-key`で、ワークスペースをそのデプロイ既定値に戻せる。
 
 `PUT`は、ワークスペース自身に刻印されたベクトル幅と一致しない`dimensions`値を、何も保存する前に`422`で拒否する。
 これが無いと、ディスク上に既にあるベクトルの幅と合わないプロバイダを割り当ててしまった場合、次にそのワークスペースへエンティティを書き込んだ時点で`sync_embedding`自身の書き込み時チェック(`services/embedding/sync.rs`)に拒否されるまで気づけない。
@@ -252,9 +252,9 @@ SQLiteバックエンドのキューに対して複数のワーカープロセ�
 
 ### ワークスペース自身のワーカークラス割り当て(有償版)
 
-`PUT /hosted/workspace/worker-class` は、1つのワークスペースの embedding-syncジョブだけを、共有プールの代わりに `tenant_private` または `official` の計算資源に固定する。
+`PUT /api/workspace/worker-class` は、1つのワークスペースの embedding-syncジョブだけを、共有プールの代わりに `tenant_private` または `official` の計算資源に固定する。
 base版には含まれない。
-どのワークスペースがどの計算先を使うかは、既にワークスペース単位でLLM/embeddingの認証情報を割り当てている(`PUT /hosted/workspace/llm-key`、`PUT /hosted/workspace/embedding-key`)のと同じ有償版の判断である。
+どのワークスペースがどの計算先を使うかは、既にワークスペース単位でLLM/embeddingの認証情報を割り当てている(`PUT /api/workspace/llm-key`、`PUT /api/workspace/embedding-key`)のと同じ有償版の判断である。
 
 | フィールド | 説明 |
 |---|---|
@@ -262,7 +262,7 @@ base版には含まれない。
 
 ここに何も設定していないワークスペースは、引き続き`shared`のままジョブを処理する。
 つまり何も設定しなければ、割り当てを行わないデプロイの挙動は変わらない。
-`DELETE /hosted/workspace/worker-class` で、ワークスペースを `shared` に戻せる。
+`DELETE /api/workspace/worker-class` で、ワークスペースを `shared` に戻せる。
 キャッシュは無い。
 このエンドポイント経由の設定変更は、そのワークスペースに対して次にジョブが積まれた時点から即座に効き、遅延や再起動を待つ必要はない。
 ワークスペースを`tenant_private`/`official`に割り当てても、そのタグを実際に購読するワーカープロセスが動いていなければ、それ自体には何の効果もない(前述の「サーバとは別プロセス・別ホストでワーカーを動かす」参照)。

@@ -90,7 +90,7 @@ async fn without_a_licence_the_marketplace_is_not_served() {
         let setup = setup(&ctx, "acme").await;
 
         let response = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", format!("Bearer {}", setup.owner_key))
             .await;
         assert_eq!(
@@ -111,7 +111,7 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let response = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", "Bearer ysr_not_a_real_key")
             .await;
         assert_eq!(
@@ -134,7 +134,7 @@ async fn a_licence_does_not_replace_authentication() {
         licence(&ctx);
 
         let response = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", "Bearer ysr_not_a_real_key")
             .await;
         assert_eq!(
@@ -159,7 +159,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         // Publishing a version of a template that doesn't exist must 404.
         let draft = request
-            .post("/hosted/marketplace/00000000-0000-0000-0000-000000000000/versions")
+            .post("/api/marketplace/00000000-0000-0000-0000-000000000000/versions")
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"definition": note_definition()}))
             .await;
@@ -187,7 +187,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .unwrap();
 
         let make_community = request
-            .put(&format!("/hosted/marketplace/{template_id}/visibility"))
+            .put(&format!("/api/marketplace/{template_id}/visibility"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"visibility": "community"}))
             .await;
@@ -200,7 +200,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         // Still not listed: no published (non-draft) version exists yet.
         let empty_listing = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .await;
         assert_eq!(empty_listing.status_code(), 200);
@@ -211,7 +211,7 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         let publish_v1 = request
-            .post(&format!("/hosted/marketplace/{template_id}/versions"))
+            .post(&format!("/api/marketplace/{template_id}/versions"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
@@ -228,7 +228,7 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         let publish_v2 = request
-            .post(&format!("/hosted/marketplace/{template_id}/versions"))
+            .post(&format!("/api/marketplace/{template_id}/versions"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
@@ -239,7 +239,7 @@ async fn publish_list_fork_and_review_round_trip() {
         );
 
         let listing = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .await;
         let listing_body: Vec<serde_json::Value> = listing.json();
@@ -251,7 +251,7 @@ async fn publish_list_fork_and_review_round_trip() {
         assert_ne!(forker.tenant_id, owner.tenant_id);
 
         let fork = request
-            .post(&format!("/hosted/marketplace/{template_id}/fork"))
+            .post(&format!("/api/marketplace/{template_id}/fork"))
             .add_header("Authorization", format!("Bearer {}", forker.owner_key))
             .await;
         assert_eq!(fork.status_code(), 201, "response: {:?}", fork.text());
@@ -267,7 +267,7 @@ async fn publish_list_fork_and_review_round_trip() {
 
         // The fork does not itself appear in the marketplace: it starts private ('tenant').
         let listing_after_fork = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .await;
         let listing_after_fork_body: Vec<serde_json::Value> = listing_after_fork.json();
@@ -280,14 +280,14 @@ async fn publish_list_fork_and_review_round_trip() {
 
         // The forker reviews the original.
         let review = request
-            .post(&format!("/hosted/marketplace/{template_id}/reviews"))
+            .post(&format!("/api/marketplace/{template_id}/reviews"))
             .add_header("Authorization", format!("Bearer {}", forker.owner_key))
             .json(&json!({"rating": 5, "comment": "does the job"}))
             .await;
         assert_eq!(review.status_code(), 200, "response: {:?}", review.text());
 
         let listing_with_review = request
-            .get("/hosted/marketplace")
+            .get("/api/marketplace")
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .await;
         let listing_with_review_body: Vec<serde_json::Value> = listing_with_review.json();
@@ -302,14 +302,14 @@ async fn publish_list_fork_and_review_round_trip() {
 
         // Forking a template that has been taken back down to 'tenant' visibility 404s.
         let take_down = request
-            .put(&format!("/hosted/marketplace/{template_id}/visibility"))
+            .put(&format!("/api/marketplace/{template_id}/visibility"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"visibility": "tenant"}))
             .await;
         assert_eq!(take_down.status_code(), 204);
 
         let fork_after_takedown = request
-            .post(&format!("/hosted/marketplace/{template_id}/fork"))
+            .post(&format!("/api/marketplace/{template_id}/fork"))
             .add_header("Authorization", format!("Bearer {}", forker.owner_key))
             .await;
         assert_eq!(
@@ -346,7 +346,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
             .unwrap();
 
         let steal_visibility = request
-            .put(&format!("/hosted/marketplace/{template_id}/visibility"))
+            .put(&format!("/api/marketplace/{template_id}/visibility"))
             .add_header("Authorization", format!("Bearer {}", other.owner_key))
             .json(&json!({"visibility": "community"}))
             .await;
@@ -358,7 +358,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
         );
 
         let steal_publish = request
-            .post(&format!("/hosted/marketplace/{template_id}/versions"))
+            .post(&format!("/api/marketplace/{template_id}/versions"))
             .add_header("Authorization", format!("Bearer {}", other.owner_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
@@ -394,18 +394,18 @@ async fn a_rating_outside_the_range_is_rejected() {
             .parse()
             .unwrap();
         request
-            .put(&format!("/hosted/marketplace/{template_id}/visibility"))
+            .put(&format!("/api/marketplace/{template_id}/visibility"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"visibility": "community"}))
             .await;
         request
-            .post(&format!("/hosted/marketplace/{template_id}/versions"))
+            .post(&format!("/api/marketplace/{template_id}/versions"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
 
         let bad_review = request
-            .post(&format!("/hosted/marketplace/{template_id}/reviews"))
+            .post(&format!("/api/marketplace/{template_id}/reviews"))
             .add_header("Authorization", format!("Bearer {}", reviewer.owner_key))
             .json(&json!({"rating": 6}))
             .await;

@@ -30,7 +30,7 @@ pub struct SetLlmKeyRequest {
     pub api_key: String,
 }
 
-/// `PUT /hosted/workspace/llm-key`
+/// `PUT /api/workspace/llm-key`
 async fn set_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -49,7 +49,7 @@ async fn set_llm_key(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `GET /hosted/workspace/llm-key`
+/// `GET /api/workspace/llm-key`
 async fn get_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -62,7 +62,7 @@ async fn get_llm_key(
     Ok(Json(described))
 }
 
-/// `DELETE /hosted/workspace/llm-key`
+/// `DELETE /api/workspace/llm-key`
 async fn delete_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -83,7 +83,7 @@ pub struct InferFillReport {
     pub skipped: i64,
 }
 
-/// `POST /hosted/schemas/active/{name}/infer-fill`
+/// `POST /api/schemas/active/{name}/infer-fill`
 ///
 /// Writes each accepted guess straight to `content_entities`, the same "compute and write immediately" shape the embedding-sync worker types use, rather than holding proposals in a separate table for a second confirming request: a guess is reversible the same way any other entity write is, through base's own `content_entities::snapshot`/`undo_job`, so that extra step would buy no reversibility this deployment does not already have.
 async fn infer_fill(
@@ -104,7 +104,7 @@ async fn infer_fill(
         YorishiroError::ValidationFailed {
             message: "this workspace has no LLM credentials configured".into(),
             details: vec![],
-            hint: "PUT /hosted/workspace/llm-key".into(),
+            hint: "PUT /api/workspace/llm-key".into(),
         }
     })?;
 
@@ -179,11 +179,11 @@ async fn infer_fill(
 /// does. Merging the two groups would extend the gate over these, which is a product decision rather
 /// than a routing detail.
 ///
-/// The `hosted` prefix is repeated rather than factored out, so both groups serve the paths a client
-/// expects.
+/// The two groups also sit under different prefixes: credentials belong with the workspace's other
+/// settings, while the inference call itself extends the schema routes it fills against.
 pub fn routes() -> Routes {
-    Routes::new().prefix("hosted").add(
-        "/workspace/llm-key",
+    Routes::new().prefix("api/workspace").add(
+        "/llm-key",
         axum::routing::put(set_llm_key)
             .get(get_llm_key)
             .delete(delete_llm_key),
@@ -193,8 +193,7 @@ pub fn routes() -> Routes {
 /// The route this module's licence gate covers: the server calls an LLM here, which is what makes
 /// it a paid feature. See [`routes`] for why the two groups are separate.
 pub fn gated_routes() -> Routes {
-    Routes::new().prefix("hosted").add(
-        "/schemas/active/{name}/infer-fill",
-        axum::routing::post(infer_fill),
-    )
+    Routes::new()
+        .prefix("api/schemas")
+        .add("/active/{name}/infer-fill", axum::routing::post(infer_fill))
 }

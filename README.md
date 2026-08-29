@@ -16,7 +16,7 @@ flowchart TD
 
     subgraph Paid["ee/ (paid edition, composed into the same binary)"]
         HostedMCP["HostedMcpServer<br/>(its own tools, then delegates)"]
-        HostedREST["hosted routes<br/>(marketplace / origin / billing / OAuth)"]
+        HostedREST["paid-edition routes<br/>(marketplace / origin / billing / OAuth)"]
     end
 
     subgraph Server["yorishiro (axum)"]
