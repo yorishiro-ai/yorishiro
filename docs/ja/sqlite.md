@@ -191,7 +191,8 @@ SQLite上では`embedding`を除いた列リストでクエリを組み立てて
 
 アプリケーション層では、`Hooks::after_context`(`src/app.rs`)が`DbHandle`やデフォルトの`Authenticator`を構築する前に`ctx.db.get_database_backend() != DatabaseBackend::Sqlite`を確認し、`AuthContext`/`Authorized<R>`/`AuditAuthorized`の`FromRequestParts`実装(`src/controllers/extractors.rs`)も同じ条件を確認して、`services::auth::authorize`/`services::auth::authenticate`の`..._sqlite`系関数とPostgreSQL用の`Authenticator`/`DbHandle`のどちらを使うかを選ぶ。
 `db::sqlite_generated_id`(`before_save`から呼ばれる。前述「単一テナントガード」を参照)も同様に`conn.get_database_backend()`を確認する。
-唯一の例外が`db::require_min_sqlite_connections`(前述「`database.max_connections`はSQLite上で2以上が必須」を参照)で、これだけは設定値そのものを無条件に確認する。接続がまだ存在しない起動の時点で拒否を判断しなければならないので、その場の接続を見て判断するという他の分岐と同じやり方が使えない。
+唯一の例外が`db::require_min_sqlite_connections`(前述「`database.max_connections`はSQLite上で2以上が必須」を参照)で、これだけは設定値そのものを無条件に確認する。
+接続がまだ存在しない起動の時点で拒否を判断しなければならないので、その場の接続を見て判断するという他の分岐と同じやり方が使えない。
 それ以外の分岐はすべて、設定フラグや環境変数を読むのではなく、常にその場の接続から読み取っている。
 
 ## 現在のSQLite経路に関する注意点

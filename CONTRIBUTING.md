@@ -87,4 +87,4 @@ A superuser bypasses RLS regardless of `FORCE`, so a green run as one proves not
 One sentence per line, in Markdown and in comments.
 Do not hard-wrap, and do not join two clauses with a dash.
 
-`migration/src/` is not exempt from this: `sea-orm-migration` does not checksum migration files, unlike the sqlx migrations this project used previously, so editing an applied migration is safe.
+`migration/src/` is not exempt from this: `sea-orm-migration` does not checksum migration files, so editing an applied migration is safe here even though some migration tools forbid it.

@@ -45,7 +45,7 @@ Which workspace uses which compute backend is a paid-edition decision.
 | `dimensions` | The vector width this provider produces |
 | `send_dimensions_param` | `true` includes a `dimensions` field in the embeddings request; default `false`, matching `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` above |
 
-A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so setting nothing is the same as before this endpoint existed.
+A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so a deployment that assigns nothing is unaffected by this endpoint.
 `DELETE /hosted/workspace/embedding-key` returns a workspace to that deployment default.
 
 `PUT` refuses a `dimensions` value that does not match the workspace's own stamped vector width (the `embedding_dimensions` recorded when the workspace was created) with `422`, before storing anything: assigning a provider whose output width does not match the vectors already on disk would otherwise only be discovered on the next entity write, when `sync_embedding`'s own write-time check (`services/embedding/sync.rs`) rejects it.
@@ -202,7 +202,7 @@ Not part of the base edition: which compute a tenant's jobs run on is the same p
 |---|---|
 | `worker_class` | One of `tenant_private`, `official`, `shared` |
 
-A workspace with nothing configured here keeps its jobs `shared`, so setting nothing is the same as before this endpoint existed.
+A workspace with nothing configured here keeps its jobs `shared`, so a deployment that assigns nothing is unaffected by this endpoint.
 `DELETE /hosted/workspace/worker-class` returns a workspace to `shared`.
 No caching: an assignment made through this endpoint takes effect on the very next job enqueued for that workspace, not after some delay or a restart.
 Assigning a workspace to `tenant_private`/`official` has no effect on its own until a worker process actually subscribes to that tag ("Running workers on a separate process or host" above).

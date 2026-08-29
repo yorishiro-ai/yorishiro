@@ -53,7 +53,7 @@ base版には含まれない。
 | `send_dimensions_param` | `true`にすると埋め込みリクエストに`dimensions`フィールドを含める。既定は`false`で、前述の`YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM`と同じ |
 
 ここに何も設定していないワークスペースは、引き続きデプロイ全体共通のプロバイダ(`YORISHIRO_EMBEDDING_BASE_URL`など)を使う。
-つまり何も設定しなければ、このエンドポイントが存在する前と同じ挙動のままである。
+つまり割り当てを行わないデプロイは、このエンドポイントの影響を受けない。
 `DELETE /hosted/workspace/embedding-key`で、ワークスペースをそのデプロイ既定値に戻せる。
 
 `PUT`は、ワークスペース自身に刻印されたベクトル幅と一致しない`dimensions`値を、何も保存する前に`422`で拒否する。
@@ -193,7 +193,7 @@ locoは既定のフィルタを、固定のモジュールホワイトリスト�
 **`RUST_LOG`はこの設定をすべて上書きする。**
 locoはこの設定ファイルを読むより先に`EnvFilter::try_from_default_env()`を試す(`logger.rs:193`)。
 そのため`RUST_LOG`を注入するプラットフォーム上では、ここに何が書いてあるかに関わらずその変数の内容が使われる。
-統合前の2クレート構成での実測では、`RUST_LOG=loco_rs=info`を与えるとサーバは正常に起動したままアプリケーション側2クレートのログが1行も出なくなった。
+実測: `RUST_LOG=loco_rs=info`を与えると、サーバは正常に起動したままアプリケーションのログが1行も出なくなる。
 環境で`RUST_LOG`を設定する場合は、その値自体に`yorishiro`を含めること。
 
 ## キューのバックエンドと調整(`config/development.yaml`、`config/production.yaml`)
