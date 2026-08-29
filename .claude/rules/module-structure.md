@@ -22,7 +22,7 @@ MCP middleware (rate limiting, request-body limits on the `/mcp` route specifica
 ## Router integration (`ee/`)
 
 Request-ID stamping and access logging are Loco's own `request_id`/`logger` middlewares, enabled in `server.middlewares` in every `config/*.yaml`, not a hand-rolled tower layer applied at router-merge time.
-`HostedApp`'s `Hooks` methods delegate to `App`'s per the composition pattern in `ee-composition.md`, so a middleware Loco applies once at boot covers both editions' routes with no merge-layer step to remember.
+There is one `Hooks` impl, `app::App`, which mounts both editions' routes (see `ee-composition.md`), so a middleware Loco applies once at boot covers all of them with no merge-layer step to remember.
 
 `Router::merge` panics on a duplicate route, and only a booted server sees it.
 A route registered on both sides is therefore a startup crash rather than a compile error.

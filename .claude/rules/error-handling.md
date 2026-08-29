@@ -9,10 +9,10 @@
 - The `into_response` mapping from `YorishiroError` to HTTP status+body lives in `YorishiroError::into_http_parts()` (in `crate::error`).
   `ApiError` calls it, and so must any other axum error wrapper built on `YorishiroError`.
   Never duplicate the match block.
-  `ee/`'s `HostedApiError` delegates to it for the same reason.
-  Both names are fixed; do not rename either.
+  `ApiError` is currently the only such wrapper, and `ee/` has none of its own: its handlers return `ApiError` like base's do.
+  That name is fixed; do not rename it.
 - The Stripe webhook (`stripe_webhook`) returns a plain `impl IntoResponse` with raw status codes, because Stripe expects simple text rather than a JSON error envelope.
-  It is the sole exception to using `HostedApiError`.
+  It is the sole exception to using `ApiError`, which every other handler under `ee/` returns.
 - Every `YorishiroError` variant has a machine-readable `code()` (`crate::error`), emitted as `error.code` in the JSON body by `into_http_parts()`.
   A new variant with no arm in `code()`'s match fails to compile, which is what makes `ValidationFailed` and `RelationTypeMismatch` distinguishable on the wire even though both answer 422.
   Do not add a variant without adding its code.
