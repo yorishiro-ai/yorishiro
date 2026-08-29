@@ -4,8 +4,6 @@ use sea_orm::entity::prelude::*;
 pub use super::_entities::identity_workspaces::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 
-pub type IdentityWorkspaces = Entity;
-
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.

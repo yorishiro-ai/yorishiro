@@ -1,6 +1,5 @@
 pub use super::_entities::identity_users::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type IdentityUsers = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

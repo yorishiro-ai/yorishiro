@@ -8,8 +8,6 @@ pub use super::_entities::content_relations::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, ValidationDetail, YorishiroError};
 use crate::models::content_entities::{self, EntityRecord};
 
-pub type ContentRelations = Entity;
-
 /// The generated `Model` already matches this API's response shape, so this is an alias rather than a distinct struct.
 pub type RelationRecord = Model;
 

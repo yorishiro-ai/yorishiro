@@ -24,7 +24,15 @@ Every table lives in `public`, with the old schema name kept as a table-name pre
 **GRANT is always per-table, never schema-wide**: `migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant structurally awkward to write, because unifying the schema means a wildcard grant would now also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`, `identity_workspace_embedding_keys`).
 Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 
-**Migrations**: one file per table under `migration/src/`, generated via `cargo loco generate migration Create<Name>` then hand-edited.
+**Migrations**: one file, `migration/src/m20260829_000000_initial_schema.rs`, holding the whole schema.
+
+The twenty-four incremental files this replaced recorded the order the schema was built in, which is worth keeping only while some deployment might be part-way through that order. None is, and this is explicitly not backward compatible: a database carrying the old history cannot apply this file, and is recreated rather than upgraded.
+
+A new table is added to that file rather than beside it, **only while no deployment has applied it**. Once any deployment has, a second file is the only correct answer, since editing an applied migration changes a schema someone is already running while leaving that deployment on the old one.
+
+`seaql_migrations`'s row count does not answer this and must not be used as the test: a database that has applied this migration also holds exactly one row, so the count cannot separate "never applied" from "applied once". The question is whether a deployment exists that has run it, which is a fact about deployments rather than about any one database, and answering it means knowing where this schema is running.
+
+`cargo loco generate migration <Name>` still writes the file and registers it in `lib.rs`, and is the way to start a second migration when that day comes; it produces an empty scaffold, so the schema itself is written by hand either way.
 Column definitions use `loco_rs::schema`'s `ColType` helpers where they fit; drop to raw `sea_query::ColumnDef` (see `migration/src/helpers.rs`'s `uuidv7_pk()`) for anything `ColType` can't express, rather than fighting the abstraction.
 RLS, GRANT, `CREATE SCHEMA`, extensions, triggers, and `SECURITY DEFINER` functions go through `manager.get_connection().execute_unprepared(...)`: this is Loco's own documented pattern for these, not an escape hatch to avoid.
 
@@ -47,7 +55,8 @@ Verification for any new write handler must include a follow-up read confirming 
 `TenantDb::begin_for_workspace(tenant_id, workspace_id)` begins a transaction on that wrapped connection and sets `app.current_tenant`/`app.current_workspace` transaction-locally (`set_config(..., true)`), so RLS policies see them for every statement on that transaction, entity API and raw SQL alike, and they disappear automatically at commit or rollback with no `after_release` reset needed for the GUCs specifically.
 Both pools are constructed in `Hooks::after_context` (`src/app.rs`) and stored as `db::DbHandle` in `ctx.shared_store`, retrieved via `ctx.shared_store.get_ref::<db::DbHandle>()`.
 `Authorized<R>`'s extractor calls `begin_for_workspace` and hands the handler the resulting `DatabaseTransaction`.
-`SessionLock` (session-scoped `pg_advisory_lock`, used where a caller needs the same lock held across steps that can't share one transaction) is the one thing that still has no SeaORM equivalent and stays on the raw `sqlx::PgPool` permanently: `begin`/entity API re-acquire a connection per call or pin one only for a transaction's lifetime, and neither expresses "hold this one connection across steps with no enclosing transaction."
+There is no session-scoped advisory lock helper: `SessionLock` existed for the shape where a caller needs one lock held across steps that cannot share a transaction, and was removed unused, since every lock this codebase actually takes is `db::lock_for_update` inside one transaction.
+Reintroducing it means the raw `sqlx::PgPool` again, because SeaORM's `DatabaseConnection` re-acquires a connection per call and a transaction pins one only for its own lifetime, so neither expresses "hold this connection across steps with no enclosing transaction".
 See <https://github.com/yotsunagi/yorishiro/issues/221> for the design history.
 
 **Decided (2026-08-24): the migration crate targets SQLite as well as PostgreSQL; nothing else does yet.**

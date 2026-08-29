@@ -1,13 +1,14 @@
 pub use super::_entities::identity_invites::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
-pub type IdentityInvites = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, _db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
+    async fn before_save<C>(mut self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
+        self.id = crate::db::sqlite_generated_id(db, self.id);
         Ok(self)
     }
 }
