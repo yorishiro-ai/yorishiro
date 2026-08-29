@@ -1,8 +1,8 @@
 name: Documentation Check
 
-# Retargeted from master to develop/loco-rebuild, and the source-path detection below from
-# crates/ + migrations/ (master's pre-rebuild layout) to src/ + ee/crates/ + migration/ (the
-# Loco rebuild's own), so the check actually looks at paths this branch has.
+# Runs on develop/loco-rebuild. The source-path detection below covers `src/` and `ee/`, which is
+# where this repository's Rust lives; `master`'s own layout is different and its workflow is
+# separate.
 
 on:
   pull_request:
@@ -37,7 +37,7 @@ jobs:
             });
 
             const srcChanged = files.some(f =>
-              (f.filename.startsWith('src/') || f.filename.startsWith('ee/crates/')) &&
+              (f.filename.startsWith('src/') || f.filename.startsWith('ee/')) &&
               f.filename.endsWith('.rs') &&
               !f.filename.includes('/tests/')
             );

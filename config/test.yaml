@@ -71,7 +71,7 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_test") %>
+  uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro_test") %>
   # When enabled, the sql query will be logged.
   enable_logging: false
   # Set the timeout duration when acquiring a connection.

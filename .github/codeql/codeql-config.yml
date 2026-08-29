@@ -19,7 +19,7 @@
 # It fired on three sites and each one is correct, because none of them is a log.
 # src/tasks/list_members.rs prints a member table to the terminal of the operator who ran `admin list-members`, and the email address is the answer to the question that command exists to answer.
 # src/tasks/add_member.rs prints the confirmation of the membership the operator just created.
-# ee/crates/yorishiro-hosted/tests/requests/oauth.rs interpolates a value into a `panic!` message in a test assertion.
+# tests/requests/oauth.rs interpolates a value into a `panic!` message in a test assertion.
 # The query detects sensitive data reaching an output sink and cannot distinguish a log shipped somewhere from stdout read by the person who asked for it.
 #
 # GitHub's autofix drafts for all three (#244, #245, #246) were read and closed rather than merged.

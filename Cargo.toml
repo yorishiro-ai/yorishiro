@@ -15,7 +15,7 @@ default-run = "yorishiro"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace.dependencies]
-# Depended on identically (version and, where they take any, features) by both the root package and ee/crates/yorishiro-hosted; each side pulls these with `workspace = true` rather than repeating the specification, so the two can't drift out of sync the way loco-rs's version did before this table existed.
+# Depended on identically (version and, where they take any, features) by this package and `migration/`; each side pulls these with `workspace = true` rather than repeating the specification, so the two cannot drift out of sync.
 #
 # `worker` used to be listed explicitly here; it is loco-rs's own default and was never doing anything (`default-features = false` is not set), so the explicit listing read as "deliberately enabled" when it was actually just the default, which invited exactly that misreading.
 # Dropped rather than kept-with-a-comment, since there is nothing this crate does to make it deliberate.

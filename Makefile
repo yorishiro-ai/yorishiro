@@ -20,7 +20,7 @@ fmt:
 fmt-check:
 	cargo fmt --all --check
 
-# make test [ARGS="-p yorishiro-core --test mod auth"]
+# make test [ARGS="-p yorishiro --test mod auth"]
 test:
 	DATABASE_URL=$(DATABASE_URL) cargo test --workspace $(ARGS)
 
