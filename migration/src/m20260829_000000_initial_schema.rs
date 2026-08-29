@@ -1115,8 +1115,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // yorishiro_app gets no GRANT at all here, matching identity_tenants: this table is reached only through ctx.db (the migration-role connection), never a tenant-scoped request connection.
-        // Enabling RLS anyway is defense in depth against a future grant added without re-deriving this reasoning.
+        // No GRANT and RLS anyway, for the reason identity_tenants gives above: this table is reached only through ctx.db, never a tenant-scoped request connection.
         helpers::enable_rls_with_policy(
             manager,
             "identity_tenant_billing",
