@@ -7,12 +7,12 @@
 //! The routes fall into four groups, and the reason each is here differs:
 //!
 //! **Gated** (`marketplace`, and `inference::gated_routes`) must answer 404 unlicensed and something
-//! other than 404 licensed. These are exactly the surfaces that carried `LicenceState::require_active`
-//! in their own handlers before the gate became a layer.
+//! other than 404 licensed.
 //!
-//! **Ungated inside a gated controller** (`/hosted/workspace/llm-key`) is the group that exists
-//! because a layer applies per `Routes` while the check it replaced was written per handler. These
-//! three sit in `inference` beside a gated route and were never gated themselves.
+//! **Ungated inside a gated controller** (`/hosted/workspace/llm-key`) sits in `inference` beside a
+//! gated route without being gated itself, because storing a credential is not a paid action while
+//! spending it on an inference call is. A layer applies per `Routes`, so this group exists to keep
+//! the two apart.
 //!
 //! **Config-gated** (`oauth`, `stripe`) are deliberately absent from these assertions. Both already
 //! answer 404 when their own configuration is unset, which is the state a test process boots in, so
@@ -52,8 +52,8 @@ fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
 ///
 /// Authentication is deliberately not set up: the gate runs before the handler, so an unlicensed
 /// deployment answers 404 to an unauthenticated caller for the licence reason rather than 401 for
-/// the authentication one. That ordering is the anti-probing property the layer inherits from the
-/// original in-handler checks, and asserting it here is what pins it.
+/// the authentication one. That ordering is what keeps an unlicensed deployment un-probeable, and
+/// asserting it here is what pins it.
 ///
 /// Every path in this file is a GET that a route actually declares. A path with no route answers 404
 /// for that reason alone, which would make the unlicensed assertions pass with the gate deleted —
@@ -65,11 +65,9 @@ const GATED: &[&str] = &[
 
 /// Routes inside a gated controller that are deliberately NOT gated.
 ///
-/// `inference` declares two route groups for this reason: the licence check it replaces was written
-/// per handler, and these three never called it. Storing an LLM key has never needed a licence; only
-/// spending it on an inference call has. They are asserted separately from `UNGATED` because the
-/// failure they catch is specific — collapsing `inference`'s two groups back into one would gate
-/// them, and nothing else in this file would notice.
+/// Asserted separately from `UNGATED` because the failure they catch is specific: collapsing
+/// `inference`'s two route groups into one would gate them, and nothing else in this file would
+/// notice.
 const UNGATED_INSIDE_A_GATED_CONTROLLER: &[&str] = &["/hosted/workspace/llm-key"];
 
 /// One per ungated controller. These must be served in both boots.
@@ -132,8 +130,8 @@ async fn gated_routes_are_served_with_a_licence() {
         for path in GATED {
             let response = request.get(path).await;
             // Not asserting 200: these routes still authenticate, and this request carries no key.
-            // What matters is that the licence gate is no longer the thing rejecting it, which a
-            // 404 would mean and a 401/403/422 would not.
+            // What matters is that the licence gate is not what rejects it, which a 404 would mean
+            // and a 401/403/422 would not.
             assert_ne!(
                 response.status_code(),
                 404,
@@ -176,9 +174,9 @@ async fn an_expired_licence_closes_the_gate_again() {
         install_licence(&ctx, 60 * 60);
         let licensed = request.get(GATED[0]).await.status_code();
         // 401 here rather than 200: the request carries no API key, and the point is only that the
-        // *licence* is no longer what rejects it. Asserting the exact code rather than `!= 404`
-        // matters — a bare `assert_ne!(.., 404)` also holds when the gate is disabled entirely, so
-        // it would pass with the mechanism removed (confirmed by running exactly that).
+        // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters —
+        // a bare `assert_ne!(.., 404)` also holds when the gate is disabled entirely, so it would
+        // pass with the mechanism removed (confirmed by running exactly that).
         assert_eq!(
             licensed, 401,
             "an active licence must let the request reach authentication; got {licensed}"

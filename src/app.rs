@@ -17,19 +17,18 @@ use crate::{controllers, tasks};
 
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
-/// This is where the paid-edition boundary lives now. It used to be the crate split: paid code was
-/// absent from the community binary on disk, so there was nothing to gate. One binary carries both
-/// editions, so the boundary became a runtime check instead.
+/// This is the paid-edition boundary: one binary carries both editions, and the licence decides at
+/// runtime which surfaces answer.
 ///
 /// **Per request, not per boot.** Mounting the gated routes conditionally at startup would be
 /// simpler and is wrong: `LicenceState::is_active` compares `exp` against the current time on every
 /// call precisely so a key that lapses while the process runs stops unlocking paid features without
 /// a restart (see `ee::services::licence`). A route set decided once at boot cannot un-mount, which
-/// would turn that documented property into a silent enforcement hole.
+/// would turn that property into a silent enforcement hole.
 ///
 /// Applied through `Routes::layer`, which wraps each handler's own `MethodRouter`, so it reaches
-/// exactly the routes it is attached to and cannot leak onto base's. That is a property of the data
-/// rather than of this function, but it is the reason the community routes stay reachable.
+/// exactly the routes it is attached to and cannot leak onto the community ones. That is a property
+/// of the data rather than of this function, but it is the reason those routes stay reachable.
 ///
 /// Running before the handler is also what keeps an unlicensed deployment un-probeable: every gated
 /// route answers the same 404 to everyone, rather than authenticating first and thereby confirming
@@ -50,9 +49,8 @@ async fn licence_gate(
         return next.run(request).await;
     }
 
-    // The same 404 and operator-facing hint `LicenceState::require_active` returned from the two
-    // handlers that used to carry this check themselves, rendered through `ApiError` so the body
-    // matches every other error this application emits rather than being formatted a second way.
+    // Rendered through `ApiError` so the body matches every other error this application emits
+    // rather than being formatted a second way.
     crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
         "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
     ))
@@ -142,8 +140,7 @@ impl Hooks for App {
             crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
         ));
 
-        // The paid edition's own wiring. This ran in a second `Hooks` impl while `ee/` was a
-        // separate crate; one crate means one impl, so it is layered here instead.
+        // The paid edition's own wiring.
         //
         // An absent or invalid licence key does not fail boot. It warns and continues rather than
         // refusing, which is deliberate: `db::require_min_sqlite_connections` above refuses boot on
@@ -206,15 +203,12 @@ impl Hooks for App {
     /// Which of the paid edition's routes are licence-gated is a three-way split, not a binary one,
     /// and the two ungated groups are ungated for different reasons.
     ///
-    /// `marketplace` and `inference::gated_routes` carry the gate: these are the surfaces that
-    /// previously called `LicenceState::require_active` in their own handlers, and attaching the
-    /// layer reproduces exactly that set rather than widening it.
+    /// `marketplace` and `inference::gated_routes` carry the gate.
     ///
-    /// The split inside `inference` is why it has two route groups. A layer applies to a whole
-    /// `Routes`, but the check it replaces was written per handler: `infer-fill` called it and the
-    /// three `/workspace/llm-key` routes beside it never did — storing a key has never needed a
-    /// licence, only spending it on an inference call has. Leaving them in one group would have
-    /// silently gated three routes that serve without a licence today.
+    /// `inference` is two route groups because the licence line runs through the middle of it:
+    /// `infer-fill` spends an LLM call and is gated, while the three `/workspace/llm-key` routes
+    /// beside it only store the credential and are not. A layer applies to a whole `Routes`, so
+    /// keeping them in one group would gate all four.
     ///
     /// `oauth` and `stripe` are gated by *configuration* instead, and deliberately carry no licence
     /// check: `oauth` because it is opt-in by setting an issuer URL rather than a feature to unlock

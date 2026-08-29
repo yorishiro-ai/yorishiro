@@ -91,11 +91,10 @@ async fn infer_fill(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<InferFillReport>, ApiError> {
-    // The server calls an LLM here, which is the definition of a paid feature. The licence check
-    // that used to sit at the top of this function is `app::licence_gate`, a layer on this module's
-    // route group: it still runs before authentication, so an unlicensed deployment still answers
-    // the same 404 to everyone rather than confirming to a valid key that the endpoint exists and
-    // is merely locked.
+    // The server calls an LLM here, which is the definition of a paid feature. The licence check is
+    // `app::licence_gate`, a layer on this route's own group: it runs before authentication, so an
+    // unlicensed deployment answers the same 404 to everyone rather than confirming to a valid key
+    // that the endpoint exists and is merely locked.
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     let workspace_id = auth_ctx.workspace_id;
@@ -175,13 +174,13 @@ async fn infer_fill(
 
 /// Managing the workspace's own LLM credentials.
 ///
-/// Split from [`gated_routes`] rather than sharing one `Routes` with it, because the licence gate
-/// is applied per `Routes` and these three are not gated: storing a key has never required a
-/// licence, only spending it on an inference call has. Merging the two back together would quietly
-/// extend the gate over these, which is a product decision rather than a routing detail.
+/// Separate from [`gated_routes`] because the licence gate applies per `Routes` and these three are
+/// not gated: storing a credential does not require a licence, only spending it on an inference call
+/// does. Merging the two groups would extend the gate over these, which is a product decision rather
+/// than a routing detail.
 ///
-/// The `hosted` prefix is repeated rather than factored out, so the paths a client sees are
-/// identical to when both groups lived in one `Routes`.
+/// The `hosted` prefix is repeated rather than factored out, so both groups serve the paths a client
+/// expects.
 pub fn routes() -> Routes {
     Routes::new().prefix("hosted").add(
         "/workspace/llm-key",

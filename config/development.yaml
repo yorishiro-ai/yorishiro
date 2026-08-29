@@ -7,11 +7,10 @@ logger:
   # Enable pretty backtrace (sets RUST_BACKTRACE=1)
   pretty_backtrace: true
   # Log level, options: trace, debug, info, warn or error.
-  # This is live: loco applies it to its own module whitelist plus this application. It was inert
-  # while an `override_filter` sat below (loco does not read `level` at all when that is set), which
-  # this workspace needed only because it had two application crates and loco's default filter
-  # admits exactly one. There is one crate now, so the default covers it.
-  # `RUST_LOG` still overrides everything here when set: loco tries `EnvFilter::try_from_default_env()`
+  # loco applies this to its own module whitelist plus this application, which its default filter
+  # admits because there is one application crate. Setting `override_filter` below would make this
+  # key inert: loco does not read `level` at all when that is set.
+  # `RUST_LOG` overrides everything here when set: loco tries `EnvFilter::try_from_default_env()`
   # before reading this file at all (`logger.rs:193`), so a platform that injects `RUST_LOG` silences
   # this application unless that variable names it too.
   level: <%= get_env(name="LOG_LEVEL", default="debug") %>

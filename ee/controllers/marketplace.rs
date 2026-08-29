@@ -20,11 +20,10 @@ use crate::ee::services::marketplace;
 
 /// Authentication for every route in this module.
 ///
-/// This used to check the licence here too, before authenticating, so that an unlicensed deployment
-/// answered the same `404` to everyone rather than 401ing and thereby telling an anonymous prober
-/// that the endpoint exists and is merely locked. That check now lives in `app::licence_gate`,
-/// applied as a layer to this module's whole route group, which runs before any handler and so
-/// preserves that ordering by construction rather than by every handler remembering to call this.
+/// The licence check is not here: `app::licence_gate` covers this module's whole route group and
+/// runs before any handler, so an unlicensed deployment answers the same `404` to everyone rather
+/// than 401ing and thereby telling an anonymous prober that the endpoint exists and is merely
+/// locked. That ordering holds by construction rather than by every handler remembering to check.
 async fn licensed_tenant(
     ctx: &AppContext,
     headers: &HeaderMap,
