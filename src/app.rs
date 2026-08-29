@@ -87,12 +87,10 @@ impl Hooks for App {
     }
 
     /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store`, on PostgreSQL only.
+    /// `crate::db`'s module doc has why that pool exists separately from `ctx.db`.
     ///
-    /// Loco's own database connection (`ctx.db`, a `sea_orm::DatabaseConnection`) is built from `sea_orm::ConnectOptions`, which has no `after_connect`/`after_release` hook.
-    /// This deployment's row-level security depends on a `SET ROLE` per physical connection and `set_config(...)` per request, so that lifecycle is built separately here, on a hand-constructed `sqlx::PgPool`, and stored for handlers to retrieve via `ctx.shared_store.get_ref::<crate::db::DbHandle>()`.
-    ///
-    /// On SQLite, none of this runs: `sqlx::postgres::PgPoolOptions::connect` on a `sqlite://` URL doesn't error, it hangs indefinitely, so this whole block must not be reached at all rather than be expected to fail fast.
-    /// SQLite has no second tenant to isolate with RLS in the first place (see `docs/sqlite.md`), so `DbHandle`/`Authenticator` are simply not built for it: `crate::controllers::extractors` branches on `ctx.db.get_database_backend()` and authenticates directly against `ctx.db` instead of going through the `Authenticator` seam, which is a PostgreSQL/`ee/`-only concept on a deployment with no `ee/` and one backend.
+    /// On SQLite none of this runs, and the branch must skip it rather than let it fail: `PgPoolOptions::connect` on a `sqlite://` URL hangs indefinitely instead of erroring.
+    /// That backend has no second tenant to isolate (see `docs/sqlite.md`), so `DbHandle` and the `Authenticator` seam are not built at all; `controllers::extractors` authenticates against `ctx.db` directly there.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
             crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
@@ -106,8 +104,8 @@ impl Hooks for App {
                     .map_err(|e| {
                         loco_rs::Error::Message(format!("failed to build tenant pool: {e}"))
                     })?;
-            // The identity pool connects as the migration role (bypassing RLS) for control-plane access: signup, setup, the admin CLI.
-            // No after_connect/after_release, since it never scopes to a tenant/workspace.
+            // The identity pool connects as the migration role for control-plane access (signup,
+            // setup, the admin CLI), so it needs no hooks: it never scopes to a workspace.
             let identity = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(ctx.config.database.max_connections)
                 .connect(&database_url)
@@ -117,7 +115,8 @@ impl Hooks for App {
                 })?;
             ctx.shared_store
                 .insert(crate::db::DbHandle { tenant, identity });
-            // The authenticator seam: a deployment that needs a different authentication rule (a key naming its workspace per request, an external identity system) replaces this insert with its own `Arc<dyn Authenticator>` rather than changing every call site.
+            // Each of the four seams below works the same way: a later `shared_store.insert` of the
+            // same trait object replaces the default without any call site changing.
             ctx.shared_store
                 .insert(crate::services::auth::default_authenticator());
         }
@@ -128,11 +127,10 @@ impl Hooks for App {
                 loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
             })?;
         ctx.shared_store.insert(embedding_provider);
-        // The per-workspace embedding resolver seam: a deployment that lets a workspace point at its own embedding backend replaces this insert with its own `Arc<dyn WorkspaceEmbeddingResolver>` rather than changing every call site.
-        // Unlike the authenticator seam, this is inserted on every backend: it reads `ctx.db` directly (see the trait's own doc comment), which works on SQLite too, and a workspace-level assignment is not an RLS concept the way `Authenticator` is.
+        // Both resolver seams are installed on every backend, unlike the authenticator above: they
+        // read `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
         ctx.shared_store
             .insert(crate::services::embedding::default_embedding_resolver());
-        // The per-workspace worker-class resolver seam, the same pattern as the embedding resolver above: a deployment that lets a workspace pin its jobs to a tenant-private or official-node worker replaces this insert with its own `Arc<dyn WorkerClassResolver>`.
         ctx.shared_store
             .insert(crate::workers::embedding_sync::default_worker_class_resolver());
         // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
@@ -142,24 +140,17 @@ impl Hooks for App {
 
         // The paid edition's own wiring.
         //
-        // An absent or invalid licence key does not fail boot. It warns and continues rather than
-        // refusing, which is deliberate: `db::require_min_sqlite_connections` above refuses boot on
-        // a comparable misconfiguration, and the analogy does not carry. That one refuses because
-        // `max_connections` below 2 deadlocks under load with no legible symptom; this one has a
-        // legible symptom the moment a gated route is reached, so the operator keeps the choice.
+        // An absent or invalid licence key warns and continues rather than failing boot: unlike
+        // `require_min_sqlite_connections` above, this misconfiguration announces itself the moment
+        // a gated route is reached, so the operator keeps the choice.
         ctx.shared_store
             .insert(crate::ee::services::licence::LicenceState::from_env());
 
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            // Three of the paid edition's queries hardcode `DatabaseBackend::Postgres` and fail at
-            // execution time naming a query rather than the configuration that caused it:
-            // `ee::models::origin::list_with_upstream_changes`, `ee::models::marketplace::list_marketplace`,
-            // and `ee::models::marketplace::insert_next_version`. Named by function rather than by
-            // line, since a line number goes stale and a function does not.
-            //
-            // This is the only thing that explains those failures on this backend, because
-            // `TenantScopedAuthenticator` below is deliberately not installed here: without it,
-            // nothing else names the paid edition at boot at all.
+            // The three queries named here hardcode `DatabaseBackend::Postgres` and would otherwise
+            // fail at execution time naming a query rather than the configuration behind it. Nothing
+            // else reports the paid edition's state at boot on this backend, since
+            // `TenantScopedAuthenticator` below is deliberately not installed.
             tracing::warn!(
                 "some paid features are unavailable on SQLite: browsing the marketplace, publishing \
                  a template version, and listing template-origin updates each run a PostgreSQL-only \
@@ -168,16 +159,15 @@ impl Hooks for App {
             );
         } else {
             // Replaces the default authenticator inserted above (`Arc<dyn Authenticator>` is keyed
-            // by `TypeId`, so the later insert wins), which is what lets a tenant-scoped key name
-            // its workspace per request on every authenticated path, REST and MCP alike.
+            // by `TypeId`, so the later insert wins), letting a tenant-scoped key name its workspace
+            // per request on every authenticated path, REST and MCP alike.
             //
-            // PostgreSQL only, and deliberately not licence-conditional. It reads through
-            // `DbHandle::tenant`, which does not exist on SQLite; and making authentication itself
-            // depend on the licence would change who a caller *is* the moment a key lapsed, rather
-            // than which features they reach. It is safe unconditionally on this backend because it
-            // is a strict superset: base's authenticator calls `authenticate_api_key($1)`, this one
-            // calls `($1, $2)`, and the second argument is consulted only for a key with a NULL
-            // `workspace_id`, which nothing outside the paid edition can mint.
+            // PostgreSQL only, because it reads through `DbHandle::tenant`. Deliberately not
+            // licence-conditional either: tying authentication to the licence would change who a
+            // caller *is* the moment a key lapsed, rather than which features they reach.
+            // Installing it unconditionally here is safe because it is a strict superset, calling
+            // `authenticate_api_key($1, $2)` where base calls `($1)`, and the second argument only
+            // matters for a NULL-`workspace_id` key, which nothing outside `ee/` can mint.
             ctx.shared_store.insert(std::sync::Arc::new(
                 crate::ee::services::tenant_auth::TenantScopedAuthenticator,
             )
@@ -200,24 +190,18 @@ impl Hooks for App {
         Ok(ctx)
     }
 
-    /// Which of the paid edition's routes are licence-gated is a three-way split, not a binary one,
-    /// and the two ungated groups are ungated for different reasons.
+    /// The community routes first, then the paid edition's on top, which is the shape the product
+    /// describes: `ee/` adds paths rather than replacing any.
     ///
-    /// `marketplace` and `inference::gated_routes` carry the gate.
+    /// Only `marketplace` and `inference::gated_routes` take the gate. `oauth` and `stripe` are
+    /// gated by configuration instead, and the rest serve without a licence; `ee-composition.md`
+    /// records why each falls where it does, and widening that set is a product decision rather than
+    /// something to inherit from where a layer is attached.
     ///
     /// `inference` is two route groups because the licence line runs through the middle of it:
-    /// `infer-fill` spends an LLM call and is gated, while the three `/workspace/llm-key` routes
-    /// beside it only store the credential and are not. A layer applies to a whole `Routes`, so
-    /// keeping them in one group would gate all four.
-    ///
-    /// `oauth` and `stripe` are gated by *configuration* instead, and deliberately carry no licence
-    /// check: `oauth` because it is opt-in by setting an issuer URL rather than a feature to unlock
-    /// (see its own module doc), and `stripe` because the webhook is how a licence gets bought, so
-    /// requiring one to reach it would be circular.
-    ///
-    /// The rest (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`) serve without
-    /// a licence today and continue to. Widening the gate to cover them may well be right, but it is
-    /// a deliberate product decision rather than something to inherit from where a layer is attached.
+    /// `infer-fill` spends an LLM call and is gated, while the `/workspace/llm-key` routes beside it
+    /// only store the credential. A layer applies to a whole `Routes`, so one group would gate all
+    /// four.
     fn routes(_ctx: &AppContext) -> AppRoutes {
         let gate = axum::middleware::from_fn_with_state(_ctx.clone(), licence_gate);
 

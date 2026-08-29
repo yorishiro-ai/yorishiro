@@ -64,8 +64,8 @@ impl WorkerClass {
         }
     }
 
-    /// The `snake_case` wire form this type already serializes to/from (`#[serde(rename_all = "snake_case")]`), exposed as a plain string for `ee/`'s own persistence (`identity_workspace_worker_classes`).
-    /// Storing this same string rather than inventing a second representation means a value read from the database and one read off `EmbeddingSyncArgs`'s own queue payload are byte-identical, so an operator inspecting either sees the same thing.
+    /// The `snake_case` wire form this type already serializes to, exposed as a plain string for `ee/`'s `identity_workspace_worker_classes`.
+    /// Reusing it rather than inventing a second representation keeps a database value and a queue payload byte-identical to an operator inspecting either.
     #[must_use]
     pub fn as_db_str(self) -> &'static str {
         match self {
@@ -93,12 +93,12 @@ impl WorkerClass {
 
 /// Resolves a workspace's own worker-class assignment, if it has one.
 ///
-/// A seam, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`]: a deployment can let a workspace pin its embedding-sync jobs to a tenant-private or official-node worker instead of the shared pool, without touching the callers that enqueue a job.
-/// [`DefaultWorkerClassResolver`] is the behaviour of every deployment that does not replace it: every workspace's jobs stay `Shared`.
+/// A seam, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`], letting a deployment pin a workspace's jobs to particular compute without touching the callers that enqueue them.
+/// [`DefaultWorkerClassResolver`] keeps every workspace on `Shared`.
 ///
-/// `conn` is `ctx.db`, not the RLS-scoped tenant pool, for the same reason `WorkspaceEmbeddingResolver` takes it: a per-workspace worker-class assignment is deployment configuration (which compute a tenant pays for), read the same way `identity_workspace_llm_keys`/`identity_workspace_embedding_keys` are, not tenant content.
+/// `conn` is `ctx.db` rather than the RLS-scoped pool: which compute a tenant pays for is deployment configuration, not tenant content.
 ///
-/// Returns `Ok(None)` when the workspace has no assignment of its own, so the caller falls back to [`WorkerClass::Shared`] rather than this seam deciding the fallback itself.
+/// Returns `Ok(None)` for a workspace with no assignment, leaving the fallback to the caller rather than deciding it here.
 #[async_trait]
 pub trait WorkerClassResolver: Send + Sync {
     async fn resolve(
@@ -128,12 +128,8 @@ pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
     Arc::new(DefaultWorkerClassResolver)
 }
 
-/// Only `workspace_id`/`entity_id`, not the `EntityRecord` itself: the record is re-read from the database inside `perform`, so a create-then-update (or create-then-delete) racing ahead of a still-queued job is picked up as the entity's current state rather than overwriting it with whatever was true at enqueue time.
-/// A deleted entity is simply not found when re-read, and the job is a no-op for it.
-///
-/// No `model` field: `perform` re-resolves the provider from `workspace_id` on every run, and
-/// `EmbeddingProvider` exposes no model identifier to mirror here anyway. Carrying one would be a
-/// value nothing reads and nothing keeps in sync.
+/// Ids only, not the `EntityRecord` or the provider's model name: everything is re-read inside `perform`, so an update racing ahead of a still-queued job is picked up as the entity's current state rather than overwritten with what was true at enqueue time.
+/// A deleted entity is not found on that re-read, and the job is a no-op.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
     pub workspace_id: Uuid,
@@ -141,14 +137,11 @@ pub struct EmbeddingSyncArgs {
     pub worker_class: WorkerClass,
 }
 
-/// Loco has no automatic retry for any queue driver (see `Queue::retry_failed`'s own doc comment): `Ok` marks the job `Completed` in `pg_loco_queue` and `Err` marks it `Failed`, and only `Failed` is something an operator can find and re-run with `retry_failed`.
-/// A structural failure (a schema no longer defining the field being embedded, a workspace's stamped dimension count not matching what the provider produces) will not go away on retry, so it is logged and reported `Ok`: retrying it would just mark the same job `Completed` again with nothing to show for the failure.
-/// A transient one (`ProviderBusy`, `ProviderUnreachable`, or `Internal`) propagates as `Err`, which
-/// is what `Failed` plus `retry_failed` exist for. Reporting them `Ok` would let a whole provider
-/// outage mark itself `Completed` with every embedding still `NULL` and nothing recording that
-/// anything went wrong, which is indistinguishable from jobs that never needed to run.
+/// Loco has no automatic retry, so the return value decides what an operator can recover: `Err` marks the job `Failed`, which `retry_failed` can find and re-run, while `Ok` marks it `Completed` and forgets it.
+/// A structural failure (a schema no longer defining the embedded field, a dimension count not matching the provider) will not go away on retry, so it is logged and reported `Ok`.
+/// A transient one (`ProviderBusy`, `ProviderUnreachable`, `Internal`) propagates as `Err`: reporting those `Ok` would let a whole provider outage mark itself `Completed` with every embedding still `NULL`, indistinguishable from jobs that never needed to run.
 ///
-/// Shared by all three `WorkerClass` worker types below: the only difference between `EmbeddingSyncWorkerTenantPrivate`/`Official`/`Shared` is which tag `tags()` returns, so this function is the single place the actual sync logic lives rather than being copy-pasted three times.
+/// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> loco_rs::Result<()> {
     let provider = match crate::controllers::extractors::resolve_embedding_provider(
         ctx,
@@ -204,11 +197,10 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
     Ok(())
 }
 
-/// Declares one `WorkerClass`'s worker type: a thin struct whose only job is to give `tags()` a fixed single tag, so that class's jobs are visible only to a worker process that asked for that tag.
-/// `perform` on every generated type delegates to [`perform_embedding_sync`] unchanged; the three types differ in nothing but `tags()`'s return value.
+/// Declares one `WorkerClass`'s worker type: a thin struct giving `tags()` a fixed single tag, so that class's jobs are visible only to a worker process asking for it.
 macro_rules! embedding_sync_worker_for_class {
     ($worker_ty:ident, $class:expr) => {
-        #[doc = concat!("`EmbeddingSyncWorker` restricted to `", stringify!($class), "` jobs: registered under its own `class_name()`, so `enqueue_for_class` enqueues under this type's name for that `WorkerClass` and a worker process started with `--worker=", stringify!($class), "` dequeues only jobs this type enqueued.")]
+        #[doc = concat!("`EmbeddingSyncWorker` restricted to `", stringify!($class), "` jobs.")]
         pub struct $worker_ty {
             ctx: AppContext,
         }
@@ -234,9 +226,9 @@ embedding_sync_worker_for_class!(EmbeddingSyncWorkerTenantPrivate, WorkerClass::
 embedding_sync_worker_for_class!(EmbeddingSyncWorkerOfficial, WorkerClass::Official);
 embedding_sync_worker_for_class!(EmbeddingSyncWorkerShared, WorkerClass::Shared);
 
-/// Enqueues `args` on the worker type matching `args.worker_class`, so the tag `pg_loco_queue.tags` actually carries is the one the caller resolved, not every class's tag at once.
+/// Enqueues `args` on the worker type matching `args.worker_class`, so the queued tag is the one the caller resolved.
 ///
-/// Exhaustively matched on `WorkerClass` (no `_` arm) on purpose: adding a fourth `WorkerClass` variant without also adding its worker type here fails to compile, rather than silently falling through to the wrong queue the way a wildcard arm would let it.
+/// Exhaustively matched, with no `_` arm: a fourth `WorkerClass` without its worker type fails to compile rather than falling through to the wrong queue.
 pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
     let result = match args.worker_class {
         WorkerClass::TenantPrivate => EmbeddingSyncWorkerTenantPrivate::perform_later(ctx, args),
