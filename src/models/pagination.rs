@@ -1,6 +1,6 @@
 //! The `limit`/`offset` pair every `list` function takes, and the clamp it's checked against.
 //!
-//! Previously duplicated per table: `content_entities` and `content_relations` each defined their own `DEFAULT_LIST_LIMIT` (same value, `50`) and their own `.clamp(1, 200)` call, and `marketplace::list_marketplace` imported `content_entities`' copy rather than having a shared one of its own to reach for — a concept a specific table's module happened to own first.
+//! One definition for every table, rather than a `DEFAULT_LIST_LIMIT` and a `.clamp(1, 200)` per table's own module: pagination is not a concept any single table owns, and a caller in one module reaching into another's copy is what that shape produces.
 
 /// Applies to every paginated list, not `search.rs`'s `DEFAULT_SEARCH_LIMIT`: vector/trigram
 /// search is a different kind of query (ranked by relevance, not a page over a stable order) and

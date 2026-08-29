@@ -1,11 +1,8 @@
 [workspace]
 resolver = "2"
-# ".": this manifest is both the workspace root and the sole application package, the flat layout
-# this session's CLAUDE.md records as decided-2026-08-22, not carried forward from master's crates/ split.
-# `ee/` is no longer a package of its own: the paid edition compiles into this crate as one module
-# (see `src/lib.rs`'s `ee` declaration) and is gated at runtime by the licence layer rather than by
-# being a separate compilation unit. Two packages cannot share a name, which is what made the split
-# the only available shape when the paid edition needed its own crate; it no longer does.
+# ".": this manifest is both the workspace root and the sole application package.
+# The paid edition compiles into this crate as one module (see `src/lib.rs`'s `ee` declaration)
+# rather than being a package of its own; what it serves is decided at runtime by the licence layer.
 members = [".", "migration"]
 
 [package]

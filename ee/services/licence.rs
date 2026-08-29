@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 /// The public half of the signing key, compiled in.
 /// Rotating it means replacing this file and cutting a release; keys signed by the previous private key stop verifying at that point.
-// Resolved from this file's own directory (`ee/services/`), so the key stays beside the code it
-// verifies for rather than moving under `src/` with the crate that now compiles it.
+// Resolved from this file's own directory (`ee/services/`), so the key stays inside `ee/` beside
+// the code it verifies for.
 const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../keys/licence-public.pem");
 
 /// What a licence key asserts.
@@ -36,8 +36,7 @@ pub struct LicenceClaims {
 /// Which of the two sources wins, as a pure function so the precedence is testable without touching the process environment: tests that set a variable race each other.
 ///
 /// The file is consulted only when the variable is **absent**.
-/// Set-but-empty means the environment has spoken and the answer is "no licence", matching every other setting: the shared loader skips the file whenever the variable exists at all.
-/// Without that, `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file, despite the environment being what takes precedence.
+/// Set-but-empty means "no licence" rather than falling through, or `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file.
 pub(crate) fn resolve_licence_key(
     from_env: Option<String>,
     from_file: impl FnOnce() -> Option<String>,
@@ -107,9 +106,8 @@ pub struct LicenceState {
 impl LicenceState {
     /// Reads `YORISHIRO_LICENSE_KEY` and verifies it against the compiled-in public key.
     ///
-    /// An absent or empty variable yields an unlicensed state, which is a supported way to run: the free half works and the paid gates answer 404.
-    /// A *present but invalid* key also yields an unlicensed state rather than aborting startup, because refusing to boot would take down the free half over a paid-feature misconfiguration.
-    /// It is logged at `warn`, since it almost certainly means someone expected paid features to be on.
+    /// An absent, empty or invalid key all yield an unlicensed state rather than aborting startup: refusing to boot would take down the free half over a paid-feature misconfiguration.
+    /// An invalid one is logged at `warn`, since it almost certainly means someone expected paid features to be on.
     pub fn from_env() -> Self {
         let from_env =
             std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());

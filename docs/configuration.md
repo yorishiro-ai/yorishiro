@@ -3,7 +3,7 @@
 **English** | [日本語](ja/configuration.md)
 
 This is not a full settings reference: it covers the embedding provider, the per-workspace search token quota, and `config/production.yaml`'s queue tuning.
-Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings on this branch.
+Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings.
 
 ## Embedding provider
 
@@ -11,11 +11,14 @@ Every variable listed here is read directly from the environment; there is no `c
 
 ### When an embedding is generated
 
-Creating or replacing an entity queues a background job that generates its vector, on both transports: `POST /api/entities` and `PUT /api/entities/{id}`, and the `create_entity` and `update_entity` MCP tools. The job is enqueued only after the write's own transaction has committed, so the embedding provider round trip never adds its latency to the write.
+Creating or replacing an entity queues a background job that generates its vector, on both transports: `POST /api/entities` and `PUT /api/entities/{id}`, and the `create_entity` and `update_entity` MCP tools.
+The job is enqueued only after the write's own transaction has committed, so the embedding provider round trip never adds its latency to the write.
 
-**`import_jsonl` is the exception, on either transport.** A restored backup's entities are written with no embedding job queued, so they stay `embedding IS NULL` and are reachable only through the `pg_trgm` fuzzy fallback until something fills them in. Run `cargo loco task resync_embeddings workspace_id:<uuid>` after an import; the same command recovers entities whose background sync failed against an embedding provider outage that outlasted the job's own retries.
+**`import_jsonl` is the exception, on either transport.** A restored backup's entities are written with no embedding job queued, so they stay `embedding IS NULL` and are reachable only through the `pg_trgm` fuzzy fallback until something fills them in.
+Run `cargo loco task resync_embeddings workspace_id:<uuid>` after an import; the same command recovers entities whose background sync failed against an embedding provider outage that outlasted the job's own retries.
 
-An entity with a NULL embedding produces no error at any point. Search simply returns worse results for it, so this is worth checking after a restore rather than waiting for a report.
+An entity with a NULL embedding produces no error at any point.
+Search simply returns worse results for it, so this is worth checking after a restore rather than waiting for a report.
 
 `resync_embeddings` is PostgreSQL-only: `content_entities` has no `embedding` column at all on SQLite, since vector search is not ported to that backend (see `docs/sqlite.md`).
 
@@ -42,7 +45,7 @@ Which workspace uses which compute backend is a paid-edition decision.
 | `dimensions` | The vector width this provider produces |
 | `send_dimensions_param` | `true` includes a `dimensions` field in the embeddings request; default `false`, matching `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` above |
 
-A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so setting nothing is the same as before this endpoint existed.
+A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so a deployment that assigns nothing is unaffected by this endpoint.
 `DELETE /hosted/workspace/embedding-key` returns a workspace to that deployment default.
 
 `PUT` refuses a `dimensions` value that does not match the workspace's own stamped vector width (the `embedding_dimensions` recorded when the workspace was created) with `422`, before storing anything: assigning a provider whose output width does not match the vectors already on disk would otherwise only be discovered on the next entity write, when `sync_embedding`'s own write-time check (`services/embedding/sync.rs`) rejects it.
@@ -118,30 +121,39 @@ Three variables, and nothing else:
 
 Everything else this file reads either has a default or is opt-in.
 
-**The mailer block is opt-in and renders only when `MAILER_HOST` is set to a non-empty value.** Nothing in this application sends mail, and `Config.mailer` is an `Option`, so an absent block is a supported state. It is a template conditional rather than variables with defaults for a specific reason: loco-rs builds an `EmailSender` from this block whenever `smtp.enable` is true and fails the boot if that construction fails, so a block rendered against a placeholder host would fail exactly where an unset variable used to. Once you do set `MAILER_HOST`, `MAILER_USER` and `MAILER_PASSWORD` become required, which is the intended behaviour: opting in to mail means supplying credentials for it.
+**The mailer block is opt-in and renders only when `MAILER_HOST` is set to a non-empty value.** Nothing in this application sends mail, and `Config.mailer` is an `Option`, so an absent block is a supported state.
+It is a template conditional rather than variables with defaults for a specific reason: loco-rs builds an `EmailSender` from this block whenever `smtp.enable` is true and fails the boot if that construction fails, so a block rendered against a placeholder host would fail where an unset variable would not.
+Once you do set `MAILER_HOST`, `MAILER_USER` and `MAILER_PASSWORD` become required, which is the intended behaviour: opting in to mail means supplying credentials for it.
 
-**There is no `auth:` block, deliberately.** That block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`. `JWT_SECRET` is therefore not a variable this deployment reads at all.
+**There is no `auth:` block, deliberately.** That block configures loco-rs's own JWT support, and this application issues no JWTs: `POST /auth/login` returns a Yorishiro API key, and every authenticated path resolves it through `services::auth`, which never reads `Config.auth`.
+`JWT_SECRET` is therefore not a variable this deployment reads at all.
 
 `config/development.yaml` requires nothing: it boots against an empty environment, creating its own SQLite file.
 
 ## Logging
 
-`logger.level` is what sets the level, and loco's own default filter is what selects the modules. No `config/*.yaml` sets `override_filter`.
+`logger.level` is what sets the level, and loco's own default filter is what selects the modules.
+No `config/*.yaml` sets `override_filter`.
 
-loco builds that default from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`). One entry is enough because this workspace has one application crate: the paid edition compiles into it rather than being a crate of its own.
+loco builds that default from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`).
+One entry is enough because this workspace has one application crate: the paid edition compiles into it rather than being a crate of its own.
 
-It was not always. While `ee/` was a separate crate, the paid binary booted that crate's own `Hooks` impl, so the single entry named `yorishiro_hosted` and nothing named the base crate — every event from it was dropped by the filter on every paid-edition deployment, including the embedding worker's warnings and the auth paths. Every `config/*.yaml` carried an `override_filter` naming both crates to work around that. Consolidating the editions into one crate removed the reason for it, and the workaround came out with it.
+A second application crate would need naming in `override_filter`, or its events would be dropped by the filter with nothing in the symptom to point at why.
 
 If you do set `override_filter` for your own reasons, two things follow that are easy to get wrong:
 
-- **It replaces loco's whitelist rather than extending it.** The framework's own modules must be repeated in the value. Remove `loco_rs` and the queue, routing and `listening on` lines disappear; remove `sea_orm_migration` and migration progress does.
+- **It replaces loco's whitelist rather than extending it.** The framework's own modules must be repeated in the value.
+  Remove `loco_rs` and the queue, routing and `listening on` lines disappear; remove `sea_orm_migration` and migration progress does.
 - **It replaces `logger.level` too**, which loco does not read at all when this is set, so `LOG_LEVEL` stops changing anything.
 
-**`RUST_LOG` overrides all of this.** loco tries `EnvFilter::try_from_default_env()` before it looks at this configuration at all (`logger.rs:193`), so a deployment whose platform injects `RUST_LOG` gets whatever that variable says regardless of what is written here. Measured against the previous two-crate configuration: `RUST_LOG=loco_rs=info` produced zero lines from either application crate, with the server booting normally. If `RUST_LOG` is set in your environment, it has to name `yorishiro` itself.
+**`RUST_LOG` overrides all of this.** loco tries `EnvFilter::try_from_default_env()` before it looks at this configuration at all (`logger.rs:193`), so a deployment whose platform injects `RUST_LOG` gets whatever that variable says regardless of what is written here.
+Measured: `RUST_LOG=loco_rs=info` produces zero lines from the application, with the server booting normally.
+If `RUST_LOG` is set in your environment, it has to name `yorishiro` itself.
 
 ## Queue backend and tuning (`config/development.yaml`, `config/production.yaml`)
 
-`queue.kind` is switchable at boot, since loco-rs ships three queue providers (Postgres, `SQLite`, Redis/Valkey, `QueueConfig`'s `#[serde(tag = "kind")]` variants) and each needs a different set of fields (Redis alone takes `queues`; Postgres/`SQLite` share the SQL-pool knobs but point at different URIs). Both `development.yaml` and `production.yaml` template a whole alternative `queue:` block per `kind` (a Tera `<% if %>`/`<% elif %>`/`<% endif %>`) rather than templating individual fields inside one fixed shape.
+`queue.kind` is switchable at boot, since loco-rs ships three queue providers (Postgres, `SQLite`, Redis/Valkey, `QueueConfig`'s `#[serde(tag = "kind")]` variants) and each needs a different set of fields (Redis alone takes `queues`; Postgres/`SQLite` share the SQL-pool knobs but point at different URIs).
+Both `development.yaml` and `production.yaml` template a whole alternative `queue:` block per `kind` (a Tera `<% if %>`/`<% elif %>`/`<% endif %>`) rather than templating individual fields inside one fixed shape.
 
 | Variable | Description |
 |---|---|
@@ -153,19 +165,33 @@ If you do set `override_filter` for your own reasons, two things follow that are
 `development.yaml` enables the same reaper with fixed values (`num_workers: 2`, `age_minutes: 10`) rather than reading `YORISHIRO_QUEUE_WORKERS`/`YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, since a local development environment has no reason to tune them per deployment; `production.yaml` reads both.
 `config/test.yaml` has no `queue:` block at all (`docs`/`.claude/rules/testing.md` covers why), so none of this applies there.
 
-`config/sqlite.yaml` (the manual-verification SQLite tier, `docs/sqlite.md`) also configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as the other two environments. loco-rs's `SQLite` queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of the application's own `SQLite` connection, so it is a genuinely separate pool against the same or a different file, not routed through `db.rs`'s RLS-aware pool (`SQLite` has no RLS to be aware of). Measured directly against a real file: a concurrent write from the queue pool while the application holds an open write transaction on the same file waits out `sqlx`'s own 5-second default `busy_timeout` and succeeds once that transaction releases the lock, rather than failing. In this codebase specifically, the embedding-sync enqueue call only runs after the request's own write transaction has already committed, so this scenario does not arise from a single request; it would only matter for a genuinely concurrent second request racing the first's still-open transaction, and `content_entities::create` is one fast `INSERT`, well under the 5-second budget.
+`config/sqlite.yaml` (the manual-verification SQLite tier, `docs/sqlite.md`) also configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as the other two environments.
+loco-rs's `SQLite` queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of the application's own `SQLite` connection, so it is a genuinely separate pool against the same or a different file, not routed through `db.rs`'s RLS-aware pool (`SQLite` has no RLS to be aware of).
+Measured directly against a real file: a concurrent write from the queue pool while the application holds an open write transaction on the same file waits out `sqlx`'s own 5-second default `busy_timeout` and succeeds once that transaction releases the lock, rather than failing.
+In this codebase specifically, the embedding-sync enqueue call only runs after the request's own write transaction has already committed, so this scenario does not arise from a single request; it would only matter for a genuinely concurrent second request racing the first's still-open transaction, and `content_entities::create` is one fast `INSERT`, well under the 5-second budget.
 
 ## Running workers on a separate process or host
 
-`cargo loco start --worker[=tag1,tag2]` (or the equivalent `yorishiro` invocation, which shares loco-rs's own CLI) runs only the queue worker loop, no HTTP server, in the current process. `--worker=worker-class:official` restricts that process to jobs carrying that tag (`WorkerClass::tag()`, `src/workers/embedding_sync.rs`). A separate process, on a separate host, needs nothing beyond pointing its own config at the same `queue.uri`/`QUEUE_URL` and `database.uri`/`DATABASE_URL` the server uses — no additional networking layer, shared secret, or node-registration step.
+`cargo loco start --worker[=tag1,tag2]` (or the equivalent `yorishiro` invocation, which shares loco-rs's own CLI) runs only the queue worker loop, no HTTP server, in the current process.
+`--worker=worker-class:official` restricts that process to jobs carrying that tag (`WorkerClass::tag()`, `src/workers/embedding_sync.rs`).
+A separate process, on a separate host, needs nothing beyond pointing its own config at the same `queue.uri`/`QUEUE_URL` and `database.uri`/`DATABASE_URL` the server uses: no additional networking layer, shared secret, or node-registration step.
 
-**`--worker` with no value does not take every job.** Confirmed against `loco-rs` 1.1.0's own dequeue SQL (shared shape across the Postgres/`SQLite`/Redis queue providers): an empty tag list means "untagged jobs only", not "every job regardless of tag". Every job this deployment enqueues always carries exactly one `worker-class:*` tag (`workers::embedding_sync::enqueue_for_class`), so it is never untagged — a bare `--worker` process here dequeues none of these jobs, ever, not "the ones nothing else claimed". A deployment that wants one process to cover every class must name every tag explicitly: `--worker=worker-class:tenant-private,worker-class:official,worker-class:shared`. There is no wildcard/catch-all flag in `loco-rs` 1.1.0.
+**`--worker` with no value does not take every job.** Confirmed against `loco-rs` 1.1.0's own dequeue SQL (shared shape across the Postgres/`SQLite`/Redis queue providers): an empty tag list means "untagged jobs only", not "every job regardless of tag".
+Every job this deployment enqueues always carries exactly one `worker-class:*` tag (`workers::embedding_sync::enqueue_for_class`), so it is never untagged, and a bare `--worker` process here dequeues none of these jobs rather than taking "the ones nothing else claimed".
+A deployment that wants one process to cover every class must name every tag explicitly: `--worker=worker-class:tenant-private,worker-class:official,worker-class:shared`.
+There is no wildcard/catch-all flag in `loco-rs` 1.1.0.
 
-**A worker-only process still needs the server's full config, not just the queue connection.** `Hooks::after_context` (`src/app.rs`) runs unconditionally for every `StartMode` loco-rs has, including `--worker`-only: it builds the RLS-aware tenant pool and the migration-role identity pool against `DATABASE_URL` regardless of whether the process ever serves a request, and it fails boot outright if the embedding provider is misconfigured ("Boot fails loudly ... rather than deferring the error to the first search," the same doc comment names this deliberate). Every `WorkerClass` worker type's `perform` genuinely uses both: it reads `ctx.db` to re-fetch the entity and calls `resolve_embedding_provider`, which needs the same `YORISHIRO_EMBEDDING_*` variables (or a workspace's own assignment) the server needs. A worker node configured with only a queue connection and nothing else fails at boot, not silently: the operator error this guards against is assuming "the worker only talks to the queue" and skipping the rest of the config.
+**A worker-only process still needs the server's full config, not just the queue connection.** `Hooks::after_context` (`src/app.rs`) runs unconditionally for every `StartMode` loco-rs has, including `--worker`-only: it builds the RLS-aware tenant pool and the migration-role identity pool against `DATABASE_URL` regardless of whether the process ever serves a request, and it fails boot outright if the embedding provider is misconfigured.
+Every `WorkerClass` worker type's `perform` genuinely uses both: it reads `ctx.db` to re-fetch the entity and calls `resolve_embedding_provider`, which needs the same `YORISHIRO_EMBEDDING_*` variables (or a workspace's own assignment) the server needs.
+A worker node configured with only a queue connection fails at boot rather than silently: the operator error this guards against is assuming "the worker only talks to the queue" and skipping the rest of the config.
 
-**At least one process must stay subscribed to every `WorkerClass`'s tag, named explicitly.** If every running worker process is tag-restricted and no process names all three (`worker-class:tenant-private`, `worker-class:official`, `worker-class:shared`), whichever class none of them cover queues forever in `pg_loco_queue`/`sqlt_loco_queue` with nothing to dequeue it. A deployment adding a dedicated `worker-class:official` node must keep (or add) at least one process still running with all three tags named (not bare `--worker`, see above) to cover `Shared` and any other class that node doesn't.
+**At least one process must stay subscribed to every `WorkerClass`'s tag, named explicitly.** If every running worker process is tag-restricted and no process names all three (`worker-class:tenant-private`, `worker-class:official`, `worker-class:shared`), whichever class none of them cover queues forever with nothing to dequeue it.
+A deployment adding a dedicated `worker-class:official` node must keep (or add) at least one process still running with all three tags named (not bare `--worker`, see above) to cover `Shared` and any other class that node doesn't.
 
-**What actually parallelizes across multiple worker processes/hosts depends on the queue backend**, the same distinction `YORISHIRO_QUEUE_WORKERS`'s own row above already draws for `num_workers` within one process: Postgres's `pg_loco_queue` dequeue uses `FOR UPDATE SKIP LOCKED`, so multiple processes (on one host or several) genuinely dequeue different jobs concurrently. `SQLite`'s `sqlt_loco_queue` dequeue uses `BEGIN IMMEDIATE`, which takes the file's one write lock, so a second process pointed at the same `SQLite` file serializes behind the first rather than adding real parallelism — running more than one worker process against a `SQLite`-backed queue buys resilience (a second process to pick up work if the first dies) but not throughput.
+**What actually parallelizes across multiple worker processes/hosts depends on the queue backend**, the same distinction `YORISHIRO_QUEUE_WORKERS`'s own row above already draws for `num_workers` within one process.
+Postgres's `pg_loco_queue` dequeue uses `FOR UPDATE SKIP LOCKED`, so multiple processes (on one host or several) genuinely dequeue different jobs concurrently.
+`SQLite`'s `sqlt_loco_queue` dequeue uses `BEGIN IMMEDIATE`, which takes the file's one write lock, so a second process pointed at the same `SQLite` file serializes behind the first.
+Running more than one worker process against a `SQLite`-backed queue therefore buys resilience (a second process to pick up work if the first dies) but not throughput.
 
 ### A workspace's own worker-class assignment (paid edition)
 
@@ -176,7 +202,8 @@ Not part of the base edition: which compute a tenant's jobs run on is the same p
 |---|---|
 | `worker_class` | One of `tenant_private`, `official`, `shared` |
 
-A workspace with nothing configured here keeps its jobs `shared`, so setting nothing is the same as before this endpoint existed.
+A workspace with nothing configured here keeps its jobs `shared`, so a deployment that assigns nothing is unaffected by this endpoint.
 `DELETE /hosted/workspace/worker-class` returns a workspace to `shared`.
 No caching: an assignment made through this endpoint takes effect on the very next job enqueued for that workspace, not after some delay or a restart.
-Assigning a workspace to `tenant_private`/`official` has no effect on its own until a worker process actually subscribes to that tag ("Running workers on a separate process or host" above) — a workspace can be assigned a class with no node running it yet, and its jobs simply queue until one does.
+Assigning a workspace to `tenant_private`/`official` has no effect on its own until a worker process actually subscribes to that tag ("Running workers on a separate process or host" above).
+A workspace can be assigned a class with no node running it yet, and its jobs simply queue until one does.

@@ -37,7 +37,7 @@ flowchart TD
     Core --> DB
 ```
 
-The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: the same API routes, without `ee/` in front of them.
+Without a licence key, the inner subgraph is what a deployment serves on its own: the same API routes, with the paid surfaces answering `404`.
 It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
@@ -162,15 +162,11 @@ Configuration decides what is enabled, not which artifact you installed.
 | Web UI | Served either way, since the SPA is not licence-gated | |
 | Licence | [BUSL-1.1](LICENSE), plus [`ee/LICENSE`](ee/LICENSE) for the `ee/` directory | |
 
-The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a
-valid licence key is configured. The check is per request rather than at startup, so a key
-that expires while the process runs stops unlocking those surfaces without a restart.
+The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a valid licence key is configured.
+The check runs per request rather than at startup, so a key that expires while the process runs stops unlocking those surfaces without a restart.
 
-Both licences continue to apply exactly as written, because `ee/` remains a directory of
-that name: `ee/LICENSE` covers its contents, and the root [BUSL-1.1](LICENSE) covers the
-repository excluding it.
-
-The paid half has no README of its own on this branch. `ee/LICENSE` sets out the intended terms and says at the top of the file that it is a draft not yet settled by counsel, and `ee/crates/yorishiro-hosted/` is where its code lives.
+`ee/LICENSE` covers the `ee/` directory, and the root [BUSL-1.1](LICENSE) covers the repository excluding it.
+`ee/LICENSE` states at the top of the file that it is a draft not yet settled by counsel.
 
 ## Documentation
 
@@ -180,7 +176,7 @@ The paid half has no README of its own on this branch. `ee/LICENSE` sets out the
 | [docs/sqlite.md](docs/sqlite.md) | The SQLite tier: what it supports, what it does not, and why |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Where code goes, how `tests/` mirrors `src/`, what to run before pushing |
 
-Not written on this branch: a setup guide, a meta-schema guide, a REST/MCP API reference, a deployment guide and operational notes.
+Not yet written: a setup guide, a meta-schema guide, a REST/MCP API reference, a deployment guide and operational notes.
 Their subjects are covered where they are implemented rather than in prose, so `docs/configuration.md` and the doc comments are what to read until those documents exist.
 
 ## Development

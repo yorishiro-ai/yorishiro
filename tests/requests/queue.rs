@@ -1,14 +1,13 @@
 //! Covers the enqueue side of the background queue: that `enqueue_for_class` puts a row in the queue at all, and that each `WorkerClass` carries its own tag.
 //!
 //! Nothing else in this suite exercises a queue backend.
-//! `config/test.yaml` sets `workers.mode: ForegroundBlocking`, under which `perform_later` calls `perform` inline and never touches a queue, so every job body is covered on every run and the enqueue path is covered by nothing.
-//! That is the gap `#227` and `#232` both shipped through with a green suite.
+//! `config/test.yaml` sets `workers.mode: ForegroundBlocking`, under which `perform_later` calls `perform` inline and never touches a queue, so every job body is covered on every run and the enqueue path would otherwise be covered by nothing: a change breaking it ships through a green suite.
 //!
 //! **What this does not cover: the dequeue-side tag filter.**
-//! `#237` broke two things, the enqueue join tested here and the `WHERE` clause that decides which tags a running worker takes, and only the first is reachable from a test.
+//! A change can break both the enqueue join tested here and the `WHERE` clause that decides which tags a running worker takes, and only the first is reachable from a test.
 //! `Queue::run(tags)` is the sole public entry to the dequeue side and it is a loop with no one-shot, so asserting on it means running a worker for a bounded interval and checking what happened, which is a timing test.
 //! `SqliteDriver::dequeue` is the primitive that would express it exactly, and it is unreachable: the `Driver` trait lives in `bgworker::sql`, which is `pub(crate)`.
-//! Re-running loco's own filter SQL against the queue table was considered and rejected, because a copy of an implementation passes whether or not the implementation still behaves that way: it would keep passing after a loco upgrade changed the real filter, while appearing to cover exactly what changed.
+//! **Do not close this gap by re-running loco's own filter SQL against the queue table.** A copy of an implementation passes whether or not the implementation still behaves that way: it would keep passing after a loco upgrade changed the real filter, while appearing to cover exactly what changed.
 //! If loco ever makes `Driver` public, that assertion becomes writable and belongs here.
 //!
 //! The application database is PostgreSQL (`request_with_create_db`) while the queue is a SQLite file in a `TempDir`, which is a pairing no deployment runs.
@@ -103,7 +102,7 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 
 /// Each `WorkerClass` enqueues under its own worker type and carries that class's tag.
 ///
-/// This is the shape `#237` got wrong: `tags()` is a per-type static, so the class has to select the worker type at `perform_later` time rather than travel in the job's arguments.
+/// `tags()` is a per-type static, so the class has to select the worker type at `perform_later` time rather than travel in the job's arguments; getting that backwards is the easy mistake here.
 /// A regression that sent every class to one worker, or dropped the tag, shows up here as two rows sharing a name or carrying `None`.
 #[tokio::test]
 #[serial]

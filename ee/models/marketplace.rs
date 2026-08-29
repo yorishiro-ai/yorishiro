@@ -114,8 +114,13 @@ pub(crate) struct ForkSource {
 ///
 /// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
 ///
-/// The three aggregates (latest stable version, review count, average rating) stay correlated subqueries rather than a `JOIN` + `GROUP BY`: with `limit` bounding the page to at most 200 rows, their cost is bounded by the page size, and nothing here has measured the join rewrite as faster.
-/// The hand-written column list stays raw SQL for the same reason: three of nine selected columns are the correlated subqueries above, which are not columns any entity has, so no SeaORM projection can generate them; splitting the six real `identity_templates` columns out onto the entity API while leaving the three aggregates hand-written would fragment one `SELECT` across two code paths for no gain in drift-safety, since the struct itself still has to list all nine fields either way.
+/// The three aggregates (latest stable version, review count, average rating) are correlated
+/// subqueries rather than a `JOIN` + `GROUP BY`: `limit` bounds the page to 200 rows, so their cost
+/// is bounded too, and nothing has measured the rewrite as faster.
+///
+/// That is also why the whole `SELECT` is raw SQL: three of its nine columns are those subqueries,
+/// which no entity projection can produce. Putting the other six on the entity API would split one
+/// query across two code paths without reducing drift, since the struct lists all nine either way.
 pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,

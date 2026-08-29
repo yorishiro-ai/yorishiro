@@ -67,8 +67,16 @@ pub struct AuditActor {
 
 /// Appends one row.
 ///
-/// `conn` is deliberately generic over `ConnectionTrait` rather than fixed to a `DatabaseTransaction`: `undo_migration_job` records this on the same RLS-scoped transaction its effect lands on (so a rollback loses both together), while `set_maintenance` records it on `ctx.db`, the migration-role connection its own write already goes through (see `identity_maintenance::set`'s doc comment for why that write can't be RLS-scoped in the first place).
-/// The RLS policy on this table is strict (matching `content_entities`), so a `conn` that hasn't set `app.current_workspace` to `actor.workspace_id` first (or isn't the migration role, which the policy doesn't apply to at all) gets a row silently rejected by the `USING` clause rather than an error; callers on the RLS-scoped path get this for free from `TenantDb::begin_for_workspace`, already run before `record` by the time an `Authorized<R>` handler calls it.
+/// `conn` is generic over `ConnectionTrait` because callers need different connections:
+/// `undo_migration_job` records on the same RLS-scoped transaction its effect lands on, so a
+/// rollback loses both together, while `set_maintenance` records on `ctx.db`, the migration-role
+/// connection its own write already uses.
+///
+/// This table's RLS policy is `USING`-only, which PostgreSQL also applies as the implicit
+/// `WITH CHECK` on an insert, so a `conn` that has not set `app.current_workspace` to
+/// `actor.workspace_id` (and is not the migration role, which the policy does not apply to) fails
+/// the insert with a policy violation. An `Authorized<R>` handler gets the right scoping for free
+/// from `TenantDb::begin_for_workspace`.
 pub async fn record(
     conn: &impl ConnectionTrait,
     actor: AuditActor,

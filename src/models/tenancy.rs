@@ -715,9 +715,9 @@ mod tests {
     }
 
     /// `create_invite` builds its `ActiveModel` with `..Default::default()`, so `id` reaches the insert `NotSet`.
-    /// PostgreSQL fills it from the column's `uuidv7()` default; SQLite has no such default, and this table's `before_save` was the one `uuidv7_pk` table whose hook never called `db::sqlite_generated_id`, so the insert failed with `NOT NULL constraint failed: identity_invites.id`.
+    /// PostgreSQL fills it from the column's `uuidv7()` default; SQLite has no such default, so this table's `before_save` must call `db::sqlite_generated_id` or the insert fails with `NOT NULL constraint failed: identity_invites.id`.
     ///
-    /// The whole suite this guards is PostgreSQL-only (`request_with_create_db` issues `CREATE DATABASE`), which is why the gap survived: nothing exercised this path on the backend that has it.
+    /// This test exists here rather than in `tests/` because that suite is PostgreSQL-only (`request_with_create_db` issues `CREATE DATABASE`), so nothing there reaches the backend where the failure occurs.
     #[tokio::test]
     #[serial]
     async fn an_invite_gets_an_id_on_sqlite() {

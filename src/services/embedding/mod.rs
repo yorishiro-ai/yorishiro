@@ -260,7 +260,7 @@ enum DefaultPathOutcome {
 ///
 /// Exactly one file present is a half-executed intent, not an empty default path: someone put that file there on purpose and the other is missing.
 /// Fetching around it would quietly ignore the file they chose and embed with a different model, which can disagree with the vectors already in the index while every status stays green.
-/// A lone file here was already a hard error before the fetch existed, so reporting it preserves that rather than adding a new restriction.
+/// A lone file here is a hard error rather than a partial load: an incomplete model directory cannot serve embeddings, so it is reported at boot instead of at first use.
 fn default_path_outcome(model_exists: bool, tokenizer_exists: bool) -> DefaultPathOutcome {
     match (model_exists, tokenizer_exists) {
         (true, true) => DefaultPathOutcome::UseBoth,
