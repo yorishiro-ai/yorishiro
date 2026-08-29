@@ -82,13 +82,13 @@ async fn llm_key_set_get_and_clear_round_trip() {
         let setup = setup(&ctx).await;
 
         let missing = request
-            .get("/hosted/workspace/llm-key")
+            .get("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(missing.status_code(), 404, "response: {:?}", missing.text());
 
         let put = request
-            .put("/hosted/workspace/llm-key")
+            .put("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({
                 "base_url": "https://api.example.com/v1/",
@@ -99,7 +99,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         assert_eq!(put.status_code(), 204, "response: {:?}", put.text());
 
         let get = request
-            .get("/hosted/workspace/llm-key")
+            .get("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(get.status_code(), 200, "response: {:?}", get.text());
@@ -115,13 +115,13 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
 
         let delete = request
-            .delete("/hosted/workspace/llm-key")
+            .delete("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(delete.status_code(), 204, "response: {:?}", delete.text());
 
         let after_delete = request
-            .get("/hosted/workspace/llm-key")
+            .get("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
@@ -144,7 +144,7 @@ async fn a_non_http_base_url_is_refused() {
             "api.example.com/v1",
         ] {
             let put = request
-                .put("/hosted/workspace/llm-key")
+                .put("/api/workspace/llm-key")
                 .add_header("Authorization", format!("Bearer {}", setup.key))
                 .json(&serde_json::json!({
                     "base_url": bad_url,
@@ -191,7 +191,7 @@ async fn infer_fill_without_a_configured_key_is_refused() {
         );
 
         let infer = request
-            .post("/hosted/schemas/active/note/infer-fill")
+            .post("/api/schemas/active/note/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(infer.status_code(), 422, "response: {:?}", infer.text());
@@ -210,10 +210,10 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
         let setup = setup(&ctx).await;
 
         let with_key = request
-            .post("/hosted/schemas/active/note/infer-fill")
+            .post("/api/schemas/active/note/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        let without_key = request.post("/hosted/schemas/active/note/infer-fill").await;
+        let without_key = request.post("/api/schemas/active/note/infer-fill").await;
 
         assert_eq!(with_key.status_code(), without_key.status_code());
         assert_eq!(with_key.status_code(), 404);

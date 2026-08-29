@@ -23,7 +23,7 @@ pub struct SetWorkerClassRequest {
     pub worker_class: WorkerClass,
 }
 
-/// `PUT /hosted/workspace/worker-class`
+/// `PUT /api/workspace/worker-class`
 async fn set_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -35,7 +35,7 @@ async fn set_worker_class(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `GET /hosted/workspace/worker-class`
+/// `GET /api/workspace/worker-class`
 async fn get_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -50,7 +50,7 @@ async fn get_worker_class(
     Ok(Json(described))
 }
 
-/// `DELETE /hosted/workspace/worker-class`
+/// `DELETE /api/workspace/worker-class`
 async fn delete_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -62,8 +62,8 @@ async fn delete_worker_class(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().prefix("hosted").add(
-        "/workspace/worker-class",
+    Routes::new().prefix("api/workspace").add(
+        "/worker-class",
         axum::routing::put(set_worker_class)
             .get(get_worker_class)
             .delete(delete_worker_class),

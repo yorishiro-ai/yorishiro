@@ -33,8 +33,8 @@ Search simply returns worse results for it, so this is worth checking after a re
 
 ### A workspace's own embedding provider (paid edition)
 
-`PUT /hosted/workspace/embedding-key` points one workspace's own embedding work at a different provider than the deployment-wide one above, instead of every workspace sharing `YORISHIRO_EMBEDDING_BASE_URL`.
-Not part of the base edition: this is the same split as `PUT /hosted/workspace/llm-key`, which assigns LLM inference credentials per workspace already.
+`PUT /api/workspace/embedding-key` points one workspace's own embedding work at a different provider than the deployment-wide one above, instead of every workspace sharing `YORISHIRO_EMBEDDING_BASE_URL`.
+Not part of the base edition: this is the same split as `PUT /api/workspace/llm-key`, which assigns LLM inference credentials per workspace already.
 Which workspace uses which compute backend is a paid-edition decision.
 
 | Field | Description |
@@ -46,7 +46,7 @@ Which workspace uses which compute backend is a paid-edition decision.
 | `send_dimensions_param` | `true` includes a `dimensions` field in the embeddings request; default `false`, matching `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` above |
 
 A workspace with nothing configured here keeps using the deployment-wide provider (`YORISHIRO_EMBEDDING_BASE_URL` etc.), so a deployment that assigns nothing is unaffected by this endpoint.
-`DELETE /hosted/workspace/embedding-key` returns a workspace to that deployment default.
+`DELETE /api/workspace/embedding-key` returns a workspace to that deployment default.
 
 `PUT` refuses a `dimensions` value that does not match the workspace's own stamped vector width (the `embedding_dimensions` recorded when the workspace was created) with `422`, before storing anything: assigning a provider whose output width does not match the vectors already on disk would otherwise only be discovered on the next entity write, when `sync_embedding`'s own write-time check (`services/embedding/sync.rs`) rejects it.
 Both checks exist and neither replaces the other: the write-time check still runs regardless of how a workspace ended up with a mismatched provider, but this one surfaces the same mistake immediately, at the point an operator makes it.
@@ -195,15 +195,15 @@ Running more than one worker process against a `SQLite`-backed queue therefore b
 
 ### A workspace's own worker-class assignment (paid edition)
 
-`PUT /hosted/workspace/worker-class` pins one workspace's embedding-sync jobs to `tenant_private` or `official` compute instead of the shared pool every workspace uses by default.
-Not part of the base edition: which compute a tenant's jobs run on is the same paid-edition decision that already assigns LLM/embedding credentials per workspace (`PUT /hosted/workspace/llm-key`, `PUT /hosted/workspace/embedding-key`).
+`PUT /api/workspace/worker-class` pins one workspace's embedding-sync jobs to `tenant_private` or `official` compute instead of the shared pool every workspace uses by default.
+Not part of the base edition: which compute a tenant's jobs run on is the same paid-edition decision that already assigns LLM/embedding credentials per workspace (`PUT /api/workspace/llm-key`, `PUT /api/workspace/embedding-key`).
 
 | Field | Description |
 |---|---|
 | `worker_class` | One of `tenant_private`, `official`, `shared` |
 
 A workspace with nothing configured here keeps its jobs `shared`, so a deployment that assigns nothing is unaffected by this endpoint.
-`DELETE /hosted/workspace/worker-class` returns a workspace to `shared`.
+`DELETE /api/workspace/worker-class` returns a workspace to `shared`.
 No caching: an assignment made through this endpoint takes effect on the very next job enqueued for that workspace, not after some delay or a restart.
 Assigning a workspace to `tenant_private`/`official` has no effect on its own until a worker process actually subscribes to that tag ("Running workers on a separate process or host" above).
 A workspace can be assigned a class with no node running it yet, and its jobs simply queue until one does.

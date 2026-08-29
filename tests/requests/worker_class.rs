@@ -62,20 +62,20 @@ async fn worker_class_set_get_and_clear_round_trip() {
         let setup = setup(&ctx).await;
 
         let missing = request
-            .get("/hosted/workspace/worker-class")
+            .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(missing.status_code(), 404, "response: {:?}", missing.text());
 
         let put = request
-            .put("/hosted/workspace/worker-class")
+            .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "worker_class": "tenant_private" }))
             .await;
         assert_eq!(put.status_code(), 204, "response: {:?}", put.text());
 
         let get = request
-            .get("/hosted/workspace/worker-class")
+            .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(get.status_code(), 200, "response: {:?}", get.text());
@@ -83,13 +83,13 @@ async fn worker_class_set_get_and_clear_round_trip() {
         assert_eq!(body["worker_class"], "tenant_private");
 
         let delete = request
-            .delete("/hosted/workspace/worker-class")
+            .delete("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(delete.status_code(), 204, "response: {:?}", delete.text());
 
         let after_delete = request
-            .get("/hosted/workspace/worker-class")
+            .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
@@ -107,21 +107,21 @@ async fn setting_a_new_class_replaces_the_old_one() {
         let setup = setup(&ctx).await;
 
         let first = request
-            .put("/hosted/workspace/worker-class")
+            .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "worker_class": "tenant_private" }))
             .await;
         assert_eq!(first.status_code(), 204, "response: {:?}", first.text());
 
         let second = request
-            .put("/hosted/workspace/worker-class")
+            .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "worker_class": "official" }))
             .await;
         assert_eq!(second.status_code(), 204, "response: {:?}", second.text());
 
         let get = request
-            .get("/hosted/workspace/worker-class")
+            .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         let body: serde_json::Value = get.json();
