@@ -1,7 +1,7 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
+use yorishiro::app::App;
+use yorishiro::models::tenancy::{self, MembershipRole};
 
 use super::with_max_tenants;
 
@@ -9,7 +9,7 @@ use super::with_max_tenants;
 #[serial]
 async fn signup_then_login_round_trip() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
-        let tenant = yorishiro_core::models::_entities::identity_tenants::ActiveModel {
+        let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("request-test-tenant".into()),
             ..Default::default()
         };
@@ -17,11 +17,11 @@ async fn signup_then_login_round_trip() {
             .await
             .expect("insert tenant");
 
-        let workspace = yorishiro_core::models::_entities::identity_workspaces::ActiveModel {
+        let workspace = yorishiro::models::_entities::identity_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("request-test-ws".into()),
             status: sea_orm::ActiveValue::Set(
-                yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
+                yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
             ),
             ..Default::default()
         };
@@ -238,7 +238,7 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
         with_db_max_connections("4", async move {
             request_with_create_db::<App, _, _>(|_request, ctx| async move {
                 let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
-                yorishiro_core::db::lock_for_update(&holder, "create_tenant")
+                yorishiro::db::lock_for_update(&holder, "create_tenant")
                     .await
                     .unwrap();
 

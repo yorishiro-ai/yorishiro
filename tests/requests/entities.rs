@@ -1,12 +1,12 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use uuid::Uuid;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
-use yorishiro_core::models::{content_entities, content_schemas};
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::{content_entities, content_schemas};
+use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: Uuid,

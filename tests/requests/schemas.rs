@@ -1,10 +1,10 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: uuid::Uuid,
@@ -137,7 +137,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let Setup { tenant_id, key } = setup(&ctx).await;
 
-        let template = yorishiro_core::models::_entities::identity_templates::ActiveModel {
+        let template = yorishiro::models::_entities::identity_templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant_id),
             name: sea_orm::ActiveValue::Set("library-note".into()),
             definition: sea_orm::ActiveValue::Set(serde_json::json!({
@@ -189,7 +189,7 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let Setup { tenant_id, key } = setup(&ctx).await;
 
-        let template = yorishiro_core::models::_entities::identity_templates::ActiveModel {
+        let template = yorishiro::models::_entities::identity_templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant_id),
             name: sea_orm::ActiveValue::Set("library-note".into()),
             definition: sea_orm::ActiveValue::Set(serde_json::json!({

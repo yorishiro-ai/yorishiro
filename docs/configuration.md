@@ -126,19 +126,18 @@ Everything else this file reads either has a default or is opt-in.
 
 ## Logging
 
-Every `config/*.yaml` sets `logger.override_filter` explicitly, and that is load-bearing rather than tuning.
+`logger.level` is what sets the level, and loco's own default filter is what selects the modules. No `config/*.yaml` sets `override_filter`.
 
-loco builds its default filter from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`). This workspace has two application crates, and `yorishiro-server` boots `HostedApp`, whose `app_name()` is `yorishiro_hosted`. Under that default, nothing from `yorishiro_core` was logged at all on a paid-edition deployment: not the embedding worker's warnings, not the auth paths, nothing. The events were emitted and dropped by the filter.
+loco builds that default from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`). One entry is enough because this workspace has one application crate: the paid edition compiles into it rather than being a crate of its own.
 
-`override_filter` names both crates, which fixes it. Three things follow that are easy to get wrong:
+It was not always. While `ee/` was a separate crate, the paid binary booted that crate's own `Hooks` impl, so the single entry named `yorishiro_hosted` and nothing named the base crate — every event from it was dropped by the filter on every paid-edition deployment, including the embedding worker's warnings and the auth paths. Every `config/*.yaml` carried an `override_filter` naming both crates to work around that. Consolidating the editions into one crate removed the reason for it, and the workaround came out with it.
 
-- **It replaces loco's whitelist rather than extending it.** The framework's own modules are repeated in the value for that reason. Remove `loco_rs` and the queue, routing and `listening on` lines disappear; remove `sea_orm_migration` and migration progress does.
-- **It replaces `logger.level` too**, which loco does not read when this is set. The level is therefore written into the filter value per environment, and `LOG_LEVEL` does not change it.
-- **A crate added to this workspace must be added to this line**, in every `config/*.yaml`. Its logs are otherwise silently absent, and nothing in the symptom points at the filter.
+If you do set `override_filter` for your own reasons, two things follow that are easy to get wrong:
 
-Naming only `yorishiro_core` instead of both is not an alternative fix: it reverses the same defect, silencing `yorishiro_hosted` including the licence line that reports whether a key validated.
+- **It replaces loco's whitelist rather than extending it.** The framework's own modules must be repeated in the value. Remove `loco_rs` and the queue, routing and `listening on` lines disappear; remove `sea_orm_migration` and migration progress does.
+- **It replaces `logger.level` too**, which loco does not read at all when this is set, so `LOG_LEVEL` stops changing anything.
 
-**`RUST_LOG` overrides all of this.** loco tries `EnvFilter::try_from_default_env()` before it looks at `override_filter` at all (`logger.rs:193`), so a deployment whose platform injects `RUST_LOG` gets the silence back while this configuration still says otherwise. Measured: `RUST_LOG=loco_rs=info` against the shipped config produces zero lines from either application crate, with the server booting normally. If `RUST_LOG` is set in your environment, it has to name both `yorishiro_core` and `yorishiro_hosted` itself.
+**`RUST_LOG` overrides all of this.** loco tries `EnvFilter::try_from_default_env()` before it looks at this configuration at all (`logger.rs:193`), so a deployment whose platform injects `RUST_LOG` gets whatever that variable says regardless of what is written here. Measured against the previous two-crate configuration: `RUST_LOG=loco_rs=info` produced zero lines from either application crate, with the server booting normally. If `RUST_LOG` is set in your environment, it has to name `yorishiro` itself.
 
 ## Queue backend and tuning (`config/development.yaml`, `config/production.yaml`)
 
@@ -158,7 +157,7 @@ Naming only `yorishiro_core` instead of both is not an alternative fix: it rever
 
 ## Running workers on a separate process or host
 
-`cargo loco start --worker[=tag1,tag2]` (or the equivalent `yorishiro_core-cli`/`yorishiro_server` invocation, both binaries share loco-rs's own CLI) runs only the queue worker loop, no HTTP server, in the current process. `--worker=worker-class:official` restricts that process to jobs carrying that tag (`WorkerClass::tag()`, `src/workers/embedding_sync.rs`). A separate process, on a separate host, needs nothing beyond pointing its own config at the same `queue.uri`/`QUEUE_URL` and `database.uri`/`DATABASE_URL` the server uses — no additional networking layer, shared secret, or node-registration step.
+`cargo loco start --worker[=tag1,tag2]` (or the equivalent `yorishiro` invocation, which shares loco-rs's own CLI) runs only the queue worker loop, no HTTP server, in the current process. `--worker=worker-class:official` restricts that process to jobs carrying that tag (`WorkerClass::tag()`, `src/workers/embedding_sync.rs`). A separate process, on a separate host, needs nothing beyond pointing its own config at the same `queue.uri`/`QUEUE_URL` and `database.uri`/`DATABASE_URL` the server uses — no additional networking layer, shared secret, or node-registration step.
 
 **`--worker` with no value does not take every job.** Confirmed against `loco-rs` 1.1.0's own dequeue SQL (shared shape across the Postgres/`SQLite`/Redis queue providers): an empty tag list means "untagged jobs only", not "every job regardless of tag". Every job this deployment enqueues always carries exactly one `worker-class:*` tag (`workers::embedding_sync::enqueue_for_class`), so it is never untagged — a bare `--worker` process here dequeues none of these jobs, ever, not "the ones nothing else claimed". A deployment that wants one process to cover every class must name every tag explicitly: `--worker=worker-class:tenant-private,worker-class:official,worker-class:shared`. There is no wildcard/catch-all flag in `loco-rs` 1.1.0.
 

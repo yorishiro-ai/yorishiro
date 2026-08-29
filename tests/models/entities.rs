@@ -1,9 +1,9 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::{content_entities, content_schemas};
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::{content_entities, content_schemas};
 
 /// `migration_dry_run` uses `select_only().group_by(...).into_model::<GroupedCount>()`.
 /// A single-version workspace can't tell whether that mapping is correct: every entity lands in the `current` bucket and the per-old-version loop body never runs.

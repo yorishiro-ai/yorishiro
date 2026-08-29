@@ -2,13 +2,13 @@ use async_trait::async_trait;
 use loco_rs::testing::prelude::*;
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::error::YorishiroError;
-use yorishiro_core::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::{content_entities, content_schemas, search};
-use yorishiro_core::services::embedding::EmbeddingProvider;
-use yorishiro_core::services::embedding::sync;
+use yorishiro::app::App;
+use yorishiro::error::YorishiroError;
+use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::{content_entities, content_schemas, search};
+use yorishiro::services::embedding::EmbeddingProvider;
+use yorishiro::services::embedding::sync;
 
 fn note_definition() -> serde_json::Value {
     serde_json::json!({

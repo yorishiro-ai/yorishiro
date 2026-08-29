@@ -165,30 +165,29 @@ loco-rsは`smtp.enable`が真であればこのブロックから`EmailSender`�
 
 ## ログ
 
-`config/*.yaml`はすべて`logger.override_filter`を明示的に設定している。
-これは調整のためではなく、設定しなければ機能しないためである。
+レベルを決めるのは`logger.level`であり、どのモジュールを通すかはlocoの既定フィルタが決める。
+`config/*.yaml`のいずれも`override_filter`を設定していない。
 
 locoは既定のフィルタを、固定のモジュールホワイトリストと、`Hooks::app_name()`から取る**1つだけ**のアプリケーションクレート名から組み立てる(`loco-rs-1.1.0/src/logger.rs:192-210`)。
-このワークスペースにはアプリケーションクレートが2つあり、`yorishiro-server`は`HostedApp`で起動するので、その`app_name()`は`yorishiro_hosted`になる。
-既定のままでは、有償版の配備において`yorishiro_core`のログが一切出力されなかった。
-埋め込みワーカーの警告も、認証経路のログも出ない。
-イベントは発行されており、フィルタが捨てていた。
+このワークスペースのアプリケーションクレートは1つなので、1つで足りる。
+有償版は独立したクレートではなく、このクレートに取り込まれてコンパイルされる。
 
-`override_filter`で両方のクレート名を挙げるとこれが解消する。
-間違えやすい点が3つある。
+かつてはそうではなかった。
+`ee/`が独立したクレートだった頃、有償版のバイナリはそちらの`Hooks`実装で起動していたため、唯一の枠は`yorishiro_hosted`が占め、基盤クレートを指すものが無かった。
+その結果、有償版の配備では基盤クレートのイベントがフィルタに捨てられていた。埋め込みワーカーの警告も、認証経路のログもである。
+`config/*.yaml`はすべて、両方のクレート名を挙げる`override_filter`でこれを回避していた。
+エディションを1つのクレートに統合したことで回避策の必要が無くなり、記述も併せて削除した。
 
-- **locoのホワイトリストを拡張するのではなく置き換える。** 値の中にフレームワーク自身のモジュールを書いているのはそのためである。`loco_rs`を外すとキュー・ルーティング・`listening on`のログが消え、`sea_orm_migration`を外すとマイグレーションの進行状況が消える。
-- **`logger.level`も置き換える。** この設定があるとlocoは`level`を読まない。したがってレベルはフィルタの値の中に環境ごとに直接書いてあり、`LOG_LEVEL`では変更できない。
-- **このワークスペースにクレートを追加したら、すべての`config/*.yaml`のこの行にも追加すること。** そうしないとそのクレートのログは黙って出なくなり、症状からフィルタを疑う手がかりは何も無い。
+独自の理由で`override_filter`を設定する場合、間違えやすい点が2つある。
 
-`yorishiro_core`だけを挙げるのは代替案にならない。
-同じ欠陥を逆向きにするだけで、`yorishiro_hosted`が沈黙し、ライセンスキーが検証されたかどうかを伝える行も失われる。
+- **locoのホワイトリストを拡張するのではなく置き換える。** フレームワーク自身のモジュールを値の中に書き直す必要がある。`loco_rs`を外すとキュー・ルーティング・`listening on`のログが消え、`sea_orm_migration`を外すとマイグレーションの進行状況が消える。
+- **`logger.level`も置き換える。** この設定があるとlocoは`level`を一切読まないため、`LOG_LEVEL`では何も変更できなくなる。
 
 **`RUST_LOG`はこの設定をすべて上書きする。**
-locoは`override_filter`を読むより先に`EnvFilter::try_from_default_env()`を試す(`logger.rs:193`)。
-そのため`RUST_LOG`を注入するプラットフォーム上では、この設定ファイルの記述に関わらず前述の沈黙が戻る。
-実測では、同梱の設定に対して`RUST_LOG=loco_rs=info`を与えると、サーバは正常に起動したままアプリケーション側2クレートのログが1行も出なくなる。
-環境で`RUST_LOG`を設定する場合は、その値自体に`yorishiro_core`と`yorishiro_hosted`を含めること。
+locoはこの設定ファイルを読むより先に`EnvFilter::try_from_default_env()`を試す(`logger.rs:193`)。
+そのため`RUST_LOG`を注入するプラットフォーム上では、ここに何が書いてあるかに関わらずその変数の内容が使われる。
+統合前の2クレート構成での実測では、`RUST_LOG=loco_rs=info`を与えるとサーバは正常に起動したままアプリケーション側2クレートのログが1行も出なくなった。
+環境で`RUST_LOG`を設定する場合は、その値自体に`yorishiro`を含めること。
 
 ## キューのバックエンドと調整(`config/development.yaml`、`config/production.yaml`)
 
@@ -208,7 +207,7 @@ locoは`override_filter`を読むより先に`EnvFilter::try_from_default_env()`
 
 ## サーバとは別プロセス・別ホストでワーカーを動かす
 
-`cargo loco start --worker[=tag1,tag2]`(`yorishiro_core-cli`/`yorishiro_server` どちらでも同じ loco-rs 自身の CLI を共有するので同じ形で使える)は、HTTPサーバを起動せずキューのワーカーループだけを現在のプロセスで動かす。`--worker=worker-class:official` はそのプロセスをそのタグのジョブに限定する(`WorkerClass::tag()`、`src/workers/embedding_sync.rs`)。別ホストの別プロセスであっても、自分の config がサーバと同じ `queue.uri`/`QUEUE_URL` と `database.uri`/`DATABASE_URL` を指してさえいれば足り、追加のネットワーク層や共有シークレット、ノード登録の手順は不要である。
+`cargo loco start --worker[=tag1,tag2]`(`yorishiro` を直接呼んでも同じ loco-rs 自身の CLI を共有するので同じ形で使える)は、HTTPサーバを起動せずキューのワーカーループだけを現在のプロセスで動かす。`--worker=worker-class:official` はそのプロセスをそのタグのジョブに限定する(`WorkerClass::tag()`、`src/workers/embedding_sync.rs`)。別ホストの別プロセスであっても、自分の config がサーバと同じ `queue.uri`/`QUEUE_URL` と `database.uri`/`DATABASE_URL` を指してさえいれば足り、追加のネットワーク層や共有シークレット、ノード登録の手順は不要である。
 
 **値なしの `--worker` は、全てのジョブを引き受けるわけではない。** loco-rs 1.1.0 自身のデキューSQL(Postgres・SQLite・Redisいずれのキュープロバイダにも共通する形)を確認した結果、タグを1つも指定しないワーカーが引き受けるのは「タグ無しのジョブ」だけであり、「タグの有無を問わず全部」ではない。このデプロイが積むジョブは必ず`worker-class:*`のタグを1つ持つ(`workers::embedding_sync::enqueue_for_class`)ため、タグ無しのジョブは存在しない。つまり値なしの`--worker`で起動したプロセスは、こうしたジョブを一切デキューしない。「他のプロセスが拾わなかった分を拾う」という動きにはならない。全クラスをカバーする1プロセスを用意したいなら、`--worker=worker-class:tenant-private,worker-class:official,worker-class:shared`のようにタグを全て明示する必要がある。loco-rs 1.1.0にワイルドカードや全件購読の指定方法は無い。
 

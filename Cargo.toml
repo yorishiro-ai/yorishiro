@@ -1,15 +1,19 @@
 [workspace]
 resolver = "2"
-# ".": this manifest is both the workspace root and the base package (yorishiro-core), the flat layout this session's CLAUDE.md records as decided-2026-08-22, not carried forward from master's crates/ split.
-# ee/crates/yorishiro-hosted depends on it by path; the reverse dependency must never appear, see CLAUDE.md's "Editions and the ee/ boundary".
-members = [".", "ee/crates/yorishiro-hosted"]
+# ".": this manifest is both the workspace root and the sole application package, the flat layout
+# this session's CLAUDE.md records as decided-2026-08-22, not carried forward from master's crates/ split.
+# `ee/` is no longer a package of its own: the paid edition compiles into this crate as one module
+# (see `src/lib.rs`'s `ee` declaration) and is gated at runtime by the licence layer rather than by
+# being a separate compilation unit. Two packages cannot share a name, which is what made the split
+# the only available shape when the paid edition needed its own crate; it no longer does.
+members = [".", "migration"]
 
 [package]
-name = "yorishiro-core"
+name = "yorishiro"
 version = "0.1.0"
 edition = "2024"
 publish = false
-default-run = "yorishiro_core-cli"
+default-run = "yorishiro"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -90,9 +94,16 @@ ort = { version = "=2.0.0-rc.12", features = ["ndarray"] }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 # `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter (search.rs, sync.rs), without pinning a second, possibly-mismatched version.
 pgvector = { version = "0.4", default-features = false }
+# The following are reached only from `ee/`, which compiles into this crate rather than its own.
+# Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
+jsonwebtoken = { version = "10" }    # licence key verification (ee/services/licence.rs)
+serde_yaml_ng = { version = "0.10" } # licence key from a config file (ee/services/licence.rs)
+hmac = { version = "0.12" }          # Stripe webhook signature (ee/controllers/stripe.rs)
+base64 = { version = "0.22" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
+url = { version = "2.5" }            # OIDC discovery (ee/services/oauth.rs)
 
 [[bin]]
-name = "yorishiro_core-cli"
+name = "yorishiro"
 path = "src/bin/main.rs"
 required-features = []
 
@@ -103,3 +114,5 @@ rstest = { version = "0.25" }
 insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
 # Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
 tempfile = { version = "3" }
+# Used by the ee/ request tests folded into tests/requests/.
+axum-test = { version = "17.3" }

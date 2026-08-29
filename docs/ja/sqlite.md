@@ -52,7 +52,7 @@ RLS・複数テナント・ベクトル検索のいずれかを必要とする�
 そのプロセスに担当させたいクラスは、すべて明示的に並べる。
 
 ```sh
-yorishiro_core-cli start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared
+yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared
 ```
 
 どれを購読したかはワーカー自身の起動行でわかる。

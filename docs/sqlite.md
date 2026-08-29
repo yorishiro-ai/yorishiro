@@ -35,7 +35,7 @@ Measured on a live SQLite boot: three `EmbeddingSyncWorkerShared` jobs sat at `q
 Name every class the process should cover:
 
 ```sh
-yorishiro_core-cli start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared
+yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared
 ```
 
 The worker's own startup line tells you which it took, `worker is online with tags: ...` rather than a bare `worker is online`.
