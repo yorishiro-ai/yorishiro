@@ -1,6 +1,6 @@
 //! Billing state stored in this crate's own `identity_tenant_billing` table.
 //!
-//! `yorishiro-core` owns `identity_tenants` and knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
+//! `models::identity_tenants` knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
 //! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
 use crate::error::{ResultExt, YorishiroError};

@@ -1,6 +1,7 @@
 name: CI
 
-# Rewritten for the Loco rebuild's actual layout (root package + ee/crates/yorishiro-hosted + migration/), replacing a version that still referenced master's pre-rebuild crates/ split (crates/yorishiro-core, crates/yorishiro-server), ee/web's SPA, packaging/, and a Dockerfile, none of which exist here.
+# Covers this repository's layout: the root package (`yorishiro`) and `migration/`, with the paid
+# edition compiled in as the `ee/` module rather than a package of its own.
 # Deliberately minimal: cargo check/clippy/fmt-check/test against a Postgres service, matching what `make check clippy fmt-check test` already runs locally.
 # master's own ci.yml is untouched; it is correct for master's own structure.
 

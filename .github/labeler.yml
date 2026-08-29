@@ -3,7 +3,7 @@ core:
       - any-glob-to-any-file: ["src/**", "Cargo.toml"]
 server:
   - changed-files:
-      - any-glob-to-any-file: "ee/crates/yorishiro-hosted/src/bin/**"
+      - any-glob-to-any-file: "src/bin/**"
 # `ee/web` is deferred, not abandoned: this rule starts matching when the SPA lands.
 web-ui:
   - changed-files:

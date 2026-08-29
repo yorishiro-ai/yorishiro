@@ -107,7 +107,7 @@ queue:
   # Measured: the boot dies on `Any(Sqlx(PoolTimedOut))` when the queue cannot reach Postgres, and leaves an empty `yorishiro.sqlite3` behind (4 KiB, zero tables): the queue pool is built before migrations run, so the file is created by opening a connection and nothing is written into it.
   # It is a harmless artifact to delete rather than a half-initialized database, and a corrected boot migrates it from scratch.
   # Set DATABASE_URL alongside YORISHIRO_QUEUE_KIND=Postgres, which is what any deployment actually using a Postgres queue already does.
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro-core_development")) %>
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro_development")) %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
 
