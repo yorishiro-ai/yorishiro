@@ -14,10 +14,17 @@
 //! spending it on an inference call is. A layer applies per `Routes`, so this group exists to keep
 //! the two apart.
 //!
-//! **Config-gated** (`oauth`, `stripe`) are deliberately absent from these assertions. Both already
-//! answer 404 when their own configuration is unset, which is the state a test process boots in, so
-//! "404 without a licence" would hold for them whether or not a licence gate existed at all: the
-//! assertion would keep passing with the mechanism it claims to check deleted.
+//! **Config-gated** (`oauth`) is deliberately absent from these assertions. It already answers 404
+//! when its own configuration is unset, which is the state a test process boots in, so "404 without
+//! a licence" would hold for it whether or not a licence gate existed at all: the assertion would
+//! keep passing with the mechanism it claims to check deleted.
+//!
+//! `stripe` carries the gate but cannot join `GATED` either, for two reasons that are both about
+//! telling the gate apart from something else. Its webhook is POST-only, so the GET these lists use
+//! would answer 404 by method alone; and it answers 404 unconfigured, which is how a test process
+//! boots. `stripe_webhook_is_gated` below therefore POSTs, and asserts the licensed side answers
+//! 501 (the handler's own "no secret configured") rather than merely "not 404": 501 is a status only
+//! the handler produces, so it cannot be reached unless the request got past the gate.
 //!
 //! **Ungated** (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`) must stay
 //! reachable in *both* boots. Nothing in the current code can make these 404 for licence reasons:
@@ -182,6 +189,36 @@ async fn an_expired_licence_closes_the_gate_again() {
         assert_eq!(
             expired, 404,
             "an expired licence must close the gate again without a restart; got {expired}"
+        );
+
+        close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// `stripe`'s webhook, which the four lists above cannot cover.
+///
+/// The gate is asserted from both sides on one path, the same shape as the lists, but with a POST
+/// (the webhook declares no GET) and against 501 rather than "not 404" on the licensed side.
+/// 501 is the handler's own answer to a missing `YORISHIRO_STRIPE_WEBHOOK_SECRET`, which a test
+/// process boots without: reaching it proves the request passed the gate and entered the handler,
+/// where a weaker `assert_ne!(.., 404)` would also hold if the route stopped existing.
+#[tokio::test]
+#[serial]
+async fn stripe_webhook_is_gated() {
+    request_with_create_db::<App, _, _>(|request, ctx| async move {
+        let unlicensed = request.post("/api/stripe/webhook").await.status_code();
+        assert_eq!(
+            unlicensed, 404,
+            "the Stripe webhook must answer 404 with no licence; got {unlicensed}"
+        );
+
+        install_licence(&ctx, 60 * 60);
+        let licensed = request.post("/api/stripe/webhook").await.status_code();
+        assert_eq!(
+            licensed, 501,
+            "an active licence must let the request reach the handler, which then refuses for want \
+             of a configured secret; got {licensed}"
         );
 
         close_app_pools(&ctx).await;

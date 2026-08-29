@@ -165,6 +165,9 @@ Configuration decides what is enabled, not which artifact you installed.
 The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a valid licence key is configured.
 The check runs per request rather than at startup, so a key that expires while the process runs stops unlocking those surfaces without a restart.
 
+The Stripe webhook is one of those surfaces, so a deployment with no valid licence does not receive Stripe events.
+An operator running billing needs the licence key configured for the webhook to be reachable at all, and a key that lapses stops deliveries the same way it closes any other paid route.
+
 `ee/LICENSE` covers the `ee/` directory, and the root [BUSL-1.1](LICENSE) covers the repository excluding it.
 `ee/LICENSE` states at the top of the file that it is a draft not yet settled by counsel.
 

@@ -198,10 +198,15 @@ impl Hooks for App {
     /// The community routes first, then the paid edition's on top, which is the shape the product
     /// describes: `ee/` adds paths rather than replacing any.
     ///
-    /// Only `marketplace` and `inference::gated_routes` take the gate. `oauth` and `stripe` are
-    /// gated by configuration instead, and the rest serve without a licence; `ee-composition.md`
-    /// records why each falls where it does, and widening that set is a product decision rather than
-    /// something to inherit from where a layer is attached.
+    /// `marketplace`, `stripe` and `inference::gated_routes` take the gate. `oauth` is gated by
+    /// configuration instead, and the rest serve without a licence; `ee-composition.md` records why
+    /// each falls where it does, and widening that set is a product decision rather than something
+    /// to inherit from where a layer is attached.
+    ///
+    /// `stripe` is gated because billing is a paid-edition feature, which is a decision about what
+    /// the feature is rather than about what protects it: the webhook still verifies its Stripe
+    /// signature and still needs a configured secret, and neither of those made it a community
+    /// route.
     ///
     /// `inference` is two route groups because the licence line runs through the middle of it:
     /// `infer-fill` spends an LLM call and is gated, while the `/workspace/llm-key` routes beside it
@@ -234,10 +239,10 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::entity_columns::routes())
             .add_route(crate::ee::controllers::inference::routes())
             .add_route(crate::ee::controllers::inference::gated_routes().layer(gate.clone()))
-            .add_route(crate::ee::controllers::marketplace::routes().layer(gate))
+            .add_route(crate::ee::controllers::marketplace::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::oauth::routes())
             .add_route(crate::ee::controllers::origin::routes())
-            .add_route(crate::ee::controllers::stripe::routes())
+            .add_route(crate::ee::controllers::stripe::routes().layer(gate))
             .add_route(crate::ee::controllers::worker_class::routes())
     }
 
