@@ -3,10 +3,17 @@
 //! A queue provider rather than a bare `tokio::spawn`: a spawned task loses every in-flight sync on a process restart, a forced kill, or a provider outage past its own retry budget, leaving the entity's `embedding` column permanently `NULL` with nothing to retry it (`tasks::resync_embeddings` is the operational recovery command for rows in that state).
 //! `pg_loco_queue` persists the job in Postgres, so a re-deployed or restarted process resumes it instead of losing it.
 //!
-//! **There is no "subscribe to every `WorkerClass`" worker mode.** A worker started with no `--worker=<tags>` argument (bare `--worker`, or the worker half of `--server-and-worker`) does not dequeue every tagged job; confirmed against `loco-rs` 1.1.0's own dequeue SQL (`bgworker/pg.rs`'s `dequeue`, and the matching logic in `sqlt.rs`/`redis.rs`), an empty tag list makes the query `AND (tags IS NULL)`, so an untagged worker dequeues only *untagged* jobs.
-//! Every job this module enqueues always carries exactly one tag (its resolved `WorkerClass`'s own tag, via [`enqueue_for_class`]), so it is never untagged, so a bare `--worker` process run against this deployment dequeues none of these jobs, ever, not "the leftover ones nothing else claimed."
-//! A deployment that wants one process to cover every class must start it with every tag named explicitly: `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared`.
-//! There is no wildcard or "ignore tags" flag in `loco-rs` 1.1.0; a class added to [`WorkerClass`] in the future needs that class's tag added to every such command by hand, the same way it needs a fourth worker type added here (`enqueue_for_class`'s exhaustive match forces the latter to be noticed at compile time; the former has no equivalent enforcement and is an operational runbook concern, not a code one).
+//! **There is no "subscribe to every `WorkerClass`" worker mode.** An empty tag list makes loco's
+//! dequeue query `AND (tags IS NULL)` (confirmed against `loco-rs` 1.1.0's `bgworker/pg.rs`, and the
+//! matching logic in `sqlt.rs`/`redis.rs`), so a bare `--worker` process dequeues only *untagged*
+//! jobs. Every job this module enqueues carries exactly one tag, so such a process takes none of
+//! them — not "the leftover ones nothing else claimed".
+//!
+//! Covering every class in one process means naming every tag:
+//! `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared`.
+//! There is no wildcard flag, so a new [`WorkerClass`] needs its tag added to those commands by
+//! hand. The matching worker type is caught at compile time by `enqueue_for_class`'s exhaustive
+//! match; the command is not, and is an operational concern.
 
 use std::sync::Arc;
 
@@ -22,11 +29,18 @@ use crate::services::embedding;
 
 /// Which class of worker process a queued job is meant for.
 ///
-/// Routes jobs via `BackgroundWorker::tags()` (loco-rs's own dequeue-time tag filter, shared by the Postgres, `SQLite`, and Redis queue providers, unlike `queues: Option<Vec<String>>`, which only exists on the Redis config) rather than a named queue: this deployment's queue provider is Postgres (`pg_loco_queue`), and `queue: Option<String>` is silently discarded by that provider's `enqueue` (no column for it), so a named-queue split would require switching to Redis first.
+/// Routes jobs by `BackgroundWorker::tags()` rather than by named queue: `queue: Option<String>` is
+/// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
+/// named-queue split would mean switching to Redis first.
 ///
-/// `tags()` is a `BackgroundWorker` trait method with no access to a specific job's own args (confirmed against `loco-rs` 1.1.0's `perform_later_with_priority`, which calls `Self::tags()` before it ever sees `args`): one worker *type* can carry only one fixed tag set, not a tag set chosen per enqueued job.
-/// A single `EmbeddingSyncWorker` type whose `tags()` returned every `WorkerClass`'s tag could not route by class at all: every job it enqueued would carry all three tags regardless of which one `resolve_worker_class` picked, so a tag-restricted `--worker=worker-class:tenant-private` process would dequeue *every* class's jobs, not just its own. One type per class is what avoids that.
-/// [`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`], and [`EmbeddingSyncWorkerShared`] exist to give each `WorkerClass` its own worker *type*, each with a `tags()` fixed to that one class's tag, so the class chosen at enqueue time (via [`enqueue_for_class`]) is the class whose type actually gets registered with the queue and whose tag actually lands in `pg_loco_queue.tags`.
+/// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.1.0's
+/// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
+/// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
+/// process would then dequeue every class's work rather than its own.
+///
+/// Hence one type per class ([`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`],
+/// [`EmbeddingSyncWorkerShared`]), each fixed to a single tag, so the class picked at enqueue time
+/// is the tag that lands in the queue table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerClass {
@@ -117,8 +131,9 @@ pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
 /// Only `workspace_id`/`entity_id`, not the `EntityRecord` itself: the record is re-read from the database inside `perform`, so a create-then-update (or create-then-delete) racing ahead of a still-queued job is picked up as the entity's current state rather than overwriting it with whatever was true at enqueue time.
 /// A deleted entity is simply not found when re-read, and the job is a no-op for it.
 ///
-/// No `model` field: `perform` already re-resolves the embedding provider from `workspace_id` via `WorkspaceEmbeddingResolver` on every run (the same live-lookup reasoning as not re-reading the entity at enqueue time), and `EmbeddingProvider` exposes no model identifier for a payload field to even mirror.
-/// Carrying one here would be a value nothing reads and nothing keeps in sync with the resolver's own answer.
+/// No `model` field: `perform` re-resolves the provider from `workspace_id` on every run, and
+/// `EmbeddingProvider` exposes no model identifier to mirror here anyway. Carrying one would be a
+/// value nothing reads and nothing keeps in sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
     pub workspace_id: Uuid,
@@ -128,7 +143,10 @@ pub struct EmbeddingSyncArgs {
 
 /// Loco has no automatic retry for any queue driver (see `Queue::retry_failed`'s own doc comment): `Ok` marks the job `Completed` in `pg_loco_queue` and `Err` marks it `Failed`, and only `Failed` is something an operator can find and re-run with `retry_failed`.
 /// A structural failure (a schema no longer defining the field being embedded, a workspace's stamped dimension count not matching what the provider produces) will not go away on retry, so it is logged and reported `Ok`: retrying it would just mark the same job `Completed` again with nothing to show for the failure.
-/// A transient one (`ProviderBusy`, `ProviderUnreachable`, or `Internal`, chiefly a DB failure on the write/read this function itself does) is exactly what `Failed` plus `retry_failed` exists for, so those propagate as `Err`: reporting them `Ok` would let an entire provider outage's worth of jobs mark themselves `Completed` with the embedding still `NULL` and no record that anything went wrong, which is indistinguishable from a job that never needed to run at all.
+/// A transient one (`ProviderBusy`, `ProviderUnreachable`, or `Internal`) propagates as `Err`, which
+/// is what `Failed` plus `retry_failed` exist for. Reporting them `Ok` would let a whole provider
+/// outage mark itself `Completed` with every embedding still `NULL` and nothing recording that
+/// anything went wrong — indistinguishable from jobs that never needed to run.
 ///
 /// Shared by all three `WorkerClass` worker types below: the only difference between `EmbeddingSyncWorkerTenantPrivate`/`Official`/`Shared` is which tag `tags()` returns, so this function is the single place the actual sync logic lives rather than being copy-pasted three times.
 async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> loco_rs::Result<()> {
@@ -320,7 +338,10 @@ mod tests {
         assert!(WorkerClass::from_db_str("not-a-real-class").is_err());
     }
 
-    /// `App::connect_workers` registers each of these three types under its own `class_name()` (a `Queue::register` call per type); this test cannot call `connect_workers` itself (it needs a real `Queue`, not available to a plain unit test), but it guards the assumption that call relies on: the three types must resolve to three distinct class names, or one `queue.register` call would silently clobber another's handler instead of adding a third one.
+    /// `App::connect_workers` registers each of the three types under its own `class_name()`.
+    /// Registering needs a real `Queue`, which a unit test has no access to, so this guards the
+    /// assumption instead: three distinct class names, or one `register` call silently clobbers
+    /// another's handler rather than adding a third.
     /// `enqueue_for_class`'s exhaustive `match` on `WorkerClass` already forces a compile error if a fourth variant is added with no worker type to dispatch to; this test covers the complementary runtime gap `connect_workers` itself has no compiler check for: a worker type that exists and is dispatched to, but was never actually registered.
     #[test]
     fn the_three_worker_types_have_distinct_class_names() {

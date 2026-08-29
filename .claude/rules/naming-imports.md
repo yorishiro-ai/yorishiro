@@ -9,7 +9,7 @@
 
 ## Naming
 
-- The newtype wrapper over `YorishiroError` for axum is `ApiError` (`yorishiro-server`).
+- The newtype wrapper over `YorishiroError` for axum is `ApiError` (`src/controllers/error.rs`).
   The name is fixed: do not rename.
 - Avoid naming collisions across layers.
-  If a type name already exists in `yorishiro-core`, the server-layer type that wraps/extends it should have a distinct name (e.g. core's `AuthContext` vs. server's auth extractor).
+  A type that wraps or extends another should not reuse its name (e.g. `services::auth`'s `AuthContext` vs. the extractors in `controllers::extractors` that produce it).

@@ -16,7 +16,7 @@ The layout follows a standard MVC split, with Rust's module system standing in f
 | `Hooks::seed` in `src/app.rs`, `templates/*.json` | Seed data |
 | `src/tasks/` | Admin and one-off commands, via `cargo loco task` |
 
-The paid edition mirrors models, controllers and services under `ee/crates/yorishiro-hosted/src/`, for the tables and endpoints it adds.
+The paid edition mirrors models, controllers and services under `ee/`, for the tables and endpoints it adds.
 
 ### A model owns a table
 
@@ -38,14 +38,14 @@ If you are adding a decision that reaches for a table, put the decision in `serv
 A new table's queries belong in `models/`.
 Raw SQL is for what the SeaORM entity API genuinely cannot express: JSONB containment (`data @> filter`), pgvector similarity search, advisory locks, a value no entity has a column for (a correlated aggregate computed in the same query), and a write whose correctness depends on running as one statement.
 Everything else uses `Entity::find()`/`ActiveModel`/`Set(...)`, on whichever connection or transaction the caller holds.
-`ee/crates/yorishiro-hosted/src/models/marketplace.rs` has the current instances of the last two: `list_marketplace` selects three correlated subqueries alongside `identity_templates`' own columns, which no entity projection can produce, and `insert_next_version` computes a template's next version number and inserts it in the same `INSERT ... SELECT`, which is what makes its advisory lock actually prevent two concurrent publishes from racing to the same version number.
+`ee/models/marketplace.rs` has the current instances of the last two: `list_marketplace` selects three correlated subqueries alongside `identity_templates`' own columns, which no entity projection can produce, and `insert_next_version` computes a template's next version number and inserts it in the same `INSERT ... SELECT`, which is what makes its advisory lock actually prevent two concurrent publishes from racing to the same version number.
 
 Some raw SQL outside `models/` is correct and stays, but only the specific query that needs it, not the whole file it lives in: a file on this list can still have other queries that belong on the entity API, and do.
 
 - `src/db.rs` is connection handling, not table access: its `SET ROLE`/`RESET`/`set_config`/advisory-lock statements are Postgres session primitives SeaORM has no equivalent for.
 - `src/services/auth/authenticate.rs`'s `authenticate_api_key($1)` call is the SECURITY DEFINER function that is RLS's one intentional bypass, reading rows an ordinary connection's session state would hide; its `touch_last_used`'s `last_used_at` write runs on that same kind of connection (one `TenantDb::acquire_for_workspace` scoped with the request's RLS session vars, not a general-purpose connection), which is why it stays raw too: an update through the entity API on any other connection would either roll back with a read-only request's transaction, or silently match zero rows under `identity_api_keys`' own RLS policy. Everything else `authenticate.rs` does not fitting that shape is on the entity API (see `authenticate_sqlite`/`touch_last_used_sqlite`, which have no RLS to preserve and use it throughout).
 - `src/services/embedding/sync.rs` and `src/tasks/resync_embeddings.rs` write and scan the `embedding` column, which is pgvector-typed and has no entity-API expression.
-- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`'s `TenantScopedAuthenticator::authenticate` calls `authenticate_api_key($1, $2)`, the two-argument overload of the same SECURITY DEFINER function, for the same reason as above; `create_tenant_api_key`'s own existence check, role lookup and insert have no such reason and are on the entity API.
+- `ee/services/tenant_auth.rs`'s `TenantScopedAuthenticator::authenticate` calls `authenticate_api_key($1, $2)`, the two-argument overload of the same SECURITY DEFINER function, for the same reason as above; `create_tenant_api_key`'s own existence check, role lookup and insert have no such reason and are on the entity API.
 
 ### MCP is a service, not a controller
 

@@ -193,9 +193,16 @@ pub fn stamped_updated_at(
 
 /// Rejects boot outright when `database.max_connections` is below 2, on SQLite only.
 ///
-/// `authorize_sqlite`/`authorize_audit_sqlite` (`services/auth/authorize.rs`) hold a transaction open on `ctx.db` for the lifetime of an `Authorized<R>`/`AuditAuthorized` request while also touching `last_used_at` on a second, independent connection from that same pool — the same reason Postgres's `authorize`/`authorize_audit` use `touch_last_used_on`'s own short-lived connection rather than the request's own transaction: a read-only handler drops its transaction without committing, and updating `last_used_at` there would silently roll back with it.
-/// At `max_connections: 1` the pool has only one connection to give out, so that second acquire always waits for the first (held) one to free, which happens only when the transaction ends; `connect_timeout` bounds that wait rather than leaving it unbounded (empirically: reads still return `200` in this state, since `touch_last_used_sqlite`'s failure is logged and swallowed, but any handler that itself needs a second connection, e.g. `set_maintenance` writing through `ctx.db`, fails with `500` around 500ms in, logged as "Connection pool timed out").
-/// A `2`-or-more pool has a free connection for the second acquire to succeed on immediately, matching production's `config/sqlite.yaml` default of `10`; this rejects boot rather than letting an operator discover the failure as an intermittent `500` under load.
+/// An `Authorized<R>`/`AuditAuthorized` request needs two connections at once: one held by its
+/// transaction for the request's lifetime, and a second for `touch_last_used_at`, which cannot share
+/// the transaction because a read-only handler drops it uncommitted and the update would roll back
+/// with it.
+///
+/// At `max_connections: 1` the second acquire waits for the first to free, which happens only when
+/// the request ends, so it always times out. Reads still answer `200` (that failure is logged and
+/// swallowed), but any handler needing a real second connection fails with `500` after
+/// `connect_timeout` — an intermittent failure under load with nothing pointing at the cause.
+/// Rejecting boot is what turns that into a legible startup error.
 pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String> {
     if max_connections < 2 {
         return Err(format!(

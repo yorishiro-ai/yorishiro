@@ -16,7 +16,7 @@
 | `src/app.rs`の`Hooks::seed`、`templates/*.json` | 初期データ |
 | `src/tasks/` | 管理・単発コマンド(`cargo loco task`経由) |
 
-有償版は、追加するテーブルとエンドポイントについて、models・controllers・servicesを`ee/crates/yorishiro-hosted/src/`配下に同じ形で持つ。
+有償版は、追加するテーブルとエンドポイントについて、models・controllers・servicesを`ee/`配下に同じ形で持つ。
 
 ### モデルはテーブルを1つ持つ
 
@@ -40,7 +40,7 @@
 生SQLは、SeaORMのエンティティAPIで表現できないものに限る。
 具体的にはJSONBの包含判定(`data @> filter`)、pgvectorの類似検索、アドバイザリロック、どのエンティティも列を持たない値(同一クエリ内で計算する相関集計)、そして1つの文として実行されることに正しさが依存する書き込みである。
 それ以外は、呼び出し側が持っているコネクションまたはトランザクションの上で`Entity::find()`/`ActiveModel`/`Set(...)`を使う。
-最後の2つの現在の実例は`ee/crates/yorishiro-hosted/src/models/marketplace.rs`にある。
+最後の2つの現在の実例は`ee/models/marketplace.rs`にある。
 `list_marketplace`は`identity_templates`自体の列に加えて3つの相関サブクエリを選択しており、これはどのエンティティ射影からも作れない。
 `insert_next_version`はテンプレートの次のバージョン番号を計算する`INSERT ... SELECT`を1つの文として実行しており、これによってアドバイザリロックが2つの同時公開を同じバージョン番号へ競合させないという保証が成り立っている。
 
@@ -55,7 +55,7 @@
   この形に当てはまらない`authenticate.rs`の他の処理はエンティティAPI上にある(`authenticate_sqlite`/`touch_last_used_sqlite`を参照。これらはRLSを保持する必要が無いのでSQLite上では全面的にエンティティAPIを使っている)。
 - `src/services/embedding/sync.rs`と`src/tasks/resync_embeddings.rs`は`embedding`カラムを書き・走査する。
   このカラムはpgvector型で、エンティティAPIでの表現手段が無い。
-- `ee/crates/yorishiro-hosted/src/services/tenant_auth.rs`の`TenantScopedAuthenticator::authenticate`は、同じSECURITY DEFINER関数の2引数オーバーロードである`authenticate_api_key($1, $2)`を呼んでおり、上と同じ理由で残している。
+- `ee/services/tenant_auth.rs`の`TenantScopedAuthenticator::authenticate`は、同じSECURITY DEFINER関数の2引数オーバーロードである`authenticate_api_key($1, $2)`を呼んでおり、上と同じ理由で残している。
   `create_tenant_api_key`自身のテナント存在チェック・ロール取得・INSERTにはその理由が無く、エンティティAPI上にある。
 
 ### MCPはコントローラではなくサービス

@@ -3,7 +3,7 @@
 **English** | [日本語](ja/configuration.md)
 
 This is not a full settings reference: it covers the embedding provider, the per-workspace search token quota, and `config/production.yaml`'s queue tuning.
-Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings on this branch.
+Every variable listed here is read directly from the environment; there is no `config.yml`-style file for these settings.
 
 ## Embedding provider
 
@@ -130,7 +130,7 @@ Everything else this file reads either has a default or is opt-in.
 
 loco builds that default from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`). One entry is enough because this workspace has one application crate: the paid edition compiles into it rather than being a crate of its own.
 
-It was not always. While `ee/` was a separate crate, the paid binary booted that crate's own `Hooks` impl, so the single entry named `yorishiro_hosted` and nothing named the base crate — every event from it was dropped by the filter on every paid-edition deployment, including the embedding worker's warnings and the auth paths. Every `config/*.yaml` carried an `override_filter` naming both crates to work around that. Consolidating the editions into one crate removed the reason for it, and the workaround came out with it.
+A second application crate would need naming in `override_filter`, or its events would be dropped by the filter with nothing in the symptom to point at why.
 
 If you do set `override_filter` for your own reasons, two things follow that are easy to get wrong:
 
