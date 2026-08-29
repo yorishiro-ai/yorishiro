@@ -65,7 +65,8 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
     result
 }
 
-/// `GET /auth/oauth/status` always answers 200, whether or not OAuth is configured: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
+/// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
+/// The third state, an issuer set with no `client_id`/`client_secret`, answers 500 instead and belongs to `status_errors_loudly_when_partially_configured` below.
 #[tokio::test]
 #[serial]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
