@@ -23,8 +23,8 @@ use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use serial_test::serial;
 use uuid::Uuid;
-use yorishiro_core::app::App;
-use yorishiro_core::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
+use yorishiro::app::App;
+use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
 
 /// Boots the app against a throwaway PostgreSQL database with `BackgroundQueue` and a SQLite queue file, and hands the test both the context and a pool onto that same queue file.
 ///

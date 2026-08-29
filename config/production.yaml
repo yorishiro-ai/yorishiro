@@ -22,16 +22,6 @@ logger:
   # Define the logging format. options: compact, pretty or json
   # `json` is the machine-readable one, for a log aggregator.
   format: json
-  # `override_filter` rather than loco's default, because this workspace has two application crates and the default admits exactly one.
-  # loco builds its filter from a fixed module whitelist plus a single `H::app_name()` entry (`loco-rs-1.1.0/src/logger.rs:192-210`), and both `Hooks` impls return their own `env!("CARGO_CRATE_NAME")`.
-  # `yorishiro-server` boots `HostedApp`, so that filter named `yorishiro_hosted` and nothing for `yorishiro_core`: every event from the base crate was dropped, including the embedding worker's warnings and the auth paths, on every paid-edition deployment.
-  # Naming only `yorishiro_core` instead is not a fix but the same defect reversed, and it loses the licence line that tells an operator whether their key validated.
-  #
-  # This replaces loco's whitelist rather than extending it, so the framework's own modules are repeated here: drop `loco_rs` and the queue, routing and `listening on` lines go with it, drop `sea_orm_migration` and migration progress does.
-  # It also replaces `level:` above, which loco does not read at all when this is set, so the level is written here per environment rather than templated.
-  # Add a crate to this workspace and its name belongs on this line, or it is silent for the same reason with nothing in the symptom to suggest why.
-  # `RUST_LOG` overrides this entirely when set: loco tries `EnvFilter::try_from_default_env()` before reading this key at all (`logger.rs:193`), so a platform that injects `RUST_LOG` restores the silence described above while this file still says otherwise. Measured: `RUST_LOG=loco_rs=info` against this config gives zero lines from either application crate.
-  override_filter: loco_rs=info,sea_orm_migration=info,tower_http=info,sqlx::query=info,yorishiro_core=info,yorishiro_hosted=info
 
 # Web server configuration
 server:

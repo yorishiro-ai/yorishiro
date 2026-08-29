@@ -1,9 +1,9 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::{content_entities, content_relations, content_schemas, recall};
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::{content_entities, content_relations, content_schemas, recall};
 
 fn chain_definition() -> serde_json::Value {
     serde_json::json!({

@@ -3,9 +3,9 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Transaction
 use serial_test::serial;
 use std::sync::Arc;
 use tokio::sync::Barrier;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro_core::models::tenancy;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
+use yorishiro::models::tenancy;
 
 /// Eight concurrent `create_workspace` calls against a tenant with one workspace slot left must produce exactly one workspace, not eight.
 ///

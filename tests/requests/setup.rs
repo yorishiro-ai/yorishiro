@@ -1,6 +1,6 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
+use yorishiro::app::App;
 
 use super::with_max_tenants;
 

@@ -15,6 +15,50 @@ use std::path::Path;
 #[allow(unused_imports)]
 use crate::{controllers, tasks};
 
+/// Refuses a request when no active licence is held, for the routes this is applied to.
+///
+/// This is where the paid-edition boundary lives now. It used to be the crate split: paid code was
+/// absent from the community binary on disk, so there was nothing to gate. One binary carries both
+/// editions, so the boundary became a runtime check instead.
+///
+/// **Per request, not per boot.** Mounting the gated routes conditionally at startup would be
+/// simpler and is wrong: `LicenceState::is_active` compares `exp` against the current time on every
+/// call precisely so a key that lapses while the process runs stops unlocking paid features without
+/// a restart (see `ee::services::licence`). A route set decided once at boot cannot un-mount, which
+/// would turn that documented property into a silent enforcement hole.
+///
+/// Applied through `Routes::layer`, which wraps each handler's own `MethodRouter`, so it reaches
+/// exactly the routes it is attached to and cannot leak onto base's. That is a property of the data
+/// rather than of this function, but it is the reason the community routes stay reachable.
+///
+/// Running before the handler is also what keeps an unlicensed deployment un-probeable: every gated
+/// route answers the same 404 to everyone, rather than authenticating first and thereby confirming
+/// to a valid key that the endpoint exists and is merely locked.
+async fn licence_gate(
+    axum::extract::State(ctx): axum::extract::State<AppContext>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    let active = ctx
+        .shared_store
+        .get::<crate::ee::services::licence::LicenceState>()
+        .is_some_and(|state| state.is_active());
+
+    if active {
+        return next.run(request).await;
+    }
+
+    // The same 404 and operator-facing hint `LicenceState::require_active` returned from the two
+    // handlers that used to carry this check themselves, rendered through `ApiError` so the body
+    // matches every other error this application emits rather than being formatted a second way.
+    crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
+        "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
+    ))
+    .into_response()
+}
+
 pub struct App;
 #[async_trait]
 impl Hooks for App {
@@ -97,10 +141,88 @@ impl Hooks for App {
         ctx.shared_store.insert(std::sync::Arc::new(
             crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
         ));
+
+        // The paid edition's own wiring. This ran in a second `Hooks` impl while `ee/` was a
+        // separate crate; one crate means one impl, so it is layered here instead.
+        //
+        // An absent or invalid licence key does not fail boot. It warns and continues rather than
+        // refusing, which is deliberate: `db::require_min_sqlite_connections` above refuses boot on
+        // a comparable misconfiguration, and the analogy does not carry. That one refuses because
+        // `max_connections` below 2 deadlocks under load with no legible symptom; this one has a
+        // legible symptom the moment a gated route is reached, so the operator keeps the choice.
+        ctx.shared_store
+            .insert(crate::ee::services::licence::LicenceState::from_env());
+
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            // Three of the paid edition's queries hardcode `DatabaseBackend::Postgres` and fail at
+            // execution time naming a query rather than the configuration that caused it:
+            // `ee::models::origin::list_with_upstream_changes`, `ee::models::marketplace::list_marketplace`,
+            // and `ee::models::marketplace::insert_next_version`. Named by function rather than by
+            // line, since a line number goes stale and a function does not.
+            //
+            // This is the only thing that explains those failures on this backend, because
+            // `TenantScopedAuthenticator` below is deliberately not installed here: without it,
+            // nothing else names the paid edition at boot at all.
+            tracing::warn!(
+                "some paid features are unavailable on SQLite: browsing the marketplace, publishing \
+                 a template version, and listing template-origin updates each run a PostgreSQL-only \
+                 query and will fail when reached. Point DATABASE_URL at PostgreSQL to use them; \
+                 everything else works on this backend"
+            );
+        } else {
+            // Replaces the default authenticator inserted above (`Arc<dyn Authenticator>` is keyed
+            // by `TypeId`, so the later insert wins), which is what lets a tenant-scoped key name
+            // its workspace per request on every authenticated path, REST and MCP alike.
+            //
+            // PostgreSQL only, and deliberately not licence-conditional. It reads through
+            // `DbHandle::tenant`, which does not exist on SQLite; and making authentication itself
+            // depend on the licence would change who a caller *is* the moment a key lapsed, rather
+            // than which features they reach. It is safe unconditionally on this backend because it
+            // is a strict superset: base's authenticator calls `authenticate_api_key($1)`, this one
+            // calls `($1, $2)`, and the second argument is consulted only for a key with a NULL
+            // `workspace_id`, which nothing outside the paid edition can mint.
+            ctx.shared_store.insert(std::sync::Arc::new(
+                crate::ee::services::tenant_auth::TenantScopedAuthenticator,
+            )
+                as std::sync::Arc<dyn crate::services::auth::Authenticator>);
+        }
+
+        // The embedding and worker-class resolver seams, replacing the defaults inserted above.
+        // Both return `None` for a workspace with no row of its own, so a deployment that never
+        // assigns one is unaffected; which compute a tenant's jobs run on, and against which
+        // embedding backend, is the paid-edition decision that keeps these tables in `ee/`.
+        ctx.shared_store.insert(std::sync::Arc::new(
+            crate::ee::services::embedding_resolver::EmbeddingKeyResolver,
+        )
+            as std::sync::Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>);
+        ctx.shared_store.insert(std::sync::Arc::new(
+            crate::ee::services::worker_class_resolver::WorkerClassAssignmentResolver,
+        )
+            as std::sync::Arc<dyn crate::workers::embedding_sync::WorkerClassResolver>);
+
         Ok(ctx)
     }
 
+    /// Which of the paid edition's routes are licence-gated is a three-way split, not a binary one,
+    /// and the two ungated groups are ungated for different reasons.
+    ///
+    /// `inference` and `marketplace` carry the gate: these are the surfaces that previously called
+    /// `LicenceState::require_active` in their own handlers. Attaching the layer here is equivalent
+    /// rather than a widening — every one of `marketplace`'s handlers already routed through its
+    /// `licensed_tenant` helper, and `inference`'s two routes checked before authenticating, which
+    /// is the order the layer reproduces.
+    ///
+    /// `oauth` and `stripe` are gated by *configuration* instead, and deliberately carry no licence
+    /// check: `oauth` because it is opt-in by setting an issuer URL rather than a feature to unlock
+    /// (see its own module doc), and `stripe` because the webhook is how a licence gets bought, so
+    /// requiring one to reach it would be circular.
+    ///
+    /// The rest (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`) serve without
+    /// a licence today and continue to. Widening the gate to cover them may well be right, but it is
+    /// a deliberate product decision rather than something to inherit from where a layer is attached.
     fn routes(_ctx: &AppContext) -> AppRoutes {
+        let gate = axum::middleware::from_fn_with_state(_ctx.clone(), licence_gate);
+
         AppRoutes::with_default_routes()
             .add_route(controllers::audit_log::routes())
             .add_route(controllers::auth::routes())
@@ -118,6 +240,17 @@ impl Hooks for App {
             .add_route(controllers::template_library::routes())
             .add_route(controllers::whoami::routes())
             .add_route(controllers::workspaces::routes())
+            // The paid edition's routes, mounted unconditionally; see this function's doc comment
+            // for why only two of them carry the gate.
+            .add_route(crate::ee::controllers::dashboard::routes())
+            .add_route(crate::ee::controllers::embedding::routes())
+            .add_route(crate::ee::controllers::entity_columns::routes())
+            .add_route(crate::ee::controllers::inference::routes().layer(gate.clone()))
+            .add_route(crate::ee::controllers::marketplace::routes().layer(gate))
+            .add_route(crate::ee::controllers::oauth::routes())
+            .add_route(crate::ee::controllers::origin::routes())
+            .add_route(crate::ee::controllers::stripe::routes())
+            .add_route(crate::ee::controllers::worker_class::routes())
     }
 
     /// Mounts the MCP server under `/mcp` and layers the maintenance guard and the auth rate limiter over everything, REST and MCP alike.
@@ -168,12 +301,23 @@ impl Hooks for App {
         tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
         tasks.register(tasks::maintenance::Maintenance);
         tasks.register(tasks::maintenance_status::MaintenanceStatus);
+        // The paid edition's tasks. Registering only makes them available to `cargo loco task`;
+        // neither runs at boot, so this changes nothing for a deployment that never invokes them.
+        tasks.register(crate::ee::tasks::seed_official_templates::SeedOfficialTemplates);
+        tasks.register(crate::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
         // tasks-inject (do not remove)
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())
     }
-    async fn seed(_ctx: &AppContext, _base: &Path) -> Result<()> {
+    /// Publishing the templates themselves stays `seed_official_templates`'s own job; this only
+    /// ensures the tenant that owns them exists.
+    ///
+    /// That tenant is `INFRASTRUCTURE_TENANT_ID` (the nil UUID), which `models::tenancy` already
+    /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
+    /// so seeding it cannot consume a single-tenant deployment's one slot.
+    async fn seed(ctx: &AppContext, _base: &Path) -> Result<()> {
+        crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
         Ok(())
     }
 }

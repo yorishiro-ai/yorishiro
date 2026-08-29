@@ -25,12 +25,12 @@ test:
 	DATABASE_URL=$(DATABASE_URL) cargo test --workspace $(ARGS)
 
 build:
-	cargo build -p yorishiro-core --bin yorishiro_core-cli
+	cargo build -p yorishiro --bin yorishiro
 
 # make task NAME=seed_official_templates [ARGS="key:value"]
 task: build
-	DATABASE_URL=$(DATABASE_URL) ./target/debug/yorishiro_core-cli task $(NAME) $(ARGS)
+	DATABASE_URL=$(DATABASE_URL) ./target/debug/yorishiro task $(NAME) $(ARGS)
 
 # make doctor [ENVIRONMENT=production]
 doctor: build
-	DATABASE_URL=$(DATABASE_URL) ./target/debug/yorishiro_core-cli doctor -e $(ENVIRONMENT)
+	DATABASE_URL=$(DATABASE_URL) ./target/debug/yorishiro doctor -e $(ENVIRONMENT)

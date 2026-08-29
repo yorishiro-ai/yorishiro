@@ -11,6 +11,25 @@ mod system;
 mod template_library;
 mod workspaces;
 
+// The paid edition's own request suites. These lived in a second test binary under
+// `ee/crates/yorishiro-hosted/tests/` while `ee/` was its own crate; one crate means one
+// integration-test binary, so they join this module list instead.
+// `hosted_setup` is that tree's own `setup.rs` under a non-colliding name: both trees
+// declared `mod setup;` in this very module, which cannot coexist here.
+mod dashboard;
+mod embedding;
+mod entity_columns;
+mod hosted_setup;
+mod inference;
+mod licence_gate;
+mod marketplace;
+mod oauth;
+mod official_templates;
+mod origin;
+mod stripe;
+mod tenant_auth;
+mod worker_class;
+
 /// `after_context` opens two pools Loco's own request-test harness knows nothing about: the identity pool and the tenant pool.
 /// Leaving either open means a session survives on the throwaway test database, and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
 /// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
@@ -20,7 +39,7 @@ mod workspaces;
 ///
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
-    if let Some(db) = ctx.shared_store.get::<yorishiro_core::db::DbHandle>() {
+    if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;
     }

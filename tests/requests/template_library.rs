@@ -1,10 +1,10 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: uuid::Uuid,
@@ -173,7 +173,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
 
-        let community = yorishiro_core::models::_entities::identity_templates::ActiveModel {
+        let community = yorishiro::models::_entities::identity_templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(owner_a.tenant_id),
             name: sea_orm::ActiveValue::Set("shared-note".into()),
             definition: sea_orm::ActiveValue::Set(note_definition()),
@@ -232,7 +232,7 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
 
-        let community = yorishiro_core::models::_entities::identity_templates::ActiveModel {
+        let community = yorishiro::models::_entities::identity_templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(owner_a.tenant_id),
             name: sea_orm::ActiveValue::Set("shared-note".into()),
             definition: sea_orm::ActiveValue::Set(note_definition()),

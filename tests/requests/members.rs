@@ -1,10 +1,10 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::services::auth::ApiKeyScope;
 
 /// Creates a tenant and one active workspace, for tests that need somewhere to attach members.
 async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {

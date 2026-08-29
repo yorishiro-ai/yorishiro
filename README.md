@@ -19,10 +19,10 @@ flowchart TD
         HostedREST["hosted routes<br/>(marketplace / origin / billing / OAuth)"]
     end
 
-    subgraph Server["yorishiro-server (axum)"]
+    subgraph Server["yorishiro (axum)"]
         MCPAdapter["MCP adapter<br/>(YorishiroMcpServer, 23 tools)"]
         RESTAdapter["REST adapter"]
-        Core["yorishiro-core<br/>(schemas / entities / relations /<br/>search / auth / embedding)"]
+        Core["core<br/>(schemas / entities / relations /<br/>search / auth / embedding)"]
         MCPAdapter --> Core
         RESTAdapter --> Core
     end
@@ -41,8 +41,9 @@ The community binary (`yorishiro-ce-server`) is the inner subgraph on its own: t
 It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
-  - `yorishiro-core` (domain logic) and `yorishiro-server` (HTTP server and adapter layer).
-  - `yorishiro-core` owns the models and issues the queries; `yorishiro-server` adapts them to HTTP and MCP.
+  - One application crate at the repository root, plus `migration/`.
+  - `src/models/` owns the models and issues the queries; `src/controllers/` adapts them to HTTP, and `src/services/mcp/` to MCP.
+  - The paid edition lives under `ee/`, compiled into the same crate and gated at runtime rather than at build time.
 - Two-tier tenancy
   - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer.
     A tenant owns one or more **workspaces**.
@@ -107,8 +108,10 @@ flowchart TD
 
   A version bump is therefore cheap and non-destructive: no bulk rewrite runs, and no existing row becomes invalid.
 - Single binary
-  - Everything above ships in the single `yorishiro-server` binary.
-  - Defaults to a single-tenant deployment (`YORISHIRO_MAX_TENANTS=1`; set it to `0` for unlimited tenants).
+  - Everything above ships in the single `yorishiro` binary.
+  - Defaults to a single-tenant deployment (`YORISHIRO_MAX_TENANTS=1`). Setting it to `0` means unlimited tenants,
+    which also disables the first-run setup wizard below: unlimited and unset are the same value internally, and the
+    wizard only appears when a cap is set.
   - That same cap also enables a first-run setup wizard (browser UI at `/`, or `POST /setup`) that creates the tenant, workspace, and owner account in one step, no admin CLI needed.
   - Beyond that first account, further account creation is invite-only (`admin create-invite` → `POST /auth/signup` → `POST /auth/login`).
   - Tenant owners/admins can then manage members (`/api/members`) and workspaces (`/api/workspaces`) over REST, or through the same browser UI, without touching the admin CLI.
@@ -149,19 +152,23 @@ $ make init
 
 ## Editions
 
-One repository, one image, two binaries.
-Which one you run decides what is on disk, not what you configure.
+One repository, one image, one binary.
+Configuration decides what is enabled, not which artifact you installed.
 
-| | `yorishiro-server` | `yorishiro-ce-server` |
+| | Without a licence key | With `YORISHIRO_LICENSE_KEY` |
 |---|---|---|
-| Contains | Everything, including `ee/` | BUSL-1.1 only, no trace of `ee/` |
-| Paid features | Enabled by `YORISHIRO_LICENSE_KEY`, otherwise `404` | Not present |
-| Web UI | Served from the binary | None: `/` answers `404` |
-| Licence | [BUSL-1.1](LICENSE) plus [`ee/LICENSE`](ee/LICENSE) for `ee/` | [BUSL-1.1](LICENSE) |
+| Paid API surfaces | `404` | Served |
+| Everything else | Served | Served |
+| Web UI | Served either way, since the SPA is not licence-gated | |
+| Licence | [BUSL-1.1](LICENSE), plus [`ee/LICENSE`](ee/LICENSE) for the `ee/` directory | |
 
-The default artifact is `yorishiro-server`, and without a licence key its paid API surfaces answer `404`.
-It is still not the same as the community binary: `ee/` is on disk, and the Web UI is served either way, since the SPA is not licence-gated.
-`yorishiro-ce-server` exists for a deployment that cannot have proprietary code on disk at all: a distribution policy, a redistribution requirement, an audit that reads the package rather than the configuration.
+The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a
+valid licence key is configured. The check is per request rather than at startup, so a key
+that expires while the process runs stops unlocking those surfaces without a restart.
+
+Both licences continue to apply exactly as written, because `ee/` remains a directory of
+that name: `ee/LICENSE` covers its contents, and the root [BUSL-1.1](LICENSE) covers the
+repository excluding it.
 
 The paid half has no README of its own on this branch. `ee/LICENSE` sets out the intended terms and says at the top of the file that it is a draft not yet settled by counsel, and `ee/crates/yorishiro-hosted/` is where its code lives.
 

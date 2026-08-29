@@ -1,8 +1,8 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_templates, identity_tenants};
-use yorishiro_core::models::identity_templates as templates;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_templates, identity_tenants};
+use yorishiro::models::identity_templates as templates;
 
 fn note_definition(name: &str) -> serde_json::Value {
     serde_json::json!({
@@ -79,7 +79,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
         let visible = templates::list_templates(
             &ctx.db,
             tenant_a.id,
-            yorishiro_core::models::pagination::ListParams::default(),
+            yorishiro::models::pagination::ListParams::default(),
         )
         .await
         .expect("list_templates");

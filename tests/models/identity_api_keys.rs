@@ -1,10 +1,10 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_api_keys::Entity as ApiKeys;
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
+use yorishiro::models::identity_api_keys::Entity as ApiKeys;
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::services::auth::ApiKeyScope;
 
 async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
     let tenant = identity_tenants::ActiveModel {
@@ -54,7 +54,7 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
         let keys = ApiKeys::list_for_workspace(
             &ctx.db,
             workspace_id,
-            yorishiro_core::models::pagination::ListParams::default(),
+            yorishiro::models::pagination::ListParams::default(),
         )
         .await
         .expect("list_for_workspace");
@@ -90,7 +90,7 @@ async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
         let keys = ApiKeys::list_for_workspace(
             &ctx.db,
             workspace_id,
-            yorishiro_core::models::pagination::ListParams::default(),
+            yorishiro::models::pagination::ListParams::default(),
         )
         .await
         .expect("list_for_workspace");
@@ -100,7 +100,7 @@ async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
         assert!(
             matches!(
                 result,
-                Err(yorishiro_core::error::YorishiroError::NotFound { .. })
+                Err(yorishiro::error::YorishiroError::NotFound { .. })
             ),
             "result: {result:?}"
         );

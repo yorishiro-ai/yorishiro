@@ -1,11 +1,11 @@
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use uuid::Uuid;
-use yorishiro_core::app::App;
-use yorishiro_core::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro_core::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro_core::models::tenancy::{self, MembershipRole};
-use yorishiro_core::services::auth::ApiKeyScope;
+use yorishiro::app::App;
+use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
+use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: Uuid,
@@ -130,7 +130,7 @@ async fn undo_migration_job_is_recorded() {
             }
         }))
         .expect("parse definition");
-        yorishiro_core::models::content_schemas::create_schema(
+        yorishiro::models::content_schemas::create_schema(
             &ctx.db,
             setup.tenant_id,
             setup.workspace_id,
@@ -140,10 +140,10 @@ async fn undo_migration_job_is_recorded() {
         )
         .await
         .expect("create schema");
-        let entity = yorishiro_core::models::content_entities::create(
+        let entity = yorishiro::models::content_entities::create(
             &ctx.db,
             setup.workspace_id,
-            yorishiro_core::models::content_entities::CreateEntityInput {
+            yorishiro::models::content_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "before" }),
@@ -153,7 +153,7 @@ async fn undo_migration_job_is_recorded() {
         .await
         .expect("create entity");
         let job_id = Uuid::new_v4();
-        yorishiro_core::models::content_entities::snapshot(
+        yorishiro::models::content_entities::snapshot(
             &ctx.db,
             setup.workspace_id,
             entity.id,
@@ -161,7 +161,7 @@ async fn undo_migration_job_is_recorded() {
         )
         .await
         .expect("snapshot entity");
-        yorishiro_core::models::content_entities::update(
+        yorishiro::models::content_entities::update(
             &ctx.db,
             setup.workspace_id,
             entity.id,
