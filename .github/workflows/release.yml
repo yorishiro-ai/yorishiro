@@ -1,18 +1,37 @@
 name: Release
 
-# One dispatch is the whole release: bump, tag, build, publish, verify. The tag is pushed
-# directly to master.
+# One dispatch cuts a prerelease from `develop`: build, package, publish images, publish a
+# GitHub Release marked prerelease.
 #
-# This is only safe because this repository has no branch protection or ruleset on master
-# (both verified disabled). If either is ever enabled, the push step below starts failing and
-# this needs a token that isn't `github-actions[bot]`.
+# Releases and prereleases are numbered by two different systems, and that is the design rather
+# than a limitation to work around.
+#
+#   a release      vX.Y.Z, SemVer, and what `Cargo.toml`'s version means
+#   a prerelease   YYYYMMDD-N, the UTC date and the run within that day, outside SemVer entirely
+#
+# So nothing here edits `Cargo.toml` or commits to `develop`. Not because that would be
+# untidy, but because a prerelease tag is not a version and does not belong in the field that
+# holds one: cargo rejects `20260830-1` outright ("unexpected character '-' after major version
+# number"). `develop` staying at `0.1.0` is its position in the SemVer system, which a
+# prerelease does not move.
+#
+# Both systems are visible in what the binary reports, and the release body says which is
+# which: `yorishiro version` answers `0.1.0 (20260830-1)`, the branch's SemVer position and
+# then this build's prerelease identity. The packages are versioned by the tag, so `dpkg -l`
+# names the prerelease exactly.
+#
+# There is no `crates-publish` job. `yorishiro-core` and `yorishiro-server` are both on
+# crates.io at 0.50.0, published from the `master` lineage, which still holds the crates those
+# names belong to. Publishing from this branch's single-crate layout is a separate design
+# question for whenever `develop` replaces `master`, not something this workflow defers.
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version (e.g. 0.18.1) -- without the leading v'
-        required: true
+      dry_run:
+        description: 'Build and package without publishing anything'
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,134 +50,76 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.commit.outputs.tag }}
+      tag: ${{ steps.plan.outputs.tag }}
+      ref: ${{ steps.plan.outputs.ref }}
 
     steps:
-      # workflow_dispatch runs against whatever ref the dispatcher selected, and the checkout below has no `ref:` pin, so without this guard, dispatching from a branch that is a fast-forward descendant of master would push that branch's content straight to master.
-      # Fail loudly rather than silently pinning `ref: master`, which would build something other than what the dispatcher chose.
-      - name: Require dispatch from master
+      # A real release comes from `develop`; a dry run may come from anywhere. That exemption is
+      # the point of `dry_run`: it is what lets this workflow be checked from a pull request
+      # branch before it is merged, which is otherwise impossible for a `workflow_dispatch`
+      # workflow whose every other path writes something public.
+      - name: Check the dispatch ref
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
-            echo "Releases must be dispatched from master (got $GITHUB_REF)." >&2
+          if [ "$DRY_RUN" != "true" ] && [ "$GITHUB_REF" != "refs/heads/develop" ]; then
+            echo "A real release must be dispatched from develop (got $GITHUB_REF)." >&2
+            echo "Dispatch with dry_run=true to check the workflow from another branch." >&2
             exit 1
           fi
 
-      # persist-credentials stays at its default (true), unlike other checkouts in this repo:
-      # this job needs the injected token to push the bump commit and tag below.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      # (0|[1-9][0-9]*) per component rather than [0-9]+: the naive form also accepts a
-      # leading-zero component like "01.2.3", which is not a valid SemVer version core and
-      # would confuse `cargo update -w`'s output downstream.
-      - name: Validate version format
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Version '$VERSION' is not in x.y.z form." >&2
-            exit 1
-          fi
-
-      # A tag on its own does not mean the release shipped: the GitHub Release, created last
-      # after every artifact is pushed, is what marks it complete. The two together tell the
-      # three cases apart:
+      # The tag names the day and the run within it: `20260830-1`, then `20260830-2`. There is
+      # no version input, because a prerelease is not claiming a version: see this file's
+      # header on why `develop` stays at 0.1.0.
       #
-      #   no tag              -> normal first run: bump, tag, publish
-      #   tag + release       -> already out; dispatching it again is a mistake
-      #   tag, but no release -> a previous run died partway. Skip the bump (the commit and tag
-      #                          are already on master) and republish from the existing tag.
+      # The date is UTC, which is what the runner's clock reads. A prerelease cut late in the
+      # evening in Asia/Tokyo therefore carries the following day's date, and the Release's own
+      # creation time will look a day ahead of its tag for that window. Stated because the
+      # alternative reading is that something is wrong.
       #
-      # The resume path exists so a failed publish can be re-dispatched at the same version,
-      # without deleting the remote tag by hand or burning a patch number.
-      - name: Determine release state
-        id: state
+      # Numbering reads `git ls-remote` rather than the tags API, because the API pages and this
+      # must not. `gh api repos/.../tags?per_page=100` returns a single page, so once this
+      # repository passes 100 tags the oldest stop appearing, and today's tags are the newest:
+      # they would be the first to vanish from the answer, numbering would restart at 1, and the
+      # tag it produced would already exist. `ls-remote` has no paging, so it cannot drift that
+      # way regardless of how many tags accumulate.
+      #
+      # (Not because the two disagree today: they report the same 72 tags. The 13-ref difference
+      # in raw `ls-remote` output is the peeled `^{}` entries annotated tags carry, which is what
+      # `grep -v` below removes, not evidence of anything missing.)
+      - name: Plan the release
+        id: plan
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          tag_exists=false
-          release_exists=false
+          DATE="$(date -u +%Y%m%d)"
+          existing="$(git ls-remote --tags origin \
+            | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' \
+            | grep -E "^${DATE}-[0-9]+$" | sed "s|^${DATE}-||" | sort -n | tail -1)"
+          TAG="${DATE}-$(( ${existing:-0} + 1 ))"
 
-          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
-            tag_exists=true
-          fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            release_exists=true
-          fi
-
-          if [ "$tag_exists" = true ] && [ "$release_exists" = true ]; then
-            echo "$TAG is already released. Nothing to do." >&2
-            exit 1
-          fi
-
-          if [ "$tag_exists" = true ]; then
-            echo "::notice::$TAG exists but has no GitHub Release -- resuming a failed publish."
-            echo "resumed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "resumed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.state.outputs.resumed == 'false'
-
-      - name: Bump workspace version
-        if: steps.state.outputs.resumed == 'false'
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          sed -i "0,/^version = \".*\"$/s//version = \"$VERSION\"/" Cargo.toml
-          if [ "$(grep -c '^version = "'"$VERSION"'"$' Cargo.toml)" -ne 1 ]; then
-            echo "Expected exactly one '^version = \"$VERSION\"' line in Cargo.toml after the bump." >&2
-            exit 1
-          fi
-
-          # yorishiro-server's `yorishiro-core` path dependency carries an explicit `version` for `cargo publish` (a path dependency with none is unresolvable off this filesystem), so it has to move in step with the workspace version.
-          server_manifest=crates/yorishiro-server/Cargo.toml
-          sed -i "s/^yorishiro-core = { path = \"..\/yorishiro-core\", version = \".*\" }$/yorishiro-core = { path = \"..\/yorishiro-core\", version = \"$VERSION\" }/" "$server_manifest"
-          if [ "$(grep -c "^yorishiro-core = { path = \"../yorishiro-core\", version = \"$VERSION\" }$" "$server_manifest")" -ne 1 ]; then
-            echo "Expected yorishiro-core's path dependency in $server_manifest to carry version \"$VERSION\" after the bump." >&2
-            exit 1
-          fi
-
-      # -w only: a bare `cargo update` would also move git dependencies to newer commits on the
-      # same tag ref than what this release was built and tested against.
-      - name: Update Cargo.lock
-        if: steps.state.outputs.resumed == 'false'
-        run: cargo update -w
-
-      - name: Commit and tag
-        id: commit
-        env:
-          GIT_AUTHOR_NAME: github-actions[bot]
-          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
-          GIT_COMMITTER_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
-          TAG: v${{ inputs.version }}
-          RESUMED: ${{ steps.state.outputs.resumed }}
-        run: |
-          if [ "$RESUMED" = "true" ]; then
-            echo "Resuming: $TAG already points at the release commit, not re-bumping."
-          else
-            git add Cargo.toml Cargo.lock crates/yorishiro-server/Cargo.toml
-            if git diff --quiet --cached; then
-              # Nothing to commit: the version is already what was asked for, because a PR
-              # already carried the bump. Tag the commit that brought it in rather than
-              # failing on an empty commit.
-              echo "::notice::Cargo.toml is already at ${TAG}; tagging without a bump commit."
-              git tag "$TAG"
-              git push origin "$TAG"
-            else
-              git commit -m "Bump version to ${TAG}"
-              git tag "$TAG"
-              # Atomic: master and the tag land together, or neither does. Avoids a bumped
-              # master with no matching tag if the second of two separate pushes failed.
-              git push --atomic origin HEAD:master "$TAG"
-            fi
-          fi
+          # The version compiled into the binary. A prerelease tag is not a SemVer version and
+          # `Cargo.toml` will not take it, so the manifest keeps the version it already has and
+          # only the build metadata says which prerelease this is.
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "dry run: would tag ${TAG}, building from ${GITHUB_SHA}"
+            # Every downstream job checks out this, not the tag: in a dry run the tag does not
+            # exist, and `ref:` pointing at a missing tag fails the checkout rather than the
+            # release.
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "ref=${TAG}" >> "$GITHUB_OUTPUT"
 
   binary:
     needs: prepare
@@ -167,18 +128,14 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: amd64
-            ext: ""
-            archive: deb+rpm
           - os: ubuntu-24.04-arm
             arch: arm64
-            ext: ""
-            archive: deb+rpm
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
@@ -193,59 +150,29 @@ jobs:
           cache-directories: ~/.cache/ort.pyke.io
 
       - name: Route rustc through sccache
-        if: runner.os == 'Linux'
         run: |
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
-      # The SPA is embedded from `ee/web/dist`, a build output that is not committed, so it is
-      # built before cargo: a release binary that links without it serves no UI.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          package_json_file: ee/web/package.json
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: ee/web/pnpm-lock.yaml
-
-      - name: Build the SPA
-        run: |
-          pnpm --dir ee/web install --frozen-lockfile
-          pnpm --dir ee/web run build
-
-      - name: Build
-        run: cargo build --release -p yorishiro-hosted
-
-      # The community binary carries no code from `ee/`, for a deployment that cannot hold
-      # proprietary code at all. Built only on Linux: it exists for the distribution packages
-      # below, and the default edition is the unsuffixed package.
-      - name: Build the community binary
-        if: runner.os == 'Linux'
-        run: cargo build --release -p yorishiro-server --bin yorishiro-ce-server
-
-      # No Linux tarball. The .deb and .rpm below carry the same binaries and additionally
-      # create the service user, the state directory, the config directory and the systemd
-      # unit, and they declare the glibc floor, so the package manager refuses a system the
-      # binary cannot run on instead of unpacking one that dies at first start. A tarball
-      # offers none of that and works on exactly the same systems, the floor being a property
-      # of the binary rather than of the packaging.
+      # `Cargo.toml` is left alone: its version is this branch's position in the SemVer system,
+      # and a prerelease belongs to the other one (see this file's header). Nothing to inject.
       #
-      # No Windows build either: nothing documents it, so the zip was an artifact nobody was
-      # ever pointed at.
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
+      # `BUILD_SHA` carries the tag rather than the commit sha, so `yorishiro version` answers
+      # `0.1.0 (20260830-1)` and both systems are legible in one string: where the branch sits,
+      # and which prerelease this binary is. The commit is in the release body for anyone who
+      # needs it.
+      #
+      # There is no separate community build. `ee/` compiles into this crate as a module and
+      # the licence layer decides at runtime what serves, so there is one binary and one
+      # package; `packaging/nfpm-yorishiro.yaml` records the same reasoning.
+      - name: Build
         env:
-          TAG: ${{ needs.prepare.outputs.tag }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          mkdir -p dist
+          BUILD_SHA: ${{ needs.prepare.outputs.tag }}
+        run: cargo build --release --bin yorishiro
 
       # Installed from the release tarball rather than an action: the version is pinned here in
       # plain sight, and nfpm publishes static binaries for both architectures this matrix runs.
       - name: Install nfpm
-        if: runner.os == 'Linux'
         env:
           NFPM_VERSION: 2.47.0
           ARCH: ${{ matrix.arch }}
@@ -271,27 +198,46 @@ jobs:
           sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           nfpm --version
 
-      # Two package lines, one per edition: `yorishiro-ee` carries the paid features (inactive without a licence key) and is what most deployments want; `yorishiro-ce` holds no proprietary code and is therefore headless.
-      # They Conflict, since both would run a service against one database.
+      # Built in CI rather than from a developer's machine, and this is the reason: the package
+      # declares a glibc floor of 2.39, and a binary linked against a newer host glibc raises the
+      # real requirement above the declared one, so the package installs on systems it cannot run
+      # on. The runner's glibc is what holds the floor down.
+      # `VERSION` is the tag. `20260830-1` is a well-formed Debian version (`20260830` upstream,
+      # `1` revision), so the packages carry the prerelease identity even though the binary
+      # inside them reports the manifest's own version. rpm treats the hyphen the same way, as
+      # the release field.
       - name: Package (deb and rpm)
-        if: runner.os == 'Linux'
         env:
-          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.tag }}
           ARCH: ${{ matrix.arch }}
         run: |
-          # nfpm wants the bare version, not the v-prefixed tag.
-          export VERSION="${TAG#v}"
-          for edition in yorishiro-ee yorishiro-ce; do
-            for pkg in deb rpm; do
-              nfpm package \
-                --config "packaging/nfpm-${edition}.yaml" \
-                --packager "$pkg" \
-                --target dist/
-            done
+          mkdir -p dist
+          for pkg in deb rpm; do
+            nfpm package --config packaging/nfpm-yorishiro.yaml --packager "$pkg" --target dist/
           done
           ls -1 dist/
 
+      # The packages are installed and started in the distributions they claim to support,
+      # including the ones they must refuse. This runs in a dry run too: it is the part of a
+      # release most worth checking before publishing anything.
+      - name: Test the packages
+        if: matrix.arch == 'amd64'
+        run: ./packaging/test-install.sh dist
+
+      - name: Test the packages under systemd
+        if: matrix.arch == 'amd64'
+        run: ./packaging/test-systemd.sh dist
+
+      # `!cancelled()` rather than the default `success()`, so a failed package test still
+      # leaves the packages behind. The tests above run after the build, so a failure there
+      # meant the artifacts were never uploaded, and the one thing needed to diagnose the
+      # failure was the thing the failure destroyed. Diagnosing it then needs a second run with
+      # the tests removed, which is a worse position than simply keeping the output.
+      #
+      # `github-release` still gates on the job's own success, so a failed run cannot publish
+      # these: they are kept for reading, not for shipping.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() }}
         with:
           name: binary-linux-${{ matrix.arch }}
           path: dist/*
@@ -310,21 +256,24 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        if: ${{ !inputs.dry_run }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A dry run builds the image and does not push it, which is what makes the Dockerfile
+      # itself checkable without a registry write.
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
-          push: true
+          push: ${{ !inputs.dry_run }}
           provenance: false
           tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
@@ -332,6 +281,9 @@ jobs:
 
   docker-manifest:
     needs: [docker, prepare]
+    # Skipped entirely in a dry run: it merges tags that were never pushed, so there is nothing
+    # for it to read. This is the one job a dry run cannot exercise at all.
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
 
     steps:
@@ -343,8 +295,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Each arch was pushed as its own tag by the (native, no-QEMU) `docker` job above;
-      # this merges them into one multi-arch manifest under the version and `latest` tags.
+      # Each arch was pushed as its own tag by the (native, no-QEMU) `docker` job above; this
+      # merges them into one multi-arch manifest.
+      #
+      # The image tag is the bare prerelease tag, `20260830-1`, with no leading `v`. The
+      # released images carry one (`:v0.50.0` exists, `:0.50.0` does not), and that convention
+      # holds for versions; a date is not a version, so prefixing it would only make the two
+      # kinds of tag look alike in a listing where telling them apart is the point.
+      #
+      # No `latest`. That is what an unqualified `docker pull` takes, and moving it here would
+      # point it at a prerelease newer than the newest release, so anyone who did not name a tag
+      # would silently get one.
       - name: Create multi-arch manifest
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
@@ -352,16 +313,18 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t "${IMAGE}:${TAG}" \
-            -t "${IMAGE}:latest" \
             "${IMAGE}:${TAG}-amd64" \
             "${IMAGE}:${TAG}-arm64"
 
-  # Pulls the manifest that was just published and boots it against a real database.
-  # `ci.yml`'s package-smoke covers the same ground for a debug build on every PR, but nothing until now checks the actual release artifact: a release-profile-only fault, or a Dockerfile stage that only breaks in the published image, would otherwise ship unnoticed.
+  # Pulls the manifest that was just published and boots it against a real database. Nothing
+  # before this point runs the actual release image: a release-profile-only fault, or a
+  # Dockerfile stage that only breaks in the published image, would otherwise ship unnoticed.
   #
-  # Runs before github-release deliberately: the GitHub Release is what marks a version as published (see `prepare`), so a failure here leaves the version resumable rather than looking complete.
+  # Runs before github-release deliberately, so a failure here leaves a tag and images but no
+  # Release, which is the state that reads as "did not finish" rather than as "shipped".
   smoke:
     needs: [docker-manifest, prepare]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
 
     services:
@@ -369,15 +332,15 @@ jobs:
         image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: yorishiro
-          POSTGRES_PASSWORD: yorishiro
+          POSTGRES_PASSWORD: secret
           POSTGRES_DB: yorishiro
         ports:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U yorishiro"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
 
     steps:
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
@@ -386,119 +349,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The image refuses to start without an embedding model on disk (by design: a missing
-      # model is a hard failure, not a degraded mode), so fetch the same one the docs tell
-      # operators to use.
-      #
-      # This must stay in step with the default model and YORISHIRO_EMBEDDING_DIMENSIONS: the server
-      # checks the loaded model's width against the configured one and refuses to start when
-      # they disagree. Change the default, change this.
-      - name: Fetch the embedding model
-        run: |
-          mkdir -p models
-          curl -fsSL -o models/model.onnx \
-            https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
-          curl -fsSL -o models/tokenizer.json \
-            https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
-
-      - name: Boot the published image and check /up
+      - name: Boot the published image
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
+          psql "postgres://yorishiro:secret@127.0.0.1:5432/yorishiro" \
+            -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
           docker run -d --name smoke --network host \
-            -v "$PWD/models:/app/models:ro" \
-            -e DATABASE_URL=postgres://yorishiro:yorishiro@127.0.0.1:5432/yorishiro \
+            -e DATABASE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
+            -e QUEUE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
+            -e HOST=http://127.0.0.1:5150 \
+            -e YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1 \
+            -e YORISHIRO_EMBEDDING_MODEL=unused \
             "${IMAGE}:${TAG}"
 
-          booted=
           for _ in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8080/up >/dev/null 2>&1; then
-              booted=1
-              break
-            fi
-            sleep 2
+            curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
+            sleep 3
           done
-
-          if [ -z "$booted" ]; then
-            echo "The published image never answered /up." >&2
-            docker logs smoke >&2 || true
+          curl -fsS http://127.0.0.1:5150/_ping || {
+            echo "::error::the published image never answered /_ping" >&2
+            docker logs smoke
             exit 1
-          fi
-
-          # The one binary serves the UI too, so an image whose SPA failed to build answers
-          # /up perfectly while serving a blank 404 at /. `/up` alone would call that healthy.
-          if ! curl -fsS http://127.0.0.1:8080/ | grep -q "<html"; then
-            echo "The published image booted but served no SPA at /." >&2
-            docker logs smoke >&2 || true
-            exit 1
-          fi
-
-          echo "::notice::${IMAGE}:${TAG} booted, answered /up, and served the SPA"
-
-  # Publishes the two BUSL-1.1 crates to crates.io, keeping that channel in step with what the
-  # Docker image and OS packages ship.
-  # `ee/`'s `yorishiro-hosted` carries `publish = false` and is never a candidate.
-  # Runs after `smoke` and before `github-release` deliberately: the GitHub Release is what
-  # marks a version "already released" (see `prepare`), so a crates.io failure here leaves the
-  # version resumable by re-dispatching, the same as every other step.
-  # A crates.io outage therefore blocks the whole release rather than being skipped, which
-  # matches `smoke`'s own stated philosophy.
-  crates-publish:
-    needs: [smoke, prepare]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      # Once yorishiro-core@$VERSION is uploaded, that version is burned on crates.io: yankable, never erasable (the same lesson the workspace checklist already carries for `yorishiro` itself).
-      # So catch a packaging fault in yorishiro-server *before* core goes out, not after.
-      # `crates/yorishiro-server/migrations` is a symlink to the workspace-root `migrations/`, which `include` only picks up if cargo actually resolves the link; count is the same "a glob matching nothing is not an error" shape `github-release`'s artifact check already guards against.
-      - name: Confirm yorishiro-server packages its migrations before publishing anything
-        run: |
-          count=$(cargo package --list -p yorishiro-server | grep -c '^migrations/')
-          if [ "$count" -eq 0 ]; then
-            echo "::error::yorishiro-server's package listing carries no migrations/ files; publishing core first would burn its version for nothing." >&2
-            exit 1
-          fi
-          echo "::notice::yorishiro-server packages $count migration file(s)."
-
-      # Publish order matters: yorishiro-server depends on yorishiro-core, and crates.io's
-      # index has to carry core's just-published version before server's manifest (which names
-      # it as a versioned dependency, not a bare path) resolves.
-      #
-      # Idempotent per crate: a re-dispatch resuming a partially failed publish (one crate went
-      # through, the other didn't) must not fail on the crate that is already there.
-      # crates.io 403s a request with no User-Agent rather than 404ing, so this sets one
-      # explicitly.
-      # Treating a 403 as "already published" would misread a block as a skip.
-      - name: Publish yorishiro-core and yorishiro-server
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          already_published() {
-            status=$(curl -s -o /dev/null -w '%{http_code}' \
-              -H 'User-Agent: yorishiro-release (github-actions)' \
-              "https://crates.io/api/v1/crates/$1/$VERSION")
-            [ "$status" = "200" ]
           }
-
-          for crate in yorishiro-core yorishiro-server; do
-            if already_published "$crate"; then
-              echo "::notice::$crate@$VERSION is already on crates.io, skipping."
-            else
-              cargo publish -p "$crate"
-            fi
-          done
+          docker rm -f smoke
 
   github-release:
-    needs: [binary, smoke, crates-publish, prepare]
+    needs: [binary, smoke, prepare]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
 
     steps:
@@ -510,8 +390,10 @@ jobs:
 
       # Count what is about to be published, before publishing it.
       #
-      # A glob matching nothing is not an error to the upload action, which is precisely why
-      # the list below cannot be trusted to prove its own coverage, and this counts instead.
+      # A glob matching nothing is not an error to the upload action, which is precisely why a
+      # list of files cannot prove its own coverage, and this counts instead. One package per
+      # format per architecture, and nothing else: two, not master's four, because there is no
+      # community package.
       - name: Every documented artifact is present
         run: |
           status=0
@@ -524,9 +406,8 @@ jobs:
               echo "ok: $1 ($n)"
             fi
           }
-          # Both editions x both architectures x both formats, and nothing else.
-          expect '*.deb' 4
-          expect '*.rpm' 4
+          expect '*.deb' 2
+          expect '*.rpm' 2
           exit "$status"
 
       # One checksum file over everything published, so a download can be verified without a
@@ -539,11 +420,7 @@ jobs:
 
       # What the packages are and where they came from, without a signing key to distribute,
       # rotate or have anyone trust. `gh attestation verify <file> --repo yotsunagi/yorishiro`
-      # answers "this artifact was built by this workflow, from this commit", which is the
-      # question a signature would answer, minus the key management that made GPG not worth it
-      # for a project with no package repository.
-      #
-      # checksums.txt stays: it needs no tooling beyond sha256sum and works offline.
+      # answers "this artifact was built by this workflow, from this commit".
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'dist/*.deb, dist/*.rpm'
@@ -551,8 +428,31 @@ jobs:
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
+          prerelease: true
           files: |
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
-          generate_release_notes: true
+          # The version mismatch, stated where the people who meet it will be: someone who
+          # downloads a prerelease, checks out its tag and rebuilds. They get `0.1.0`, and
+          # nothing else in the repository would tell them why.
+          body: |
+            Prerelease built from `develop`.
+
+            Prereleases are numbered by date and run, `YYYYMMDD-N`, which is a different system
+            from the `vX.Y.Z` releases use. A prerelease is not a version, so it does not
+            appear in one:
+
+            ```
+            $ yorishiro version
+            0.1.0 (${{ needs.prepare.outputs.tag }})
+            ```
+
+            `0.1.0` is where `develop` sits in the release numbering, compiled in from its
+            `Cargo.toml`; the second half is this prerelease. The packages are versioned
+            `${{ needs.prepare.outputs.tag }}`, so `dpkg -l` and `rpm -q` name it directly.
+
+            Commit: ${{ github.sha }}
+
+            Packages carry both editions in one binary. The paid features stay inactive until
+            `YORISHIRO_LICENSE_KEY` is set.

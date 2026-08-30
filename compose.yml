@@ -1,0 +1,67 @@
+# Runs the built binary from the Dockerfile at the repository root, the same image used for
+# distribution.
+#
+#   docker compose up --build
+#
+# The database credentials here are development ones and are meant to stay on the loopback port
+# binding below. A deployment sets its own through the environment.
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: yorishiro
+      POSTGRES_PASSWORD: yorishiro
+      POSTGRES_DB: yorishiro
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yorishiro"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # To use a model this machine already has, put `model.onnx` and `tokenizer.json` in
+    # `models/` and add:
+    #
+    #   volumes:
+    #     - ./models:/app/models:ro
+    #
+    # Not mounted by default because `models/` is gitignored, so docker would create it as an
+    # empty root-owned directory. That is not an error: with no files there the provider fetches
+    # the model on first use into $HOME/.cache/yorishiro/models instead, which blocks that first
+    # start for about 522 MiB. Both files or neither, though: exactly one present is a startup
+    # error rather than a partial fetch.
+    environment:
+      # The three `production` requires. `get_env` with no default fails at startup rather than
+      # falling back, so all three are spelled out even where the value looks obvious.
+      DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
+      QUEUE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
+      HOST: http://localhost:5150
+      LOG_LEVEL: info
+      # The local ONNX embedding provider, reading the mount above. Unlike the settings below it,
+      # this is not the binary's default: without it the OpenAI-compatible provider is selected,
+      # and with neither YORISHIRO_EMBEDDING_BASE_URL nor YORISHIRO_EMBEDDING_MODEL set the app
+      # starts with no embedding backend and errors on the first search.
+      YORISHIRO_EMBEDDING_PROVIDER: local
+      # YORISHIRO_ONNX_MODEL_PATH and YORISHIRO_ONNX_TOKENIZER_PATH are deliberately not set.
+      # Setting either one turns the automatic fetch off for both files and requires them to
+      # already exist at the named path, so spelling out the defaults here would break the
+      # no-mount case rather than document it.
+      # Also the binary's own default: `src/bin/main.rs` sets YORISHIRO_MAX_TENANTS to "1" when
+      # it is unset, which is what keeps the first-run setup wizard reachable. Set it to "0" for
+      # multiple tenants, which turns that wizard off.
+      YORISHIRO_MAX_TENANTS: "1"
+    ports:
+      - "5150:5150"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

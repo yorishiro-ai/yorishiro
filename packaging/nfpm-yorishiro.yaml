@@ -1,0 +1,125 @@
+# The only package. Both editions ship in one artifact, because they are one binary: `ee/`
+# compiles into this crate as a module (`src/lib.rs`'s `#[path = "../ee/mod.rs"]`), and what a
+# deployment serves is decided at runtime by the licence layer, not by which file was installed.
+#
+# There is deliberately no `yorishiro-ce` package any more. Its reason to exist was that the
+# community binary carried no code from `ee/` on disk, which a separate `cargo build -p` made
+# true. That is no longer expressible: with one binary there is no on-disk separation to assert,
+# so a community package could only claim an absence that is not there. `conflicts` below still
+# names it, so a machine carrying the old package can move to this one.
+name: yorishiro
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+# nfpm defaults to `version_schema: semver`, which parses the version and rewrites it. A
+# prerelease tag is not a SemVer version, and the default mangles it rather than refusing:
+# `20260830-1` becomes `20260830.0.0~1`, reading the `-1` as a SemVer prerelease suffix and
+# padding the rest out to a full version core. Measured, with nfpm 2.47.0, on both packagers.
+# `none` passes the string through, so the package is versioned by the tag it was built from.
+version_schema: none
+section: net
+priority: optional
+maintainer: Yorishiro Contributors <noreply@yotsunagi.dev>
+description: |
+  An MCP-native, multi-tenant knowledge store with user-defined schemas.
+  Includes the paid features (billing, SSO, marketplace, LLM-backed fill).
+  Those stay disabled until YORISHIRO_LICENSE_KEY is set; everything else works without one.
+vendor: Yotsunagi
+homepage: https://github.com/yotsunagi/yorishiro
+license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
+
+depends:
+  - ca-certificates
+
+# These two floors are declared so the package manager refuses a system that cannot run the
+# binary, rather than installing happily and failing at first start. Verified: without them, the
+# rpm installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
+#
+# Both figures are read off the binary CI builds, not chosen. `objdump -p` on the amd64 artifact
+# reports `GLIBC_2.39` and `GLIBCXX_3.4.30`, and those are what appear below. Read them from a
+# CI artifact rather than a local build: the glibc floor tracks the host that compiled it, so a
+# developer's machine gives a different and higher answer.
+#
+# That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
+# produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
+# source, same dependencies. The C library's own headers decide which versioned symbols the
+# compiler selects. An earlier version of this comment attributed the floor to "the onnxruntime
+# that `ort` links", which is not what the binary says.
+#
+# `2.39` matches what this project supports: the current LTS releases, Ubuntu 24.04 and
+# AlmaLinux 10, both of which ship glibc 2.39. So the build host and the support target agree,
+# and neither has to move for the other.
+#
+# It said `2.38` until this was measured, which let the package install on a glibc 2.38 system
+# where the binary could not then start. That is what `test-install.sh`'s fedora:39 block was
+# failing on.
+#
+# Read this from the binary rather than from its symbol table. `objdump -T` shows the two
+# `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol
+# bindings, it rejects any binary whose version-requirements section names a version the library
+# lacks. `objdump -p` is the one that answers the question the package manager needs.
+#
+# GLIBCXX_3.4.30 is a separate floor and does come from the C++ side: `std::condition_variable`
+# via onnxruntime. Lowering the glibc figure would not move it, which is why Rocky 9 stays out of
+# reach either way (it provides 3.4.29).
+#
+# This floor is why the release build has to happen in CI rather than from a developer's
+# `target/release`: a binary linked against a newer host glibc raises the real requirement above
+# what is declared here, and the package then installs on a system it cannot run on.
+overrides:
+  deb:
+    depends:
+      - ca-certificates
+      - libstdc++6 (>= 12)
+      - libc6 (>= 2.39)
+  rpm:
+    depends:
+      - ca-certificates
+      - libstdc++ >= 12
+      - libc.so.6(GLIBC_2.39)(64bit)
+      - libstdc++.so.6(GLIBCXX_3.4.30)(64bit)
+
+# The retired community package installed the same unit name and state directory, so having
+# both would leave two services fighting over one database.
+conflicts:
+  - yorishiro-ce
+replaces:
+  - yorishiro-ce
+  - yorishiro-ee
+
+contents:
+  - src: ./target/release/yorishiro
+    dst: /usr/bin/yorishiro
+  - src: ./packaging/yorishiro.service
+    dst: /lib/systemd/system/yorishiro.service
+  # The application resolves `config/{LOCO_ENV}.yaml` relative to its working directory, so
+  # these ship as package-owned files rather than as editable configuration: an operator's
+  # settings go in /etc/yorishiro/yorishiro.env, which the unit reads as the environment these
+  # files interpolate from. Marking them `config` would prompt on upgrade for files nobody is
+  # meant to hand-edit.
+  - src: ./config/production.yaml
+    dst: /usr/share/yorishiro/config/production.yaml
+  - src: ./config/development.yaml
+    dst: /usr/share/yorishiro/config/development.yaml
+  - src: ./config/sqlite.yaml
+    dst: /usr/share/yorishiro/config/sqlite.yaml
+  # In /usr/share/yorishiro rather than /usr/share/doc: the same dpkg `path-exclude` that drops
+  # LICENSE would drop this, and the settings reference is what the environment file points at.
+  - src: ./docs/configuration.md
+    dst: /usr/share/yorishiro/docs/configuration.md
+  # `copyright` rather than `LICENSE`: Debian policy names it that, and minimal images
+  # (including the official ubuntu/debian containers) carry a dpkg `path-exclude` for
+  # `/usr/share/doc/*` with a `path-include` for `copyright` alone -- a file called LICENSE is
+  # silently dropped on exactly the systems most likely to be used for a deployment.
+  - src: ./LICENSE
+    dst: /usr/share/doc/yorishiro/copyright
+  # The paid licence in /etc for the same reason as the environment file above, and not as
+  # `copyright.ee`: the `path-include` covers the name `copyright` exactly, so this shipped
+  # inside the package and was deleted at unpack on every minimal image -- the enterprise
+  # edition delivering everything except the licence it is distributed under.
+  - src: ./ee/LICENSE
+    dst: /etc/yorishiro/LICENSE.enterprise
+
+scripts:
+  preinstall: ./packaging/preinstall.sh
+  postinstall: ./packaging/postinstall.sh

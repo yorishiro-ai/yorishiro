@@ -180,6 +180,7 @@ pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Emb
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
 /// `YORISHIRO_ONNX_MODEL_PATH`/`YORISHIRO_ONNX_TOKENIZER_PATH` default to `models/model.onnx`/`models/tokenizer.json`; `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` defaults to 512.
+/// Setting *either* path variable also turns the automatic fetch off, for both files: those defaults describe where an unset variable points, not a fallback the fetch still applies behind them.
 /// `YORISHIRO_ONNX_POOLING` is rejected rather than defaulted on an unknown value: reading a model with the wrong pooling does not fail, it just returns worse vectors.
 /// `YORISHIRO_ONNX_QUERY_INSTRUCTION` empty is treated as unset: an operator clearing the variable means "no prefix", not "prefix with nothing".
 ///
