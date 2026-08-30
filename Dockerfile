@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --no-create-home yorishiro
+    && useradd --system --create-home --home-dir /home/yorishiro yorishiro
 
 COPY --from=builder /usr/local/bin/yorishiro /usr/local/bin/yorishiro
 # The application reads `config/{LOCO_ENV}.yaml` relative to its working directory, so the
@@ -56,6 +56,17 @@ COPY config/ /app/config/
 WORKDIR /app
 RUN chown -R yorishiro:yorishiro /app
 
+# The account has a real home, and `HOME` is set for it, because the model fetch needs somewhere
+# to write. `services::embedding::model_fetch::cache_dir` reads `HOME` and gives up when it is
+# unset or empty, which makes the provider degrade to erroring on every call rather than
+# fetching. `compose.yml` selects the local provider and deliberately leaves the ONNX paths
+# unset so that fetch is what runs, so an image whose user had no home would take exactly that
+# degraded path on a machine with no model mounted.
+#
+# `--no-create-home` was what this used, and `src/services/embedding/mod.rs` cites a
+# `--no-create-home` container as the reason the no-`HOME` branch exists at all. It was
+# describing this image.
+ENV HOME=/home/yorishiro
 USER yorishiro
 # `production` takes no silent default for a secret or an address: it fails at startup when
 # DATABASE_URL, QUEUE_URL or HOST is unset rather than falling back to a development value.

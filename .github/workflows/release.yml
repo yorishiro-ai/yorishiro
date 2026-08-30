@@ -199,7 +199,7 @@ jobs:
           nfpm --version
 
       # Built in CI rather than from a developer's machine, and this is the reason: the package
-      # declares a glibc floor of 2.38, and a binary linked against a newer host glibc raises the
+      # declares a glibc floor of 2.39, and a binary linked against a newer host glibc raises the
       # real requirement above the declared one, so the package installs on systems it cannot run
       # on. The runner's glibc is what holds the floor down.
       # `VERSION` is the tag. `20260830-1` is a well-formed Debian version (`20260830` upstream,
