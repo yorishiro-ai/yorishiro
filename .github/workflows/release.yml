@@ -3,20 +3,19 @@ name: Release
 # One dispatch cuts a prerelease from `develop`: build, package, publish images, publish a
 # GitHub Release marked prerelease.
 #
-# Nothing is committed to `develop`. The version reaches the artifacts by editing `Cargo.toml`
-# in the runner's own checkout before building, which is enough because
-# `app::App::app_version` reads `env!("CARGO_PKG_VERSION")` at compile time: the file has to be
-# right at that moment, not afterwards in history. Everything else takes its version from
-# somewhere other than the manifest (nfpm reads `${VERSION}` from the environment; image and
-# release tags come from the dispatch input), so committing the bump would be a side effect
-# rather than a mechanism.
+# Nothing is committed to `develop`, and `Cargo.toml` is not edited either. A prerelease is
+# identified by its tag, which is the UTC date and the run within that day (`20260830-1`), and
+# cargo rejects that as a version outright: "unexpected character '-' after major version
+# number". So there is no version to inject and nothing to undo.
 #
-# Leaving `develop` at `0.1.0` is also the accurate state: this branch has not claimed a
-# version number yet, and committing one would say it had.
+# Leaving `develop` at `0.1.0` is the accurate state rather than a workaround: `master` holds
+# 0.50.0 and this branch has not claimed a version, so writing one into the manifest would say
+# it had.
 #
-# The consequence, which the release body repeats for the people who actually meet it:
-# rebuilding from a release tag produces a binary reporting `0.1.0`, because the tagged commit
-# is unmodified. The published artifacts carry the dispatched version.
+# What that costs, and where it is repeated for the people who meet it: `yorishiro version`
+# reports `0.1.0 (20260830-1)`. The version half is the branch's, the parenthesised half is
+# this build's, and the release body says so. The packages are versioned by the tag, so
+# `dpkg -l` names the prerelease exactly.
 #
 # There is no `crates-publish` job. `yorishiro-core` and `yorishiro-server` are both on
 # crates.io at 0.50.0, published from the `master` lineage, which still holds the crates those
@@ -26,9 +25,6 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Prerelease version (e.g. 0.51.0) -- without the leading v'
-        required: true
       dry_run:
         description: 'Build and package without publishing anything'
         type: boolean
@@ -74,31 +70,41 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # (0|[1-9][0-9]*) per component rather than [0-9]+: the naive form also accepts a
-      # leading-zero component like "01.2.3", which is not a valid SemVer version core.
-      - name: Validate version format
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Version '$VERSION' is not in x.y.z form." >&2
-            exit 1
-          fi
-
-      # The tag is created here and nowhere else, so a version that already has one is a
-      # re-dispatch of something already published. There is no resume path: nothing is
-      # committed, so a failed run leaves only the tag, and deleting a prerelease tag to run
-      # again is a smaller operation than the state machine that would avoid it.
+      # The tag names the day and the run within it: `20260830-1`, then `20260830-2`. There is
+      # no version input, because a prerelease is not claiming a version: see this file's
+      # header on why `develop` stays at 0.1.0.
+      #
+      # The date is UTC, which is what the runner's clock reads. A prerelease cut late in the
+      # evening in Asia/Tokyo therefore carries the following day's date, and the Release's own
+      # creation time will look a day ahead of its tag for that window. Stated because the
+      # alternative reading is that something is wrong.
+      #
+      # Numbering reads `git ls-remote`, deliberately, and not the tags API. `gh api
+      # repos/.../tags?per_page=100` returns one page: measured here at 72 of the 85 refs
+      # `ls-remote` reports. Today's tags are the newest, so they are the first to fall off that
+      # page as the list grows, and the numbering would then silently restart at 1 and collide
+      # with a tag that already exists. `ls-remote` has no paging.
+      #
+      # `grep -v '\^{}'` drops the peeled refs an annotated tag adds; the 13 of them here are
+      # exactly the difference between those two counts.
       - name: Plan the release
         id: plan
         env:
-          VERSION: ${{ inputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          TAG="v${VERSION}"
+          DATE="$(date -u +%Y%m%d)"
+          existing="$(git ls-remote --tags origin \
+            | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' \
+            | grep -E "^${DATE}-[0-9]+$" | sed "s|^${DATE}-||" | sort -n | tail -1)"
+          TAG="${DATE}-$(( ${existing:-0} + 1 ))"
+
+          # The version compiled into the binary. A prerelease tag is not a SemVer version and
+          # `Cargo.toml` will not take it, so the manifest keeps the version it already has and
+          # only the build metadata says which prerelease this is.
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
           if [ "$DRY_RUN" = "true" ]; then
-            echo "dry run: not tagging, building from ${GITHUB_SHA}"
-            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "dry run: would tag ${TAG}, building from ${GITHUB_SHA}"
             # Every downstream job checks out this, not the tag: in a dry run the tag does not
             # exist, and `ref:` pointing at a missing tag fails the checkout rather than the
             # release.
@@ -106,14 +112,8 @@ jobs:
             exit 0
           fi
 
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "Tag ${TAG} already exists. Delete it to re-run this version." >&2
-            exit 1
-          fi
-
           git tag "$TAG"
           git push origin "$TAG"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "ref=${TAG}" >> "$GITHUB_OUTPUT"
 
   binary:
@@ -149,27 +149,22 @@ jobs:
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
-      # Not committed, and not pushed anywhere: see this file's header. The build reads the
-      # manifest, so this has to happen before `cargo build` and nothing has to happen after it.
-      - name: Set the version for this build
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          sed -i "0,/^version = \".*\"$/s//version = \"$VERSION\"/" Cargo.toml
-          if [ "$(grep -c '^version = "'"$VERSION"'"$' Cargo.toml)" -ne 1 ]; then
-            echo "Expected exactly one '^version = \"$VERSION\"' line in Cargo.toml." >&2
-            exit 1
-          fi
-          # -w only: a bare `cargo update` would also move dependencies to versions this
-          # release was never built or tested against.
-          cargo update -w
-
+      # `Cargo.toml` is left alone. A prerelease tag is a date and a run number, which cargo
+      # rejects as a version outright ("unexpected character '-' after major version number",
+      # measured), so there is nothing to inject into the manifest and no edit to undo.
+      #
+      # `app_version` therefore reports the manifest's `0.1.0`, and the tag is what identifies
+      # the build. `BUILD_SHA` carries the tag rather than the commit sha so that
+      # `yorishiro version` answers `0.1.0 (20260830-1)`, which names the prerelease a person
+      # actually downloaded. The header and the release body both say the version half is the
+      # branch's, not this build's.
+      #
       # There is no separate community build. `ee/` compiles into this crate as a module and
       # the licence layer decides at runtime what serves, so there is one binary and one
       # package; `packaging/nfpm-yorishiro.yaml` records the same reasoning.
       - name: Build
         env:
-          BUILD_SHA: ${{ github.sha }}
+          BUILD_SHA: ${{ needs.prepare.outputs.tag }}
         run: cargo build --release --bin yorishiro
 
       # Installed from the release tarball rather than an action: the version is pinned here in
@@ -204,9 +199,13 @@ jobs:
       # declares a glibc floor of 2.38, and a binary linked against a newer host glibc raises the
       # real requirement above the declared one, so the package installs on systems it cannot run
       # on. The runner's glibc is what holds the floor down.
+      # `VERSION` is the tag. `20260830-1` is a well-formed Debian version (`20260830` upstream,
+      # `1` revision), so the packages carry the prerelease identity even though the binary
+      # inside them reports the manifest's own version. rpm treats the hyphen the same way, as
+      # the release field.
       - name: Package (deb and rpm)
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.prepare.outputs.tag }}
           ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist
@@ -248,13 +247,6 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
-      - name: Set the version for this build
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          sed -i "0,/^version = \".*\"$/s//version = \"$VERSION\"/" Cargo.toml
-          cargo update -w
-
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
@@ -294,8 +286,14 @@ jobs:
       # Each arch was pushed as its own tag by the (native, no-QEMU) `docker` job above; this
       # merges them into one multi-arch manifest.
       #
-      # No `latest`. These are prereleases: `latest` is what an unqualified `docker pull` takes,
-      # and a prerelease is not what someone who did not name a version is asking for.
+      # The image tag is the bare prerelease tag, `20260830-1`, with no leading `v`. The
+      # released images carry one (`:v0.50.0` exists, `:0.50.0` does not), and that convention
+      # holds for versions; a date is not a version, so prefixing it would only make the two
+      # kinds of tag look alike in a listing where telling them apart is the point.
+      #
+      # No `latest`. That is what an unqualified `docker pull` takes, and moving it here would
+      # point it at a prerelease newer than the newest release, so anyone who did not name a tag
+      # would silently get one.
       - name: Create multi-arch manifest
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
@@ -427,15 +425,21 @@ jobs:
           # downloads a prerelease, checks out its tag and rebuilds. They get `0.1.0`, and
           # nothing else in the repository would tell them why.
           body: |
-            Prerelease built from `develop`.
+            Prerelease built from `develop`. The tag is the UTC date and the run within that
+            day, not a version: `develop` has not claimed a version number, and nothing here
+            makes it claim one.
 
-            **Rebuilding from this tag does not reproduce the version.** The tagged commit's
-            `Cargo.toml` says `0.1.0`, and a binary built from it reports `0.1.0`. The version
-            below is injected at release time, into the artifacts only, and is never committed:
-            `develop` has not claimed a version number, and this workflow does not make it
-            claim one.
+            **`yorishiro version` reports `0.1.0`, and that is not a mistake.** `0.1.0` is what
+            `develop`'s `Cargo.toml` holds, and it is compiled in. The prerelease this binary
+            came from is the second half of that string:
 
-            Version: `${{ inputs.version }}`
+            ```
+            0.1.0 (${{ needs.prepare.outputs.tag }})
+            ```
+
+            The packages themselves are versioned `${{ needs.prepare.outputs.tag }}`, so
+            `dpkg -l` and `rpm -q` name the prerelease directly.
+
             Commit: ${{ github.sha }}
 
             Packages carry both editions in one binary. The paid features stay inactive until
