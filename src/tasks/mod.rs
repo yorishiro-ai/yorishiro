@@ -10,5 +10,6 @@ pub mod list_tenants;
 pub mod list_workspaces;
 pub mod maintenance;
 pub mod maintenance_status;
+pub mod reindex_embeddings;
 pub mod resync_embeddings;
 pub mod revoke_api_key;

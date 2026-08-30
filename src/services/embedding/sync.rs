@@ -36,6 +36,8 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
 
 /// Generates an embedding vector from an entity's `x-embed` fields and updates the `content_entities.embedding` column.
 /// Returns `Ok(())` without doing anything if the schema has no `x-embed` fields or none have values: embedding is an auxiliary feature and must never block the entity write it follows.
+///
+/// Checks the workspace's stamp before writing; see [`embed_and_write`] for the unguarded write this wraps, and why the reindex task calls that directly instead of this.
 pub async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -90,12 +92,27 @@ pub async fn sync_embedding(
                 provider.model_name()
             ),
             details: vec![],
-            hint: "point the deployment at the workspace's stamped model, or re-embed the \
-                   workspace after switching models"
+            hint: "point the deployment at the workspace's stamped model, or run \
+                   reindex_embeddings to switch it over"
                 .into(),
         });
     }
 
+    embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector).await
+}
+
+/// Writes an already-computed embedding vector to `content_entities.embedding`, with no check against the workspace's stamped model or dimensions.
+///
+/// [`sync_embedding`] wraps this with both checks for the normal write path.
+/// [`reindex_workspace`] calls this directly instead: its entire job is changing which model a workspace's vectors were embedded with, so a check that refuses a write on exactly that mismatch would refuse its own writes on every row.
+/// Safe to bypass here only because `reindex_workspace` restamps `identity_workspaces.embedding_model` itself, and only after every row succeeds: the stamp and the actual column contents genuinely disagree for its own duration, which is the situation `sync_embedding`'s check exists to prevent everywhere else.
+async fn embed_and_write(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+    snapshot_updated_at: chrono::DateTime<chrono::Utc>,
+    vector: Vec<f32>,
+) -> Result<(), YorishiroError> {
     // `updated_at` as a write condition prevents a vector computed from stale data from overwriting a newer one when concurrent syncs for the same entity finish out of order.
     // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later sync.
     let result = conn
@@ -116,7 +133,7 @@ pub async fn sync_embedding(
     if result.rows_affected() == 0 {
         tracing::debug!(
             %entity_id,
-            "sync_embedding: entity was deleted or updated since this snapshot, write skipped"
+            "embed_and_write: entity was deleted or updated since this snapshot, write skipped"
         );
     }
 
@@ -156,6 +173,108 @@ pub async fn sync_embedding_for_record(
         provider,
     )
     .await
+}
+
+/// The reindex loop's per-entity step: composes the embedding text, embeds it, and writes it via [`embed_and_write`], bypassing both of [`sync_embedding`]'s checks (model stamp and dimension) for the reason documented on [`embed_and_write`] itself.
+/// Otherwise identical to [`sync_embedding_for_record`]: same schema resolution, same no-op on an entity_type with no `x-embed` fields.
+///
+/// Skipping the dimension check specifically is harmless today only because `content_entities.embedding` is `vector(768)` at the SQL type level: Postgres itself still refuses a wrong-width write, `pgvector` erroring with "expected 768 dimensions, not N".
+/// The day a differently-sized model is added and this deployment's column type changes to match, that raw Postgres error, naming neither the workspace nor the entity, becomes the first thing a reindex against the new model hits, rather than the readable message [`sync_embedding`]'s own dimension check would have given.
+async fn reindex_embedding_for_record(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    record: &EntityRecord,
+    provider: &dyn EmbeddingProvider,
+) -> Result<(), YorishiroError> {
+    let schema =
+        crate::models::content_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
+    let entity_type_def = schema
+        .definition
+        .entity_types
+        .get(&record.entity_type)
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!(
+                "entity_type '{}' is not defined in schema '{}'",
+                record.entity_type, schema.definition.name
+            ))
+        })?;
+
+    let Some(text) = compose_embedding_text(entity_type_def, &record.data) else {
+        return Ok(());
+    };
+    let vector = provider.embed_as(EmbedKind::Document, &text).await?;
+    embed_and_write(conn, workspace_id, record.id, record.updated_at, vector).await
+}
+
+/// One entity that failed during a [`reindex_workspace`] run, carrying enough to report it.
+pub struct ReindexFailure {
+    pub entity_id: Uuid,
+    pub error: YorishiroError,
+}
+
+/// Outcome of a full [`reindex_workspace`] run.
+pub struct ReindexOutcome {
+    pub total: usize,
+    pub reindexed: usize,
+    pub failures: Vec<ReindexFailure>,
+}
+
+/// Re-embeds every entity in a workspace with `provider`, then restamps `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, but only when every entity succeeded.
+///
+/// This is the core the `reindex_embeddings` task wraps; see that task's own doc comment for why a partial failure must leave the stamp untouched, and why bypassing [`sync_embedding`]'s model check here is safe only under that restamp-on-full-success ordering.
+/// Callers needing every candidate id (rather than just those already `EntityRecord`-fetchable) pass them in as `candidate_ids`, since a row deleted between the caller's own scan and this function's batch fetch is reported as a failure rather than silently skipped.
+pub async fn reindex_workspace(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    candidate_ids: &[Uuid],
+    provider: &dyn EmbeddingProvider,
+) -> Result<ReindexOutcome, YorishiroError> {
+    let records = crate::models::content_entities::get_batch(conn, workspace_id, candidate_ids)
+        .await
+        .internal()?;
+
+    let mut reindexed = 0;
+    let mut failures = Vec::new();
+    for &entity_id in candidate_ids {
+        let Some(record) = records.get(&entity_id) else {
+            failures.push(ReindexFailure {
+                entity_id,
+                error: YorishiroError::not_found(format!("entity {entity_id} no longer exists")),
+            });
+            continue;
+        };
+        match reindex_embedding_for_record(conn, workspace_id, record, provider).await {
+            Ok(()) => reindexed += 1,
+            Err(error) => failures.push(ReindexFailure { entity_id, error }),
+        }
+    }
+
+    if failures.is_empty() {
+        let dimensions = i32::try_from(provider.dimensions()).map_err(|_| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "provider dimensions {} do not fit in an i32 column",
+                provider.dimensions()
+            ))
+        })?;
+        conn.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "UPDATE identity_workspaces SET embedding_model = $1, embedding_dimensions = $2 \
+             WHERE id = $3",
+            [
+                provider.model_name().into(),
+                dimensions.into(),
+                workspace_id.into(),
+            ],
+        ))
+        .await
+        .internal()?;
+    }
+
+    Ok(ReindexOutcome {
+        total: candidate_ids.len(),
+        reindexed,
+        failures,
+    })
 }
 
 /// The dimension count a workspace's vectors are expected to have, or `None` for a workspace carrying no stamp of its own, which takes the deployment's.
