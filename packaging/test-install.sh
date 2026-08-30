@@ -111,32 +111,28 @@ else
 fi
 
 # --------------------------------------------------------------------------------------------
-note "rpm on fedora:39 — glibc $GLIBC_FLOOR exactly, the tightest supported case"
+note "rpm on almalinux:10 — the current RPM-family release this supports"
 # --------------------------------------------------------------------------------------------
-# fedora:39 specifically, because its glibc is 2.38: the floor exactly, so this is the tightest
-# system the package claims to support. Replacing it needs a distro at whatever the floor then
-# is, not merely a newer Fedora, or the boundary stops being tested. The image is EOL and its
-# repositories may be gone; installing a local rpm whose dependencies are already satisfied does
-# not need them, which is why there is no `dnf update` here.
+# This project supports the current LTS releases, which on the RPM side is AlmaLinux 10: glibc
+# 2.39 and GLIBCXX 3.4.33, both measured, against declared floors of 2.39 and 3.4.30.
 #
-# It is also the only block that installs an rpm at all: seven install an rpm's counterpart deb.
-# So this is not a second opinion on the deb tests, it is the only evidence that the other half
-# of what a release publishes can be unpacked. Dropping it in favour of "current LTS only" would
-# leave the workflow building and attaching an rpm that nothing has ever installed.
+# It replaced fedora:39, which was here because its glibc was 2.38, the floor as declared at the
+# time. That floor was wrong (the binary needs 2.39), so fedora:39 was a system this package
+# installed on and could not start on, and it is EOL besides.
 #
-# There is no LTS answer here to move to. The RPM family's long-term images sit below the floor
-# this package declares (`libc.so.6(GLIBC_2.38)`), which is exactly why rockylinux:9 appears
-# below as a system that must refuse the package rather than accept it.
+# This is the only block that installs an rpm at all: the others install its counterpart deb. So
+# it is not a second opinion on the deb tests, it is the only evidence that the other half of
+# what a release publishes can be unpacked and run.
 # The image is pulled first, and its progress goes to the terminal rather than into `$out`.
 # Docker writes that to stderr, and folding it in with `2>&1` below puts a paragraph of layer
 # names in front of every assertion's failure message, which is what this looked like the first
 # time it failed for a real reason.
-docker pull -q fedora:39 >/dev/null 2>&1 || true
+docker pull -q almalinux:10 >/dev/null 2>&1 || true
 # The exit code is captured into a variable and always printed, rather than being consumed by an
 # `if`. When this first failed, `RUNS` was simply absent: no marker said whether the binary had
 # been run at all, and an `if` with an `echo` in both branches would have been just as silent if
 # the command never reached either. A line that is always emitted cannot fail to appear.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
+out=$(docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro --help >/dev/null 2>/tmp/help.err
   rc=$?
@@ -150,13 +146,13 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
 # reason next to it rather than only in the raw output dump.
 case "$out" in
   *HELP_EXIT:0*) ;;
-  *HELP_EXIT:*) bad "fedora:39 --help exited $(sed -n 's/.*HELP_EXIT:\([0-9]*\).*/\1/p' <<<"$out")" ;;
-  *) bad "fedora:39 --help never reported an exit code: $(echo "$out" | tr '\n' ' ')" ;;
+  *HELP_EXIT:*) bad "almalinux:10 --help exited $(sed -n 's/.*HELP_EXIT:\([0-9]*\).*/\1/p' <<<"$out")" ;;
+  *) bad "almalinux:10 --help never reported an exit code: $(echo "$out" | tr '\n' ' ')" ;;
 esac
 for want in RUNS COPYRIGHT USER; do
   case "$out" in
-    *"$want"*) ok "fedora:39 $want" ;;
-    *) bad "fedora:39 $want (output: $(echo "$out" | tr '\n' ' '))" ;;
+    *"$want"*) ok "almalinux:10 $want" ;;
+    *) bad "almalinux:10 $want (output: $(echo "$out" | tr '\n' ' '))" ;;
   esac
 done
 
