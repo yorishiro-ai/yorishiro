@@ -232,7 +232,11 @@ const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 5] = [
 /// that does not exist would cost the accurate claim above its credibility on the next reader.
 fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     for (old, fate) in RENAMED_ONNX_VARS {
-        if std::env::var(old).is_err() {
+        // `var_os`, not `var`: `var` returns `Err` both when the variable is unset and when it is
+        // set to a non-UTF-8 value, so checking `.is_err()` would let a non-UTF-8
+        // `YORISHIRO_ONNX_MODEL_PATH` slip past this guard as though it were absent. `var_os`
+        // only cares whether the variable is present, regardless of what it decodes to.
+        if std::env::var_os(old).is_none() {
             continue;
         }
         match fate {
@@ -426,6 +430,33 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `std::env::var` returns `Err` both when a variable is unset and when it is set to a
+    /// non-UTF-8 value, so a naive `.is_err()` check would let a non-UTF-8 stale value slip past
+    /// this guard as though the variable were absent, exactly the case this test rules out.
+    /// Unix-only: building a non-UTF-8 `OsString` from arbitrary bytes needs
+    /// `OsStringExt::from_vec`, which only exists on Unix; Windows OS strings are not able to
+    /// hold arbitrary invalid UTF-8 the same way, so this scenario cannot arise there the same way.
+    #[test]
+    #[serial]
+    #[cfg(unix)]
+    fn reject_renamed_onnx_vars_catches_a_non_utf8_value() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let (old, _fate) = &RENAMED_ONNX_VARS[0];
+        let non_utf8 = std::ffi::OsString::from_vec(vec![0xFF, 0xFE, 0xFD]);
+        unsafe {
+            std::env::set_var(old, &non_utf8);
+        }
+        let result = reject_renamed_onnx_vars();
+        unsafe {
+            std::env::remove_var(old);
+        }
+        let Err(err) = result else {
+            panic!("reject_renamed_onnx_vars should fail when {old} is set to a non-UTF-8 value");
+        };
+        assert!(err.to_string().contains(old));
     }
 
     #[test]
