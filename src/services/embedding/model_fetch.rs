@@ -1,10 +1,10 @@
-//! First-use fetch of the local ONNX provider's model and tokenizer.
+//! First-use fetch of the local embedding provider's model and tokenizer.
 //!
-//! `YORISHIRO_EMBEDDING_PROVIDER=local` needs an ONNX model and its tokenizer, neither of which is in the repository: the model alone is about 522 MiB, which does not belong in git.
+//! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the model alone is about 522 MiB, which does not belong in git.
 //! Rather than making an operator fetch them by hand, the default path is fetched on first use and verified against a hardcoded digest.
 //!
 //! Only the *default* path is ever fetched.
-//! An operator who sets `YORISHIRO_ONNX_MODEL_PATH` or `YORISHIRO_ONNX_TOKENIZER_PATH` has told us where the file already is, so a wrong path there fails loudly instead of quietly downloading half a gigabyte somewhere they did not ask for; see [`super::build_local_onnx_provider`].
+//! An operator who sets `YORISHIRO_LOCAL_MODEL_PATH` or `YORISHIRO_LOCAL_TOKENIZER_PATH` has told us where the file already is, so a wrong path there fails loudly instead of quietly downloading half a gigabyte somewhere they did not ask for; see [`super::build_local_provider`].
 
 use std::path::{Path, PathBuf};
 
@@ -21,12 +21,12 @@ const REPO: &str = "nomic-ai/nomic-embed-text-v1.5";
 struct Artifact {
     /// Path within the model repository, at [`REVISION`].
     remote_path: &'static str,
-    /// Name under the cache directory, matching the default file names in [`super::build_local_onnx_provider`].
+    /// Name under the cache directory, matching the default file names in [`super::build_local_provider`].
     local_name: &'static str,
     /// SHA256 of the file's bytes.
     ///
     /// Taken by downloading each file at [`REVISION`] and running `sha256sum` on it, never transcribed from a response header.
-    /// The headers cannot be trusted for this. `model.onnx` answers with two different 64-hex values (`x-linked-etag` on the 302 and `etag` on the 200), and nothing in the response says which is the content digest; it is the 302's. `tokenizer.json`'s ETag matches neither, being a 40-hex Git blob SHA1, since it is small enough not to go through LFS.
+    /// The headers cannot be trusted for this. `model.safetensors` answers with two different 64-hex values (`x-linked-etag` on the 302 and `etag` on the 200), and nothing in the response says which is the content digest; it is the 302's. `tokenizer.json`'s ETag matches neither, being a 40-hex Git blob SHA1, since it is small enough not to go through LFS.
     /// Updating [`REVISION`] means re-measuring these the same way.
     sha256: &'static str,
     /// Expected length in bytes, checked before hashing.
@@ -38,11 +38,11 @@ struct Artifact {
 }
 
 const MODEL: Artifact = Artifact {
-    remote_path: "onnx/model.onnx",
-    local_name: "model.onnx",
-    sha256: "147d5aa88c2101237358e17796cf3a227cead1ec304ec34b465bb08e9d952965",
-    size: 547_310_275,
-    description: "ONNX model",
+    remote_path: "model.safetensors",
+    local_name: "model.safetensors",
+    sha256: "9e7d262b1fe5ea350782829496efa831901b77486bbde1cea54a4c822d010d5c",
+    size: 546_938_168,
+    description: "model",
 };
 
 const TOKENIZER: Artifact = Artifact {
@@ -55,7 +55,8 @@ const TOKENIZER: Artifact = Artifact {
 
 /// Where an auto-fetched model lives.
 ///
-/// Returns `None` when `HOME` does not resolve, which is not hypothetical: the Docker image's user is created `--no-create-home`.
+/// Returns `None` when `HOME` does not resolve.
+/// The Docker image sets `HOME` for its service user for exactly this reason, but nothing here may assume that holds for every deployment: an operator running the binary directly, under a different supervisor, or in a container image of their own can still reach a user with no home.
 /// Nothing invents a fallback directory in that case; the caller degrades and names the two path variables instead, since writing half a gigabyte to a guessed location is worse than not writing it.
 fn cache_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
@@ -68,7 +69,7 @@ fn cache_dir() -> Option<PathBuf> {
 /// The model and tokenizer paths to load from, fetching either one first if it is absent.
 ///
 /// `Ok(None)` means the destination could not be resolved at all (no `HOME`), so the caller degrades rather than failing.
-/// `Err` means a fetch was attempted and failed, which fails the boot; see [`super::build_local_onnx_provider`] for why those two outcomes differ.
+/// `Err` means a fetch was attempted and failed, which fails the boot; see [`super::build_local_provider`] for why those two outcomes differ.
 pub(super) async fn ensure_model_files() -> anyhow::Result<Option<(PathBuf, PathBuf)>> {
     let Some(dir) = cache_dir() else {
         return Ok(None);
@@ -86,8 +87,8 @@ async fn ensure_file(dir: &Path, artifact: &Artifact) -> anyhow::Result<PathBuf>
         // The size is checked, and deliberately not the digest. Do not "fix" this into a re-verification: the reasons it is not one are the whole point.
         //
         // The digest guards the wire, not the disk. This destination only ever receives bytes that already passed both length and SHA256, moved in by an atomic rename within one filesystem, so the mechanism cannot itself produce a bad file here.
-        // Getting one needs an outside writer or disk corruption, and corruption that mangles an ONNX protobuf fails loudly in `LocalOnnxProvider::load` regardless.
-        // The quiet case, a valid but different model swapped in, needs someone holding the service user's write access, and they could as easily set `YORISHIRO_ONNX_MODEL_PATH` or replace the `models/` files, neither of which is checked at all.
+        // Getting one needs an outside writer or disk corruption, and corruption that mangles a safetensors header fails loudly in `LocalEmbeddingProvider::load` regardless.
+        // The quiet case, a valid but different model swapped in, needs someone holding the service user's write access, and they could as easily set `YORISHIRO_LOCAL_MODEL_PATH` or replace the `models/` files, neither of which is checked at all.
         //
         // Re-hashing only this tier would also invert the design: files an operator placed themselves are deliberately unverified, since a custom model cannot match a digest pinned to nomic's, so re-checking at read time the one tier that was already verified at write time, at 522 MiB on every single start forever, would spend the cost exactly where it buys least.
         //

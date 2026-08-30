@@ -24,11 +24,11 @@ Search simply returns worse results for it, so this is worth checking after a re
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local` selects the local ONNX provider (see below). Anything else, or unset, selects the OpenAI-compatible provider |
+| `YORISHIRO_EMBEDDING_PROVIDER` | `local` selects the local in-process provider (see below). Anything else, or unset, selects the OpenAI-compatible provider |
 | `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI-compatible provider only. Base URL of an OpenAI-compatible embeddings endpoint (LM Studio, Ollama, vLLM, or real OpenAI), e.g. `http://localhost:11434`. Required together with `YORISHIRO_EMBEDDING_MODEL`: if either is unset, boot proceeds with no embedding backend configured rather than failing, and every embed call fails at request time with `ProviderUnreachable` instead |
 | `YORISHIRO_EMBEDDING_MODEL` | OpenAI-compatible provider only. Model name sent in the `model` field of the embeddings request. Also stamped onto a workspace at creation time as the model it was embedded with; unset, a workspace is stamped `unconfigured` |
 | `YORISHIRO_EMBEDDING_API_KEY` | OpenAI-compatible provider only. Bearer token sent to `YORISHIRO_EMBEDDING_BASE_URL`. Empty by default, which is correct for a local server (LM Studio, Ollama) that doesn't check one |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector width (default: `768`). Every vector in a deployment must share this width; the local ONNX provider verifies it at startup with a probe inference, the OpenAI-compatible provider verifies it per response |
+| `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector width (default: `768`). Every vector in a deployment must share this width; the local provider verifies it at startup with a probe inference, the OpenAI-compatible provider verifies it per response |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | OpenAI-compatible provider only. `true` includes a `dimensions` field in the embeddings request. Default `false`, since some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) reject a `dimensions` field they don't recognise |
 
 ### A workspace's own embedding provider (paid edition)
@@ -53,22 +53,22 @@ Both checks exist and neither replaces the other: the write-time check still run
 
 There is no caching: an assignment made through this endpoint takes effect on the very next request that resolves an embedding provider for that workspace (search, embedding sync), not after some delay or a restart.
 
-### Local ONNX provider (`YORISHIRO_EMBEDDING_PROVIDER=local`)
+### Local provider (`YORISHIRO_EMBEDDING_PROVIDER=local`)
 
-Runs a BERT-family ONNX model in-process, with no external embedding service.
+Runs `nomic-ai/nomic-embed-text-v1.5` in-process from a `safetensors` checkpoint, with no external embedding service.
+`candle-transformers`' `nomic_bert` module implements exactly that architecture (a BERT variant with rotary position embeddings and a SwiGLU MLP), not an arbitrary encoder graph, so this provider always loads that one model family.
+Pooling is always mean pooling: that is what this model was trained with, and there is no other architecture this provider can load, so there is nothing left for a pooling setting to select between.
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_ONNX_MODEL_PATH` | Path to the `.onnx` model file. Unset, the model is fetched automatically on first use (see below); set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_ONNX_TOKENIZER_PATH` if it does not |
-| `YORISHIRO_ONNX_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_ONNX_MODEL_PATH`: fetched automatically when unset, required to exist when set |
-| `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`) |
-| `YORISHIRO_ONNX_POOLING` | `mean` (default) or `last_token` (also accepts `last-token`/`lasttoken`). An unrecognized value is rejected at boot rather than silently falling back to `mean`: reading a model with the wrong pooling doesn't fail, it just returns worse vectors, and defaulting quietly on a typo would hide exactly that degradation |
-| `YORISHIRO_ONNX_QUERY_INSTRUCTION` | Instruction text embedded into a search query only, never into a stored document, for asymmetric models that expect one on the query side (rendered as `Instruct: {instruction}\nQuery:{text}`). Unset by default, which makes this exactly a plain `embed` call, the right behaviour for a symmetric model. An empty string is treated the same as unset, not as "prefix with nothing": clearing the variable is how an operator turns the instruction back off |
+| `YORISHIRO_LOCAL_MODEL_PATH` | Path to the `.safetensors` model file. Unset, the model is fetched automatically on first use (see below); set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_LOCAL_TOKENIZER_PATH` if it does not |
+| `YORISHIRO_LOCAL_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_LOCAL_MODEL_PATH`: fetched automatically when unset, required to exist when set |
+| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`) |
 
 #### Fetching the model
 
 The model and tokenizer are not in the repository: the model alone is about 522 MiB.
-When neither `YORISHIRO_ONNX_MODEL_PATH` nor `YORISHIRO_ONNX_TOKENIZER_PATH` is set and nothing is at the default `models/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/` and verified against a SHA256 built into the binary.
+When neither `YORISHIRO_LOCAL_MODEL_PATH` nor `YORISHIRO_LOCAL_TOKENIZER_PATH` is set and nothing is at the default `models/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/` and verified against a SHA256 built into the binary.
 That directory is also where later starts look first, so only the first one pays the download.
 
 Verification happens at download time, not at every read.
@@ -95,7 +95,7 @@ If `HOME` does not resolve at all there is nowhere to fetch to, no restart chang
 A download that is killed partway leaves a `.partial.` file behind in the cache directory, which a later start removes once it has gone six hours without being written to.
 The age requirement is what keeps that sweep away from a download still in progress, so two processes starting together do not delete each other's work.
 
-Building with this provider compiled in pulls in the `ort` crate, whose default `download-binaries` feature fetches an onnxruntime binary from `cdn.pyke.io` at build time; point `ORT_LIB_LOCATION` at a pre-provisioned onnxruntime if the build environment must be closed off.
+This provider builds a fully statically linked binary: `candle-core`/`candle-nn`/`candle-transformers` need no prebuilt runtime binary and no dynamic OpenSSL link, unlike the ONNX-based provider this replaced.
 
 ## Search token quota
 
@@ -104,10 +104,10 @@ Building with this provider compiled in pulls in the `ort` crate, whose default 
 | `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | Tokens a workspace may spend on search per minute (default: `100000`). Charged once per query, before embedding, whether the request arrives at `GET /api/search` or through the `search_entities` MCP tool: one shared budget per workspace, not one per protocol. A query over budget gets HTTP `422` (`validation_failed`) instead of running. The default is high enough that ordinary use never reaches it; it exists to bound a runaway agent, not to ration normal traffic |
 
 Search is metered in tokens rather than requests because that's what a query costs the embedding model; entity writes stay on request counts, since counting a large body is itself expensive.
-The token count for a query comes from `EmbeddingProvider::count_tokens`, which the local ONNX provider overrides to the tokenizer's exact count and every other provider defaults to a byte-length estimate (`text.len() / 4`, rounded up).
+The token count for a query comes from `EmbeddingProvider::count_tokens`, which the local provider overrides to the tokenizer's exact count and every other provider defaults to a byte-length estimate (`text.len() / 4`, rounded up).
 That estimate is calibrated for English, where roughly 4 bytes make one token; Japanese text is roughly 3 bytes per character and tokenizes at roughly one token per character, so the estimate returns under half the token count a real tokenizer would report for the same Japanese query.
-In other words, outside the local ONNX provider, a Japanese search query is charged against the budget at well under its real cost: `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` admits noticeably more Japanese-language search traffic per minute than English before this quota starts returning `422`.
-Size the budget with that skew in mind if the deployment's search traffic is mostly Japanese and not running the local ONNX provider.
+In other words, outside the local provider, a Japanese search query is charged against the budget at well under its real cost: `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` admits noticeably more Japanese-language search traffic per minute than English before this quota starts returning `422`.
+Size the budget with that skew in mind if the deployment's search traffic is mostly Japanese and not running the local provider.
 
 ## What `config/production.yaml` requires
 
