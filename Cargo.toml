@@ -94,7 +94,7 @@ tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 pgvector = { version = "0.4", default-features = false }
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "10" }    # licence key verification (ee/services/licence.rs)
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }  # licence key verification (ee/services/licence.rs)
 serde_yaml_ng = { version = "0.10" } # licence key from a config file (ee/services/licence.rs)
 hmac = { version = "0.13" }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
