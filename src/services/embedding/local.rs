@@ -275,6 +275,10 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
         self.inner.dimensions
     }
 
+    fn model_name(&self) -> String {
+        super::model_fetch::REPO.into()
+    }
+
     /// Counted exactly: this provider already holds the tokenizer the model uses, so the number is the one the model will actually see rather than an estimate of it.
     fn count_tokens(&self, text: &str) -> u32 {
         match self.inner.tokenizer.encode(text, false) {

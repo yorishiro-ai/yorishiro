@@ -15,7 +15,10 @@ use sha2::{Digest, Sha256};
 /// A tag or `main` would let the bytes behind these digests change under us, turning a legitimate upstream update into a verification failure that looks like corruption.
 const REVISION: &str = "e9b6763023c676ca8431644204f50c2b100d9aab";
 
-const REPO: &str = "nomic-ai/nomic-embed-text-v1.5";
+/// The model this build of the local provider implements.
+///
+/// Reported as [`super::EmbeddingProvider::model_name`] regardless of whether the checkpoint came from the automatic fetch or an operator-supplied `YORISHIRO_LOCAL_MODEL_PATH`: the path itself is uninformative (it defaults to the fixed `models/model.safetensors` either way), while this identifies the architecture and weights the code actually runs.
+pub(super) const REPO: &str = "nomic-ai/nomic-embed-text-v1.5";
 
 /// One file to fetch, with everything needed to verify it.
 struct Artifact {

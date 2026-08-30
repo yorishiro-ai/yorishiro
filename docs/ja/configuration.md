@@ -33,7 +33,7 @@ SQLiteではベクトル検索が移植されていないため、`content_entit
 |---|---|
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local`でローカルプロバイダを選択する(後述)。それ以外の値、または未設定の場合はOpenAI互換プロバイダを選択する |
 | `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI互換プロバイダのみ。OpenAI互換の埋め込みエンドポイントのベースURL(LM Studio、Ollama、vLLM、または実際のOpenAI)。例: `http://localhost:11434`。`YORISHIRO_EMBEDDING_MODEL`とあわせて設定が必要。どちらか一方でも未設定だと、起動は埋め込みバックエンド未設定のまま進み(失敗しない)、埋め込み呼び出しはすべてリクエスト時に`ProviderUnreachable`で失敗するようになる |
-| `YORISHIRO_EMBEDDING_MODEL` | OpenAI互換プロバイダのみ。埋め込みリクエストの`model`フィールドに送られるモデル名。ワークスペース作成時、そのワークスペースが埋め込まれたモデルとしても刻印される。未設定の場合、ワークスペースには`unconfigured`が刻印される |
+| `YORISHIRO_EMBEDDING_MODEL` | OpenAI互換プロバイダのみ。埋め込みリクエストの`model`フィールドに送られるモデル名で、ワークスペース作成時にそのワークスペースが埋め込まれたモデルとして刻印される。この刻印はプロバイダごとに自分自身の名前を刻む。ローカルプロバイダはこの変数と無関係に読み込んだモデルを刻印し、埋め込みプロバイダが何も設定されずに作成されたワークスペースには`unconfigured`が刻印される |
 | `YORISHIRO_EMBEDDING_API_KEY` | OpenAI互換プロバイダのみ。`YORISHIRO_EMBEDDING_BASE_URL`に送るベアラートークン。既定は空文字列で、トークンを確認しないローカルサーバー(LM Studio、Ollama)にはこれが正しい |
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | 期待するベクトルの次元数(既定: `768`)。デプロイ内のすべてのベクトルはこの次元数を共有する必要がある。ローカルプロバイダは起動時のプローブ推論でこれを検証し、OpenAI互換プロバイダはレスポンスごとに検証する |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | OpenAI互換プロバイダのみ。`true`にすると埋め込みリクエストに`dimensions`フィールドを含める。既定は`false`で、一部のOpenAI互換実装(vLLM、Ollama、LM Studio)は認識しない`dimensions`フィールドを拒否するため |

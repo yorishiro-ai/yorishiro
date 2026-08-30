@@ -69,6 +69,10 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         self.dimensions
     }
 
+    fn model_name(&self) -> String {
+        self.model.clone()
+    }
+
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
         if texts.is_empty() {
             return Ok(Vec::new());

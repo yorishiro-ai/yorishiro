@@ -155,6 +155,10 @@ impl EmbeddingProvider for FixedWidthProvider {
         self.0
     }
 
+    fn model_name(&self) -> String {
+        "fixed-width".into()
+    }
+
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
         Ok(texts.iter().map(|_| vec![0.0_f32; self.0]).collect())
     }

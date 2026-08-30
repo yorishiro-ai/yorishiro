@@ -34,6 +34,11 @@ pub enum EmbedKind {
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;
 
+    /// Identifies the model this provider embeds with, for stamping onto a workspace at creation.
+    ///
+    /// Each implementation names itself rather than a caller inferring it from configuration: `YORISHIRO_EMBEDDING_MODEL` only ever holds the OpenAI-compatible provider's model, so a caller that read it regardless of which provider it actually got would record `"unconfigured"` for every local-provider workspace, unable to tell "no embeddings configured" apart from "embeddings configured, just not through that variable".
+    fn model_name(&self) -> String;
+
     /// How many tokens `text` costs this provider, for quota purposes.
     ///
     /// The default is a byte-length estimate, and deliberately so: a provider without a tokenizer in the process (an external API, where the model runs elsewhere) cannot count exactly, and loading one purely to meter would mean shipping a tokenizer to a deployment that chose not to run embeddings locally.
@@ -122,18 +127,16 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
         self.dimensions
     }
 
+    fn model_name(&self) -> String {
+        "unconfigured".into()
+    }
+
     async fn embed_batch(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
         Err(YorishiroError::ProviderUnreachable {
             url: String::new(),
             message: format!("no embedding provider is configured: {}", self.remedy),
         })
     }
-}
-
-/// The model name this deployment is configured for, for stamping onto new workspaces.
-/// Read from the environment rather than the provider, to avoid adding a `model()` method to the trait for this one caller.
-pub fn model_name_from_env() -> String {
-    std::env::var("YORISHIRO_EMBEDDING_MODEL").unwrap_or_else(|_| "unconfigured".into())
 }
 
 /// Builds the embedding provider from environment variables.

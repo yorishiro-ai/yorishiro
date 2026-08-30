@@ -178,6 +178,9 @@ mod tests {
         fn dimensions(&self) -> usize {
             1
         }
+        fn model_name(&self) -> String {
+            "fixed-cost".into()
+        }
         fn count_tokens(&self, text: &str) -> u32 {
             text.len() as u32
         }

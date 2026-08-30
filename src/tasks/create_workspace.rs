@@ -24,11 +24,11 @@ impl Task for CreateWorkspace {
             .parse()
             .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
         let name = vars.cli_arg("name")?;
-        let embedding_model = crate::services::embedding::model_name_from_env();
 
         let provider = crate::services::embedding::build_embedding_provider()
             .await
             .map_err(|err| Error::Message(err.to_string()))?;
+        let embedding_model = provider.model_name();
         let dimensions = provider.dimensions() as i32;
 
         // `create_workspace` holds a transaction-scoped advisory lock across its count and insert, so it takes a transaction rather than the pool.
