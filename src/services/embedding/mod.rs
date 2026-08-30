@@ -292,6 +292,15 @@ async fn build_local_provider(
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     reject_renamed_onnx_vars()?;
     let def = resolve_local_model()?;
+    if dimensions != def.dimensions {
+        anyhow::bail!(
+            "YORISHIRO_EMBEDDING_DIMENSIONS={dimensions} does not match {}'s own output width \
+             ({}); unset YORISHIRO_EMBEDDING_DIMENSIONS to use the selected model's own width, \
+             or point YORISHIRO_LOCAL_MODEL at a model that actually produces {dimensions}",
+            def.id,
+            def.dimensions
+        );
+    }
     let max_sequence_length: usize = std::env::var("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH")
         .unwrap_or_else(|_| "512".into())
         .parse()?;

@@ -151,6 +151,41 @@ impl EmbeddingProvider for WorkingProvider {
     }
 }
 
+/// A provider that, on its first call, updates `target_entity_id`'s own data (bumping `updated_at`) before returning a vector, deterministically recreating the race `embed_and_write`'s `updated_at` guard exists for: `reindex_embedding_for_record` reads `record.updated_at` before this call runs, so the write that follows targets a now-stale snapshot and matches zero rows.
+struct ConcurrentModificationProvider {
+    model_name: &'static str,
+    conn: sea_orm::DatabaseConnection,
+    workspace_id: uuid::Uuid,
+    target_entity_id: uuid::Uuid,
+    triggered: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl EmbeddingProvider for ConcurrentModificationProvider {
+    fn dimensions(&self) -> usize {
+        768
+    }
+
+    fn model_name(&self) -> String {
+        self.model_name.into()
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        if !self.triggered.swap(true, Ordering::SeqCst) {
+            content_entities::update(
+                &self.conn,
+                self.workspace_id,
+                self.target_entity_id,
+                serde_json::json!({ "title": "modified concurrently with the reindex" }),
+                None,
+            )
+            .await
+            .expect("concurrent update");
+        }
+        Ok(texts.iter().map(|_| vec![0.0_f32; 768]).collect())
+    }
+}
+
 /// A partial failure must leave the workspace's stamp completely unchanged, which is the load-bearing property `reindex_embeddings` exists to guarantee: restamping on a partial result would claim a model for rows that were never actually re-embedded with it, recreating the exact stamp/data mismatch the write-time model check in `sync.rs` exists to catch.
 #[tokio::test]
 #[serial]
@@ -217,6 +252,46 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
             stamped_model(&ctx, workspace.id).await,
             Some("intfloat/multilingual-e5-base".into()),
             "full success must restamp the workspace to the provider that actually wrote the vectors"
+        );
+
+        crate::requests::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// An entity modified between `reindex_workspace`'s batch fetch and its write landing must be reported as a failure, not silently counted as reindexed, or the workspace would restamp while that row still holds a vector from before the concurrent modification: the exact stamp/data mismatch the write-time model check exists to catch, this time caused by the migration tool racing an ordinary write instead of a misconfigured deployment.
+#[tokio::test]
+#[serial]
+async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure() {
+    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
+        let first = insert_entity(&ctx, workspace.id, "first entity").await;
+        let second = insert_entity(&ctx, workspace.id, "second entity").await;
+
+        let provider = ConcurrentModificationProvider {
+            model_name: "intfloat/multilingual-e5-base",
+            conn: ctx.db.clone(),
+            workspace_id: workspace.id,
+            target_entity_id: first.id,
+            triggered: std::sync::atomic::AtomicBool::new(false),
+        };
+        let outcome =
+            sync::reindex_workspace(&ctx.db, workspace.id, &[first.id, second.id], &provider)
+                .await
+                .expect("reindex_workspace runs even with a concurrent modification");
+
+        assert_eq!(outcome.total, 2);
+        assert_eq!(
+            outcome.reindexed, 1,
+            "only the entity that was not concurrently modified should count as reindexed"
+        );
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].entity_id, first.id);
+
+        assert_eq!(
+            stamped_model(&ctx, workspace.id).await,
+            Some("nomic-ai/nomic-embed-text-v1.5".into()),
+            "a concurrently modified entity must block the restamp exactly like any other failure"
         );
 
         crate::requests::close_app_pools(&ctx).await;

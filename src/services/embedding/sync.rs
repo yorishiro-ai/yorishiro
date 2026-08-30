@@ -98,21 +98,29 @@ pub async fn sync_embedding(
         });
     }
 
-    embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector).await
+    // A skipped write (entity changed since `snapshot_updated_at`) is not an error here: a newer
+    // sync for the same entity is already in flight or has already landed, so nothing needs
+    // redoing on this call's behalf. See `embed_and_write`'s own doc comment for why
+    // `reindex_workspace` cannot make the same choice.
+    embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector)
+        .await
+        .map(|_written| ())
 }
 
 /// Writes an already-computed embedding vector to `content_entities.embedding`, with no check against the workspace's stamped model or dimensions.
+/// Returns whether the row was actually written: `false` means the `updated_at` guard below skipped the write because the entity changed since `snapshot_updated_at` was read, not an error.
 ///
-/// [`sync_embedding`] wraps this with both checks for the normal write path.
+/// [`sync_embedding`] wraps this with both checks for the normal write path, and ignores the returned bool: a skipped write there means a newer sync for the same entity is already in flight or has already landed, so nothing needs redoing.
 /// [`reindex_workspace`] calls this directly instead: its entire job is changing which model a workspace's vectors were embedded with, so a check that refuses a write on exactly that mismatch would refuse its own writes on every row.
 /// Safe to bypass here only because `reindex_workspace` restamps `identity_workspaces.embedding_model` itself, and only after every row succeeds: the stamp and the actual column contents genuinely disagree for its own duration, which is the situation `sync_embedding`'s check exists to prevent everywhere else.
+/// `reindex_workspace` does *not* ignore the returned bool the way `sync_embedding` does: unlike an ordinary sync, a skipped reindex write means this entity's current data was never actually re-embedded with the new model, so counting it as reindexed would let the workspace restamp while that row still holds the old model's vector.
 async fn embed_and_write(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     entity_id: Uuid,
     snapshot_updated_at: chrono::DateTime<chrono::Utc>,
     vector: Vec<f32>,
-) -> Result<(), YorishiroError> {
+) -> Result<bool, YorishiroError> {
     // `updated_at` as a write condition prevents a vector computed from stale data from overwriting a newer one when concurrent syncs for the same entity finish out of order.
     // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later sync.
     let result = conn
@@ -135,9 +143,10 @@ async fn embed_and_write(
             %entity_id,
             "embed_and_write: entity was deleted or updated since this snapshot, write skipped"
         );
+        return Ok(false);
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// Resolves the schema definition needed for embedding sync on its own, relying only on the return value of `content_entities::create`/`update` (`EntityRecord`), then calls [`sync_embedding`].
@@ -175,6 +184,18 @@ pub async fn sync_embedding_for_record(
     .await
 }
 
+/// Whether [`reindex_embedding_for_record`] actually wrote a fresh vector for this entity.
+#[derive(Debug, PartialEq, Eq)]
+enum ReindexStep {
+    /// The entity had `x-embed` fields and the write landed: this row's vector now reflects the new model.
+    Reindexed,
+    /// The entity's schema has no `x-embed` fields (or none had values), the same no-op [`sync_embedding`] would take: nothing to embed, and nothing wrong.
+    NothingToEmbed,
+    /// `embed_and_write` matched zero rows: the entity's data changed between this run's batch fetch and the write, so the vector just written is already stale for the entity's current data.
+    /// Not the same as `NothingToEmbed`: this entity still has `x-embed` fields and still needs a real vector, just not the one this call produced.
+    ConcurrentlyModified,
+}
+
 /// The reindex loop's per-entity step: composes the embedding text, embeds it, and writes it via [`embed_and_write`], bypassing both of [`sync_embedding`]'s checks (model stamp and dimension) for the reason documented on [`embed_and_write`] itself.
 /// Otherwise identical to [`sync_embedding_for_record`]: same schema resolution, same no-op on an entity_type with no `x-embed` fields.
 ///
@@ -185,7 +206,7 @@ async fn reindex_embedding_for_record(
     workspace_id: Uuid,
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
-) -> Result<(), YorishiroError> {
+) -> Result<ReindexStep, YorishiroError> {
     let schema =
         crate::models::content_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
     let entity_type_def = schema
@@ -200,10 +221,15 @@ async fn reindex_embedding_for_record(
         })?;
 
     let Some(text) = compose_embedding_text(entity_type_def, &record.data) else {
-        return Ok(());
+        return Ok(ReindexStep::NothingToEmbed);
     };
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    embed_and_write(conn, workspace_id, record.id, record.updated_at, vector).await
+    let written = embed_and_write(conn, workspace_id, record.id, record.updated_at, vector).await?;
+    Ok(if written {
+        ReindexStep::Reindexed
+    } else {
+        ReindexStep::ConcurrentlyModified
+    })
 }
 
 /// One entity that failed during a [`reindex_workspace`] run, carrying enough to report it.
@@ -244,7 +270,19 @@ pub async fn reindex_workspace(
             continue;
         };
         match reindex_embedding_for_record(conn, workspace_id, record, provider).await {
-            Ok(()) => reindexed += 1,
+            Ok(ReindexStep::Reindexed | ReindexStep::NothingToEmbed) => reindexed += 1,
+            // Not an error from the provider or the write itself: the entity changed between this
+            // run's batch fetch and the write landing, so the vector just computed is already
+            // stale. Counting this as reindexed would let the workspace restamp while this row
+            // still holds the old model's vector; a plain re-run picks it up against its current
+            // data instead.
+            Ok(ReindexStep::ConcurrentlyModified) => failures.push(ReindexFailure {
+                entity_id,
+                error: YorishiroError::Internal(anyhow::anyhow!(
+                    "entity was modified concurrently with the reindex; re-run reindex_embeddings \
+                     to pick it up against its current data"
+                )),
+            }),
             Err(error) => failures.push(ReindexFailure { entity_id, error }),
         }
     }

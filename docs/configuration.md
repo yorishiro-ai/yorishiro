@@ -103,6 +103,7 @@ Verification happens at download time, not at every read.
 A file only reaches that directory by passing both checks and then being moved into place atomically, so a later start treats what is already there as the product of that earlier verified download rather than hashing it again on every start.
 It does check the cached file's size, which is free and catches a truncated file; one of the wrong size is removed and fetched again, so that case repairs itself rather than being loaded as though it were sound.
 Files you supply yourself, at `models/<short_id>/` or through either path variable, are not checked at all: no digest can be pinned for a model of your choosing, and it may deliberately be a different one.
+That trust extends to identity, not just bytes: this provider reports `def.id` (the catalog model named by `YORISHIRO_LOCAL_MODEL`) regardless of what the supplied checkpoint actually is, so a custom `nomic-embed-text-v1.5` path holding a different model's weights is stamped onto a workspace and compared by the write-time model check as if it really were nomic-embed-text-v1.5.
 Both models are pinned to a fixed revision rather than a branch, so the bytes behind their digests cannot change underneath a deployment.
 
 The download blocks whatever triggered it, and the log line before it says so.
