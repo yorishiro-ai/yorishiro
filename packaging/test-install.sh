@@ -30,7 +30,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The floor the package declares. Read rather than hardcoded: this file must not be the place
 # the two disagree.
-GLIBC_FLOOR="$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' "$REPO/packaging/nfpm-yorishiro.yaml" | sort -uV | tail -1)"
+# Scoped to the rpm depends line specifically (`libc.so.6(GLIBC_X.Y)(64bit)`), not the whole
+# file: nfpm-yorishiro.yaml's own comments discuss other glibc versions by number (a locally
+# measured floor that was rejected, historical figures), and a bare whole-file grep picks up
+# whichever of those sorts highest, which is not necessarily the one actually declared below.
+GLIBC_FLOOR="$(grep -oE 'libc\.so\.6\(GLIBC_[0-9]+\.[0-9]+\)' "$REPO/packaging/nfpm-yorishiro.yaml" \
+  | grep -oE 'GLIBC_[0-9]+\.[0-9]+')"
 
 # Checked up front rather than at the call site: a missing tool otherwise surfaces as the
 # assertion it happens to sit in, which reads as a packaging fault.
@@ -114,7 +119,8 @@ fi
 note "rpm on almalinux:10 — the current RPM-family release this supports"
 # --------------------------------------------------------------------------------------------
 # This project supports the current LTS releases, which on the RPM side is AlmaLinux 10: glibc
-# 2.39 and GLIBCXX 3.4.33, both measured, against declared floors of 2.39 and 3.4.30.
+# 2.39, measured, against a declared floor of 2.39. There is no GLIBCXX floor to check against:
+# the candle-based embedding provider links no C++ standard library dynamically.
 #
 # It replaced fedora:39, which was here because its glibc was 2.38, the floor as declared at the
 # time. That floor was wrong (the binary needs 2.39), so fedora:39 was a system this package

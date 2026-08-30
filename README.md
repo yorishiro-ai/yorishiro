@@ -121,15 +121,7 @@ flowchart TD
 A full setup guide covering the prebuilt binary and background/systemd operation is not written yet.
 The fastest path, with Docker:
 
-1. Fetch the embedding model (the default local ONNX provider needs no external service):
-
-   ```console
-   $ mkdir -p models
-   $ curl -L -o models/model.onnx \
-       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/onnx/model_quantized.onnx
-   $ curl -L -o models/tokenizer.json \
-       https://huggingface.co/Xenova/multilingual-e5-large/resolve/main/tokenizer.json
-   ```
+1. Nothing to fetch by hand: the local embedding provider (`YORISHIRO_EMBEDDING_PROVIDER=local`) downloads and verifies its model on first use, so this step is only for placing one yourself instead (see `docs/configuration.md`).
 
 2. Start the server:
 
@@ -196,7 +188,7 @@ $ make test
 $ make shell   # ad-hoc cargo/psql/sqlx-cli access
 ```
 
-Placing an ONNX model under `models/` enables embedding integration tests against the real model (they're skipped automatically otherwise).
+Placing `model.safetensors` and `tokenizer.json` under `models/` enables embedding integration tests against the real model (they're skipped automatically otherwise).
 
 ## License
 
