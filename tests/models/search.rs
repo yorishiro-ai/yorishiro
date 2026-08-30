@@ -241,6 +241,176 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
     .await;
 }
 
+/// A provider that reports a fixed model name, for testing the model-identity check path in `sync_embedding` without a real embedding backend.
+/// Always 768-dimensional, matching both nomic-embed-text-v1.5 and multilingual-e5-base: the model check must fire on identity alone, not rely on a dimension mismatch to also be present.
+struct FixedModelProvider(&'static str);
+
+#[async_trait]
+impl EmbeddingProvider for FixedModelProvider {
+    fn dimensions(&self) -> usize {
+        768
+    }
+
+    fn model_name(&self) -> String {
+        self.0.into()
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        Ok(texts.iter().map(|_| vec![0.0_f32; 768]).collect())
+    }
+}
+
+/// A workspace stamped with a model name (`identity_workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `content_entities.embedding vector(768)` allows, and the case that check exists to catch.
+#[tokio::test]
+#[serial]
+async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
+    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        let tenant = identity_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("model-mismatch-test".into()),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+        let workspace = identity_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
+            embedding_model: sea_orm::ActiveValue::Set(Some(
+                "nomic-ai/nomic-embed-text-v1.5".into(),
+            )),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+
+        let entity = content_entities::create(
+            &ctx.db,
+            workspace.id,
+            content_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "will not get an embedding" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        let mismatched_provider = FixedModelProvider("intfloat/multilingual-e5-base");
+        let result =
+            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &mismatched_provider)
+                .await;
+
+        assert!(
+            matches!(result, Err(YorishiroError::ValidationFailed { .. })),
+            "result: {result:?}"
+        );
+
+        let stored: Option<bool> = {
+            #[derive(sea_orm::FromQueryResult)]
+            struct Row {
+                has_embedding: bool,
+            }
+            Row::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+                [entity.id.into()],
+            ))
+            .one(&ctx.db)
+            .await
+            .expect("query embedding")
+            .map(|r| r.has_embedding)
+        };
+        assert_eq!(
+            stored,
+            Some(false),
+            "the refused write must not have touched the embedding column"
+        );
+
+        crate::requests::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// A workspace stamped `"unconfigured"` (created before #279's stamping fix, or with no embedding provider available at all) has no real record of what it was embedded with, so the model check must not compare against that string: refusing every write to a workspace this check cannot actually help would stop every prerelease deployment from writing anything at all.
+#[tokio::test]
+#[serial]
+async fn sync_embedding_skips_the_model_check_for_an_unconfigured_stamp() {
+    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        let tenant = identity_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("unconfigured-stamp-test".into()),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+        let workspace = identity_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
+            embedding_model: sea_orm::ActiveValue::Set(Some("unconfigured".into())),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+
+        let entity = content_entities::create(
+            &ctx.db,
+            workspace.id,
+            content_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "gets an embedding despite the stamp" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        let provider = FixedModelProvider("intfloat/multilingual-e5-base");
+        let result =
+            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider).await;
+        assert!(result.is_ok(), "result: {result:?}");
+
+        let stored: Option<bool> = {
+            #[derive(sea_orm::FromQueryResult)]
+            struct Row {
+                has_embedding: bool,
+            }
+            Row::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+                [entity.id.into()],
+            ))
+            .one(&ctx.db)
+            .await
+            .expect("query embedding")
+            .map(|r| r.has_embedding)
+        };
+        assert_eq!(
+            stored,
+            Some(true),
+            "an \"unconfigured\" stamp must not block a write"
+        );
+
+        crate::requests::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
 /// The trigram fallback surfaces an entity with no embedding at all, when its data fuzzy-matches `query_text`; an entity with neither an embedding nor a fuzzy match must not appear.
 #[tokio::test]
 #[serial]

@@ -51,7 +51,8 @@ pub async fn sync_embedding(
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
-    // The column is dimensionless, so a mismatched write would succeed silently and the damage would surface later as a dimension-mismatch error on search, naming neither the entity nor the write that caused it. Check here instead.
+    // `content_entities.embedding` is `vector(768)` at the SQL type level, so a wrong-width write is already rejected by Postgres itself, not silently accepted: `pgvector` errors with "expected 768 dimensions, not N".
+    // That error names neither the workspace nor the write that produced it, so this check exists to turn that into an operator-readable message (which workspace, which width was expected, what to do about it), not to prevent data corruption the database wasn't already preventing.
     if let Some(expected) = workspace_embedding_dimensions(conn, workspace_id).await?
         && vector.len() != expected as usize
     {
@@ -63,6 +64,35 @@ pub async fn sync_embedding(
             ),
             details: vec![],
             hint: "point the deployment at the workspace's model, or re-embed the workspace".into(),
+        });
+    }
+
+    // A second, different-natured check the dimension check above cannot subsume: two distinct
+    // models can produce the same width (nomic-embed-text-v1.5 and multilingual-e5-base both output
+    // 768, as of this writing) and coexist in the one `vector(768)` column above, since that column
+    // only enforces width, not which model produced it. Postgres has no way to reject that mismatch
+    // itself, unlike the width one above, which is why this check is the only thing standing between
+    // a workspace and a silent write from the wrong model: it defends correctness, where the
+    // dimension check above only improves an error message on a write Postgres would have refused
+    // regardless.
+    // The coexistence itself is a coincidence of both current models happening to share a width, not
+    // something `content_entities` guarantees: the day a third local model ships at a different
+    // width, the column's own fixed type already forces every workspace in this deployment onto one
+    // width, and mixing stops being possible in the first place.
+    if let Some(expected) = workspace_embedding_model(conn, workspace_id).await?
+        && expected != "unconfigured"
+        && expected != provider.model_name()
+    {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "this workspace was stamped with model {expected:?}, but the configured \
+                 embedding provider is {:?}",
+                provider.model_name()
+            ),
+            details: vec![],
+            hint: "point the deployment at the workspace's stamped model, or re-embed the \
+                   workspace after switching models"
+                .into(),
         });
     }
 
@@ -147,4 +177,28 @@ async fn workspace_embedding_dimensions(
     .await
     .internal()?;
     Ok(row.and_then(|r| r.embedding_dimensions))
+}
+
+/// The model a workspace's vectors are expected to have been embedded with, or `None` for a workspace carrying no stamp of its own.
+///
+/// A `Some("unconfigured")` row is not the same as `None` and the caller must not treat them alike: `None` means this workspace predates the `embedding_model` column entirely or was never stamped, while `"unconfigured"` means a workspace created with no embedding provider available at all ([`super::UnconfiguredEmbeddingProvider`] stamps exactly this string).
+/// Both are honestly "no real record of what this workspace was embedded with", which is why the caller skips the comparison for `"unconfigured"` too rather than trying to distinguish it from `None` here.
+async fn workspace_embedding_model(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Option<String>, YorishiroError> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        embedding_model: Option<String>,
+    }
+
+    let row = Row::find_by_statement(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT embedding_model FROM identity_workspaces WHERE id = $1",
+        [workspace_id.into()],
+    ))
+    .one(conn)
+    .await
+    .internal()?;
+    Ok(row.and_then(|r| r.embedding_model))
 }
