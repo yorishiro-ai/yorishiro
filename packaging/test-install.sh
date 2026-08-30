@@ -114,7 +114,8 @@ fi
 note "rpm on almalinux:10 — the current RPM-family release this supports"
 # --------------------------------------------------------------------------------------------
 # This project supports the current LTS releases, which on the RPM side is AlmaLinux 10: glibc
-# 2.39 and GLIBCXX 3.4.33, both measured, against declared floors of 2.39 and 3.4.30.
+# 2.39, measured, against a declared floor of 2.39. There is no GLIBCXX floor to check against:
+# the candle-based embedding provider links no C++ standard library dynamically.
 #
 # It replaced fedora:39, which was here because its glibc was 2.38, the floor as declared at the
 # time. That floor was wrong (the binary needs 2.39), so fedora:39 was a system this package

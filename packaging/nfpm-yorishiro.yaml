@@ -31,14 +31,17 @@ license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
 depends:
   - ca-certificates
 
-# These two floors are declared so the package manager refuses a system that cannot run the
-# binary, rather than installing happily and failing at first start. Verified: without them, the
-# rpm installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
+# This floor is declared so the package manager refuses a system that cannot run the binary,
+# rather than installing happily and failing at first start. Verified: without it, the rpm
+# installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
 #
-# Both figures are read off the binary CI builds, not chosen. `objdump -p` on the amd64 artifact
-# reports `GLIBC_2.39` and `GLIBCXX_3.4.30`, and those are what appear below. Read them from a
-# CI artifact rather than a local build: the glibc floor tracks the host that compiled it, so a
-# developer's machine gives a different and higher answer.
+# The figure is read off a binary CI builds, not chosen. `objdump -p` on the amd64 artifact
+# reported `GLIBC_2.39` when this was last measured against the ort-based binary, and that is
+# what appears below. Read it from a CI artifact rather than a local build: the glibc floor
+# tracks the host that compiled it, so a developer's machine gives a different and higher answer.
+# Measured directly on this machine while porting the embedding provider to candle: a release
+# build here reports GLIBC_2.43 in its own verneed section, for exactly this reason, which is why
+# that number cannot be transcribed into this file.
 #
 # That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
 # produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
@@ -59,9 +62,17 @@ depends:
 # bindings, it rejects any binary whose version-requirements section names a version the library
 # lacks. `objdump -p` is the one that answers the question the package manager needs.
 #
-# GLIBCXX_3.4.30 is a separate floor and does come from the C++ side: `std::condition_variable`
-# via onnxruntime. Lowering the glibc figure would not move it, which is why Rocky 9 stays out of
-# reach either way (it provides 3.4.29).
+# There is no GLIBCXX floor as of the candle-based embedding provider: `readelf -V` on a locally
+# built release binary shows no GLIBCXX version requirement at all, and no libstdc++.so in NEEDED
+# (confirmed via `ldd`). `onig_sys` (tokenizers' oniguruma dependency) and candle's C++ kernels
+# are both statically linked, unlike onnxruntime, which is what put GLIBCXX_3.4.30 here before.
+#
+# The GLIBC_2.39 figure below is carried over unverified for this branch: it was last measured
+# against the ort-based binary, and this file's own rule above says to read it from a CI artifact
+# for the binary actually being shipped, not assume a number that predates the embedding provider
+# swap still holds. `libstdc++6`/`libstdc++ >= 12` are dropped outright rather than carried
+# forward, since their absence is a structural fact (no such link exists at all) rather than a
+# number needing re-measurement.
 #
 # This floor is why the release build has to happen in CI rather than from a developer's
 # `target/release`: a binary linked against a newer host glibc raises the real requirement above
@@ -70,14 +81,11 @@ overrides:
   deb:
     depends:
       - ca-certificates
-      - libstdc++6 (>= 12)
       - libc6 (>= 2.39)
   rpm:
     depends:
       - ca-certificates
-      - libstdc++ >= 12
       - libc.so.6(GLIBC_2.39)(64bit)
-      - libstdc++.so.6(GLIBCXX_3.4.30)(64bit)
 
 # The retired community package installed the same unit name and state directory, so having
 # both would leave two services fighting over one database.

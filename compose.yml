@@ -26,7 +26,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # To use a model this machine already has, put `model.onnx` and `tokenizer.json` in
+    # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
     # `models/` and add:
     #
     #   volumes:
@@ -44,12 +44,12 @@ services:
       QUEUE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
       HOST: http://localhost:5150
       LOG_LEVEL: info
-      # The local ONNX embedding provider, reading the mount above. Unlike the settings below it,
+      # The local embedding provider, reading the mount above. Unlike the settings below it,
       # this is not the binary's default: without it the OpenAI-compatible provider is selected,
       # and with neither YORISHIRO_EMBEDDING_BASE_URL nor YORISHIRO_EMBEDDING_MODEL set the app
       # starts with no embedding backend and errors on the first search.
       YORISHIRO_EMBEDDING_PROVIDER: local
-      # YORISHIRO_ONNX_MODEL_PATH and YORISHIRO_ONNX_TOKENIZER_PATH are deliberately not set.
+      # YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH are deliberately not set.
       # Setting either one turns the automatic fetch off for both files and requires them to
       # already exist at the named path, so spelling out the defaults here would break the
       # no-mount case rather than document it.
