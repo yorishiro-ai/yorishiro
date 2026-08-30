@@ -9,6 +9,20 @@
 [Unit]
 Description=Yorishiro server
 After=network.target
+# Give up after five failed starts in five minutes, so a service that cannot start ends in
+# `failed` rather than retrying forever.
+#
+# This matters because of what `systemctl is-failed` answers in between: a unit that keeps
+# restarting reports `activating`, not `failed`, so anything watching unit state sees a service
+# that is perpetually about to work rather than one that is broken. Measured: without these, an
+# unconfigured start sat in `activating` through a fifteen-second window that a five-second
+# restart interval crosses twice.
+#
+# A start that fails on configuration will fail identically five times, so the limit costs it
+# nothing. A database that is not up yet usually resolves within five attempts, and if it does
+# not, `systemctl reset-failed yorishiro` restarts the count.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

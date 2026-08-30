@@ -77,8 +77,19 @@ docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" ||
   echo "installing the package failed" >&2; exit 1
 }
 docker exec "$APP" systemctl start yorishiro >/dev/null 2>&1
-# Long enough that a five-second restart loop would have gone round twice.
-sleep 15
+# Long enough for the unit's start limit to be reached: `StartLimitBurst=5` at `RestartSec=5s`
+# needs about 25 seconds of retrying before systemd gives up and marks it failed. An earlier
+# version waited 15, which is two restarts in, and the unit was still `activating` then: the
+# assertion below reported a real defect rather than a timing artefact, since without a start
+# limit it would have stayed `activating` however long the wait.
+#
+# Polled rather than slept flat, so this takes the time it needs and no more.
+for _ in $(seq 1 20); do
+  case "$(docker exec "$APP" systemctl is-failed yorishiro 2>/dev/null)" in
+    failed|inactive) break ;;
+  esac
+  sleep 3
+done
 
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
