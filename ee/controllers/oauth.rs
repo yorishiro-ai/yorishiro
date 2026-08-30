@@ -133,7 +133,7 @@ async fn callback(
                 "EmbeddingProvider missing"
             )))
         })?;
-    let embedding_model = crate::services::embedding::model_name_from_env();
+    let embedding_model = embedding_provider.model_name();
     let embedding_dimensions = embedding_provider.dimensions() as i32;
 
     let txn = ctx.db.begin().await.internal()?;

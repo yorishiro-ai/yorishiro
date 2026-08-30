@@ -80,7 +80,7 @@ pub async fn setup(
     }
 
     let provider = embedding_provider(&ctx)?;
-    let embedding_model = crate::services::embedding::model_name_from_env();
+    let embedding_model = provider.model_name();
     let dimensions = provider.dimensions() as i32;
 
     // tenant + workspace + user + membership run in one transaction: a request that dies part-way must not leave rows nothing can finish or undo.

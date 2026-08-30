@@ -67,7 +67,7 @@ pub async fn create_workspace(
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
 
     let provider = embedding_provider(&ctx)?;
-    let embedding_model = crate::services::embedding::model_name_from_env();
+    let embedding_model = provider.model_name();
     let dimensions = provider.dimensions() as i32;
 
     // `create_workspace` takes a transaction-scoped advisory lock to close the gap between counting a tenant's workspaces and inserting one, so it has to be handed a transaction rather than the pool.
