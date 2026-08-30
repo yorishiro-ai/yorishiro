@@ -1,5 +1,5 @@
 use chrono::Utc;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use loco_rs::testing::prelude::*;
 use sea_orm::ActiveValue;
 use serde_json::json;
