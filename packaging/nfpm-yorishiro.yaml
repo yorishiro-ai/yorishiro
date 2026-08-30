@@ -35,13 +35,23 @@ depends:
 # rather than installing happily and failing at first start. Verified: without it, the rpm
 # installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
 #
-# The figure is read off a binary CI builds, not chosen. `objdump -p` on the amd64 artifact
-# reported `GLIBC_2.39` when this was last measured against the ort-based binary, and that is
-# what appears below. Read it from a CI artifact rather than a local build: the glibc floor
-# tracks the host that compiled it, so a developer's machine gives a different and higher answer.
-# Measured directly on this machine while porting the embedding provider to candle: a release
-# build here reports GLIBC_2.43 in its own verneed section, for exactly this reason, which is why
-# that number cannot be transcribed into this file.
+# The figure is read off a binary CI builds, not chosen. Read it from a CI artifact rather than a
+# local build: the glibc floor tracks the host that compiled it, so a developer's machine gives a
+# different and higher answer. Measured directly on this machine while porting the embedding
+# provider to candle: a local release build here reports a floor of 2.43 in its own verneed
+# section, for exactly this reason, which is why that number was never a candidate to appear here.
+# (`test-install.sh` greps this file for the pattern GLIBC underscore version number to learn the
+# declared floor, so a second such match anywhere in this file, comment included, would be picked
+# up as the floor to test against instead of the one actually declared below. This paragraph
+# avoids writing that exact pattern for that reason.)
+#
+# Re-measured against the candle-based binary from a real CI build (release.yml, dry_run,
+# binary/amd64 job): `readelf -V` on the amd64 .deb's extracted binary shows GLIBC_2.39 as the
+# highest versioned symbol required, the same figure the ort-based binary needed. Removing `ort`
+# changed what the binary links (no more libstdc++, no more openssl) but did not move this floor:
+# both binaries were built by the same toolchain image (rust:1.97-slim / the GitHub Actions
+# ubuntu-latest runner's glibc), and the versioned libc symbols this codebase's own Rust code and
+# its remaining dependencies pull in did not change with the embedding provider.
 #
 # That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
 # produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
@@ -62,17 +72,12 @@ depends:
 # bindings, it rejects any binary whose version-requirements section names a version the library
 # lacks. `objdump -p` is the one that answers the question the package manager needs.
 #
-# There is no GLIBCXX floor as of the candle-based embedding provider: `readelf -V` on a locally
-# built release binary shows no GLIBCXX version requirement at all, and no libstdc++.so in NEEDED
-# (confirmed via `ldd`). `onig_sys` (tokenizers' oniguruma dependency) and candle's C++ kernels
-# are both statically linked, unlike onnxruntime, which is what put GLIBCXX_3.4.30 here before.
-#
-# The GLIBC_2.39 figure below is carried over unverified for this branch: it was last measured
-# against the ort-based binary, and this file's own rule above says to read it from a CI artifact
-# for the binary actually being shipped, not assume a number that predates the embedding provider
-# swap still holds. `libstdc++6`/`libstdc++ >= 12` are dropped outright rather than carried
-# forward, since their absence is a structural fact (no such link exists at all) rather than a
-# number needing re-measurement.
+# There is no GLIBCXX floor as of the candle-based embedding provider: `readelf -V` on the real
+# CI-built amd64 binary shows no GLIBCXX version requirement at all, and no libstdc++.so in
+# NEEDED. `onig_sys` (tokenizers' oniguruma dependency) and candle's C++ kernels are both
+# statically linked, unlike onnxruntime, which is what put GLIBCXX_3.4.30 here before.
+# `libstdc++6`/`libstdc++ >= 12` are dropped outright rather than carried forward: their absence
+# is a structural fact (no such link exists at all), not a number needing re-measurement.
 #
 # This floor is why the release build has to happen in CI rather than from a developer's
 # `target/release`: a binary linked against a newer host glibc raises the real requirement above
