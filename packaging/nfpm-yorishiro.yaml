@@ -31,10 +31,29 @@ license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
 depends:
   - ca-certificates
 
-# The binary needs glibc 2.38 and GLIBCXX_3.4.30 or newer, which the onnxruntime that `ort`
-# links imposes -- not our own code. Declared so the package manager refuses on a system that
-# cannot run it, rather than installing happily and failing at first start. Verified: without
-# these, the rpm installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
+# These two floors are declared so the package manager refuses a system that cannot run the
+# binary, rather than installing happily and failing at first start. Verified: without them, the
+# rpm installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
+#
+# **The glibc figure below is currently wrong, and is left wrong deliberately while the fix is
+# decided.** The binary's ELF version-requirements section names `GLIBC_2.39`, so it will not
+# start on a glibc 2.38 system, and `2.38` here lets it install on one. `test-install.sh`'s
+# fedora:39 block fails on exactly this and is meant to keep failing until the number is settled.
+#
+# What sets the glibc floor is the build environment, not onnxruntime. Measured across five
+# builds: a host at glibc 2.31 produces a binary needing 2.30, 2.35 produces 2.34, 2.39 produces
+# 2.39, and 2.44 produces 2.43. The C library's own headers decide which versioned symbols the
+# compiler selects, so the floor tracks whatever built it. An earlier version of this comment
+# attributed it to "the onnxruntime that `ort` links"; that is not what the binary says.
+#
+# Read this from the binary rather than from its symbol table. `objdump -T` shows the two
+# `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol
+# bindings, it rejects any binary whose version-requirements section names a version the library
+# lacks. `objdump -p` is the one that answers the question the package manager needs.
+#
+# GLIBCXX_3.4.30 is a separate floor and does come from the C++ side: `std::condition_variable`
+# via onnxruntime. Lowering the glibc figure would not move it, which is why Rocky 9 stays out of
+# reach either way (it provides 3.4.29).
 #
 # This floor is why the release build has to happen in CI rather than from a developer's
 # `target/release`: a binary linked against a newer host glibc raises the real requirement above
