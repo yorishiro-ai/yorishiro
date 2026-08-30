@@ -11,6 +11,12 @@ name: yorishiro
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
+# nfpm defaults to `version_schema: semver`, which parses the version and rewrites it. A
+# prerelease tag is not a SemVer version, and the default mangles it rather than refusing:
+# `20260830-1` becomes `20260830.0.0~1`, reading the `-1` as a SemVer prerelease suffix and
+# padding the rest out to a full version core. Measured, with nfpm 2.47.0, on both packagers.
+# `none` passes the string through, so the package is versioned by the tag it was built from.
+version_schema: none
 section: net
 priority: optional
 maintainer: Yorishiro Contributors <noreply@yotsunagi.dev>
