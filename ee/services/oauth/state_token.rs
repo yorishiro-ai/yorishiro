@@ -9,7 +9,7 @@
 use crate::services::auth::hex_encode;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 use crate::ee::services::hmac_sign;
