@@ -118,6 +118,15 @@ note "rpm on fedora:39 — glibc $GLIBC_FLOOR exactly, the tightest supported ca
 # is, not merely a newer Fedora, or the boundary stops being tested. The image is EOL and its
 # repositories may be gone; installing a local rpm whose dependencies are already satisfied does
 # not need them, which is why there is no `dnf update` here.
+#
+# It is also the only block that installs an rpm at all: seven install an rpm's counterpart deb.
+# So this is not a second opinion on the deb tests, it is the only evidence that the other half
+# of what a release publishes can be unpacked. Dropping it in favour of "current LTS only" would
+# leave the workflow building and attaching an rpm that nothing has ever installed.
+#
+# There is no LTS answer here to move to. The RPM family's long-term images sit below the floor
+# this package declares (`libc.so.6(GLIBC_2.38)`), which is exactly why rockylinux:9 appears
+# below as a system that must refuse the package rather than accept it.
 # The image is pulled first, and its progress goes to the terminal rather than into `$out`.
 # Docker writes that to stderr, and folding it in with `2>&1` below puts a paragraph of layer
 # names in front of every assertion's failure message, which is what this looked like the first
