@@ -178,23 +178,39 @@ pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Emb
     Ok(std::sync::Arc::new(provider))
 }
 
+/// What became of one old `YORISHIRO_ONNX_*` variable.
+/// The two outcomes carry genuinely different risk, so [`reject_renamed_onnx_vars`] must not give
+/// them the same message: a stale `Renamed` variable can silently start this provider on the
+/// wrong model, but a stale `Removed` one cannot, since nothing reads it and there is no
+/// alternative behaviour left for it to have selected.
+enum OnnxVarFate {
+    /// Reading this old name would have changed which model, tokenizer, or truncation this
+    /// provider used, so leaving it set risks starting a different model than the deployment
+    /// thinks it has.
+    Renamed(&'static str),
+    /// This variable named a mechanism removed outright ([`Pooling`] having one legal value, or
+    /// nomic-embed-text-v1.5 never reading the Qwen3-style instruction this variable rendered).
+    /// A stale value here changes nothing: it names no risk, only that the setting is inert.
+    Removed,
+}
+
 /// The `YORISHIRO_ONNX_*` variables this deployment might still have set from before the local
 /// provider moved from `ort`/ONNX to candle.
-const RENAMED_ONNX_VARS: [(&str, &str); 5] = [
-    ("YORISHIRO_ONNX_MODEL_PATH", "YORISHIRO_LOCAL_MODEL_PATH"),
+const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 5] = [
+    (
+        "YORISHIRO_ONNX_MODEL_PATH",
+        OnnxVarFate::Renamed("YORISHIRO_LOCAL_MODEL_PATH"),
+    ),
     (
         "YORISHIRO_ONNX_TOKENIZER_PATH",
-        "YORISHIRO_LOCAL_TOKENIZER_PATH",
+        OnnxVarFate::Renamed("YORISHIRO_LOCAL_TOKENIZER_PATH"),
     ),
     (
         "YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH",
-        "YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH",
+        OnnxVarFate::Renamed("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH"),
     ),
-    ("YORISHIRO_ONNX_POOLING", "(removed, no replacement)"),
-    (
-        "YORISHIRO_ONNX_QUERY_INSTRUCTION",
-        "(removed, no replacement)",
-    ),
+    ("YORISHIRO_ONNX_POOLING", OnnxVarFate::Removed),
+    ("YORISHIRO_ONNX_QUERY_INSTRUCTION", OnnxVarFate::Removed),
 ];
 
 /// Fails startup when an old `YORISHIRO_ONNX_*` variable is still set.
@@ -208,16 +224,31 @@ const RENAMED_ONNX_VARS: [(&str, &str); 5] = [
 /// status staying green. Refusing to boot forces the operator to remove or rename the variable
 /// (and confirm the resulting resolution is what they actually want) before that can happen,
 /// rather than a log line they could reasonably miss during an otherwise successful upgrade.
+///
+/// `YORISHIRO_ONNX_POOLING`/`YORISHIRO_ONNX_QUERY_INSTRUCTION` still fail startup too, for
+/// consistency (every old name gets the same "stop and clean this up" treatment rather than some
+/// silently tolerated), but their message must not claim the wrong-model risk above: neither
+/// variable is read by anything, so a stale value changes no behaviour at all. Claiming a risk
+/// that does not exist would cost the accurate claim above its credibility on the next reader.
 fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
-    for (old, new) in RENAMED_ONNX_VARS {
-        if std::env::var(old).is_ok() {
-            anyhow::bail!(
+    for (old, fate) in RENAMED_ONNX_VARS {
+        if std::env::var(old).is_err() {
+            continue;
+        }
+        match fate {
+            OnnxVarFate::Renamed(new) => anyhow::bail!(
                 "{old} is set but no longer read; the local embedding provider now reads {new}. \
                  Remove {old} (or rename it to {new} if it should still apply) before starting: \
                  leaving it set would silently start this provider on a different model than the \
                  one {old} names, which is not safe to detect and correct after the fact once \
                  vectors from the wrong model have been written."
-            );
+            ),
+            OnnxVarFate::Removed => anyhow::bail!(
+                "{old} is set but no longer has any effect: this setting was removed rather than \
+                 renamed, and nothing reads it. Remove {old} before starting; leaving it set \
+                 changes no behaviour, but its presence claims a configuration this deployment no \
+                 longer has."
+            ),
         }
     }
     Ok(())
@@ -368,7 +399,7 @@ mod tests {
     #[test]
     #[serial]
     fn reject_renamed_onnx_vars_fails_when_any_old_variable_is_set() {
-        for (old, _new) in RENAMED_ONNX_VARS {
+        for (old, fate) in &RENAMED_ONNX_VARS {
             unsafe {
                 std::env::set_var(old, "x");
             }
@@ -379,14 +410,28 @@ mod tests {
             let Err(err) = result else {
                 panic!("reject_renamed_onnx_vars should fail when {old} is set");
             };
-            assert!(err.to_string().contains(old), "{err}");
+            let message = err.to_string();
+            assert!(message.contains(old), "{message}");
+            // The two fates must not share a message: `Renamed` claims a wrong-model risk that
+            // does not exist for `Removed`, and a reader who sees that claim on an inert variable
+            // learns to discount it on the variable where it is actually true.
+            match fate {
+                OnnxVarFate::Renamed(new) => {
+                    assert!(message.contains(new), "{message}");
+                    assert!(message.contains("different model"), "{message}");
+                }
+                OnnxVarFate::Removed => {
+                    assert!(message.contains("no longer has any effect"), "{message}");
+                    assert!(!message.contains("different model"), "{message}");
+                }
+            }
         }
     }
 
     #[test]
     #[serial]
     fn reject_renamed_onnx_vars_passes_when_none_are_set() {
-        for (old, _new) in RENAMED_ONNX_VARS {
+        for (old, _fate) in &RENAMED_ONNX_VARS {
             unsafe {
                 std::env::remove_var(old);
             }

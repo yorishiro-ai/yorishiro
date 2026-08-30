@@ -66,7 +66,10 @@ Pooling is always mean pooling: that is what this model was trained with, and th
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`, must be between `16` and `8192`, nomic-embed-text-v1.5's own position limit) |
 
 These variables were named `YORISHIRO_ONNX_*` before this provider moved from `ort`/ONNX to candle.
-A deployment that still has an old name set fails to start, naming both the old and new variable: the old one is no longer read at all, and a `YORISHIRO_ONNX_MODEL_PATH` that named a specific model would otherwise go unnoticed while this provider's normal resolution ran instead (using the `models/` default files if both are present, fetching nomic-embed-text-v1.5 if neither is, or erroring on an incomplete pair), silently starting a different model than the one the deployment thinks it has. Remove the old variable, or rename it to its replacement, before starting again.
+A deployment that still has an old name set fails to start, but the message differs by what became of that variable.
+`YORISHIRO_ONNX_MODEL_PATH`, `YORISHIRO_ONNX_TOKENIZER_PATH`, and `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` were renamed: the message names both the old and new variable, since a stale one of these would otherwise go unnoticed while this provider's normal resolution ran instead (using the `models/` default files if both are present, fetching nomic-embed-text-v1.5 if neither is, or erroring on an incomplete pair), silently starting a different model than the one the deployment thinks it has.
+`YORISHIRO_ONNX_POOLING` and `YORISHIRO_ONNX_QUERY_INSTRUCTION` were removed outright rather than renamed (see above and "Known gap" in this repository's own history for why), so a stale one of these carries no such risk: nothing reads it, and there is no other behaviour left for it to have selected. The message says so rather than claiming the same risk as the renamed variables.
+Either way, remove the old variable (or rename it to its replacement, for the renamed three) before starting again.
 
 #### Fetching the model
 
