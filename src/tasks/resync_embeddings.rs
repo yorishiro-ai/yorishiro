@@ -13,6 +13,10 @@ use crate::services::embedding;
 /// Two things leave an entity in that state. A sync that was enqueued but never succeeded (an embedding provider outage that outlasts the job's own retries), and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the `pg_trgm` fuzzy fallback.
 ///
 /// PostgreSQL only. `content_entities` has no `embedding` column at all on SQLite (vector search is not ported to that backend), so the `embedding IS NULL` query below cannot run there.
+///
+/// This calls `sync_embedding_for_record`, the same guarded path a normal entity write uses, deliberately: if the deployment's configured provider does not match a workspace's stamped model (`services/embedding/sync.rs`'s write-time model check), every candidate here fails for that reason and none get a vector.
+/// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
+/// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
 pub struct ResyncEmbeddings;
 
 #[derive(Debug, FromQueryResult)]

@@ -292,6 +292,7 @@ impl Hooks for App {
         tasks.register(tasks::list_api_keys::ListApiKeys);
         tasks.register(tasks::revoke_api_key::RevokeApiKey);
         tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
+        tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
         tasks.register(tasks::maintenance::Maintenance);
         tasks.register(tasks::maintenance_status::MaintenanceStatus);
         // The paid edition's tasks. Registering only makes them available to `cargo loco task`;
