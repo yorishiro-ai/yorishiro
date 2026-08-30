@@ -94,7 +94,7 @@ tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 pgvector = { version = "0.4", default-features = false }
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "10" }    # licence key verification (ee/services/licence.rs)
+jsonwebtoken = { version = "11" }    # licence key verification (ee/services/licence.rs)
 serde_yaml_ng = { version = "0.10" } # licence key from a config file (ee/services/licence.rs)
 hmac = { version = "0.12" }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.22" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
@@ -113,4 +113,4 @@ insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
 # Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
 tempfile = { version = "3" }
 # Used by the ee/ request tests folded into tests/requests/.
-axum-test = { version = "17.3" }
+axum-test = { version = "21.1" }
