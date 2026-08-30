@@ -3,19 +3,22 @@ name: Release
 # One dispatch cuts a prerelease from `develop`: build, package, publish images, publish a
 # GitHub Release marked prerelease.
 #
-# Nothing is committed to `develop`, and `Cargo.toml` is not edited either. A prerelease is
-# identified by its tag, which is the UTC date and the run within that day (`20260830-1`), and
-# cargo rejects that as a version outright: "unexpected character '-' after major version
-# number". So there is no version to inject and nothing to undo.
+# Releases and prereleases are numbered by two different systems, and that is the design rather
+# than a limitation to work around.
 #
-# Leaving `develop` at `0.1.0` is the accurate state rather than a workaround: `master` holds
-# 0.50.0 and this branch has not claimed a version, so writing one into the manifest would say
-# it had.
+#   a release      vX.Y.Z, SemVer, and what `Cargo.toml`'s version means
+#   a prerelease   YYYYMMDD-N, the UTC date and the run within that day, outside SemVer entirely
 #
-# What that costs, and where it is repeated for the people who meet it: `yorishiro version`
-# reports `0.1.0 (20260830-1)`. The version half is the branch's, the parenthesised half is
-# this build's, and the release body says so. The packages are versioned by the tag, so
-# `dpkg -l` names the prerelease exactly.
+# So nothing here edits `Cargo.toml` or commits to `develop`. Not because that would be
+# untidy, but because a prerelease tag is not a version and does not belong in the field that
+# holds one: cargo rejects `20260830-1` outright ("unexpected character '-' after major version
+# number"). `develop` staying at `0.1.0` is its position in the SemVer system, which a
+# prerelease does not move.
+#
+# Both systems are visible in what the binary reports, and the release body says which is
+# which: `yorishiro version` answers `0.1.0 (20260830-1)`, the branch's SemVer position and
+# then this build's prerelease identity. The packages are versioned by the tag, so `dpkg -l`
+# names the prerelease exactly.
 #
 # There is no `crates-publish` job. `yorishiro-core` and `yorishiro-server` are both on
 # crates.io at 0.50.0, published from the `master` lineage, which still holds the crates those
@@ -79,14 +82,16 @@ jobs:
       # creation time will look a day ahead of its tag for that window. Stated because the
       # alternative reading is that something is wrong.
       #
-      # Numbering reads `git ls-remote`, deliberately, and not the tags API. `gh api
-      # repos/.../tags?per_page=100` returns one page: measured here at 72 of the 85 refs
-      # `ls-remote` reports. Today's tags are the newest, so they are the first to fall off that
-      # page as the list grows, and the numbering would then silently restart at 1 and collide
-      # with a tag that already exists. `ls-remote` has no paging.
+      # Numbering reads `git ls-remote` rather than the tags API, because the API pages and this
+      # must not. `gh api repos/.../tags?per_page=100` returns a single page, so once this
+      # repository passes 100 tags the oldest stop appearing, and today's tags are the newest:
+      # they would be the first to vanish from the answer, numbering would restart at 1, and the
+      # tag it produced would already exist. `ls-remote` has no paging, so it cannot drift that
+      # way regardless of how many tags accumulate.
       #
-      # `grep -v '\^{}'` drops the peeled refs an annotated tag adds; the 13 of them here are
-      # exactly the difference between those two counts.
+      # (Not because the two disagree today: they report the same 72 tags. The 13-ref difference
+      # in raw `ls-remote` output is the peeled `^{}` entries annotated tags carry, which is what
+      # `grep -v` below removes, not evidence of anything missing.)
       - name: Plan the release
         id: plan
         env:
@@ -149,15 +154,13 @@ jobs:
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
-      # `Cargo.toml` is left alone. A prerelease tag is a date and a run number, which cargo
-      # rejects as a version outright ("unexpected character '-' after major version number",
-      # measured), so there is nothing to inject into the manifest and no edit to undo.
+      # `Cargo.toml` is left alone: its version is this branch's position in the SemVer system,
+      # and a prerelease belongs to the other one (see this file's header). Nothing to inject.
       #
-      # `app_version` therefore reports the manifest's `0.1.0`, and the tag is what identifies
-      # the build. `BUILD_SHA` carries the tag rather than the commit sha so that
-      # `yorishiro version` answers `0.1.0 (20260830-1)`, which names the prerelease a person
-      # actually downloaded. The header and the release body both say the version half is the
-      # branch's, not this build's.
+      # `BUILD_SHA` carries the tag rather than the commit sha, so `yorishiro version` answers
+      # `0.1.0 (20260830-1)` and both systems are legible in one string: where the branch sits,
+      # and which prerelease this binary is. The commit is in the release body for anyone who
+      # needs it.
       #
       # There is no separate community build. `ee/` compiles into this crate as a module and
       # the licence layer decides at runtime what serves, so there is one binary and one
@@ -425,20 +428,20 @@ jobs:
           # downloads a prerelease, checks out its tag and rebuilds. They get `0.1.0`, and
           # nothing else in the repository would tell them why.
           body: |
-            Prerelease built from `develop`. The tag is the UTC date and the run within that
-            day, not a version: `develop` has not claimed a version number, and nothing here
-            makes it claim one.
+            Prerelease built from `develop`.
 
-            **`yorishiro version` reports `0.1.0`, and that is not a mistake.** `0.1.0` is what
-            `develop`'s `Cargo.toml` holds, and it is compiled in. The prerelease this binary
-            came from is the second half of that string:
+            Prereleases are numbered by date and run, `YYYYMMDD-N`, which is a different system
+            from the `vX.Y.Z` releases use. A prerelease is not a version, so it does not
+            appear in one:
 
             ```
+            $ yorishiro version
             0.1.0 (${{ needs.prepare.outputs.tag }})
             ```
 
-            The packages themselves are versioned `${{ needs.prepare.outputs.tag }}`, so
-            `dpkg -l` and `rpm -q` name the prerelease directly.
+            `0.1.0` is where `develop` sits in the release numbering, compiled in from its
+            `Cargo.toml`; the second half is this prerelease. The packages are versioned
+            `${{ needs.prepare.outputs.tag }}`, so `dpkg -l` and `rpm -q` name it directly.
 
             Commit: ${{ github.sha }}
 
