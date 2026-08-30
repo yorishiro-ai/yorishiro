@@ -228,7 +228,16 @@ jobs:
         if: matrix.arch == 'amd64'
         run: ./packaging/test-systemd.sh dist
 
+      # `!cancelled()` rather than the default `success()`, so a failed package test still
+      # leaves the packages behind. The tests above run after the build, so a failure there
+      # meant the artifacts were never uploaded, and the one thing needed to diagnose the
+      # failure was the thing the failure destroyed. Diagnosing it then needs a second run with
+      # the tests removed, which is a worse position than simply keeping the output.
+      #
+      # `github-release` still gates on the job's own success, so a failed run cannot publish
+      # these: they are kept for reading, not for shipping.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() }}
         with:
           name: binary-linux-${{ matrix.arch }}
           path: dist/*
