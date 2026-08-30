@@ -7776,7 +7776,7 @@ dependencies = [
  "loco-rs",
  "migration",
  "pgvector",
- "rand 0.9.5",
+ "rand 0.10.2",
  "regex",
  "reqwest 0.12.28",
  "rmcp",
