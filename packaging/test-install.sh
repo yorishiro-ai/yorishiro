@@ -123,18 +123,27 @@ note "rpm on fedora:39 — glibc $GLIBC_FLOOR exactly, the tightest supported ca
 # names in front of every assertion's failure message, which is what this looked like the first
 # time it failed for a real reason.
 docker pull -q fedora:39 >/dev/null 2>&1 || true
-# `--help` writes its own diagnostics into the captured output rather than being discarded, so a
-# binary that cannot start says why here instead of only reporting a missing `RUNS`.
+# The exit code is captured into a variable and always printed, rather than being consumed by an
+# `if`. When this first failed, `RUNS` was simply absent: no marker said whether the binary had
+# been run at all, and an `if` with an `echo` in both branches would have been just as silent if
+# the command never reached either. A line that is always emitted cannot fail to appear.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
-  if /usr/bin/yorishiro --help >/dev/null 2>/tmp/help.err; then
-    echo "RUNS"
-  else
-    echo "HELP_FAILED: $(head -c 300 /tmp/help.err | tr "\n" " ")"
-  fi
+  /usr/bin/yorishiro --help >/dev/null 2>/tmp/help.err
+  rc=$?
+  echo "HELP_EXIT:$rc"
+  [ "$rc" = 0 ] && echo "RUNS"
+  [ -s /tmp/help.err ] && echo "HELP_STDERR: $(head -c 300 /tmp/help.err | tr "\n" " ")"
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   getent passwd yorishiro >/dev/null && echo "USER"
 ' 2>&1)
+# Reported separately from the marker loop below, so a missing `RUNS` always comes with the
+# reason next to it rather than only in the raw output dump.
+case "$out" in
+  *HELP_EXIT:0*) ;;
+  *HELP_EXIT:*) bad "fedora:39 --help exited $(sed -n 's/.*HELP_EXIT:\([0-9]*\).*/\1/p' <<<"$out")" ;;
+  *) bad "fedora:39 --help never reported an exit code: $(echo "$out" | tr '\n' ' ')" ;;
+esac
 for want in RUNS COPYRIGHT USER; do
   case "$out" in
     *"$want"*) ok "fedora:39 $want" ;;
