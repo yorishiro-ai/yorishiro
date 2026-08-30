@@ -33,7 +33,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 serial_test = { version = "3.1.1" }
-sha2 = { version = "0.10" }
+sha2 = { version = "0.11" }
 sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tokio = { version = "1.45", default-features = false, features = ["rt-multi-thread"] }
 tracing = { version = "0.1" }
@@ -96,7 +96,7 @@ pgvector = { version = "0.4", default-features = false }
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
 jsonwebtoken = { version = "10" }    # licence key verification (ee/services/licence.rs)
 serde_yaml_ng = { version = "0.10" } # licence key from a config file (ee/services/licence.rs)
-hmac = { version = "0.12" }          # Stripe webhook signature (ee/controllers/stripe.rs)
+hmac = { version = "0.13" }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.22" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 url = { version = "2.5" }            # OIDC discovery (ee/services/oauth.rs)
 

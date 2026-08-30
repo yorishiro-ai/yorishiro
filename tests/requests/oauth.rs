@@ -2,7 +2,7 @@
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
 use axum::http::header;
-use hmac::{Hmac, Mac};
+use hmac::{KeyInit, Mac};
 use loco_rs::testing::prelude::*;
 use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;

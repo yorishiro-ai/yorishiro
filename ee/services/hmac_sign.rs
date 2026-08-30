@@ -1,7 +1,7 @@
 //! Shared HMAC-SHA256 sign/verify, used by both the OAuth `state` token (`services::oauth::state_token`) and the Stripe webhook signature (`controllers::stripe`).
 
 use crate::services::auth::hex_encode;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
