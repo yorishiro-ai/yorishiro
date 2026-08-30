@@ -74,7 +74,7 @@ pub enum Architecture {
     XlmRoberta,
 }
 
-/// `nomic-embed-text-v1.5`, this provider's original (and still default-adjacent) model.
+/// `nomic-embed-text-v1.5`, this provider's original model, kept selectable rather than removed: an existing nomic-embedded deployment needs a path forward (`YORISHIRO_LOCAL_MODEL=nomic-embed-text-v1.5`, or `reindex_embeddings` to move off it) besides a forced reindex the moment it upgrades, and the write-time model check needs this definition to exist as a comparison target regardless of which model is the default.
 /// Prefix-free: nomic-embed-text-v1.5's recommended `search_query:`/`search_document:` prefixes are a known, deliberately deferred gap tracked separately (see this repository's own issue tracker), not implemented here to avoid invalidating the irreplaceable `ort`-parity fixture and every existing nomic-embedded deployment's vectors in the same change that adds multi-model selection.
 pub(super) static NOMIC: LocalModelDef = LocalModelDef {
     id: "nomic-ai/nomic-embed-text-v1.5",
@@ -102,8 +102,8 @@ pub(super) static NOMIC: LocalModelDef = LocalModelDef {
     architecture: Architecture::NomicBert,
 };
 
-/// `intfloat/multilingual-e5-base`, intended to become this provider's default once the write-time model check exists; see [`DEFAULT_MODEL`]'s own doc comment for why it is not yet.
-/// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of making it the default when that lands: this codebase's search and recall are not English-only.
+/// `intfloat/multilingual-e5-base`, this provider's default; see [`DEFAULT_MODEL`]'s own doc comment for why.
+/// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of making it the default: this codebase's search and recall are not English-only.
 pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     id: "intfloat/multilingual-e5-base",
     short_id: "multilingual-e5-base",
@@ -137,10 +137,12 @@ pub(super) const MODELS: &[&LocalModelDef] = &[&NOMIC, &MULTILINGUAL_E5_BASE];
 
 /// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
 ///
-/// Still nomic as of this commit, deliberately: `MULTILINGUAL_E5_BASE` now has its own numeric reference fixture (`tests/fixtures/e5_reference_embeddings.json`, verified against a real `sentence-transformers` run) and passes its parity test, but the write-time model check that would refuse a stamp mismatch does not exist yet.
-/// Flipping the default before that check lands would let a deployment upgrading with `YORISHIRO_LOCAL_MODEL` unset boot straight onto e5 and silently write e5 vectors into workspaces stamped (or previously embedded) as nomic, with every status staying green, precisely the failure this whole effort exists to prevent.
-/// The default flips to `MULTILINGUAL_E5_BASE` in the commit that adds that check, not before.
-pub(super) const DEFAULT_MODEL: &LocalModelDef = &NOMIC;
+/// `multilingual-e5-base`, not `nomic-embed-text-v1.5`: this codebase's search and recall are not English-only, and only the multilingual model serves that well.
+/// Flipping this default was withheld until three things existed, in order: a numeric reference fixture and passing parity test for e5 (`tests/fixtures/e5_reference_embeddings.json`), the write-time model check that refuses a write whose vector doesn't match the workspace's stamped model (`services/embedding/sync.rs`), and the `reindex_embeddings` task (with its own tests) that actually moves a workspace between models.
+/// All three now exist, which is what makes this flip safe rather than the exact "stamp says one model, data holds another" failure the write-time check exists to catch: a deployment upgrading with `YORISHIRO_LOCAL_MODEL` unset now boots onto e5, and every write to a workspace still stamped nomic is refused (loudly, `422`) rather than silently mixed, until `reindex_embeddings` is run against it.
+/// The one population that check does not protect is a workspace stamped `"unconfigured"`: `sync_embedding` skips the model comparison for that sentinel value (see `services/embedding/sync.rs`'s own doc comment on why), so a workspace that reached that state under nomic and is later filled in by `resync_embeddings` gets e5 vectors mixed into a nomic-embedded index with no error at any point.
+/// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
+pub(super) const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 
 /// Where an auto-fetched model lives, scoped to `def` so two models' cached files can never collide or be mismatched with each other.
 ///

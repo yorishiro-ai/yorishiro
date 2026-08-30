@@ -79,7 +79,7 @@ Pooling is always mean pooling for either model: that is what both were trained 
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_LOCAL_MODEL` | Which model to load: `nomic-embed-text-v1.5` or `multilingual-e5-base`. Unset defaults to `nomic-embed-text-v1.5`. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default |
+| `YORISHIRO_LOCAL_MODEL` | Which model to load: `nomic-embed-text-v1.5` or `multilingual-e5-base`. Unset defaults to `multilingual-e5-base`, since this codebase's search and recall are not English-only. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default |
 | `YORISHIRO_LOCAL_MODEL_PATH` | Path to the `.safetensors` model file. Unset, the model is fetched automatically on first use (see below), into a path scoped by the selected model so two models' cached files never collide; set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_LOCAL_TOKENIZER_PATH` if it does not |
 | `YORISHIRO_LOCAL_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_LOCAL_MODEL_PATH`: fetched automatically when unset, required to exist when set |
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`, unchanged regardless of which model is selected). Must fit the selected model's own upper bound (`8192` for nomic-embed-text-v1.5, `512` for multilingual-e5-base); the default already satisfies both, so it needs no per-model adjustment on its own |

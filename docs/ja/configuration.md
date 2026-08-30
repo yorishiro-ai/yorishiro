@@ -92,7 +92,7 @@ base版には含まれない。
 
 | 変数 | 説明 |
 |---|---|
-| `YORISHIRO_LOCAL_MODEL` | どのモデルを読み込むか。`nomic-embed-text-v1.5`または`multilingual-e5-base`。未設定の既定は`nomic-embed-text-v1.5`。認識できない値は、既定へ黙って倒れるのではなく、有効な値を名指ししたメッセージとともに起動を失敗させる |
+| `YORISHIRO_LOCAL_MODEL` | どのモデルを読み込むか。`nomic-embed-text-v1.5`または`multilingual-e5-base`。未設定の既定は`multilingual-e5-base`である。このコードベースの検索とrecallは英語専用ではないためである。認識できない値は、既定へ黙って倒れるのではなく、有効な値を名指ししたメッセージとともに起動を失敗させる |
 | `YORISHIRO_LOCAL_MODEL_PATH` | `.safetensors`モデルファイルへのパス。未設定なら初回利用時に自動取得する(後述)。取得先は選択中のモデルごとに分かれたパスなので、2つのモデルのキャッシュファイルが衝突することはない。設定した場合はそのパスにファイルが存在している必要があり、無ければこのパスと`YORISHIRO_LOCAL_TOKENIZER_PATH`の両方を名指ししたメッセージとともに起動が失敗する |
 | `YORISHIRO_LOCAL_TOKENIZER_PATH` | トークナイザの`tokenizer.json`へのパス。挙動は`YORISHIRO_LOCAL_MODEL_PATH`と同じで、未設定なら自動取得し、設定した場合は存在が必須になる |
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`、どのモデルを選んでも変わらない)。選択中のモデル自身の上限には収まっている必要がある(nomic-embed-text-v1.5は`8192`、multilingual-e5-baseは`512`)。既定値は両方の上限を既に満たしているので、モデルに合わせて調整する必要はない |

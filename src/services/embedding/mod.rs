@@ -218,15 +218,9 @@ const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 5] = [
 
 /// Fails startup when an old `YORISHIRO_ONNX_*` variable is still set.
 ///
-/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply
-/// invisible to [`resolve_local_paths`], which then runs its normal resolution as if nothing had
-/// been configured (using the `models/` default files if both are present, fetching nomic-embed-
-/// text-v1.5 if neither is, or erroring on an incomplete pair). A deployment that had a different
-/// model configured under the old name would, without this check, silently start writing vectors
-/// from a different model into an index built for the one it thinks it still has, with every
-/// status staying green. Refusing to boot forces the operator to remove or rename the variable
-/// (and confirm the resulting resolution is what they actually want) before that can happen,
-/// rather than a log line they could reasonably miss during an otherwise successful upgrade.
+/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply invisible to [`resolve_local_paths`], which then runs its normal resolution as if nothing had been configured (using the `models/<short_id>/` default files if both are present, fetching the selected model, `model_fetch::DEFAULT_MODEL` unless `YORISHIRO_LOCAL_MODEL` says otherwise, if neither is, or erroring on an incomplete pair).
+/// A deployment that had a different model configured under the old name would, without this check, silently start writing vectors from a different model into an index built for the one it thinks it still has, with every status staying green.
+/// Refusing to boot forces the operator to remove or rename the variable (and confirm the resulting resolution is what they actually want) before that can happen, rather than a log line they could reasonably miss during an otherwise successful upgrade.
 ///
 /// `YORISHIRO_ONNX_POOLING`/`YORISHIRO_ONNX_QUERY_INSTRUCTION` still fail startup too, for
 /// consistency (every old name gets the same "stop and clean this up" treatment rather than some
@@ -286,7 +280,7 @@ fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
 /// `YORISHIRO_LOCAL_MODEL` selects which [`model_fetch::LocalModelDef`] to load (default: [`model_fetch::DEFAULT_MODEL`]); see [`resolve_local_model`].
 /// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` default to `models/<short_id>/model.safetensors`/`models/<short_id>/tokenizer.json` for the selected model; `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` defaults to 512 regardless of which model is selected, unchanged from this provider's behavior before model selection existed.
-/// Not the selected model's own upper bound: nomic's own bound is 8192, and silently truncating further out by default the moment a deployment's `YORISHIRO_LOCAL_MODEL` stays unset (still nomic; see [`model_fetch::DEFAULT_MODEL`]) would be a memory/latency change with no corresponding request for one.
+/// Not the selected model's own upper bound: nomic's own bound is 8192, and silently truncating further out by default the moment a deployment sets `YORISHIRO_LOCAL_MODEL=nomic-embed-text-v1.5` explicitly would be a memory/latency change with no corresponding request for one.
 /// `def.max_sequence_length` still validates the setting (see [`local::LocalEmbeddingProvider::load`]): 512 already satisfies every current definition's own bound, nomic's and multilingual-e5-base's alike, so this default needs no per-model branch of its own.
 /// Setting *either* path variable also turns the automatic fetch off, for both files: those defaults describe where an unset variable points, not a fallback the fetch still applies behind them.
 ///
@@ -554,7 +548,7 @@ mod tests {
     }
 
     /// An unset `YORISHIRO_LOCAL_MODEL` resolves to `model_fetch::DEFAULT_MODEL`.
-    /// Asserting the concrete default (nomic, as of this commit) rather than just "resolves to something" makes a future flip to a different default a visible test change here, not a silent one.
+    /// Asserting the concrete default (multilingual-e5-base, as of this commit) rather than just "resolves to something" makes a future flip to a different default a visible test change here, not a silent one.
     #[test]
     #[serial]
     fn resolve_local_model_defaults_when_unset() {
@@ -563,6 +557,6 @@ mod tests {
         }
         let def = resolve_local_model().expect("default resolution must not fail");
         assert_eq!(def.short_id, model_fetch::DEFAULT_MODEL.short_id);
-        assert_eq!(def.short_id, model_fetch::NOMIC.short_id);
+        assert_eq!(def.short_id, model_fetch::MULTILINGUAL_E5_BASE.short_id);
     }
 }
