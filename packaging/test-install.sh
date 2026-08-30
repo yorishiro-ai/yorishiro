@@ -118,9 +118,20 @@ note "rpm on fedora:39 — glibc $GLIBC_FLOOR exactly, the tightest supported ca
 # is, not merely a newer Fedora, or the boundary stops being tested. The image is EOL and its
 # repositories may be gone; installing a local rpm whose dependencies are already satisfied does
 # not need them, which is why there is no `dnf update` here.
+# The image is pulled first, and its progress goes to the terminal rather than into `$out`.
+# Docker writes that to stderr, and folding it in with `2>&1` below puts a paragraph of layer
+# names in front of every assertion's failure message, which is what this looked like the first
+# time it failed for a real reason.
+docker pull -q fedora:39 >/dev/null 2>&1 || true
+# `--help` writes its own diagnostics into the captured output rather than being discarded, so a
+# binary that cannot start says why here instead of only reporting a missing `RUNS`.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro fedora:39 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
-  /usr/bin/yorishiro --help >/dev/null 2>&1 && echo "RUNS"
+  if /usr/bin/yorishiro --help >/dev/null 2>/tmp/help.err; then
+    echo "RUNS"
+  else
+    echo "HELP_FAILED: $(head -c 300 /tmp/help.err | tr "\n" " ")"
+  fi
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   getent passwd yorishiro >/dev/null && echo "USER"
 ' 2>&1)
