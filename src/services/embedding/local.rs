@@ -672,4 +672,130 @@ mod tests {
             "pairwise similarity ordering differs between the ort-based and candle-based providers"
         );
     }
+
+    /// Numeric parity against a real `sentence-transformers` run of multilingual-e5-base, and, unlike the ort-parity test above, coverage of the query/document prefix plumbing itself.
+    ///
+    /// `tests/fixtures/generate_e5_reference/generate.py` (run in the Docker image built from
+    /// that directory's Dockerfile) manually prepends `query: `/`passage: ` before encoding, since
+    /// `sentence-transformers` does not add multilingual-e5-base's prefixes on its own.
+    /// This test feeds the fixture's raw, unprefixed text through `embed_as(EmbedKind::Query, _)`
+    /// and `embed_as(EmbedKind::Document, _)`, letting this provider's own prefix wiring add the
+    /// convention, then compares against the reference's `query_vector`/`document_vector`.
+    /// A missing or wrong prefix changes the embedded text, which changes the output vector past
+    /// the similarity threshold below, so this test fails if the prefix plumbing silently regresses,
+    /// not only if the model's numeric output does.
+    ///
+    /// Unlike the ort-parity fixture, this one is regenerable (the generator script is committed,
+    /// pinned, and dockerized), so `#[ignore]` here is about needing the real model files locally,
+    /// the same reason nomic's parity test above is ignored, not about the fixture being irreplaceable.
+    #[tokio::test]
+    #[ignore = "requires models/multilingual-e5-base/model.safetensors and its tokenizer"]
+    async fn matches_a_real_sentence_transformers_run_of_e5() {
+        let model_path = std::env::var("YORISHIRO_TEST_E5_MODEL")
+            .unwrap_or_else(|_| "models/multilingual-e5-base/model.safetensors".into());
+        let tokenizer_path = std::env::var("YORISHIRO_TEST_E5_TOKENIZER")
+            .unwrap_or_else(|_| "models/multilingual-e5-base/tokenizer.json".into());
+        assert!(
+            Path::new(&model_path).exists(),
+            "'{model_path}' not found: this test needs the real model, see its own doc comment"
+        );
+        assert!(
+            Path::new(&tokenizer_path).exists(),
+            "'{tokenizer_path}' not found: this test needs the real tokenizer, see its own doc comment"
+        );
+
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            entries: Vec<FixtureEntry>,
+        }
+        #[derive(serde::Deserialize)]
+        struct FixtureEntry {
+            text: String,
+            query_vector: Vec<f32>,
+            document_vector: Vec<f32>,
+        }
+
+        let fixture_bytes = std::fs::read("tests/fixtures/e5_reference_embeddings.json")
+            .expect("fixture missing: see tests/fixtures/generate_e5_reference/ to generate it");
+        let fixture: Fixture =
+            serde_json::from_slice(&fixture_bytes).expect("fixture is not valid JSON");
+
+        let provider = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+            model_path: model_path.into(),
+            tokenizer_path: tokenizer_path.into(),
+            def: &MULTILINGUAL_E5_BASE,
+            max_sequence_length: 512,
+        })
+        .unwrap();
+
+        let mut query_vectors = Vec::with_capacity(fixture.entries.len());
+        let mut document_vectors = Vec::with_capacity(fixture.entries.len());
+        for entry in &fixture.entries {
+            query_vectors.push(
+                provider
+                    .embed_as(EmbedKind::Query, &entry.text)
+                    .await
+                    .unwrap(),
+            );
+            document_vectors.push(
+                provider
+                    .embed_as(EmbedKind::Document, &entry.text)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        for (i, entry) in fixture.entries.iter().enumerate() {
+            let query_sim = cosine(&entry.query_vector, &query_vectors[i]);
+            assert!(
+                query_sim > 0.999,
+                "query-side cosine similarity for {:?} was only {query_sim}, expected > 0.999",
+                entry.text
+            );
+            let document_sim = cosine(&entry.document_vector, &document_vectors[i]);
+            assert!(
+                document_sim > 0.999,
+                "document-side cosine similarity for {:?} was only {document_sim}, expected > 0.999",
+                entry.text
+            );
+        }
+
+        // The two prefixes must not collapse to the same vector: if they did, the query and
+        // document reference vectors themselves would already be near-identical (a property of
+        // the fixture, checked here rather than assumed), and this provider's own query/document
+        // outputs above must show the same separation, not just each matching its own reference.
+        let reference_query_vs_document = cosine(
+            &fixture.entries[0].query_vector,
+            &fixture.entries[0].document_vector,
+        );
+        assert!(
+            reference_query_vs_document < 0.999,
+            "the reference fixture's own query and document vectors for the same text are \
+             nearly identical ({reference_query_vs_document}); the fixture may have been \
+             generated without the query:/passage: prefixes actually differing"
+        );
+        assert_ne!(query_vectors[0], document_vectors[0]);
+
+        // A batched call must agree with the single-text path: PaddingParams::default() pads with
+        // token id 0 (XLM-RoBERTa's <s>, not multilingual-e5-base's own pad_token_id of 1), and
+        // this is the check that would actually catch a leak from that mismatch, rather than only
+        // reasoning that masked positions are excluded before pooling.
+        // `embed_batch` directly (not `embed_as`), on both sides, so this compares the same
+        // unprefixed text through the single- and batch-shaped code paths rather than accidentally
+        // comparing a prefixed vector against an unprefixed one.
+        let single = provider
+            .embed_batch(&[&fixture.entries[0].text])
+            .await
+            .unwrap();
+        let batch = provider
+            .embed_batch(&[&fixture.entries[0].text, &fixture.entries[1].text])
+            .await
+            .unwrap();
+        let batch_sim = cosine(&single[0], &batch[0]);
+        assert!(
+            batch_sim > 0.999,
+            "batched embedding for {:?} diverged from its single-text embedding: cosine {batch_sim}",
+            fixture.entries[0].text
+        );
+    }
 }

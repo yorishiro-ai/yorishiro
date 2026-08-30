@@ -102,8 +102,8 @@ pub(super) static NOMIC: LocalModelDef = LocalModelDef {
     architecture: Architecture::NomicBert,
 };
 
-/// `intfloat/multilingual-e5-base`, this provider's default as of the multi-model local provider.
-/// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of selecting it as the default: this codebase's search and recall are not English-only.
+/// `intfloat/multilingual-e5-base`, intended to become this provider's default once the write-time model check exists; see [`DEFAULT_MODEL`]'s own doc comment for why it is not yet.
+/// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of making it the default when that lands: this codebase's search and recall are not English-only.
 pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     id: "intfloat/multilingual-e5-base",
     short_id: "multilingual-e5-base",
@@ -137,8 +137,9 @@ pub(super) const MODELS: &[&LocalModelDef] = &[&NOMIC, &MULTILINGUAL_E5_BASE];
 
 /// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
 ///
-/// Still nomic as of this commit, deliberately: `MULTILINGUAL_E5_BASE`'s load path is smoke-tested against real weights here, but has no numeric reference fixture yet (unlike nomic's `ort`-parity fixture) and no query/document task-prefix precedent in an existing deployment to compare against.
-/// The default flips to `MULTILINGUAL_E5_BASE` in the commit that adds that fixture, so every commit's default is a model verified as of that same commit, not one verified only by a later commit in the same PR.
+/// Still nomic as of this commit, deliberately: `MULTILINGUAL_E5_BASE` now has its own numeric reference fixture (`tests/fixtures/e5_reference_embeddings.json`, verified against a real `sentence-transformers` run) and passes its parity test, but the write-time model check that would refuse a stamp mismatch does not exist yet.
+/// Flipping the default before that check lands would let a deployment upgrading with `YORISHIRO_LOCAL_MODEL` unset boot straight onto e5 and silently write e5 vectors into workspaces stamped (or previously embedded) as nomic, with every status staying green, precisely the failure this whole effort exists to prevent.
+/// The default flips to `MULTILINGUAL_E5_BASE` in the commit that adds that check, not before.
 pub(super) const DEFAULT_MODEL: &LocalModelDef = &NOMIC;
 
 /// Where an auto-fetched model lives, scoped to `def` so two models' cached files can never collide or be mismatched with each other.
