@@ -197,27 +197,30 @@ const RENAMED_ONNX_VARS: [(&str, &str); 5] = [
     ),
 ];
 
-/// Warns, but does not fail, when an old `YORISHIRO_ONNX_*` variable is still set.
+/// Fails startup when an old `YORISHIRO_ONNX_*` variable is still set.
 ///
-/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model does not error: it is simply
-/// never read, and [`resolve_local_paths`] falls through to the `YORISHIRO_LOCAL_*` defaults as if
-/// nothing had been configured, silently swapping in nomic-embed-text-v1.5 for whatever the
-/// operator had actually configured. New vectors land in a different embedding space than the
-/// existing index while every status stays green, exactly the class of failure this codebase's own
-/// pooling and query-instruction notes describe. This is the log line an operator upgrading past
-/// this rename needs to see, not a compatibility shim for the old names.
-fn warn_about_renamed_onnx_vars() {
+/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply
+/// invisible to [`resolve_local_paths`], which then runs its normal resolution as if nothing had
+/// been configured (using the `models/` default files if both are present, fetching nomic-embed-
+/// text-v1.5 if neither is, or erroring on an incomplete pair). A deployment that had a different
+/// model configured under the old name would, without this check, silently start writing vectors
+/// from a different model into an index built for the one it thinks it still has, with every
+/// status staying green. Refusing to boot forces the operator to remove or rename the variable
+/// (and confirm the resulting resolution is what they actually want) before that can happen,
+/// rather than a log line they could reasonably miss during an otherwise successful upgrade.
+fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     for (old, new) in RENAMED_ONNX_VARS {
         if std::env::var(old).is_ok() {
-            tracing::warn!(
-                old,
-                new,
+            anyhow::bail!(
                 "{old} is set but no longer read; the local embedding provider now reads {new}. \
-                 If this deployment relied on {old} to point at a specific model, it is now \
-                 silently using nomic-embed-text-v1.5 instead."
+                 Remove {old} (or rename it to {new} if it should still apply) before starting: \
+                 leaving it set would silently start this provider on a different model than the \
+                 one {old} names, which is not safe to detect and correct after the fact once \
+                 vectors from the wrong model have been written."
             );
         }
     }
+    Ok(())
 }
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
@@ -232,7 +235,7 @@ fn warn_about_renamed_onnx_vars() {
 async fn build_local_provider(
     dimensions: usize,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
-    warn_about_renamed_onnx_vars();
+    reject_renamed_onnx_vars()?;
     let max_sequence_length: usize = std::env::var("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH")
         .unwrap_or_else(|_| "512".into())
         .parse()?;
@@ -356,7 +359,40 @@ async fn resolve_local_paths() -> anyhow::Result<Option<(std::path::PathBuf, std
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
+
+    /// `#[serial]`: mutates process-wide environment variables, which races other tests in this
+    /// binary that also read or write `YORISHIRO_ONNX_*`/`YORISHIRO_LOCAL_*` if run concurrently.
+    #[test]
+    #[serial]
+    fn reject_renamed_onnx_vars_fails_when_any_old_variable_is_set() {
+        for (old, _new) in RENAMED_ONNX_VARS {
+            unsafe {
+                std::env::set_var(old, "x");
+            }
+            let result = reject_renamed_onnx_vars();
+            unsafe {
+                std::env::remove_var(old);
+            }
+            let Err(err) = result else {
+                panic!("reject_renamed_onnx_vars should fail when {old} is set");
+            };
+            assert!(err.to_string().contains(old), "{err}");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn reject_renamed_onnx_vars_passes_when_none_are_set() {
+        for (old, _new) in RENAMED_ONNX_VARS {
+            unsafe {
+                std::env::remove_var(old);
+            }
+        }
+        assert!(reject_renamed_onnx_vars().is_ok());
+    }
 
     /// The half-populated cases are the reason this rule exists: falling through to the fetch there would ignore a file an operator deliberately placed and embed with a different model, with nothing in any status to show for it.
     #[test]
