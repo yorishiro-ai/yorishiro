@@ -178,6 +178,48 @@ pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Emb
     Ok(std::sync::Arc::new(provider))
 }
 
+/// The `YORISHIRO_ONNX_*` variables this deployment might still have set from before the local
+/// provider moved from `ort`/ONNX to candle.
+const RENAMED_ONNX_VARS: [(&str, &str); 5] = [
+    ("YORISHIRO_ONNX_MODEL_PATH", "YORISHIRO_LOCAL_MODEL_PATH"),
+    (
+        "YORISHIRO_ONNX_TOKENIZER_PATH",
+        "YORISHIRO_LOCAL_TOKENIZER_PATH",
+    ),
+    (
+        "YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH",
+        "YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH",
+    ),
+    ("YORISHIRO_ONNX_POOLING", "(removed, no replacement)"),
+    (
+        "YORISHIRO_ONNX_QUERY_INSTRUCTION",
+        "(removed, no replacement)",
+    ),
+];
+
+/// Warns, but does not fail, when an old `YORISHIRO_ONNX_*` variable is still set.
+///
+/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model does not error: it is simply
+/// never read, and [`resolve_local_paths`] falls through to the `YORISHIRO_LOCAL_*` defaults as if
+/// nothing had been configured, silently swapping in nomic-embed-text-v1.5 for whatever the
+/// operator had actually configured. New vectors land in a different embedding space than the
+/// existing index while every status stays green, exactly the class of failure this codebase's own
+/// pooling and query-instruction notes describe. This is the log line an operator upgrading past
+/// this rename needs to see, not a compatibility shim for the old names.
+fn warn_about_renamed_onnx_vars() {
+    for (old, new) in RENAMED_ONNX_VARS {
+        if std::env::var(old).is_ok() {
+            tracing::warn!(
+                old,
+                new,
+                "{old} is set but no longer read; the local embedding provider now reads {new}. \
+                 If this deployment relied on {old} to point at a specific model, it is now \
+                 silently using nomic-embed-text-v1.5 instead."
+            );
+        }
+    }
+}
+
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
 /// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` default to `models/model.safetensors`/`models/tokenizer.json`; `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` defaults to 512.
 /// Setting *either* path variable also turns the automatic fetch off, for both files: those defaults describe where an unset variable points, not a fallback the fetch still applies behind them.
@@ -190,6 +232,7 @@ pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Emb
 async fn build_local_provider(
     dimensions: usize,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
+    warn_about_renamed_onnx_vars();
     let max_sequence_length: usize = std::env::var("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH")
         .unwrap_or_else(|_| "512".into())
         .parse()?;

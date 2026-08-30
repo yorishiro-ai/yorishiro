@@ -16,6 +16,11 @@ use crate::error::YorishiroError;
 /// There's no practical use for an extremely short sequence length either, so we reject with a comfortable margin.
 const MIN_SEQUENCE_LENGTH: usize = 16;
 
+/// Upper bound for `max_sequence_length`, matching `nomic-embed-text-v1.5`'s own `n_positions` (`Config::default().n_positions`, 8192).
+/// candle's rotary embedding table is sized to this figure at model load; a longer sequence reaches the rotary embedding during inference and fails there instead of at startup, with a message about tensor shapes rather than about the setting that caused it.
+/// This is a property of the one model this provider loads, not a candle limitation, so it belongs on this constant rather than as a general timeout-style config bound.
+const MAX_SEQUENCE_LENGTH: usize = 8192;
+
 /// Upper bound on wait time for a single embed call.
 /// Inference is serialized within the process, so this guards against unbounded waits when prior requests pile up (the local equivalent of the OpenAI-compatible provider's HTTP timeout).
 const EMBED_TIMEOUT: Duration = Duration::from_secs(30);
@@ -70,6 +75,12 @@ impl LocalEmbeddingProvider {
                 config.max_sequence_length
             )));
         }
+        if config.max_sequence_length > MAX_SEQUENCE_LENGTH {
+            return Err(internal(format!(
+                "max_sequence_length must be <= {MAX_SEQUENCE_LENGTH} (nomic-embed-text-v1.5's own position limit), got {}",
+                config.max_sequence_length
+            )));
+        }
 
         let mut tokenizer = Tokenizer::from_file(&config.tokenizer_path).map_err(|err| {
             internal(format!(
@@ -86,19 +97,27 @@ impl LocalEmbeddingProvider {
         tokenizer.with_padding(Some(PaddingParams::default()));
 
         let device = Device::Cpu;
-        // Safety: `VarBuilder::from_mmaped_safetensors` maps the file directly into memory rather than
-        // reading it; the caller promises the file isn't mutated from under the mapping while the model
-        // lives, which holds here since `model_fetch` only ever replaces a cached file via `rename` into a
-        // path this provider hasn't opened yet, never in place.
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[&config.model_path], DType::F32, &device)
-        }
-        .map_err(|err| {
+        // `from_buffered_safetensors` (a plain read, not `from_mmaped_safetensors`) is deliberate:
+        // the mmap variant is `unsafe` because the caller must guarantee the file is never mutated
+        // for as long as the mapping lives, and that guarantee only holds for `model_fetch`'s own
+        // managed tier (replaced solely by `rename` into a path this provider has not opened yet).
+        // `YORISHIRO_LOCAL_MODEL_PATH` names an operator-chosen path outside that mechanism, with
+        // no such guarantee, so an `unsafe` block here would be asserting a safety invariant this
+        // function cannot actually promise. The 522 MiB read happens once at startup and is noise
+        // next to the model fetch it may follow.
+        let bytes = std::fs::read(&config.model_path).map_err(|err| {
             internal(format!(
-                "failed to load model weights '{}': {err}",
+                "failed to read model weights '{}': {err}",
                 config.model_path.display()
             ))
         })?;
+        let vb =
+            VarBuilder::from_buffered_safetensors(bytes, DType::F32, &device).map_err(|err| {
+                internal(format!(
+                    "failed to load model weights '{}': {err}",
+                    config.model_path.display()
+                ))
+            })?;
         let model = NomicBertModel::load(vb, &Config::default()).map_err(|err| {
             internal(format!(
                 "failed to build the nomic-bert model from '{}': {err}",
@@ -318,6 +337,23 @@ mod tests {
         });
         let Err(err) = result else {
             panic!("load should fail for too small max_sequence_length");
+        };
+        assert!(err.to_string().contains("max_sequence_length"));
+    }
+
+    #[test]
+    fn load_rejects_too_large_max_sequence_length() {
+        // A value past NomicBertModel's own rotary embedding table would otherwise reach candle
+        // during inference and fail there, with a message about tensor shapes rather than about
+        // the setting that caused it; confirm load() rejects it up front instead.
+        let result = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+            model_path: "/nonexistent/model.safetensors".into(),
+            tokenizer_path: "/nonexistent/tokenizer.json".into(),
+            dimensions: 768,
+            max_sequence_length: 8193,
+        });
+        let Err(err) = result else {
+            panic!("load should fail for too large max_sequence_length");
         };
         assert!(err.to_string().contains("max_sequence_length"));
     }

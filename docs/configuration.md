@@ -63,7 +63,10 @@ Pooling is always mean pooling: that is what this model was trained with, and th
 |---|---|
 | `YORISHIRO_LOCAL_MODEL_PATH` | Path to the `.safetensors` model file. Unset, the model is fetched automatically on first use (see below); set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_LOCAL_TOKENIZER_PATH` if it does not |
 | `YORISHIRO_LOCAL_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_LOCAL_MODEL_PATH`: fetched automatically when unset, required to exist when set |
-| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`) |
+| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`, must be between `16` and `8192`, nomic-embed-text-v1.5's own position limit) |
+
+These variables were named `YORISHIRO_ONNX_*` before this provider moved from `ort`/ONNX to candle.
+A deployment that still has an old name set gets a startup warning naming both the old and new variable, since the old one is no longer read at all: it does not error, and a `YORISHIRO_ONNX_MODEL_PATH` pointing at a specific model silently stops taking effect, falling through to nomic-embed-text-v1.5 instead.
 
 #### Fetching the model
 

@@ -76,7 +76,11 @@ base版には含まれない。
 |---|---|
 | `YORISHIRO_LOCAL_MODEL_PATH` | `.safetensors`モデルファイルへのパス。未設定なら初回利用時に自動取得する(後述)。設定した場合はそのパスにファイルが存在している必要があり、無ければこのパスと`YORISHIRO_LOCAL_TOKENIZER_PATH`の両方を名指ししたメッセージとともに起動が失敗する |
 | `YORISHIRO_LOCAL_TOKENIZER_PATH` | トークナイザの`tokenizer.json`へのパス。挙動は`YORISHIRO_LOCAL_MODEL_PATH`と同じで、未設定なら自動取得し、設定した場合は存在が必須になる |
-| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`) |
+| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`、`16`から`8192`の範囲内であること。`8192`はnomic-embed-text-v1.5自身の位置埋め込みの上限) |
+
+これらの変数は、このプロバイダが`ort`/ONNXからcandleに移行する前は`YORISHIRO_ONNX_*`という名前だった。
+旧名を設定したままのデプロイは、起動時に旧名と新名の両方を名指しした警告を受け取る。
+旧名はもう一切読まれないため、エラーにはならず、特定のモデルを指していた`YORISHIRO_ONNX_MODEL_PATH`は静かに効かなくなり、nomic-embed-text-v1.5にフォールバックする。
 
 #### モデルの取得
 
