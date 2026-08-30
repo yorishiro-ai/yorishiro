@@ -1,0 +1,47 @@
+# Enable with `systemctl enable --now yorishiro`.
+#
+# Settings go in /etc/yorishiro/yorishiro.env, which this unit reads as the process
+# environment. That is not a stylistic choice: this application's configuration lives in
+# `config/{LOCO_ENV}.yaml` inside the package, and those files read their values from
+# environment variables (`get_env(name="DATABASE_URL")` and so on), so the environment is
+# where an operator's settings actually take effect. docs/configuration.md lists every
+# variable.
+[Unit]
+Description=Yorishiro server
+After=network.target
+
+[Service]
+Type=simple
+User=yorishiro
+Group=yorishiro
+WorkingDirectory=/var/lib/yorishiro
+# `production` is the environment that takes no silent defaults for a secret or an address: it
+# fails at startup when DATABASE_URL, QUEUE_URL or HOST is unset, rather than falling back to a
+# development value. Without this the CLI defaults to `development`.
+Environment=LOCO_ENV=production
+# Loco looks for `config/{LOCO_ENV}.yaml` relative to the working directory unless this names a
+# folder (`loco_rs::environment::Environment::load`). The working directory here is the state
+# directory, which holds no config, so this is required rather than a tidiness: without it the
+# service starts in /var/lib/yorishiro, finds no `config/`, and fails.
+Environment=LOCO_CONFIG_FOLDER=/usr/share/yorishiro/config
+EnvironmentFile=/etc/yorishiro/yorishiro.env
+ExecStart=/usr/bin/yorishiro start
+Restart=on-failure
+RestartSec=5s
+
+# There is deliberately no `RestartPreventExitStatus=`. An earlier version of this unit carried
+# `RestartPreventExitStatus=78`, which was correct when the server was its own binary and
+# returned 78 (EX_CONFIG) for "configuration is absent or unusable". This binary does not: it
+# delegates to `loco_rs::cli::main`, and nothing in `src/` returns 78 or calls `process::exit`.
+# Restoring the line would need the exit code to exist first, in `src/bin/main.rs`; on its own
+# it would only look like a guard against a config crashloop without being one.
+
+# The process needs no write access outside its own state directory, and no new privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yorishiro
+
+[Install]
+WantedBy=multi-user.target
