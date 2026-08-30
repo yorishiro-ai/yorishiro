@@ -97,7 +97,7 @@ pgvector = { version = "0.4", default-features = false }
 jsonwebtoken = { version = "10" }    # licence key verification (ee/services/licence.rs)
 serde_yaml_ng = { version = "0.10" } # licence key from a config file (ee/services/licence.rs)
 hmac = { version = "0.13" }          # Stripe webhook signature (ee/controllers/stripe.rs)
-base64 = { version = "0.22" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
+base64 = { version = "0.23" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 url = { version = "2.5" }            # OIDC discovery (ee/services/oauth.rs)
 
 [[bin]]
