@@ -421,9 +421,12 @@ mod tests {
     /// A pooling mistake produces vectors that are still the right shape and still normalize, so a
     /// single-pair cosine check would pass even with the wrong pooling; see the module doc comment
     /// on why the choice is a property of the model, not a preference.
-    /// `tests/fixtures/onnx_reference_embeddings.json` was generated from the `ort`-based provider
+    /// `tests/fixtures/nomic_reference_embeddings.json` was generated from the `ort`-based provider
     /// against the same model revision before it was removed, and cannot be regenerated: the `ort`
     /// implementation is gone from this codebase.
+    /// Named for the model, not the implementation that produced it, since the implementation
+    /// producing this reference will keep changing (this file already outlived `ort`) while the
+    /// model it was generated against did not.
     /// This checks per-sentence cosine similarity against that fixture and, separately, that the
     /// full pairwise similarity ordering across all ten sentences is unchanged, since ordering is
     /// what a pooling mistake actually breaks.
@@ -460,8 +463,8 @@ mod tests {
             vector: Vec<f32>,
         }
 
-        let fixture_bytes = std::fs::read("tests/fixtures/onnx_reference_embeddings.json")
-            .expect("fixture missing: see tests/fixtures/onnx_reference_embeddings.json");
+        let fixture_bytes = std::fs::read("tests/fixtures/nomic_reference_embeddings.json")
+            .expect("fixture missing: see tests/fixtures/nomic_reference_embeddings.json");
         let fixture: Fixture =
             serde_json::from_slice(&fixture_bytes).expect("fixture is not valid JSON");
 
