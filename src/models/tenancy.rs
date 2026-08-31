@@ -484,8 +484,7 @@ fn workspace_count_lock_key(tenant_id: Uuid) -> String {
 /// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
 /// `None` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
 ///
-/// `embedding` is the deployment's model and dimension count, stamped onto the workspace so a later write produced by a different model can be refused where it happens rather than at query time.
-/// `None` leaves the workspace on "whatever the deployment is configured for".
+/// `embedding` is the deployment's model and dimension count. It is no longer stamped onto the workspace at creation: the workspace keeps `NULL` for both `embedding_model` and `embedding_dimensions`, and `sync_embedding` stamps the first successful embed (first-write stamping). This avoids the defect where a workspace created without an embedding provider would receive a sentinel stamp that blocks future model resolution.
 ///
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` because this takes `db::lock_for_update` before counting, and `pg_advisory_xact_lock` is transaction-scoped: handed a pool the lock would be released by the end of its own implicit transaction, before the count and insert it is meant to guard.
 /// Taking the transaction in the signature makes passing a pool a compile error instead of a lock that silently does nothing.
@@ -496,7 +495,7 @@ pub async fn create_workspace(
     name: &str,
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
-    embedding: Option<(&str, i32)>,
+    _embedding: Option<(&str, i32)>,
 ) -> Result<identity_workspaces::Model, YorishiroError> {
     use crate::models::_entities::identity_tenants;
     use crate::models::identity_workspaces::{
@@ -541,8 +540,6 @@ pub async fn create_workspace(
             }
             .to_string(),
         ),
-        embedding_model: ActiveValue::Set(embedding.map(|(model, _)| model.to_string())),
-        embedding_dimensions: ActiveValue::Set(embedding.map(|(_, dimensions)| dimensions)),
         ..Default::default()
     };
 

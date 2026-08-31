@@ -12,6 +12,9 @@ pub struct Model {
     pub name: String,
     pub max_workspaces: Option<i32>,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
