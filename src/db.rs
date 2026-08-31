@@ -238,8 +238,8 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
 /// keeps the session alive, so the lock would persist and cause the next reindex to re-enter
 /// (advisory locks are per-session, not per-connection).
 pub struct WorkspaceReindexLockGuard {
-    #[allow(dead_code)]
-    conn: Option<sqlx::PgConnection>,
+    #[expect(dead_code)]
+    conn: sqlx::PgConnection,
 }
 
 impl Drop for WorkspaceReindexLockGuard {
@@ -251,14 +251,14 @@ impl Drop for WorkspaceReindexLockGuard {
 
 /// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
 ///
-/// On PostgreSQL, acquires `pg_advisory_lock` on a bare pooled connection and detaches it.
-/// The lock is held until the guard is dropped, which ends the detached session and releases
-/// the lock. Pool return keeps the session alive, so the lock would persist and cause the next
-/// reindex to re-enter (advisory locks are per-session, not per-connection).
+/// Acquires `pg_advisory_lock` on a bare pooled connection and detaches it. The lock is held
+/// until the guard is dropped, which ends the detached session and releases the lock. Pool
+/// return keeps the session alive, so the lock would persist and cause the next reindex to
+/// re-enter (advisory locks are per-session, not per-connection).
 ///
-/// Waits up to 60 seconds for the lock: this is long enough for a full reindex to complete
-/// (thousands of entities) but short enough to surface a stuck run rather than blocking
-/// indefinitely when a prior process died without releasing its session.
+/// Does not time out: a legitimate reindex over a large workspace can block for a long time,
+/// and imposing a bound would risk killing a run that is just busy. The `tracing::info!`
+/// before and after acquisition makes a wait visible rather than a silent hang.
 pub async fn acquire_workspace_reindex_lock(
     pool: PgPool,
     workspace_id: Uuid,
@@ -280,9 +280,7 @@ pub async fn acquire_workspace_reindex_lock(
     // returning to the pool would keep the session (and the lock) alive.
     let detached = conn.detach();
 
-    Ok(WorkspaceReindexLockGuard {
-        conn: Some(detached),
-    })
+    Ok(WorkspaceReindexLockGuard { conn: detached })
 }
 
 /// Acquires the session-scoped advisory lock and runs a reindex under it, returning the outcome.
