@@ -25,9 +25,8 @@ impl MigrationTrait for Migration {
 
         helpers::sqlite_only(
             manager,
-            "ALTER TABLE identity_tenants \
-             ADD COLUMN embedding_model TEXT, \
-             ADD COLUMN embedding_dimensions INTEGER",
+            "ALTER TABLE identity_tenants ADD COLUMN embedding_model TEXT; \
+             ALTER TABLE identity_tenants ADD COLUMN embedding_dimensions INTEGER",
         )
         .await?;
 
