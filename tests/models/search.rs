@@ -116,11 +116,19 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         .await
         .expect("create entity in other workspace");
 
-        let query_vector = vec![1.0_f32, 0.0, 0.0];
-        set_embedding(&ctx.db, close.id, vec![1.0, 0.0, 0.0]).await;
-        set_embedding(&ctx.db, far.id, vec![0.0, 1.0, 0.0]).await;
+        fn unit_vector(axis: usize) -> Vec<f32> {
+            let mut v = vec![0.0_f32; 768];
+            v[axis] = 1.0;
+            v
+        }
+
+        let close_vector = unit_vector(0);
+        let far_vector = unit_vector(1);
+        let query_vector = close_vector.clone();
+        set_embedding(&ctx.db, close.id, close_vector.clone()).await;
+        set_embedding(&ctx.db, far.id, far_vector).await;
         // An exact match, but in a workspace the query never asks about: must never surface.
-        set_embedding(&ctx.db, other_workspace_entity.id, vec![1.0, 0.0, 0.0]).await;
+        set_embedding(&ctx.db, other_workspace_entity.id, close_vector).await;
 
         let hits = search::search_by_vector(
             &ctx.db,
@@ -466,7 +474,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
         let hits = search::search_by_vector(
             &ctx.db,
             workspace.id,
-            vec![1.0, 0.0, 0.0],
+            vec![0.0_f32; 768],
             "quarterly roadmap",
             search::SearchQuery::default(),
         )
