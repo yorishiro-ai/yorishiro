@@ -277,7 +277,7 @@ impl EmbeddingProvider for FixedModelProvider {
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
-        Ok(texts.iter().map(|_| vec![0.0_f32; 768]).collect())
+        Ok(texts.iter().map(|_| self.vector()).collect())
     }
 }
 
@@ -539,51 +539,46 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             .pool()
             .clone();
 
-        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-
-        // Spawn two racing calls; both wait at the barrier, then release simultaneously.
-        // Barrier::wait() blocks the current OS thread, so we use spawn_blocking + Handle::current
-        // to get a blocking thread that hits the barrier and then schedules the async reindex
-        // on the test's tokio runtime. This is the standard pattern for racing with Barrier.
         let db_conn = ctx.db.clone();
-        let pool1 = pool.clone();
-        let workspace_id1 = workspace.id;
-        let cids1 = candidate_ids.clone();
+
+        // Race two reindex calls against the same workspace using
+        // tokio::sync::Barrier (async). Both tasks reach the barrier concurrently;
+        // the first to resume acquires the lock, the second waits until the first
+        // drops its guard. This tests lock serialization rather than sequential calls.
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
         let barrier1 = barrier.clone();
         let provider1_clone = provider1.clone();
-        let h1 = tokio::task::spawn_blocking(move || {
-            let _wait = barrier1.wait();
-            tokio::runtime::Handle::current().block_on(async {
-                yorishiro::db::reindex_workspace_with_lock(
-                    pool1,
-                    workspace_id1,
-                    &db_conn,
-                    &cids1,
-                    &provider1_clone,
-                )
-                .await
-                .expect("reindex 1 join")
-            })
+        let pool1 = pool.clone();
+        let cids1 = candidate_ids.clone();
+        let db_conn1 = db_conn.clone();
+        let h1 = tokio::spawn(async move {
+            barrier1.wait().await;
+            yorishiro::db::reindex_workspace_with_lock(
+                pool1,
+                workspace.id,
+                &db_conn1,
+                &cids1,
+                &provider1_clone,
+            )
+            .await
+            .expect("reindex 1 join")
         });
-        let db_conn2 = ctx.db.clone();
-        let pool2 = pool.clone();
-        let workspace_id2 = workspace.id;
-        let cids2 = candidate_ids.clone();
+        let db_conn2 = db_conn.clone();
         let barrier2 = barrier.clone();
         let provider2_clone = provider2.clone();
-        let h2 = tokio::task::spawn_blocking(move || {
-            let _wait = barrier2.wait();
-            tokio::runtime::Handle::current().block_on(async {
-                yorishiro::db::reindex_workspace_with_lock(
-                    pool2,
-                    workspace_id2,
-                    &db_conn2,
-                    &cids2,
-                    &provider2_clone,
-                )
-                .await
-                .expect("reindex 2 join")
-            })
+        let pool2 = pool.clone();
+        let cids2 = candidate_ids.clone();
+        let h2 = tokio::spawn(async move {
+            barrier2.wait().await;
+            yorishiro::db::reindex_workspace_with_lock(
+                pool2,
+                workspace.id,
+                &db_conn2,
+                &cids2,
+                &provider2_clone,
+            )
+            .await
+            .expect("reindex 2 join")
         });
 
         let outcome1 = h1.await.expect("handler 1 finished");
@@ -630,11 +625,14 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         };
 
         // Verify every entity's embedding matches the winning provider's vector.
+        // `pgvector::Vector::data()` returns the raw `Vec<f32>` bytes.
+        // The float comparison is safe: `*b as f32 / 255.0` round-trips exactly through
+        // PostgreSQL `real` (32-bit float), so `assert_eq!` is valid.
         for entity_id in &candidate_ids {
-            let stored_vector: Option<Vec<f32>> = {
+            let stored_vector: Option<pgvector::Vector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<Vec<f32>>,
+                    embedding: Option<pgvector::Vector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
@@ -648,7 +646,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             };
             let expected = winner.vector();
             assert_eq!(
-                stored_vector.as_deref(),
+                stored_vector.as_ref().map(|v| v.as_slice()),
                 Some(expected.as_slice()),
                 "entity {entity_id} embedding must match winner {final_model:?}"
             );
