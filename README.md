@@ -15,7 +15,7 @@ flowchart TD
     RESTClient["REST client<br/>(curl/SDK)"]
 
     subgraph Paid["ee/ (paid edition, composed into the same binary)"]
-        HostedREST["paid-edition routes<br/>(marketplace / origin / billing / OAuth)"]
+        PaidREST["paid-edition routes<br/>(marketplace / origin / billing / OAuth)"]
     end
 
     subgraph Server["yorishiro (axum)"]
@@ -29,9 +29,9 @@ flowchart TD
     DB[("PostgreSQL 18 + pgvector<br/>(identity + content schemas, RLS isolation)")]
 
     MCPClient -->|"/mcp"| MCPAdapter
-    RESTClient -->|"/api/*"| HostedREST
     RESTClient -->|"/api/*"| RESTAdapter
-    HostedREST --> Core
+    RESTAdapter -.->|"paid paths, 404 unlicensed"| PaidREST
+    PaidREST --> Core
     Core --> DB
 ```
 
