@@ -251,7 +251,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
 
 /// A provider that reports a fixed model name, for testing the model-identity check path in `sync_embedding` without a real embedding backend.
 /// Always 768-dimensional, matching both nomic-embed-text-v1.5 and multilingual-e5-base: the model check must fire on identity alone, not rely on a dimension mismatch to also be present.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FixedModelProvider(&'static str);
 
 impl FixedModelProvider {
@@ -458,6 +458,74 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
     .await;
 }
 
+/// A workspace inheriting its tenant's `embedding_dimensions` must refuse a sync whose provider
+/// produces a different width, even when the provider's model name matches the tenant's stamped
+/// model (so the model check does not fire first).
+///
+/// The tenant is stamped with 1024-dimensional vectors and `nomic-ai/nomic-embed-text-v1.5`;
+/// `FixedModelProvider` is 768-dimensional, so the dimension check must fire and reject the write.
+#[tokio::test]
+#[serial]
+async fn sync_embedding_resolves_the_tenant_dimension_tier() {
+    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        let tenant = identity_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("tenant-dimension-tier-test".into()),
+            embedding_model: sea_orm::ActiveValue::Set(Some(
+                "nomic-ai/nomic-embed-text-v1.5".into(),
+            )),
+            embedding_dimensions: sea_orm::ActiveValue::Set(Some(1024)),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+        let workspace = identity_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+
+        let entity = content_entities::create(
+            &ctx.db,
+            workspace.id,
+            content_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "wrong dimension from tenant" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        // Provider is 768-dimensional, same model name as the tenant stamp, so only the
+        // dimension check is relevant: it must fire first and reject the write.
+        let provider = FixedWidthProvider(768);
+        let result =
+            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider).await;
+
+        assert!(
+            matches!(result, Err(YorishiroError::ValidationFailed { .. })),
+            "expected ValidationFailed for dimension mismatch: {result:?}"
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("1024"),
+            "error message must name the expected dimension count 1024"
+        );
+
+        crate::requests::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
 /// Two concurrent `reindex_workspace_with_lock` calls against the same workspace with different
 /// providers must serialize via the advisory lock: the second waits for the first, and the final
 /// stamp and per-row vector provenance agree.
@@ -649,6 +717,190 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 stored_vector.as_ref().map(|v| v.as_slice()),
                 Some(expected.as_slice()),
                 "entity {entity_id} embedding must match winner {final_model:?}"
+            );
+        }
+
+        crate::requests::close_app_pools(&ctx).await;
+    })
+    .await;
+}
+
+/// `reindex_workspace` must overwrite existing vectors with the new model's embeddings: if a
+/// provider's `embed_batch` impl is replaced and a reindex runs, every entity's embedding must
+/// change from the old model's vector to the new model's vector.
+///
+/// This proves both halves: `assert_ne!` against the old model's vector (the row was not left
+/// untouched) and `assert_eq!` against the new model's vector (the new embedding was actually
+/// written). Without the `assert_ne!`, a broken `reindex` that skipped `embed_as` and left
+/// the old vector in place would still pass the `assert_eq!` on the existing data; without the
+/// `assert_eq!`, a corrupted or zeroed row would pass `assert_ne!` on its own.
+#[tokio::test]
+#[serial]
+async fn reindex_overwrites_existing_entity_embeddings() {
+    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+        let tenant = identity_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("reindex-overwrite-test".into()),
+            ..Default::default()
+        };
+        let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            .await
+            .expect("insert tenant");
+        let workspace = identity_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("main".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+            ..Default::default()
+        };
+        let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            .await
+            .expect("insert workspace");
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            .await
+            .expect("create schema");
+
+        // Create entities.
+        let e1 = content_entities::create(
+            &ctx.db,
+            workspace.id,
+            content_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "entity one" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity 1");
+        let e2 = content_entities::create(
+            &ctx.db,
+            workspace.id,
+            content_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "entity two" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity 2");
+
+        // Embed with the old model provider.
+        let old_provider = FixedModelProvider("old-model-a");
+        for entity in [&e1, &e2] {
+            let entity_record = content_entities::Entity::find_by_id(entity.id)
+                .one(&ctx.db)
+                .await
+                .expect("find entity")
+                .expect("entity exists");
+            sync::sync_embedding_for_record(
+                &ctx.db,
+                workspace.id,
+                &entity_record.into(),
+                &old_provider,
+            )
+            .await
+            .expect("embed with old model");
+        }
+
+        // Verify the old vectors are stored.
+        let old_v1 = old_provider.vector();
+        for entity_id in [e1.id, e2.id] {
+            let stored: Option<pgvector::Vector> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    embedding: Option<pgvector::Vector>,
+                }
+                Row::find_by_statement(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT embedding FROM content_entities WHERE id = $1",
+                    [entity_id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("query embedding")
+                .and_then(|r| r.embedding)
+            };
+            assert_eq!(
+                stored.as_ref().map(|v| v.as_slice()),
+                Some(old_v1.as_slice()),
+                "initial embedding must match old model {old_provider:?}"
+            );
+        }
+
+        // Stamp the workspace with the old model so reindex considers it "in sync" — but
+        // reindex's entire purpose is to re-embed regardless, so this stamp is only there
+        // to make the test realistic.
+        let mut old_active = identity_workspaces::ActiveModel {
+            id: sea_orm::ActiveValue::Unchanged(workspace.id),
+            ..Default::default()
+        };
+        old_active.embedding_model = sea_orm::ActiveValue::Set(Some("old-model-a".into()));
+        old_active.embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));
+        old_active.update(&ctx.db).await.expect("stamp old model");
+
+        // Reindex with the new model provider.
+        let new_provider = FixedModelProvider("new-model-b");
+        let candidate_ids = vec![e1.id, e2.id];
+        let outcome = yorishiro::services::embedding::sync::reindex_workspace(
+            &ctx.db,
+            workspace.id,
+            &candidate_ids,
+            &new_provider,
+        )
+        .await
+        .expect("reindex");
+
+        if !outcome.failures.is_empty() {
+            panic!("reindex had {} failure(s)", outcome.failures.len());
+        }
+        assert_eq!(outcome.reindexed, 2, "both entities must be reindexed");
+
+        // Stamp and vectors must now agree on the new model.
+        let final_model = identity_workspaces::Entity::find_by_id(workspace.id)
+            .one(&ctx.db)
+            .await
+            .expect("query final workspace")
+            .expect("workspace exists")
+            .embedding_model
+            .expect("workspace must be stamped with a model");
+        assert_eq!(
+            final_model, "new-model-b",
+            "workspace stamp must reflect new model"
+        );
+
+        let new_v = new_provider.vector();
+
+        // Per-row: assert_ne against old model (the row was NOT left untouched) and
+        // assert_eq against new model (the new embedding was actually written).
+        // Both halves are required: assert_ne alone passes on a zeroed or corrupted row,
+        // assert_eq alone passes if the row already held the new value.
+        for entity_id in [e1.id, e2.id] {
+            let stored: Option<pgvector::Vector> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    embedding: Option<pgvector::Vector>,
+                }
+                Row::find_by_statement(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT embedding FROM content_entities WHERE id = $1",
+                    [entity_id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("query embedding")
+                .and_then(|r| r.embedding)
+            };
+            let old_vec = old_provider.vector();
+            assert_ne!(
+                stored.as_ref().map(|v| v.as_slice()),
+                Some(old_vec.as_slice()),
+                "entity {entity_id} embedding must NOT match old model {final_model:?}"
+            );
+            assert_eq!(
+                stored.as_ref().map(|v| v.as_slice()),
+                Some(new_v.as_slice()),
+                "entity {entity_id} embedding must match new model {final_model:?}"
             );
         }
 
