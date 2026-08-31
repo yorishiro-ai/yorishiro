@@ -34,9 +34,9 @@ pub enum EmbedKind {
 pub trait EmbeddingProvider: Send + Sync {
     fn dimensions(&self) -> usize;
 
-    /// Identifies the model this provider embeds with, for stamping onto a workspace at creation.
+    /// Identifies the model this provider embeds with, for stamping onto a workspace at first successful embed.
     ///
-    /// Each implementation names itself rather than a caller inferring it from configuration: `YORISHIRO_EMBEDDING_MODEL` only ever holds the OpenAI-compatible provider's model, so a caller that read it regardless of which provider it actually got would record `"unconfigured"` for every local-provider workspace, unable to tell "no embeddings configured" apart from "embeddings configured, just not through that variable".
+    /// Each implementation names itself rather than a caller inferring it from configuration, so a caller that reads the deployed model regardless of which provider it actually got would record the wrong name.
     fn model_name(&self) -> String;
 
     /// How many tokens `text` costs this provider, for quota purposes.

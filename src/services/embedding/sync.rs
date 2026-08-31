@@ -3,7 +3,11 @@
 //! Call this from a controller after `Authorized::commit()`, not before: it performs an HTTP call to the embedding provider (up to 30s), and holding a DB connection or transaction for that long risks connection pool exhaustion and lock contention.
 //! Runs on `ctx.db` (Loco's own pooled `DatabaseConnection`), a fresh connection independent of the request's own transaction.
 
-use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+use sea_orm::sea_query::Expr;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QuerySelect,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -37,7 +41,10 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
 /// Generates an embedding vector from an entity's `x-embed` fields and updates the `content_entities.embedding` column.
 /// Returns `Ok(())` without doing anything if the schema has no `x-embed` fields or none have values: embedding is an auxiliary feature and must never block the entity write it follows.
 ///
-/// Checks the workspace's stamp before writing; see [`embed_and_write`] for the unguarded write this wraps, and why the reindex task calls that directly instead of this.
+/// Checks the workspace's stamp against the provider's model and dimensions before writing.
+/// The three-tier inheritance is: workspace stamp → tenant default → deployment default.
+/// Stamps the workspace on first successful embed (first-write stamping).
+/// See [`embed_and_write`] for the unguarded write this wraps, and why the reindex task calls that directly instead of this.
 pub async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -55,8 +62,16 @@ pub async fn sync_embedding(
 
     // `content_entities.embedding` is `vector(768)` at the SQL type level, so a wrong-width write is already rejected by Postgres itself, not silently accepted: `pgvector` errors with "expected 768 dimensions, not N".
     // That error names neither the workspace nor the write that produced it, so this check exists to turn that into an operator-readable message (which workspace, which width was expected, what to do about it), not to prevent data corruption the database wasn't already preventing.
-    if let Some(expected) = workspace_embedding_dimensions(conn, workspace_id).await?
-        && vector.len() != expected as usize
+    let chain = resolve_embedding_chain(conn, workspace_id).await?;
+    // Three-tier inheritance: workspace stamp → tenant default → deployment default.
+    let effective_dimensions = chain
+        .workspace_dimensions
+        .or(chain.tenant_dimensions)
+        .or(Some(
+            i32::try_from(chain.deployment_dimensions).unwrap_or(768),
+        ));
+    if let Some(expected) = effective_dimensions
+        && vector.len() as usize != expected as usize
     {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
@@ -81,9 +96,8 @@ pub async fn sync_embedding(
     // something `content_entities` guarantees: the day a third local model ships at a different
     // width, the column's own fixed type already forces every workspace in this deployment onto one
     // width, and mixing stops being possible in the first place.
-    if let Some(expected) = workspace_embedding_model(conn, workspace_id).await?
-        && expected != "unconfigured"
-        && expected != provider.model_name()
+    if let Some(expected) = &chain.workspace_model
+        && expected.as_str() != provider.model_name()
     {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
@@ -102,9 +116,29 @@ pub async fn sync_embedding(
     // sync for the same entity is already in flight or has already landed, so nothing needs
     // redoing on this call's behalf. See `embed_and_write`'s own doc comment for why
     // `reindex_workspace` cannot make the same choice.
-    embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector)
-        .await
-        .map(|_written| ())
+    let written =
+        embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector).await?;
+
+    // Stamp the workspace *after* the write succeeds, not before: stamping before would record a
+    // model name even when the write fails (entity deleted, concurrently modified, or the write
+    // itself errors), and the next sync from the correct provider would be refused by the model
+    // check because the stamp now names a model whose vectors never landed.
+    // Also uses `provider.dimensions()` as the partner dimension to the stamped model, not the
+    // deployment default: if the provider's width and the deployment variable disagree, the stamp
+    // would be internally inconsistent.
+    // If the write was skipped by the `updated_at` guard, do not stamp: a newer sync is already in
+    // flight or has already landed, so there is no fresh vector to pair with the stamp.
+    if chain.workspace_model.is_none() && written {
+        let dimensions = i32::try_from(provider.dimensions()).map_err(|_| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "provider dimensions {} do not fit in an i32 column",
+                provider.dimensions()
+            ))
+        })?;
+        stamp_workspace_embedding(conn, workspace_id, provider.model_name(), dimensions).await?;
+    }
+
+    Ok(())
 }
 
 /// Writes an already-computed embedding vector to `content_entities.embedding`, with no check against the workspace's stamped model or dimensions.
@@ -123,22 +157,19 @@ async fn embed_and_write(
 ) -> Result<bool, YorishiroError> {
     // `updated_at` as a write condition prevents a vector computed from stale data from overwriting a newer one when concurrent syncs for the same entity finish out of order.
     // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later sync.
-    let result = conn
-        .execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "UPDATE content_entities SET embedding = $1 \
-             WHERE workspace_id = $2 AND id = $3 AND updated_at = $4",
-            [
-                pgvector::Vector::from(vector).into(),
-                workspace_id.into(),
-                entity_id.into(),
-                snapshot_updated_at.into(),
-            ],
-        ))
+    use crate::models::_entities::content_entities;
+
+    let pg_vector = pgvector::Vector::from(vector);
+    let rows_affected = content_entities::Entity::update_many()
+        .col_expr(content_entities::Column::Embedding, Expr::value(pg_vector))
+        .filter(content_entities::Column::WorkspaceId.eq(workspace_id))
+        .filter(content_entities::Column::Id.eq(entity_id))
+        .filter(content_entities::Column::UpdatedAt.eq(snapshot_updated_at))
+        .exec(conn)
         .await
         .internal()?;
 
-    if result.rows_affected() == 0 {
+    if rows_affected.rows_affected == 0 {
         tracing::debug!(
             %entity_id,
             "embed_and_write: entity was deleted or updated since this snapshot, write skipped"
@@ -294,18 +325,13 @@ pub async fn reindex_workspace(
                 provider.dimensions()
             ))
         })?;
-        conn.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "UPDATE identity_workspaces SET embedding_model = $1, embedding_dimensions = $2 \
-             WHERE id = $3",
-            [
-                provider.model_name().into(),
-                dimensions.into(),
-                workspace_id.into(),
-            ],
-        ))
-        .await
-        .internal()?;
+        let mut active = crate::models::identity_workspaces::ActiveModel {
+            id: ActiveValue::Unchanged(workspace_id),
+            ..Default::default()
+        };
+        active.embedding_model = ActiveValue::Set(Some(provider.model_name()));
+        active.embedding_dimensions = ActiveValue::Set(Some(dimensions));
+        active.update(conn).await.internal()?;
     }
 
     Ok(ReindexOutcome {
@@ -315,47 +341,99 @@ pub async fn reindex_workspace(
     })
 }
 
-/// The dimension count a workspace's vectors are expected to have, or `None` for a workspace carrying no stamp of its own, which takes the deployment's.
-async fn workspace_embedding_dimensions(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<Option<i32>, YorishiroError> {
-    #[derive(sea_orm::FromQueryResult)]
-    struct Row {
-        embedding_dimensions: Option<i32>,
-    }
-
-    let row = Row::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT embedding_dimensions FROM identity_workspaces WHERE id = $1",
-        [workspace_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.and_then(|r| r.embedding_dimensions))
+/// The resolved embedding chain for a workspace: which model and dimension count to use.
+///
+/// The three-tier inheritance is:
+///
+/// 1. Workspace stamp: if `identity_workspaces.embedding_model`/`embedding_dimensions` is set,
+///    use those values directly.
+/// 2. Tenant default: if the workspace's tenant has `embedding_model`/`embedding_dimensions` set,
+///    use those as the fallback.
+/// 3. Deployment default: the system default dimensions (always available, e.g. from
+///    `YORISHIRO_EMBEDDING_DIMENSIONS`, defaulting to 768).
+#[derive(Debug, Clone)]
+pub struct ResolvedEmbedding {
+    /// The workspace's own model stamp, or `None` when the workspace has no stamp of its own.
+    /// The caller uses this to determine whether first-write stamping is needed.
+    pub workspace_model: Option<String>,
+    /// The workspace's own dimension stamp, or `None` when the workspace has no stamp of its own.
+    pub workspace_dimensions: Option<i32>,
+    /// The tenant's default dimension stamp, or `None` when the tenant has no assignment.
+    /// Used as the middle fallback when the workspace has no stamp of its own.
+    pub tenant_dimensions: Option<i32>,
+    /// The deployment-wide default dimensions, always set. Used as the ultimate fallback and as
+    /// the first-write stamp value.
+    pub deployment_dimensions: usize,
 }
 
-/// The model a workspace's vectors are expected to have been embedded with, or `None` for a workspace carrying no stamp of its own.
+/// A row returned by `resolve_embedding_chain`: workspace and tenant columns in one query.
+#[derive(sea_orm::FromQueryResult)]
+struct EmbeddingChainRow {
+    embedding_model: Option<String>,
+    embedding_dimensions: Option<i32>,
+    tenant_dimensions: Option<i32>,
+}
+
+/// Resolves the full three-tier embedding chain for a workspace in a single query:
+/// workspace stamp → tenant default → deployment default.
 ///
-/// A `Some("unconfigured")` row is not the same as `None` and the caller must not treat them alike: `None` means this workspace predates the `embedding_model` column entirely or was never stamped, while `"unconfigured"` means a workspace created with no embedding provider available at all ([`super::UnconfiguredEmbeddingProvider`] stamps exactly this string).
-/// Both are honestly "no real record of what this workspace was embedded with", which is why the caller skips the comparison for `"unconfigured"` too rather than trying to distinguish it from `None` here.
-async fn workspace_embedding_model(
+/// `conn` can be any connection trait: a transaction or a pooled database connection.
+async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-) -> Result<Option<String>, YorishiroError> {
-    #[derive(sea_orm::FromQueryResult)]
-    struct Row {
-        embedding_model: Option<String>,
-    }
+) -> Result<ResolvedEmbedding, YorishiroError> {
+    use crate::models::_entities::identity_tenants::Column as TenantColumn;
+    use crate::models::_entities::identity_workspaces::Column;
 
-    let row = Row::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT embedding_model FROM identity_workspaces WHERE id = $1",
-        [workspace_id.into()],
-    ))
-    .one(conn)
-    .await
-    .internal()?;
-    Ok(row.and_then(|r| r.embedding_model))
+    let row = crate::models::identity_workspaces::Entity::find()
+        .select_only()
+        .column(Column::EmbeddingModel)
+        .column(Column::EmbeddingDimensions)
+        .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
+        .left_join(crate::models::identity_tenants::Entity)
+        .filter(Column::Id.eq(workspace_id))
+        .into_model::<EmbeddingChainRow>()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+
+    // Deployment default: read from the environment variable.
+    // The deployment's embedding dimensions are always set (default 768).
+    let deployment_dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
+        .unwrap_or_else(|_| "768".into())
+        .parse()
+        .unwrap_or(768);
+
+    Ok(ResolvedEmbedding {
+        workspace_model: row.embedding_model,
+        workspace_dimensions: row.embedding_dimensions,
+        tenant_dimensions: row.tenant_dimensions,
+        deployment_dimensions,
+    })
+}
+
+/// Stamp a workspace's `embedding_model` and `embedding_dimensions` with the deployment default.
+///
+/// Called on first-write: when a workspace has no stamp of its own, this records the deployment's
+/// default so subsequent writes can be checked against it.
+async fn stamp_workspace_embedding(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    model: String,
+    dimensions: i32,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::identity_workspaces::Column;
+
+    // Only stamp if the workspace has no existing model stamp:
+    // this is the first-write stamp, not an unconditional overwrite.
+    crate::models::identity_workspaces::Entity::update_many()
+        .col_expr(Column::EmbeddingModel, Expr::value(model))
+        .col_expr(Column::EmbeddingDimensions, Expr::value(dimensions))
+        .filter(Column::Id.eq(workspace_id))
+        .filter(Column::EmbeddingModel.is_null())
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
 }
