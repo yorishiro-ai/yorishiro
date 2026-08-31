@@ -63,8 +63,10 @@ pub async fn sync_embedding(
     // `content_entities.embedding` is `vector(768)` at the SQL type level, so a wrong-width write is already rejected by Postgres itself, not silently accepted: `pgvector` errors with "expected 768 dimensions, not N".
     // That error names neither the workspace nor the write that produced it, so this check exists to turn that into an operator-readable message (which workspace, which width was expected, what to do about it), not to prevent data corruption the database wasn't already preventing.
     let chain = resolve_embedding_chain(conn, workspace_id).await?;
-    // Workspace stamp → deployment default.
-    let effective_dimensions = chain.workspace_dimensions;
+    // Three-tier inheritance: workspace stamp → tenant default → deployment default.
+    let effective_dimensions = chain.workspace_dimensions
+        .or(chain.tenant_dimensions)
+        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(768)));
     if let Some(expected) = effective_dimensions
         && vector.len() as usize != expected as usize
     {
@@ -107,29 +109,33 @@ pub async fn sync_embedding(
         });
     }
 
-    // Stamp the workspace on first successful embed: if the workspace has no stamp of its own yet
-    // (both model and dimensions are NULL), write the provider's values. This replaces the old
-    // "unconfigured" sentinel: instead of stamping at creation time (which would record
-    // "unconfigured" when no provider is available, then never update it), we stamp on the first
-    // real embed. This avoids the defect where a workspace created without embeddings could never
-    // be updated because the sentinel blocked the comparison logic.
-    if chain.workspace_model.is_none() {
-        let dimensions = i32::try_from(chain.deployment_dimensions).map_err(|_| {
+    // A skipped write (entity changed since `snapshot_updated_at`) is not an error here: a newer
+    // sync for the same entity is already in flight or has already landed, so nothing needs
+    // redoing on this call's behalf. See `embed_and_write`'s own doc comment for why
+    // `reindex_workspace` cannot make the same choice.
+    let written = embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector)
+        .await?;
+
+    // Stamp the workspace *after* the write succeeds, not before: stamping before would record a
+    // model name even when the write fails (entity deleted, concurrently modified, or the write
+    // itself errors), and the next sync from the correct provider would be refused by the model
+    // check because the stamp now names a model whose vectors never landed.
+    // Also uses `provider.dimensions()` as the partner dimension to the stamped model, not the
+    // deployment default: if the provider's width and the deployment variable disagree, the stamp
+    // would be internally inconsistent.
+    // If the write was skipped by the `updated_at` guard, do not stamp: a newer sync is already in
+    // flight or has already landed, so there is no fresh vector to pair with the stamp.
+    if chain.workspace_model.is_none() && written {
+        let dimensions = i32::try_from(provider.dimensions()).map_err(|_| {
             YorishiroError::Internal(anyhow::anyhow!(
-                "resolved dimensions {} do not fit in an i32 column",
-                chain.deployment_dimensions
+                "provider dimensions {} do not fit in an i32 column",
+                provider.dimensions()
             ))
         })?;
         stamp_workspace_embedding(conn, workspace_id, provider.model_name(), dimensions).await?;
     }
 
-    // A skipped write (entity changed since `snapshot_updated_at`) is not an error here: a newer
-    // sync for the same entity is already in flight or has already landed, so nothing needs
-    // redoing on this call's behalf. See `embed_and_write`'s own doc comment for why
-    // `reindex_workspace` cannot make the same choice.
-    embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector)
-        .await
-        .map(|_written| ())
+    Ok(())
 }
 
 /// Writes an already-computed embedding vector to `content_entities.embedding`, with no check against the workspace's stamped model or dimensions.
@@ -349,16 +355,20 @@ pub struct ResolvedEmbedding {
     pub workspace_model: Option<String>,
     /// The workspace's own dimension stamp, or `None` when the workspace has no stamp of its own.
     pub workspace_dimensions: Option<i32>,
+    /// The tenant's default dimension stamp, or `None` when the tenant has no assignment.
+    /// Used as the middle fallback when the workspace has no stamp of its own.
+    pub tenant_dimensions: Option<i32>,
     /// The deployment-wide default dimensions, always set. Used as the ultimate fallback and as
     /// the first-write stamp value.
     pub deployment_dimensions: usize,
 }
 
-/// A row returned by `resolve_embedding_chain`: workspace columns only.
+/// A row returned by `resolve_embedding_chain`: workspace and tenant columns in one query.
 #[derive(sea_orm::FromQueryResult)]
 struct EmbeddingChainRow {
     embedding_model: Option<String>,
-    workspace_dimensions: Option<i32>,
+    embedding_dimensions: Option<i32>,
+    tenant_dimensions: Option<i32>,
 }
 
 /// Resolves the full three-tier embedding chain for a workspace in a single query:
@@ -369,12 +379,15 @@ async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
+    use crate::models::_entities::identity_tenants::Column as TenantColumn;
     use crate::models::_entities::identity_workspaces::Column;
 
     let row = crate::models::identity_workspaces::Entity::find()
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
+        .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
+        .left_join(crate::models::identity_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
         .into_model::<EmbeddingChainRow>()
         .one(conn)
@@ -391,7 +404,8 @@ async fn resolve_embedding_chain(
 
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,
-        workspace_dimensions: row.workspace_dimensions,
+        workspace_dimensions: row.embedding_dimensions,
+        tenant_dimensions: row.tenant_dimensions,
         deployment_dimensions,
     })
 }
