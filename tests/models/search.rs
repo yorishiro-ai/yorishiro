@@ -252,7 +252,11 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
 /// A provider that reports a fixed model name, for testing the model-identity check path in `sync_embedding` without a real embedding backend.
 /// Always 768-dimensional, matching both nomic-embed-text-v1.5 and multilingual-e5-base: the model check must fire on identity alone, not rely on a dimension mismatch to also be present.
 #[derive(Clone, Debug)]
-struct FixedModelProvider(&'static str);
+struct FixedModelProvider(
+    &'static str,
+    &'static [u64],
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+);
 
 impl FixedModelProvider {
     /// Returns a 768-dimensional vector that encodes the model name as a seed, so the stored vector proves which model last wrote it.
@@ -277,6 +281,17 @@ impl EmbeddingProvider for FixedModelProvider {
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, YorishiroError> {
+        // A per-call delay schedule, so two concurrent reindex runs can overtake each other
+        // between rows. Symmetric delays cannot: whichever run starts a beat later stays a beat
+        // later on every row, so it writes last everywhere and restamps last, and the stamp
+        // agrees with the rows whether or not a lock is held. Only a crossover (run A writes
+        // entity 1, run B then completes entirely, run A finally writes entity 2 and restamps)
+        // produces the stamp/provenance disagreement this test exists to catch.
+        let call = self.2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let delay = self.1.get(call).copied().unwrap_or(0);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
         Ok(texts.iter().map(|_| self.vector()).collect())
     }
 }
@@ -324,7 +339,11 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         .await
         .expect("create entity");
 
-        let mismatched_provider = FixedModelProvider("intfloat/multilingual-e5-base");
+        let mismatched_provider = FixedModelProvider(
+            "intfloat/multilingual-e5-base",
+            &[],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
         let result =
             sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &mismatched_provider)
                 .await;
@@ -406,7 +425,11 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 
         // The tenant is stamped with nomic-embed-text-v1.5, so the effective model must be that.
         // Using the same model provider should succeed.
-        let matching_provider = FixedModelProvider("nomic-ai/nomic-embed-text-v1.5");
+        let matching_provider = FixedModelProvider(
+            "nomic-ai/nomic-embed-text-v1.5",
+            &[],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
         let result =
             sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &matching_provider)
                 .await;
@@ -444,7 +467,11 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         .await
         .expect("create second entity");
 
-        let mismatched_provider = FixedModelProvider("intfloat/multilingual-e5-base");
+        let mismatched_provider = FixedModelProvider(
+            "intfloat/multilingual-e5-base",
+            &[],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
         let result2 =
             sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity2, &mismatched_provider)
                 .await;
@@ -595,8 +622,20 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 
         let candidate_ids: Vec<uuid::Uuid> = vec![e1.id, e2.id];
 
-        let provider1 = FixedModelProvider("nomic-ai/nomic-embed-text-v1.5");
-        let provider2 = FixedModelProvider("intfloat/multilingual-e5-base");
+        // Crossover schedule: provider1 writes entity 1 immediately then stalls, while
+        // provider2 runs both rows and restamps inside that stall. Unlocked, entity 1 ends up
+        // holding provider2's vector while provider1 restamps last, so the stamp and the rows
+        // disagree. Held under the lock, one run simply finishes before the other starts.
+        let provider1 = FixedModelProvider(
+            "nomic-ai/nomic-embed-text-v1.5",
+            &[0, 400],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
+        let provider2 = FixedModelProvider(
+            "intfloat/multilingual-e5-base",
+            &[50, 0],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
 
         // Grab the tenant pool so we can call reindex_workspace_with_lock under it.
         let pool = ctx
@@ -786,7 +825,11 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         .expect("create entity 2");
 
         // Embed with the old model provider.
-        let old_provider = FixedModelProvider("old-model-a");
+        let old_provider = FixedModelProvider(
+            "old-model-a",
+            &[],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
         for entity in [&e1, &e2] {
             let entity_record = content_entities::Entity::find_by_id(entity.id)
                 .one(&ctx.db)
@@ -840,7 +883,11 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         old_active.update(&ctx.db).await.expect("stamp old model");
 
         // Reindex with the new model provider.
-        let new_provider = FixedModelProvider("new-model-b");
+        let new_provider = FixedModelProvider(
+            "new-model-b",
+            &[],
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
         let candidate_ids = vec![e1.id, e2.id];
         let outcome = yorishiro::services::embedding::sync::reindex_workspace(
             &ctx.db,
