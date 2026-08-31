@@ -127,7 +127,7 @@ The fastest path, with Docker:
    $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
        -v "$(pwd)/models:/app/models:ro" \
        -e DATABASE_URL=postgres://... \
-       ghcr.io/yotsunagi/yorishiro:latest
+       ghcr.io/yorishiro-ai/yorishiro:latest
    ```
 
    This is a complete single-tenant deployment as-is.
@@ -136,7 +136,7 @@ The fastest path, with Docker:
 Prefer building from source? Clone the repo, place the model files as in step 1, then `make init` (needs Docker Compose and `make`) builds and starts PostgreSQL plus the app:
 
 ```console
-$ git clone https://github.com/yotsunagi/yorishiro && cd yorishiro
+$ git clone https://github.com/yorishiro-ai/yorishiro && cd yorishiro
 $ make init
 ```
 

@@ -14,7 +14,7 @@
 #
 # There is one package now. An earlier version of this file tested `yorishiro-ce` alongside
 # `yorishiro-ee`: it installed the community deb and rpm, asserted `Conflicts: yorishiro-ee`,
-# asserted the paid licence was absent from it, scanned the installed community binary for paid
+# asserted the enterprise licence was absent from it, scanned the installed community binary for
 # markers (`hosted/stripe`, `api/marketplace`, `infer-fill`), and switched a machine between the
 # two editions in both directions. All of that is gone because the community package is gone:
 # `ee/` compiles into the single binary and the licence layer decides at runtime what serves, so
