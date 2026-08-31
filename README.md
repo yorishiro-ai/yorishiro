@@ -15,7 +15,6 @@ flowchart TD
     RESTClient["REST client<br/>(curl/SDK)"]
 
     subgraph Paid["ee/ (paid edition, composed into the same binary)"]
-        HostedMCP["HostedMcpServer<br/>(its own tools, then delegates)"]
         HostedREST["paid-edition routes<br/>(marketplace / origin / billing / OAuth)"]
     end
 
@@ -29,10 +28,9 @@ flowchart TD
 
     DB[("PostgreSQL 18 + pgvector<br/>(identity + content schemas, RLS isolation)")]
 
-    MCPClient -->|"/mcp"| HostedMCP
+    MCPClient -->|"/mcp"| MCPAdapter
     RESTClient -->|"/api/*"| HostedREST
-    HostedMCP -->|"delegates"| MCPAdapter
-    HostedREST -->|"falls back to"| RESTAdapter
+    RESTClient -->|"/api/*"| RESTAdapter
     HostedREST --> Core
     Core --> DB
 ```
