@@ -73,16 +73,17 @@ impl Task for ReindexEmbeddings {
         // from `shared_store` directly to acquire the session-scoped lock.
         // A missing `DbHandle` on Postgres is a real defect — it means the boot path skipped
         // building the tenant pool, and proceeding without the lock would silently back off.
-        let handle = app_context
-            .shared_store
-            .get::<DbHandle>()
-            .ok_or_else(|| Error::Message(
-                "reindex requires the tenant pool, which this deployment did not build"
-                    .into(),
-            ))?;
-        let lock = crate::db::acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
-        .await
-        .map_err(|err| Error::Message(format!("failed to acquire workspace lock: {err}")))?;
+        let handle = app_context.shared_store.get::<DbHandle>().ok_or_else(|| {
+            Error::Message(
+                "reindex requires the tenant pool, which this deployment did not build".into(),
+            )
+        })?;
+        let lock =
+            crate::db::acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
+                .await
+                .map_err(|err| {
+                    Error::Message(format!("failed to acquire workspace lock: {err}"))
+                })?;
 
         let outcome = embedding::sync::reindex_workspace(
             &app_context.db,
