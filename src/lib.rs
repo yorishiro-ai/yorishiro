@@ -1,7 +1,7 @@
 pub mod app;
 pub mod controllers;
 pub mod db;
-/// The paid edition.
+/// The enterprise edition.
 ///
 /// `ee/` sits at the repository root rather than under `src/` because `ee/LICENSE` defines its own
 /// Licensed Work as "everything under the `ee/` directory of this repository": the directory name is
@@ -9,7 +9,7 @@ pub mod db;
 /// Compiling them into this crate does not change that scoping, since the files stay where the
 /// licence points.
 ///
-/// The paid edition is not a separate compilation unit. What it serves is decided at runtime by
+/// The enterprise edition is not a separate compilation unit. What it serves is decided at runtime by
 /// `app::licence_gate`.
 #[path = "../ee/mod.rs"]
 pub mod ee;

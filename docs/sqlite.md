@@ -20,7 +20,7 @@ Setting `DATABASE_URL` to a PostgreSQL URI overrides that and is what any deploy
 It configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as `development.yaml`/`production.yaml`: loco-rs's SQLite queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of `ctx.db`, confirmed empirically to work against a real file including under lock contention (see "Queue backend and tuning" in `docs/configuration.md` for the measurement).
 `YORISHIRO_MAX_TENANTS` has to resolve to a cap for the setup wizard to answer as enabled, and which entry point you start decides whether you supply it.
 The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so starting the SQLite tier with nothing configured gives you a working `POST /setup`; that is the ordinary case here.
-`ee/`'s binary sets nothing, so a paid-edition deployment needs the variable set explicitly before the wizard answers, and the test harness boots `App` without either binary's `main` and so behaves the same way.
+`ee/`'s binary sets nothing, so a enterprise-edition deployment needs the variable set explicitly before the wizard answers, and the test harness boots `App` without either binary's `main` and so behaves the same way.
 The SQLite cap itself ignores the variable's value once the wizard runs, but `wizard_enabled()` still checks that it resolves to a cap at all before allowing `/setup` to run.
 
 ## A worker started without tags drains nothing
@@ -75,8 +75,8 @@ It has no database-enforced isolation between tenants the way PostgreSQL's row-l
 The application-level filtering that would be needed to fake multi-tenant isolation on this engine is deliberately not implemented: a single missed filter in one query would be a silent isolation break, which is exactly what row-level security exists to make structurally impossible on PostgreSQL.
 
 This is the base edition only.
-The paid edition is a PostgreSQL product: three of its queries hardcode that backend and fail when reached, so browsing the marketplace, publishing a template version, and listing template-origin updates each break on SQLite.
-Starting it against a SQLite database logs a warning naming those and then continues, because the choice is left to the operator rather than refused; nothing here supports running the paid edition on this backend.
+The enterprise edition is a PostgreSQL product: three of its queries hardcode that backend and fail when reached, so browsing the marketplace, publishing a template version, and listing template-origin updates each break on SQLite.
+Starting it against a SQLite database logs a warning naming those and then continues, because the choice is left to the operator rather than refused; nothing here supports running the enterprise edition on this backend.
 
 ## The single-tenant guard
 

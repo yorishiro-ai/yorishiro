@@ -91,7 +91,7 @@ async fn infer_fill(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<InferFillReport>, ApiError> {
-    // The server calls an LLM here, which is the definition of a paid feature. The licence check is
+    // The server calls an LLM here, which is the definition of a enterprise feature. The licence check is
     // `app::licence_gate`, a layer on this route's own group: it runs before authentication, so an
     // unlicensed deployment answers the same 404 to everyone rather than confirming to a valid key
     // that the endpoint exists and is merely locked.
@@ -191,7 +191,7 @@ pub fn routes() -> Routes {
 }
 
 /// The route this module's licence gate covers: the server calls an LLM here, which is what makes
-/// it a paid feature. See [`routes`] for why the two groups are separate.
+/// it a enterprise feature. See [`routes`] for why the two groups are separate.
 pub fn gated_routes() -> Routes {
     Routes::new()
         .prefix("api/schemas")

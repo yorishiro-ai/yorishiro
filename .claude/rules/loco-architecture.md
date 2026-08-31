@@ -17,7 +17,7 @@ Several assumptions turn out wrong when checked: `ColType` has no primary-key-wi
 
 **Repository layout**: a single Loco app crate at the repository root (package `yorishiro`, binary `yorishiro`).
 Migrations live in the `migration/` crate.
-The paid edition is `ee/`, a module of that same crate rather than a package of its own; see `ee-composition.md`.
+The enterprise edition is `ee/`, a module of that same crate rather than a package of its own; see `ee-composition.md`.
 
 **Schema namespace**: every table lives in `public`, with a table-name prefix standing in for the schema (`identity_workspaces`, `content_entities`), since Loco's schema builder has no PostgreSQL schema-namespace support.
 **GRANT is always per-table, never schema-wide**: `migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant structurally awkward to write, because a single `public` schema means a wildcard grant would also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`, `identity_workspace_embedding_keys`).
@@ -128,7 +128,7 @@ Tests: `src/models/content_entities.rs`'s own `#[cfg(test)] mod sqlite_tests`, a
 `DefaultEmbeddingResolver` (base's own implementation, installed on every backend) always returns `None`, so a deployment that installs nothing extra is unaffected.
 No caching: `resolve` runs once per call, the same shape `identity_workspace_llm_keys::get` already accepts for LLM inference credentials.
 
-`ee/`'s `identity_workspace_embedding_keys` table (no RLS, no GRANT, read through `ctx.db`, matching `identity_workspace_llm_keys`) and its `EmbeddingKeyResolver` are the paid-edition half: which workspace points at which compute backend is tenant-level policy, the same reasoning that keeps `llm_keys` in `ee/` rather than base.
+`ee/`'s `identity_workspace_embedding_keys` table (no RLS, no GRANT, read through `ctx.db`, matching `identity_workspace_llm_keys`) and its `EmbeddingKeyResolver` are the enterprise-edition half: which workspace points at which compute backend is tenant-level policy, the same reasoning that keeps `llm_keys` in `ee/` rather than base.
 `embedding_keys::set` (`ee/models/embedding_keys.rs`) checks a new provider's `dimensions` against the workspace's own stamped `identity_workspaces.embedding_dimensions` at assignment time, refusing a mismatch with `ValidationFailed` before anything is stored; this sits in front of `sync_embedding`'s write-time guard (`src/services/embedding/sync.rs`) rather than replacing it: a workspace assigned by direct database access, bypassing this endpoint, still needs the write-time check.
 
 `setup.rs` and `workspaces.rs::create_workspace` call the deployment-default `embedding_provider(&ctx)`: both only stamp a new workspace's initial `embedding_dimensions`/`embedding_model`, and a workspace-specific assignment is something an operator adds afterward through the `ee/` endpoint.

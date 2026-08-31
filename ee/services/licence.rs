@@ -1,4 +1,4 @@
-//! Licence key verification for the paid features under `ee/`.
+//! Licence key verification for the enterprise features under `ee/`.
 //!
 //! The key is an RS256-signed JWT.
 //! The matching public key is compiled into the binary, so verification needs no network and no configuration beyond the key itself (`YORISHIRO_LICENSE_KEY`).
@@ -7,7 +7,7 @@
 //! That is deliberate: the protection is `ee/LICENSE`, which makes using such a build a licence violation, not this function.
 //! Do not add obfuscation here under the impression it changes that.
 //!
-//! No key means the paid features are disabled, never that the process refuses to start: a deployment that only wants the free half must keep working with no licence configured at all.
+//! No key means the enterprise features are disabled, never that the process refuses to start: a deployment that only wants the free half must keep working with no licence configured at all.
 
 use crate::YorishiroError;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
@@ -21,7 +21,7 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../keys/licence-public.pem");
 
 /// What a licence key asserts.
 ///
-/// `plan` is recorded and logged but gates nothing yet: every valid, unexpired key unlocks every paid feature.
+/// `plan` is recorded and logged but gates nothing yet: every valid, unexpired key unlocks every enterprise feature.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
     /// Who the licence was issued to.
@@ -97,7 +97,7 @@ pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, Yoris
 /// The licence a running process holds, resolved once at startup.
 ///
 /// Verification happens at startup so a malformed key is reported then rather than on the first request that needs it.
-/// Expiry is *not* frozen at startup: [`Self::is_active`] compares against the current time, so a long-running process stops serving paid features when the key lapses.
+/// Expiry is *not* frozen at startup: [`Self::is_active`] compares against the current time, so a long-running process stops serving enterprise features when the key lapses.
 #[derive(Debug, Clone, Default)]
 pub struct LicenceState {
     claims: Option<LicenceClaims>,
@@ -106,14 +106,14 @@ pub struct LicenceState {
 impl LicenceState {
     /// Reads `YORISHIRO_LICENSE_KEY` and verifies it against the compiled-in public key.
     ///
-    /// An absent, empty or invalid key all yield an unlicensed state rather than aborting startup: refusing to boot would take down the free half over a paid-feature misconfiguration.
-    /// An invalid one is logged at `warn`, since it almost certainly means someone expected paid features to be on.
+    /// An absent, empty or invalid key all yield an unlicensed state rather than aborting startup: refusing to boot would take down the free half over a enterprise-feature misconfiguration.
+    /// An invalid one is logged at `warn`, since it almost certainly means someone expected enterprise features to be on.
     pub fn from_env() -> Self {
         let from_env =
             std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());
 
         let Some(token) = resolve_licence_key(from_env, licence_key_from_config) else {
-            tracing::info!("no licence key configured: paid features are disabled");
+            tracing::info!("no licence key configured: enterprise features are disabled");
             return Self::default();
         };
 
@@ -124,7 +124,7 @@ impl LicenceState {
                 tracing::info!(
                     plan = %claims.plan,
                     expires_at = claims.exp,
-                    "licence key accepted: paid features are enabled"
+                    "licence key accepted: enterprise features are enabled"
                 );
                 Self {
                     claims: Some(claims),
@@ -132,7 +132,7 @@ impl LicenceState {
             }
             Err(_) => {
                 tracing::warn!(
-                    "licence key was set but did not verify: paid features are disabled"
+                    "licence key was set but did not verify: enterprise features are disabled"
                 );
                 Self::default()
             }
@@ -146,7 +146,7 @@ impl LicenceState {
         }
     }
 
-    /// Whether paid features are currently unlocked: a verified key that has not yet expired.
+    /// Whether enterprise features are currently unlocked: a verified key that has not yet expired.
     pub fn is_active(&self) -> bool {
         self.is_active_at(chrono::Utc::now().timestamp())
     }
