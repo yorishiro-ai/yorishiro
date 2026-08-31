@@ -114,7 +114,7 @@ pub async fn sync_embedding(
                 provider.model_name()
             ),
             details: vec![],
-            hint: "point the deployment at the workspace's stamped model, or run \
+            hint: "point the deployment at the workspace's effective model, or run \
                    reindex_embeddings to switch it over"
                 .into(),
         });

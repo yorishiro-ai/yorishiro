@@ -232,13 +232,11 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
 
 /// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
 ///
-/// On PostgreSQL, holds a detached connection whose session-end releases the lock.
-/// On SQLite, is a no-op (empty guard).
-///
-/// `conn` is detached so dropping the guard ends the session, which is when PostgreSQL
-/// releases session-level advisory locks. Using `detach` instead of returning the connection
-/// to the pool is necessary: pool return keeps the session alive, so the lock would persist
-/// and cause the next reindex to re-enter (advisory locks are per-session, not per-connection).
+/// A detached connection whose session-end releases the lock. `conn` is detached so dropping
+/// the guard ends the session, which is when PostgreSQL releases session-level advisory locks.
+/// Using `detach` instead of returning the connection to the pool is necessary: pool return
+/// keeps the session alive, so the lock would persist and cause the next reindex to re-enter
+/// (advisory locks are per-session, not per-connection).
 pub struct WorkspaceReindexLockGuard {
     #[allow(dead_code)]
     conn: Option<sqlx::PgConnection>,
@@ -257,16 +255,25 @@ impl Drop for WorkspaceReindexLockGuard {
 /// The lock is held until the guard is dropped, which ends the detached session and releases
 /// the lock. Pool return keeps the session alive, so the lock would persist and cause the next
 /// reindex to re-enter (advisory locks are per-session, not per-connection).
+///
+/// Waits up to 60 seconds for the lock: this is long enough for a full reindex to complete
+/// (thousands of entities) but short enough to surface a stuck run rather than blocking
+/// indefinitely when a prior process died without releasing its session.
 pub async fn acquire_workspace_reindex_lock(
     pool: PgPool,
     workspace_id: Uuid,
 ) -> Result<WorkspaceReindexLockGuard, sqlx::Error> {
     let mut conn = pool.acquire().await?;
 
+    let key = workspace_id.to_string();
+    tracing::info!(%key, "waiting for workspace reindex lock");
+
     sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
-        .bind(workspace_id.to_string())
+        .bind(&key)
         .execute(conn.as_mut())
         .await?;
+
+    tracing::info!(%key, "acquired workspace reindex lock");
 
     // Detach the connection so dropping the guard ends the session.
     // Session end is when PostgreSQL releases session-level advisory locks;

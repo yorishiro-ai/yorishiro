@@ -78,24 +78,15 @@ impl Task for ReindexEmbeddings {
                 "reindex requires the tenant pool, which this deployment did not build".into(),
             )
         })?;
-        let lock =
-            crate::db::acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
-                .await
-                .map_err(|err| {
-                    Error::Message(format!("failed to acquire workspace lock: {err}"))
-                })?;
-
-        let outcome = embedding::sync::reindex_workspace(
-            &app_context.db,
+        let outcome = crate::db::reindex_workspace_with_lock(
+            handle.tenant.pool().clone(),
             workspace_id,
+            &app_context.db,
             &candidate_ids,
             provider.as_ref(),
         )
         .await
         .map_err(|err| Error::Message(err.to_string()))?;
-
-        // Drop the lock guard explicitly before reporting the outcome.
-        drop(lock);
 
         if !outcome.failures.is_empty() {
             for failure in &outcome.failures {
