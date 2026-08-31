@@ -14,8 +14,8 @@ flowchart TD
     MCPClient["MCP client<br/>(Claude, etc.)"]
     RESTClient["REST client<br/>(curl/SDK)"]
 
-    subgraph Paid["ee/ (paid edition, composed into the same binary)"]
-        PaidREST["paid-edition routes<br/>(marketplace / origin / billing / OAuth)"]
+    subgraph Enterprise["ee/ (enterprise edition, composed into the same binary)"]
+        EnterpriseREST["enterprise-edition routes<br/>(marketplace / origin / billing / OAuth)"]
     end
 
     subgraph Server["yorishiro (axum)"]
@@ -30,18 +30,18 @@ flowchart TD
 
     MCPClient -->|"/mcp"| MCPAdapter
     RESTClient -->|"/api/*"| RESTAdapter
-    RESTAdapter -.->|"paid paths, 404 unlicensed"| PaidREST
-    PaidREST --> Core
+    RESTAdapter -.->|"enterprise paths, 404 unlicensed"| EnterpriseREST
+    EnterpriseREST --> Core
     Core --> DB
 ```
 
-Without a licence key, the inner subgraph is what a deployment serves on its own: the same API routes, with the paid surfaces answering `404`.
+Without a licence key, the inner subgraph is what a deployment serves on its own: the same API routes, with the enterprise surfaces answering `404`.
 It serves no Web UI, since the SPA lives under `ee/`.
 
 - Cargo workspace
   - One application crate at the repository root, plus `migration/`.
   - `src/models/` owns the models and issues the queries; `src/controllers/` adapts them to HTTP, and `src/services/mcp/` to MCP.
-  - The paid edition lives under `ee/`, compiled into the same crate and gated at runtime rather than at build time.
+  - The enterprise edition lives under `ee/`, compiled into the same crate and gated at runtime rather than at build time.
 - Two-tier tenancy
   - A **tenant** is an organization/account, with human **users** attached via roles: owner/admin/member/viewer.
     A tenant owns one or more **workspaces**.
@@ -147,16 +147,16 @@ Configuration decides what is enabled, not which artifact you installed.
 
 | | Without a licence key | With `YORISHIRO_LICENSE_KEY` |
 |---|---|---|
-| Paid API surfaces | `404` | Served |
+| Enterprise API surfaces | `404` | Served |
 | Everything else | Served | Served |
 | Web UI | Served either way, since the SPA is not licence-gated | |
 | Licence | [BUSL-1.1](LICENSE), plus [`ee/LICENSE`](ee/LICENSE) for the `ee/` directory | |
 
-The single `yorishiro` binary contains `ee/`, and its paid API surfaces answer `404` until a valid licence key is configured.
+The single `yorishiro` binary contains `ee/`, and its enterprise API surfaces answer `404` until a valid licence key is configured.
 The check runs per request rather than at startup, so a key that expires while the process runs stops unlocking those surfaces without a restart.
 
 The Stripe webhook is one of those surfaces, so a deployment with no valid licence does not receive Stripe events.
-An operator running billing needs the licence key configured for the webhook to be reachable at all, and a key that lapses stops deliveries the same way it closes any other paid route.
+An operator running billing needs the licence key configured for the webhook to be reachable at all, and a key that lapses stops deliveries the same way it closes any other enterprise route.
 
 OAuth/OIDC login is another, so an unlicensed deployment cannot serve SSO login.
 Anyone who signs in that way needs a password credential for `POST /auth/login` instead, which is worth checking before a licence is allowed to lapse.
