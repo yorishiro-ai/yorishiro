@@ -3,7 +3,7 @@ resolver = "2"
 # ".": this manifest is both the workspace root and the sole application package.
 # The paid edition compiles into this crate as one module (see `src/lib.rs`'s `ee` declaration)
 # rather than being a package of its own; what it serves is decided at runtime by the licence layer.
-members = [".", "migration"]
+members = ["."]
 
 [package]
 name = "yorishiro"
@@ -58,7 +58,11 @@ axum.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 regex = { version = "1.11" }
-migration = { path = "migration" }
+sea-orm-migration = { version = "2.0", features = [
+  "runtime-tokio-rustls",
+  "sqlx-postgres",
+  "sqlx-sqlite",
+] }
 sea-orm.workspace = true
 chrono.workspace = true
 uuid.workspace = true
@@ -114,3 +118,5 @@ insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
 tempfile = { version = "3" }
 # Used by the ee/ request tests folded into tests/requests/.
 axum-test = { version = "17.3" }
+# Used by tests/migration/ for migration test harness.
+tokio = { workspace = true, features = ["macros"] }

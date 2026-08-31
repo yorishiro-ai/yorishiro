@@ -649,7 +649,7 @@ impl From<identity_users::Model> for UserRecord {
 
 #[cfg(test)]
 mod tests {
-    use migration::{Migrator, MigratorTrait};
+    use crate::migration::{Migrator, MigratorTrait};
     use sea_orm::Database;
     use serial_test::serial;
 

@@ -1,6 +1,6 @@
 use loco_rs::cli;
-use migration::Migrator;
 use yorishiro::app::App;
+use yorishiro::migration::Migrator;
 
 /// A self-hosted deployment is single-tenant unless it says otherwise, which is also what enables the first-run setup wizard.
 /// `YORISHIRO_MAX_TENANTS` unset would otherwise resolve to `Ok(None)`, which `setup::wizard_enabled` reads as "no cap, so no wizard", leaving a fresh install with no way to create its first tenant through the product.
