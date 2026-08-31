@@ -42,6 +42,9 @@ pub enum YorishiroError {
     #[error("embedding provider unreachable at {url}: {message}")]
     ProviderUnreachable { url: String, message: String },
 
+    #[error("not implemented for backend: {message}")]
+    BackendUnsupported { message: String },
+
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -72,6 +75,7 @@ impl YorishiroError {
             }
             Self::ProviderBusy { .. } => "provider_busy",
             Self::ProviderUnreachable { .. } => "provider_unreachable",
+            Self::BackendUnsupported { .. } => "backend_unsupported",
             Self::Internal(_) => "internal",
         }
     }
@@ -146,6 +150,10 @@ impl YorishiroError {
                         "hint": "check that the provider is running and that YORISHIRO_EMBEDDING_BASE_URL points at it",
                     }
                 }),
+            ),
+            Self::BackendUnsupported { message } => (
+                501,
+                serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::Internal(err) => {
                 tracing::error!(error = %err, "internal error");

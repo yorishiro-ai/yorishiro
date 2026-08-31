@@ -353,6 +353,16 @@ where
         let headers = header_pairs(parts);
 
         let app_ctx = AppContext::from_ref(state);
+
+        // Vector search uses `content_entities.embedding` which does not exist on SQLite.
+        // `db_handle()` would fail here with "DbHandle missing" (500), but the real issue is
+        // that this backend cannot serve the route at all, so return 501 with a clear message.
+        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            return Err(ApiError(YorishiroError::BackendUnsupported {
+                message: "vector search requires PostgreSQL; point DATABASE_URL at a PostgreSQL instance to use this feature".into(),
+            }));
+        }
+
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
