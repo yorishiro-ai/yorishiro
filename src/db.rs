@@ -254,18 +254,13 @@ impl Drop for WorkspaceReindexLockGuard {
 /// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
 ///
 /// On PostgreSQL, acquires `pg_advisory_lock` on a bare pooled connection and detaches it.
-/// On SQLite, returns a no-op guard (no lock needed; the reindex task is Postgres-only).
-///
 /// The lock is held until the guard is dropped, which ends the detached session and releases
-/// the lock. `pool` should be `Some` on PostgreSQL and `None` on SQLite.
+/// the lock. Pool return keeps the session alive, so the lock would persist and cause the next
+/// reindex to re-enter (advisory locks are per-session, not per-connection).
 pub async fn acquire_workspace_reindex_lock(
-    pool: Option<PgPool>,
+    pool: PgPool,
     workspace_id: Uuid,
 ) -> Result<WorkspaceReindexLockGuard, sqlx::Error> {
-    let Some(pool) = pool else {
-        return Ok(WorkspaceReindexLockGuard { conn: None });
-    };
-
     let mut conn = pool.acquire().await?;
 
     sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
