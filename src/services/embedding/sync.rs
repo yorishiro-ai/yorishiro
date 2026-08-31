@@ -96,12 +96,20 @@ pub async fn sync_embedding(
     // something `content_entities` guarantees: the day a third local model ships at a different
     // width, the column's own fixed type already forces every workspace in this deployment onto one
     // width, and mixing stops being possible in the first place.
-    if let Some(expected) = &chain.workspace_model
+    // The check enforces the effective model (workspace stamp → tenant default → deployment),
+    // not just workspace stamps: a workspace inheriting a tenant model has no stamp of its own,
+    // but the tenant model is still the model whose vectors should be in the column, matching
+    // how the dimension check compares against the full chain.
+    let effective_model = chain
+        .workspace_model
+        .as_ref()
+        .or(chain.tenant_model.as_ref());
+    if let Some(expected) = effective_model
         && expected.as_str() != provider.model_name()
     {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
-                "this workspace was stamped with model {expected:?}, but the configured \
+                "this workspace expects model {expected:?}, but the configured \
                  embedding provider is {:?}",
                 provider.model_name()
             ),
@@ -358,6 +366,9 @@ pub struct ResolvedEmbedding {
     pub workspace_model: Option<String>,
     /// The workspace's own dimension stamp, or `None` when the workspace has no stamp of its own.
     pub workspace_dimensions: Option<i32>,
+    /// The tenant's default model stamp, or `None` when the tenant has no assignment.
+    /// Used as the middle fallback when the workspace has no stamp of its own.
+    pub tenant_model: Option<String>,
     /// The tenant's default dimension stamp, or `None` when the tenant has no assignment.
     /// Used as the middle fallback when the workspace has no stamp of its own.
     pub tenant_dimensions: Option<i32>,
@@ -371,6 +382,7 @@ pub struct ResolvedEmbedding {
 struct EmbeddingChainRow {
     embedding_model: Option<String>,
     embedding_dimensions: Option<i32>,
+    tenant_model: Option<String>,
     tenant_dimensions: Option<i32>,
 }
 
@@ -389,6 +401,7 @@ async fn resolve_embedding_chain(
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
+        .column_as(TenantColumn::EmbeddingModel, "tenant_model")
         .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
         .left_join(crate::models::identity_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
@@ -408,6 +421,7 @@ async fn resolve_embedding_chain(
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,
         workspace_dimensions: row.embedding_dimensions,
+        tenant_model: row.tenant_model,
         tenant_dimensions: row.tenant_dimensions,
         deployment_dimensions,
     })

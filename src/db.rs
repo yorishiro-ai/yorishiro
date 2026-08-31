@@ -229,3 +229,46 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
     .await?;
     Ok(())
 }
+
+/// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
+///
+/// On PostgreSQL, holds a pooled connection that keeps the lock active.
+/// On SQLite, is a no-op (empty guard).
+///
+/// The lock is released when the guard is dropped (connection returns to pool).
+pub struct WorkspaceReindexLockGuard {
+    #[allow(dead_code)]
+    conn: Option<sqlx::pool::PoolConnection<sqlx::Postgres>>,
+}
+
+impl Drop for WorkspaceReindexLockGuard {
+    fn drop(&mut self) {
+        // The lock is released when the connection returns to the pool.
+        // On SQLite, conn is None, so nothing to do.
+    }
+}
+
+/// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
+///
+/// On PostgreSQL, acquires `pg_advisory_lock` on a bare pooled connection.
+/// On SQLite, returns a no-op guard (no lock needed; the reindex task is Postgres-only).
+///
+/// The lock is held until the guard is dropped (connection returns to pool).
+/// `pool` should be `Some` on PostgreSQL and `None` on SQLite.
+pub async fn acquire_workspace_reindex_lock(
+    pool: Option<PgPool>,
+    workspace_id: Uuid,
+) -> Result<WorkspaceReindexLockGuard, sqlx::Error> {
+    let Some(pool) = pool else {
+        return Ok(WorkspaceReindexLockGuard { conn: None });
+    };
+
+    let mut conn = pool.acquire().await?;
+
+    sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
+        .bind(workspace_id.to_string())
+        .execute(conn.as_mut())
+        .await?;
+
+    Ok(WorkspaceReindexLockGuard { conn: Some(conn) })
+}

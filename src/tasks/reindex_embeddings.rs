@@ -3,6 +3,7 @@ use loco_rs::task::Vars;
 use sea_orm::{FromQueryResult, Statement};
 use uuid::Uuid;
 
+use crate::db::DbHandle;
 use crate::services::embedding;
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
@@ -62,6 +63,24 @@ impl Task for ReindexEmbeddings {
         .map_err(|err| Error::Message(err.to_string()))?;
         let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
 
+        // Serialize concurrent reindex runs against the same workspace: two runs with different
+        // providers would both bypass the write-time model check by design, and embedding writes
+        // do not touch `updated_at`, so neither run's guard sees the other. Each believes it
+        // succeeded on every row and both restamp, leaving the final stamp and per-row vector
+        // provenance in silent disagreement -- the exact failure the mechanism exists to prevent.
+        // An automated runbook serializes rather than errors out by waiting for the prior run.
+        // The task holds `app_context.db` and never resolves a `tenant_id`, so we grab the pool
+        // from `shared_store` directly to acquire the session-scoped lock.
+        let lock = crate::db::acquire_workspace_reindex_lock(
+            app_context
+                .shared_store
+                .get::<DbHandle>()
+                .map(|h| h.tenant.pool().clone()),
+            workspace_id,
+        )
+        .await
+        .map_err(|err| Error::Message(format!("failed to acquire workspace lock: {err}")))?;
+
         let outcome = embedding::sync::reindex_workspace(
             &app_context.db,
             workspace_id,
@@ -70,6 +89,9 @@ impl Task for ReindexEmbeddings {
         )
         .await
         .map_err(|err| Error::Message(err.to_string()))?;
+
+        // Drop the lock guard explicitly before reporting the outcome.
+        drop(lock);
 
         if !outcome.failures.is_empty() {
             for failure in &outcome.failures {
