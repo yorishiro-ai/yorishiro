@@ -19,13 +19,13 @@ version: ${VERSION}
 version_schema: none
 section: net
 priority: optional
-maintainer: Yorishiro Contributors <noreply@yotsunagi.dev>
+maintainer: Yorishiro Contributors <noreply@yorishiro.ai>
 description: |
   An MCP-native, multi-tenant knowledge store with user-defined schemas.
   Includes the paid features (billing, SSO, marketplace, LLM-backed fill).
   Those stay disabled until YORISHIRO_LICENSE_KEY is set; everything else works without one.
-vendor: Yotsunagi
-homepage: https://github.com/yotsunagi/yorishiro
+vendor: Yorishiro
+homepage: https://github.com/yorishiro-ai/yorishiro
 license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
 
 depends:

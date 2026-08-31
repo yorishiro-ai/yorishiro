@@ -1,6 +1,6 @@
 # Rust coding rules for yorishiro
 
-This repository is mid-port from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to [Loco](https://loco.rs); see `yotsunagi/yorishiro#221` for the rationale.
+This repository is mid-port from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to [Loco](https://loco.rs); see `yorishiro-ai/yorishiro#221` for the rationale.
 Open state for the rebuild (what's ported, what's next, what's never been raced) lives in the Yorishiro task list, not here: see `yorishiro-specs/.claude/rules/dogfooding.md` for how to reach it.
 
 ## No internal-planning references in this repository

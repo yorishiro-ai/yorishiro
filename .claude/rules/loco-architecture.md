@@ -1,7 +1,7 @@
 # Loco architecture
 
 This repository moved from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to [Loco](https://loco.rs) (SeaORM `DatabaseConnection` for query execution, `sea-orm-migration` for schema).
-See `yotsunagi/yorishiro#221` for the rationale.
+See `yorishiro-ai/yorishiro#221` for the rationale.
 
 **`yorishiro-specs`' `Yorishiro_v1_technical_spec*.md` documents are not being updated slice by slice during this rebuild**, a deliberate deferral rather than drift: they describe the shipped v0.50.0 behavior, which is still what a reader of those documents needs until `develop` actually merges and replaces it.
 They get brought current as part of that merge, not each commit here.
@@ -56,7 +56,7 @@ Both pools are constructed in `Hooks::after_context` (`src/app.rs`) and stored a
 `Authorized<R>`'s extractor calls `begin_for_workspace` and hands the handler the resulting `DatabaseTransaction`.
 There is no session-scoped advisory lock helper: every lock this codebase takes is `db::lock_for_update` inside one transaction.
 Adding one means the raw `sqlx::PgPool` again, because SeaORM's `DatabaseConnection` re-acquires a connection per call and a transaction pins one only for its own lifetime, so neither expresses "hold this connection across steps with no enclosing transaction".
-See <https://github.com/yotsunagi/yorishiro/issues/221> for the design history.
+See <https://github.com/yorishiro-ai/yorishiro/issues/221> for the design history.
 
 **`Hooks::after_context` runs before `db::converge` applies migrations** (confirmed against `loco-rs` 1.1.0's `boot.rs`: `create_context` calls `H::after_context`, and `create_app` runs `db::converge` only after `create_context` returns).
 Nothing in `after_context` may assume a migration-created object exists yet.
