@@ -3,6 +3,7 @@ use loco_rs::task::Vars;
 use sea_orm::{FromQueryResult, Statement};
 use uuid::Uuid;
 
+use crate::db::DbHandle;
 use crate::services::embedding;
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
@@ -62,9 +63,25 @@ impl Task for ReindexEmbeddings {
         .map_err(|err| Error::Message(err.to_string()))?;
         let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
 
-        let outcome = embedding::sync::reindex_workspace(
-            &app_context.db,
+        // Serialize concurrent reindex runs against the same workspace: two runs with different
+        // providers would both bypass the write-time model check by design, and embedding writes
+        // do not touch `updated_at`, so neither run's guard sees the other. Each believes it
+        // succeeded on every row and both restamp, leaving the final stamp and per-row vector
+        // provenance in silent disagreement -- the exact failure the mechanism exists to prevent.
+        // An automated runbook serializes rather than errors out by waiting for the prior run.
+        // The task holds `app_context.db` and never resolves a `tenant_id`, so we grab the pool
+        // from `shared_store` directly to acquire the session-scoped lock.
+        // A missing `DbHandle` on Postgres is a real defect — it means the boot path skipped
+        // building the tenant pool, and proceeding without the lock would silently back off.
+        let handle = app_context.shared_store.get::<DbHandle>().ok_or_else(|| {
+            Error::Message(
+                "reindex requires the tenant pool, which this deployment did not build".into(),
+            )
+        })?;
+        let outcome = crate::db::reindex_workspace_with_lock(
+            handle.tenant.pool().clone(),
             workspace_id,
+            &app_context.db,
             &candidate_ids,
             provider.as_ref(),
         )

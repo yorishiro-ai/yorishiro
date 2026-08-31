@@ -96,17 +96,25 @@ pub async fn sync_embedding(
     // something `content_entities` guarantees: the day a third local model ships at a different
     // width, the column's own fixed type already forces every workspace in this deployment onto one
     // width, and mixing stops being possible in the first place.
-    if let Some(expected) = &chain.workspace_model
+    // The check enforces the effective model (workspace stamp → tenant default → deployment),
+    // not just workspace stamps: a workspace inheriting a tenant model has no stamp of its own,
+    // but the tenant model is still the model whose vectors should be in the column, matching
+    // how the dimension check compares against the full chain.
+    let effective_model = chain
+        .workspace_model
+        .as_ref()
+        .or(chain.tenant_model.as_ref());
+    if let Some(expected) = effective_model
         && expected.as_str() != provider.model_name()
     {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
-                "this workspace was stamped with model {expected:?}, but the configured \
+                "this workspace expects model {expected:?}, but the configured \
                  embedding provider is {:?}",
                 provider.model_name()
             ),
             details: vec![],
-            hint: "point the deployment at the workspace's stamped model, or run \
+            hint: "point the deployment at the workspace's effective model, or run \
                    reindex_embeddings to switch it over"
                 .into(),
         });
@@ -276,11 +284,11 @@ pub struct ReindexOutcome {
     pub failures: Vec<ReindexFailure>,
 }
 
-/// Re-embeds every entity in a workspace with `provider`, then restamps `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, but only when every entity succeeded.
+/// Internal reindex loop: re-embeds entities and restamps the workspace.
 ///
-/// This is the core the `reindex_embeddings` task wraps; see that task's own doc comment for why a partial failure must leave the stamp untouched, and why bypassing [`sync_embedding`]'s model check here is safe only under that restamp-on-full-success ordering.
-/// Callers needing every candidate id (rather than just those already `EntityRecord`-fetchable) pass them in as `candidate_ids`, since a row deleted between the caller's own scan and this function's batch fetch is reported as a failure rather than silently skipped.
-pub async fn reindex_workspace(
+/// This is the core logic that [`db::reindex_workspace_with_lock`] wraps with lock acquisition.
+/// [`reindex_workspace`] (the public entry point) calls this after acquiring the lock.
+async fn reindex_workspace_inner(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     candidate_ids: &[Uuid],
@@ -341,6 +349,29 @@ pub async fn reindex_workspace(
     })
 }
 
+/// Re-embeds every entity in a workspace with `provider`, then restamps
+/// `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values,
+/// but only when every entity succeeded.
+///
+/// This is the core the `reindex_embeddings` task wraps; see that task's own doc comment for
+/// why a partial failure must leave the stamp untouched, and why bypassing
+/// [`sync_embedding`]'s model check here is safe only under that restamp-on-full-success
+/// ordering.
+/// Callers needing every candidate id (rather than just those already `EntityRecord`-fetchable)
+/// pass them in as `candidate_ids`, since a row deleted between the caller's own scan and this
+/// function's batch fetch is reported as a failure rather than silently skipped.
+///
+/// The caller is responsible for serializing concurrent calls against the same workspace
+/// (the `reindex_embeddings` task uses [`db::acquire_workspace_reindex_lock`] to do this).
+pub async fn reindex_workspace(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    candidate_ids: &[Uuid],
+    provider: &dyn EmbeddingProvider,
+) -> Result<ReindexOutcome, YorishiroError> {
+    reindex_workspace_inner(conn, workspace_id, candidate_ids, provider).await
+}
+
 /// The resolved embedding chain for a workspace: which model and dimension count to use.
 ///
 /// The three-tier inheritance is:
@@ -358,6 +389,9 @@ pub struct ResolvedEmbedding {
     pub workspace_model: Option<String>,
     /// The workspace's own dimension stamp, or `None` when the workspace has no stamp of its own.
     pub workspace_dimensions: Option<i32>,
+    /// The tenant's default model stamp, or `None` when the tenant has no assignment.
+    /// Used as the middle fallback when the workspace has no stamp of its own.
+    pub tenant_model: Option<String>,
     /// The tenant's default dimension stamp, or `None` when the tenant has no assignment.
     /// Used as the middle fallback when the workspace has no stamp of its own.
     pub tenant_dimensions: Option<i32>,
@@ -371,6 +405,7 @@ pub struct ResolvedEmbedding {
 struct EmbeddingChainRow {
     embedding_model: Option<String>,
     embedding_dimensions: Option<i32>,
+    tenant_model: Option<String>,
     tenant_dimensions: Option<i32>,
 }
 
@@ -389,6 +424,7 @@ async fn resolve_embedding_chain(
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
+        .column_as(TenantColumn::EmbeddingModel, "tenant_model")
         .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
         .left_join(crate::models::identity_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
@@ -408,6 +444,7 @@ async fn resolve_embedding_chain(
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,
         workspace_dimensions: row.embedding_dimensions,
+        tenant_model: row.tenant_model,
         tenant_dimensions: row.tenant_dimensions,
         deployment_dimensions,
     })

@@ -229,3 +229,86 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
     .await?;
     Ok(())
 }
+
+/// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
+///
+/// A detached connection whose session-end releases the lock. `conn` is detached so dropping
+/// the guard ends the session, which is when PostgreSQL releases session-level advisory locks.
+/// Using `detach` instead of returning the connection to the pool is necessary: pool return
+/// keeps the session alive, so the lock would persist and cause the next reindex to re-enter
+/// (advisory locks are per-session, not per-connection).
+pub struct WorkspaceReindexLockGuard {
+    #[expect(dead_code)]
+    conn: sqlx::PgConnection,
+}
+
+impl Drop for WorkspaceReindexLockGuard {
+    fn drop(&mut self) {
+        // Detached connection drop ends the session; PostgreSQL releases
+        // session-level advisory locks at session end.
+    }
+}
+
+/// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
+///
+/// Acquires `pg_advisory_lock` on a bare pooled connection and detaches it. The lock is held
+/// until the guard is dropped, which ends the detached session and releases the lock. Pool
+/// return keeps the session alive, so the lock would persist and cause the next reindex to
+/// re-enter (advisory locks are per-session, not per-connection).
+///
+/// Does not time out: a legitimate reindex over a large workspace can block for a long time,
+/// and imposing a bound would risk killing a run that is just busy. The `tracing::info!`
+/// before and after acquisition makes a wait visible rather than a silent hang.
+pub async fn acquire_workspace_reindex_lock(
+    pool: PgPool,
+    workspace_id: Uuid,
+) -> Result<WorkspaceReindexLockGuard, sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+
+    let key = workspace_id.to_string();
+    tracing::info!(%key, "waiting for workspace reindex lock");
+
+    sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
+        .bind(&key)
+        .execute(conn.as_mut())
+        .await?;
+
+    tracing::info!(%key, "acquired workspace reindex lock");
+
+    // Detach the connection so dropping the guard ends the session.
+    // Session end is when PostgreSQL releases session-level advisory locks;
+    // returning to the pool would keep the session (and the lock) alive.
+    let detached = conn.detach();
+
+    Ok(WorkspaceReindexLockGuard { conn: detached })
+}
+
+/// Acquires the session-scoped advisory lock and runs a reindex under it, returning the outcome.
+///
+/// This is the single-entry-point the concurrency test exercises: it races two such calls
+/// against the same workspace with different providers so the lock's serialization — and the
+/// restamp-on-full-success invariant that depends on it — can be verified.
+pub async fn reindex_workspace_with_lock(
+    pool: PgPool,
+    workspace_id: Uuid,
+    conn: &impl ConnectionTrait,
+    candidate_ids: &[Uuid],
+    provider: &dyn crate::services::embedding::EmbeddingProvider,
+) -> Result<crate::services::embedding::sync::ReindexOutcome, crate::YorishiroError> {
+    let lock = acquire_workspace_reindex_lock(pool, workspace_id)
+        .await
+        .map_err(|err| {
+            crate::YorishiroError::Internal(anyhow::anyhow!(
+                "failed to acquire workspace lock: {err}"
+            ))
+        })?;
+    let outcome = crate::services::embedding::sync::reindex_workspace(
+        conn,
+        workspace_id,
+        candidate_ids,
+        provider,
+    )
+    .await?;
+    drop(lock);
+    Ok(outcome)
+}
