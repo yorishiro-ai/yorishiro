@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::controllers::extractors::{db_handle, resolve_embedding_provider, search_token_limiter};
+use crate::error::YorishiroError;
 use crate::models::search;
 use crate::services::auth::ApiKeyScope;
 use crate::services::rate_limit::charge_search_tokens;
@@ -77,6 +78,13 @@ impl YorishiroMcpServer {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
+
+        // Vector search uses `content_entities.embedding` which does not exist on SQLite.
+        if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            return Ok(err_to_tool_result(YorishiroError::BackendUnsupported {
+                message: "vector search requires PostgreSQL; point DATABASE_URL at a PostgreSQL instance to use this feature".into(),
+            }));
+        }
 
         let workspace_id = auth_ctx.workspace_id;
         let db = match db_handle(&self.ctx).map_err(|err| err.0) {

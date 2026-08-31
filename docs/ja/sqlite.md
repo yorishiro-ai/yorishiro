@@ -21,7 +21,8 @@ setupはそのデプロイメントの唯一のテナント・ワークスペー
 認証したうえで、後の2つは`DbHandle`/`TenantDb::begin_for_workspace`を経由せず`ctx.db`に対して直接プレーンなトランザクションを開く。
 RLS前提の2プール構成は、RLSを持たない単一テナントバックエンドにはそもそもスコープすべき対象が無いためである。
 `Verified<R>`だけは意図的にSQLite用の分岐を持たない。
-唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶうえ、このルート自体がベクトル類似検索のために`content_entities.embedding`に依存しておりこのバックエンドには存在しないため、SQLite上ではそもそも到達不能である(詳細は「まだブロックされているもの」を参照)。
+唯一の呼び出し元(`search_entities`)がどのみち`db_handle()`を直接呼ぶが、ハンドラ本体がバックエンドを先にチェックしてPostgreSQLの要件を名指しし、501を返すためである。
+このルートがSQLiteに到達する経路自体が`content_entities.embedding`に依存しており、このバックエンドには存在しない(詳細は「まだブロックされているもの」を参照)。
 
 `config/development.yaml`もデータベースとキューの両方をSQLiteに既定している。
 したがってクローンしただけで何も設定しなくてもこのバックエンドで起動し、`LOCO_ENV`を設定しなくても初回セットアップウィザードが動作する。
@@ -168,7 +169,8 @@ SQLite上では`embedding`を除いた列リストでクエリを組み立てて
 まだブロックされているもの:
 
 - **ベクトル類似検索**(`GET /api/search`、`Verified<ReadScope>`): `content_entities.embedding`そのものを読むため、SQLiteにはまだ存在しない。
-  前述の`Verified<R>`にSQLite用の分岐が無い理由は、実質的にこれである。
+  SQLiteに到達すると501で「PostgreSQLを指定してください」と返る(前述のハンドラ本体の分岐を参照)。
+  `Verified<R>`にSQLite用の分岐が無いのは、実質的にこれである。
 - **近傍探索**(`content_relations::neighbors_batch`。「Xに関連するエンティティ」をまとめて引く処理): `embedding`とは無関係な理由でブロックされている。
   この生SQLは`embedding`列を一切SELECTしていないが、`Statement::from_sql_and_values(DatabaseBackend::Postgres, ...)`をハードコードしたうえ、PostgreSQL専用の配列関数`unnest($2::uuid[])`を使っている。
 - **`content_entity_snapshots::snapshot`**(上書きされる前のエンティティのデータを記録する`INSERT ... SELECT`。`ee/`の`infer_fill`が、モデルの推測を`content_entities`へ直接書き込む前に呼ぶ): `neighbors_batch`と同様、生のPostgres専用SQLである。
