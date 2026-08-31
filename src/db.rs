@@ -290,7 +290,7 @@ pub async fn reindex_workspace_with_lock(
     candidate_ids: &[Uuid],
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::services::embedding::sync::ReindexOutcome, crate::YorishiroError> {
-    let lock = acquire_workspace_reindex_lock(Some(pool), workspace_id)
+    let lock = acquire_workspace_reindex_lock(pool, workspace_id)
         .await
         .map_err(|err| {
             crate::YorishiroError::Internal(anyhow::anyhow!(
