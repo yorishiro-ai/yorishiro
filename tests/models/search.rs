@@ -486,11 +486,9 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 }
 
 /// A workspace inheriting its tenant's `embedding_dimensions` must refuse a sync whose provider
-/// produces a different width, even when the provider's model name matches the tenant's stamped
-/// model (so the model check does not fire first).
-///
-/// The tenant is stamped with 1024-dimensional vectors and `nomic-ai/nomic-embed-text-v1.5`;
-/// `FixedModelProvider` is 768-dimensional, so the dimension check must fire and reject the write.
+/// produces a different width. The dimension check runs before the model check, so a 768 provider
+/// against a 1024 tenant is rejected on width; the `contains("1024")` assertion in the test
+/// proves it was the dimension and not the model check that fired.
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_dimension_tier() {
