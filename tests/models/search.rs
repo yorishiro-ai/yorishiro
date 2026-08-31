@@ -371,7 +371,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             embedding_model: sea_orm::ActiveValue::Set(Some(
                 "nomic-ai/nomic-embed-text-v1.5".into(),
             )),
-            embedding_dimensions: sea_orm::ActiveValue::Set(Some(1024)),
+            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
