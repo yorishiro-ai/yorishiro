@@ -87,11 +87,11 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check
-        run: cargo check --workspace
+        run: cargo check --locked --workspace
 
       - name: Clippy
-        run: cargo clippy --workspace --tests -- -D warnings
+        run: cargo clippy --locked --workspace --tests -- -D warnings
 
       # Reaches migration/'s own tests (including the two SQLite-file migration tests, run with no DATABASE_URL and no feature flag: SeaORM's DatabaseConnection is runtime-polymorphic across backends here, so there is no compile-time "sqlite" feature to select the way master's pre-rebuild Engine-generic layer needed) because it runs against the whole workspace, not a single -p package.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace

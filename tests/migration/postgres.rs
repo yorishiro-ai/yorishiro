@@ -8,7 +8,7 @@
 //! Both tests are `#[serial]` because each gets its own database but they share a cluster, and `up()` creates the `yorishiro_app` **role**, which is a cluster-wide object.
 //! Run in parallel against a cluster where that role does not exist yet, both reach `CREATE ROLE` at once and one fails with `duplicate key value violates unique constraint "pg_authid_rolname_index"` — the migration's own `EXCEPTION WHEN duplicate_object` catches a role that already existed, not two transactions creating it simultaneously.
 //! This passed locally and failed in CI for exactly that reason: the local cluster already had the role from earlier runs, so the race had nothing to lose.
-use migration::{Migrator, MigratorTrait};
+use crate::migration::{Migrator, MigratorTrait};
 use sea_orm_migration::sea_orm::{ConnectionTrait, Database};
 use serial_test::serial;
 

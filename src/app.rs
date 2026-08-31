@@ -1,3 +1,4 @@
+use crate::migration::Migrator;
 use async_trait::async_trait;
 use loco_rs::{
     Result,
@@ -9,7 +10,6 @@ use loco_rs::{
     environment::Environment,
     task::Tasks,
 };
-use migration::Migrator;
 use std::path::Path;
 
 #[allow(unused_imports)]

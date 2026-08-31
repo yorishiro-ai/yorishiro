@@ -858,7 +858,7 @@ pub async fn undo_job(
 
 #[cfg(test)]
 mod sqlite_tests {
-    use migration::{Migrator, MigratorTrait};
+    use crate::migration::{Migrator, MigratorTrait};
     use sea_orm::{ConnectionTrait, Database, Statement};
 
     use super::{

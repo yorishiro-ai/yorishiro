@@ -1,5 +1,5 @@
 //! Every migration must produce a valid schema on SQLite (single-tenant, no RLS/roles/vector/trgm — see `helpers.rs`), not just on Postgres.
-use migration::{Migrator, MigratorTrait};
+use crate::migration::{Migrator, MigratorTrait};
 use sea_orm_migration::sea_orm::Database;
 
 #[tokio::test]
