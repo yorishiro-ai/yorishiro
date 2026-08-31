@@ -35,7 +35,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  IMAGE_NAME: ghcr.io/yotsunagi/yorishiro
+  IMAGE_NAME: ghcr.io/yorishiro-ai/yorishiro
 
 permissions:
   contents: write
@@ -419,7 +419,7 @@ jobs:
           cat dist/checksums.txt
 
       # What the packages are and where they came from, without a signing key to distribute,
-      # rotate or have anyone trust. `gh attestation verify <file> --repo yotsunagi/yorishiro`
+      # rotate or have anyone trust. `gh attestation verify <file> --repo yorishiro-ai/yorishiro`
       # answers "this artifact was built by this workflow, from this commit".
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

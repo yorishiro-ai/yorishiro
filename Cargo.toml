@@ -69,7 +69,7 @@ ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
 include_dir = { version = "0.7" }
 # Raw pool for RLS session-state handling: Loco's own ConnectOptions has no after_connect/
 # after_release hook, so this stays a hand-built sqlx pool beside SeaORM's DatabaseConnection.
-# See https://github.com/yotsunagi/yorishiro/issues/221.
+# See https://github.com/yorishiro-ai/yorishiro/issues/221.
 sqlx.workspace = true
 thiserror = { version = "2" }
 anyhow.workspace = true
