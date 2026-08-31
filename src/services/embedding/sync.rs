@@ -284,11 +284,11 @@ pub struct ReindexOutcome {
     pub failures: Vec<ReindexFailure>,
 }
 
-/// Re-embeds every entity in a workspace with `provider`, then restamps `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, but only when every entity succeeded.
+/// Internal reindex loop: re-embeds entities and restamps the workspace.
 ///
-/// This is the core the `reindex_embeddings` task wraps; see that task's own doc comment for why a partial failure must leave the stamp untouched, and why bypassing [`sync_embedding`]'s model check here is safe only under that restamp-on-full-success ordering.
-/// Callers needing every candidate id (rather than just those already `EntityRecord`-fetchable) pass them in as `candidate_ids`, since a row deleted between the caller's own scan and this function's batch fetch is reported as a failure rather than silently skipped.
-pub async fn reindex_workspace(
+/// This is the core logic that [`db::reindex_workspace_with_lock`] wraps with lock acquisition.
+/// [`reindex_workspace`] (the public entry point) calls this after acquiring the lock.
+async fn reindex_workspace_inner(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     candidate_ids: &[Uuid],
@@ -347,6 +347,29 @@ pub async fn reindex_workspace(
         reindexed,
         failures,
     })
+}
+
+/// Re-embeds every entity in a workspace with `provider`, then restamps
+/// `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values,
+/// but only when every entity succeeded.
+///
+/// This is the core the `reindex_embeddings` task wraps; see that task's own doc comment for
+/// why a partial failure must leave the stamp untouched, and why bypassing
+/// [`sync_embedding`]'s model check here is safe only under that restamp-on-full-success
+/// ordering.
+/// Callers needing every candidate id (rather than just those already `EntityRecord`-fetchable)
+/// pass them in as `candidate_ids`, since a row deleted between the caller's own scan and this
+/// function's batch fetch is reported as a failure rather than silently skipped.
+///
+/// The caller is responsible for serializing concurrent calls against the same workspace
+/// (the `reindex_embeddings` task uses [`db::acquire_workspace_reindex_lock`] to do this).
+pub async fn reindex_workspace(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    candidate_ids: &[Uuid],
+    provider: &dyn EmbeddingProvider,
+) -> Result<ReindexOutcome, YorishiroError> {
+    reindex_workspace_inner(conn, workspace_id, candidate_ids, provider).await
 }
 
 /// The resolved embedding chain for a workspace: which model and dimension count to use.

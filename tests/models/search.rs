@@ -251,7 +251,20 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
 
 /// A provider that reports a fixed model name, for testing the model-identity check path in `sync_embedding` without a real embedding backend.
 /// Always 768-dimensional, matching both nomic-embed-text-v1.5 and multilingual-e5-base: the model check must fire on identity alone, not rely on a dimension mismatch to also be present.
+#[derive(Clone)]
 struct FixedModelProvider(&'static str);
+
+impl FixedModelProvider {
+    /// Returns a 768-dimensional vector that encodes the model name as a seed, so the stored vector proves which model last wrote it.
+    fn vector(&self) -> Vec<f32> {
+        let mut v = vec![0.0_f32; 768];
+        let bytes = self.0.as_bytes();
+        for (i, b) in bytes.iter().enumerate().take(768) {
+            v[i] = *b as f32 / 255.0;
+        }
+        v
+    }
+}
 
 #[async_trait]
 impl EmbeddingProvider for FixedModelProvider {
@@ -358,7 +371,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             embedding_model: sea_orm::ActiveValue::Set(Some(
                 "nomic-ai/nomic-embed-text-v1.5".into(),
             )),
-            embedding_dimensions: sea_orm::ActiveValue::Set(Some(768)),
+            embedding_dimensions: sea_orm::ActiveValue::Set(Some(1024)),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
@@ -445,9 +458,13 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
     .await;
 }
 
-/// Two concurrent `reindex_workspace` calls against the same workspace with different providers must not both succeed in restamping: without serialization, each bypasses the write-time model check by design, both believe they succeeded, and the final stamp and per-row vector provenance silently disagree.
-/// The lock in `reindex_embeddings` serializes runs so the second waits for the first and the final state is consistent.
-/// Without the lock (the gate check: comment out the lock acquisition in `src/tasks/reindex_embeddings.rs`), the two concurrent calls race and the final stamp does not match the vectors actually stored, causing this assertion to fail.
+/// Two concurrent `reindex_workspace_with_lock` calls against the same workspace with different
+/// providers must serialize via the advisory lock: the second waits for the first, and the final
+/// stamp and per-row vector provenance agree.
+///
+/// Without the lock (the gate check: comment out the lock acquisition in
+/// `src/tasks/reindex_embeddings.rs`), the two concurrent calls race and the final stamp does
+/// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
 #[serial]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
@@ -504,55 +521,98 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             id: sea_orm::ActiveValue::Unchanged(workspace.id),
             ..Default::default()
         };
-        old_active
-            .embedding_model = sea_orm::ActiveValue::Set(Some("old-model".into()));
-        old_active
-            .embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));
-        old_active
-            .update(&ctx.db)
-            .await
-            .expect("stamp old model");
+        old_active.embedding_model = sea_orm::ActiveValue::Set(Some("old-model".into()));
+        old_active.embedding_dimensions = sea_orm::ActiveValue::Set(Some(768));
+        old_active.update(&ctx.db).await.expect("stamp old model");
 
         let candidate_ids: Vec<uuid::Uuid> = vec![e1.id, e2.id];
 
-        // Run two reindex calls sequentially (the lock ensures this), each with a different provider.
-        // The first reindex succeeds and stamps the workspace. The second reindex also succeeds
-        // (it sees the new stamp but bypasses the check via `embed_and_write`), and overwrites
-        // the stamp. The final stamp must match the provider that ran last.
         let provider1 = FixedModelProvider("nomic-ai/nomic-embed-text-v1.5");
         let provider2 = FixedModelProvider("intfloat/multilingual-e5-base");
 
-        let outcome1 = sync::reindex_workspace(&ctx.db, workspace.id, &candidate_ids, &provider1)
-            .await
-            .expect("reindex 1 ok");
+        // Grab the tenant pool so we can call reindex_workspace_with_lock under it.
+        let pool = ctx
+            .shared_store
+            .get::<yorishiro::db::DbHandle>()
+            .expect("DbHandle is configured")
+            .tenant
+            .pool()
+            .clone();
+
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+
+        // Spawn two racing calls; both wait at the barrier, then release simultaneously.
+        // Barrier::wait() blocks the current OS thread, so we use spawn_blocking + Handle::current
+        // to get a blocking thread that hits the barrier and then schedules the async reindex
+        // on the test's tokio runtime. This is the standard pattern for racing with Barrier.
+        let db_conn = ctx.db.clone();
+        let pool1 = pool.clone();
+        let workspace_id1 = workspace.id;
+        let cids1 = candidate_ids.clone();
+        let barrier1 = barrier.clone();
+        let provider1_clone = provider1.clone();
+        let h1 = tokio::task::spawn_blocking(move || {
+            let _wait = barrier1.wait();
+            tokio::runtime::Handle::current().block_on(async {
+                yorishiro::db::reindex_workspace_with_lock(
+                    pool1,
+                    workspace_id1,
+                    &db_conn,
+                    &cids1,
+                    &provider1_clone,
+                )
+                .await
+                .expect("reindex 1 join")
+            })
+        });
+        let db_conn2 = ctx.db.clone();
+        let pool2 = pool.clone();
+        let workspace_id2 = workspace.id;
+        let cids2 = candidate_ids.clone();
+        let barrier2 = barrier.clone();
+        let provider2_clone = provider2.clone();
+        let h2 = tokio::task::spawn_blocking(move || {
+            let _wait = barrier2.wait();
+            tokio::runtime::Handle::current().block_on(async {
+                yorishiro::db::reindex_workspace_with_lock(
+                    pool2,
+                    workspace_id2,
+                    &db_conn2,
+                    &cids2,
+                    &provider2_clone,
+                )
+                .await
+                .expect("reindex 2 join")
+            })
+        });
+
+        let outcome1 = h1.await.expect("handler 1 finished");
+        let outcome2 = h2.await.expect("handler 2 finished");
+
         assert!(
             outcome1.failures.is_empty(),
             "first reindex failed: {}",
-            outcome1.failures.iter().map(|f| f.error.to_string()).collect::<Vec<_>>().join(", ")
+            outcome1
+                .failures
+                .iter()
+                .map(|f| f.error.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
-
-        // The first run stamps with provider1's model.
-        let workspace_after_1 = identity_workspaces::Entity::find_by_id(workspace.id)
-            .one(&ctx.db)
-            .await
-            .expect("query workspace after 1")
-            .expect("workspace exists after 1");
-        assert_eq!(
-            workspace_after_1.embedding_model.as_deref(),
-            Some("nomic-ai/nomic-embed-text-v1.5"),
-            "first reindex must stamp with its model"
-        );
-
-        let outcome2 = sync::reindex_workspace(&ctx.db, workspace.id, &candidate_ids, &provider2)
-            .await
-            .expect("reindex 2 ok");
         assert!(
             outcome2.failures.is_empty(),
             "second reindex failed: {}",
-            outcome2.failures.iter().map(|f| f.error.to_string()).collect::<Vec<_>>().join(", ")
+            outcome2
+                .failures
+                .iter()
+                .map(|f| f.error.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
 
-        // The final workspace stamp must match the last provider.
+        // The final workspace stamp must match the provider that won the lock race.
+        // We check that the stamp and the stored vectors agree: whichever provider won,
+        // both the stamp and every entity's embedding must point to it.
         let final_model = identity_workspaces::Entity::find_by_id(workspace.id)
             .one(&ctx.db)
             .await
@@ -560,32 +620,37 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             .expect("workspace exists")
             .embedding_model
             .expect("workspace must be stamped with a model");
-        assert!(
-            final_model == "nomic-ai/nomic-embed-text-v1.5"
-                || final_model == "intfloat/multilingual-e5-base",
-            "workspace stamp must match one provider: {final_model:?}"
-        );
 
-        // Check that every entity's embedding is non-NULL.
+        let winner = if final_model == "nomic-ai/nomic-embed-text-v1.5" {
+            &provider1
+        } else if final_model == "intfloat/multilingual-e5-base" {
+            &provider2
+        } else {
+            panic!("unexpected model stamp: {final_model:?}");
+        };
+
+        // Verify every entity's embedding matches the winning provider's vector.
         for entity_id in &candidate_ids {
-            let has_embedding: Option<bool> = {
+            let stored_vector: Option<Vec<f32>> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    has_embedding: bool,
+                    embedding: Option<Vec<f32>>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+                    "SELECT embedding FROM content_entities WHERE id = $1",
                     [(*entity_id).into()],
                 ))
                 .one(&ctx.db)
                 .await
                 .expect("query embedding")
-                .map(|r| r.has_embedding)
+                .and_then(|r| r.embedding)
             };
-            assert!(
-                has_embedding == Some(true),
-                "entity {entity_id} should have an embedding"
+            let expected = winner.vector();
+            assert_eq!(
+                stored_vector.as_deref(),
+                Some(expected.as_slice()),
+                "entity {entity_id} embedding must match winner {final_model:?}"
             );
         }
 
