@@ -64,9 +64,12 @@ pub async fn sync_embedding(
     // That error names neither the workspace nor the write that produced it, so this check exists to turn that into an operator-readable message (which workspace, which width was expected, what to do about it), not to prevent data corruption the database wasn't already preventing.
     let chain = resolve_embedding_chain(conn, workspace_id).await?;
     // Three-tier inheritance: workspace stamp → tenant default → deployment default.
-    let effective_dimensions = chain.workspace_dimensions
+    let effective_dimensions = chain
+        .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(768)));
+        .or(Some(
+            i32::try_from(chain.deployment_dimensions).unwrap_or(768),
+        ));
     if let Some(expected) = effective_dimensions
         && vector.len() as usize != expected as usize
     {
@@ -113,8 +116,8 @@ pub async fn sync_embedding(
     // sync for the same entity is already in flight or has already landed, so nothing needs
     // redoing on this call's behalf. See `embed_and_write`'s own doc comment for why
     // `reindex_workspace` cannot make the same choice.
-    let written = embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector)
-        .await?;
+    let written =
+        embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector).await?;
 
     // Stamp the workspace *after* the write succeeds, not before: stamping before would record a
     // model name even when the write fails (entity deleted, concurrently modified, or the write
