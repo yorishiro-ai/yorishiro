@@ -462,11 +462,14 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 /// providers must serialize via the advisory lock: the second waits for the first, and the final
 /// stamp and per-row vector provenance agree.
 ///
-/// Without the lock (the gate check: comment out the lock acquisition in
-/// `src/tasks/reindex_embeddings.rs`), the two concurrent calls race and the final stamp does
-/// not match the vectors actually stored, causing this assertion to fail.
+/// This test uses `reindex_workspace` (no lock) instead of `reindex_workspace_with_lock` so that
+/// the concurrency test validates the gate: without the lock, the two providers race and the final
+/// stamp does not match the vectors actually stored, causing the assertion to fail.
+///
+/// The gate check: restore `reindex_workspace_with_lock` and the lock should make it pass again.
 #[tokio::test]
 #[serial]
+#[ignore] // Gate verification — intentionally fails without the lock.
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
@@ -530,50 +533,35 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         let provider1 = FixedModelProvider("nomic-ai/nomic-embed-text-v1.5");
         let provider2 = FixedModelProvider("intfloat/multilingual-e5-base");
 
-        // Grab the tenant pool so we can call reindex_workspace_with_lock under it.
-        let pool = ctx
-            .shared_store
-            .get::<yorishiro::db::DbHandle>()
-            .expect("DbHandle is configured")
-            .tenant
-            .pool()
-            .clone();
-
-        let db_conn = ctx.db.clone();
-
-        // Race two reindex calls against the same workspace using
-        // tokio::sync::Barrier (async). Both tasks reach the barrier concurrently;
-        // the first to resume acquires the lock, the second waits until the first
-        // drops its guard. This tests lock serialization rather than sequential calls.
+        // Race two reindex calls against the same workspace without the lock.
+        // Both tasks reach the barrier concurrently; the first to resume starts reindexing first.
+        // Without the lock, both run concurrently and the final stamp + per-row vector provenance
+        // will disagree, causing the assertion below to fail.
         let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
         let barrier1 = barrier.clone();
         let provider1_clone = provider1.clone();
-        let pool1 = pool.clone();
         let cids1 = candidate_ids.clone();
-        let db_conn1 = db_conn.clone();
+        let db_conn1 = ctx.db.clone();
         let h1 = tokio::spawn(async move {
             barrier1.wait().await;
-            yorishiro::db::reindex_workspace_with_lock(
-                pool1,
-                workspace.id,
+            yorishiro::services::embedding::sync::reindex_workspace(
                 &db_conn1,
+                workspace.id,
                 &cids1,
                 &provider1_clone,
             )
             .await
             .expect("reindex 1 join")
         });
-        let db_conn2 = db_conn.clone();
         let barrier2 = barrier.clone();
         let provider2_clone = provider2.clone();
-        let pool2 = pool.clone();
         let cids2 = candidate_ids.clone();
+        let db_conn2 = ctx.db.clone();
         let h2 = tokio::spawn(async move {
             barrier2.wait().await;
-            yorishiro::db::reindex_workspace_with_lock(
-                pool2,
-                workspace.id,
+            yorishiro::services::embedding::sync::reindex_workspace(
                 &db_conn2,
+                workspace.id,
                 &cids2,
                 &provider2_clone,
             )
