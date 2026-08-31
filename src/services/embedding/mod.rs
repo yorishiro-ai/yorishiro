@@ -116,7 +116,7 @@ pub struct UnconfiguredEmbeddingProvider {
     dimensions: usize,
     /// What this particular deployment should set to get a working provider.
     ///
-    /// Carried per instance rather than hardcoded in [`Self::embed_batch`], because the two ways of arriving here need opposite advice: an unset `YORISHIRO_EMBEDDING_BASE_URL` wants the OpenAI-compatible variables, while `YORISHIRO_EMBEDDING_PROVIDER=local` with nowhere to fetch to wants the local model path variables.
+    /// Carried per instance rather than hardcoded in [`Self::embed_batch`], because the two ways of arriving here need opposite advice: an unset `YORISHIRO_EMBEDDING_BASE_URL` wants the OpenAI-compatible variables, while `YORISHIRO_EMBEDDING_PROVIDER=local` with nowhere to fetch to wants the default `models/<short_id>/` files to be in place.
     /// The boot log says the same thing, but it scrolls away, and this error is what an operator keeps hitting afterwards.
     remedy: &'static str,
 }
@@ -141,7 +141,7 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 
 /// Builds the embedding provider from environment variables.
 ///
-/// `YORISHIRO_EMBEDDING_PROVIDER=local` selects the local in-process provider (needs `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH`, no external service).
+/// `YORISHIRO_EMBEDDING_PROVIDER=local` selects the local in-process provider (no external service).
 /// Otherwise, `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with [`UnconfiguredEmbeddingProvider`] rather than failing.
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
@@ -191,15 +191,14 @@ enum OnnxVarFate {
     /// provider used, so leaving it set risks starting a different model than the deployment
     /// thinks it has.
     Renamed(&'static str),
-    /// This variable named a mechanism removed outright ([`Pooling`] having one legal value, or
-    /// nomic-embed-text-v1.5 never reading the Qwen3-style instruction this variable rendered).
-    /// A stale value here changes nothing: it names no risk, only that the setting is inert.
-    Removed,
+    /// This variable named a mechanism removed outright.
+    /// `alternative` names where the operator should put the files instead, if one exists.
+    Removed { alternative: Option<&'static str> },
 }
 
 /// The `YORISHIRO_ONNX_*` variables this deployment might still have set from before the local
 /// provider moved from `ort`/ONNX to candle.
-const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 5] = [
+const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 7] = [
     (
         "YORISHIRO_ONNX_MODEL_PATH",
         OnnxVarFate::Renamed("YORISHIRO_LOCAL_MODEL_PATH"),
@@ -209,16 +208,34 @@ const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 5] = [
         OnnxVarFate::Renamed("YORISHIRO_LOCAL_TOKENIZER_PATH"),
     ),
     (
+        "YORISHIRO_LOCAL_MODEL_PATH",
+        OnnxVarFate::Removed {
+            alternative: Some("models/<short_id>/model.safetensors"),
+        },
+    ),
+    (
+        "YORISHIRO_LOCAL_TOKENIZER_PATH",
+        OnnxVarFate::Removed {
+            alternative: Some("models/<short_id>/tokenizer.json"),
+        },
+    ),
+    (
         "YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH",
         OnnxVarFate::Renamed("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH"),
     ),
-    ("YORISHIRO_ONNX_POOLING", OnnxVarFate::Removed),
-    ("YORISHIRO_ONNX_QUERY_INSTRUCTION", OnnxVarFate::Removed),
+    (
+        "YORISHIRO_ONNX_POOLING",
+        OnnxVarFate::Removed { alternative: None },
+    ),
+    (
+        "YORISHIRO_ONNX_QUERY_INSTRUCTION",
+        OnnxVarFate::Removed { alternative: None },
+    ),
 ];
 
 /// Fails startup when an old `YORISHIRO_ONNX_*` variable is still set.
 ///
-/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply invisible to [`resolve_local_paths`], which then runs its normal resolution as if nothing had been configured (using the `models/<short_id>/` default files if both are present, fetching the selected model, `model_fetch::DEFAULT_MODEL` unless `YORISHIRO_LOCAL_MODEL` says otherwise, if neither is, or erroring on an incomplete pair).
+/// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply invisible to [`resolve_model_paths`], which then runs its normal resolution as if nothing had been configured (using the `models/<short_id>/` default files if both are present, fetching the selected model, `model_fetch::DEFAULT_MODEL` unless `YORISHIRO_LOCAL_MODEL` says otherwise, if neither is, or erroring on an incomplete pair).
 /// A deployment that had a different model configured under the old name would, without this check, silently start writing vectors from a different model into an index built for the one it thinks it still has, with every status staying green.
 /// Refusing to boot forces the operator to remove or rename the variable (and confirm the resulting resolution is what they actually want) before that can happen, rather than a log line they could reasonably miss during an otherwise successful upgrade.
 ///
@@ -227,6 +244,10 @@ const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 5] = [
 /// silently tolerated), but their message must not claim the wrong-model risk above: neither
 /// variable is read by anything, so a stale value changes no behaviour at all. Claiming a risk
 /// that does not exist would cost the accurate claim above its credibility on the next reader.
+///
+/// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` are now also rejected here:
+/// the operator-chosen path was structurally unbound from the model identifier (which comes
+/// from `YORISHIRO_LOCAL_MODEL`), so a mismatch could never be detected at write time.
 fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     for (old, fate) in RENAMED_ONNX_VARS {
         // `var_os`, not `var`: `var` returns `Err` both when the variable is unset and when it is
@@ -244,12 +265,23 @@ fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
                  one {old} names, which is not safe to detect and correct after the fact once \
                  vectors from the wrong model have been written."
             ),
-            OnnxVarFate::Removed => anyhow::bail!(
-                "{old} is set but no longer has any effect: this setting was removed rather than \
-                 renamed, and nothing reads it. Remove {old} before starting; leaving it set \
-                 changes no behaviour, but its presence claims a configuration this deployment no \
-                 longer has."
-            ),
+            OnnxVarFate::Removed { alternative } => {
+                let msg = if alternative.is_some() {
+                    format!(
+                        "{old} is set but no longer has any effect: this setting was removed rather than \
+                         renamed, and nothing reads it. Use {alternative:?} (relative to your working directory) \
+                         and place both model files under models/<short_id>/ instead. Remove {old} before starting."
+                    )
+                } else {
+                    format!(
+                        "{old} is set but no longer has any effect: this setting was removed rather than \
+                         renamed, and nothing reads it. Remove {old} before starting; leaving it set \
+                         changes no behaviour, but its presence claims a configuration this deployment no \
+                         longer has."
+                    )
+                };
+                anyhow::bail!("{msg}")
+            }
         }
     }
     Ok(())
@@ -279,14 +311,13 @@ fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> 
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
 /// `YORISHIRO_LOCAL_MODEL` selects which [`model_fetch::LocalModelDef`] to load (default: [`model_fetch::DEFAULT_MODEL`]); see [`resolve_local_model`].
-/// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` default to `models/<short_id>/model.safetensors`/`models/<short_id>/tokenizer.json` for the selected model; `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` defaults to 512 regardless of which model is selected, unchanged from this provider's behavior before model selection existed.
+/// The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
 /// Not the selected model's own upper bound: nomic's own bound is 8192, and silently truncating further out by default the moment a deployment sets `YORISHIRO_LOCAL_MODEL=nomic-embed-text-v1.5` explicitly would be a memory/latency change with no corresponding request for one.
 /// `def.max_sequence_length` still validates the setting (see [`local::LocalEmbeddingProvider::load`]): 512 already satisfies every current definition's own bound, nomic's and multilingual-e5-base's alike, so this default needs no per-model branch of its own.
-/// Setting *either* path variable also turns the automatic fetch off, for both files: those defaults describe where an unset variable points, not a fallback the fetch still applies behind them.
 ///
 /// There is no pooling variable: every model this provider can load is mean-pooled (see `local::LocalEmbeddingProvider`'s own doc comment for why that stays a fact rather than a config surface).
 ///
-/// The model files are fetched on first use when, and only when, neither path variable is set and nothing is at the default path; see [`resolve_local_paths`].
+/// The model files are fetched on first use when, and only when, neither the default path nor the cache path holds both files.
 async fn build_local_provider(
     dimensions: usize,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
@@ -304,13 +335,12 @@ async fn build_local_provider(
     let max_sequence_length: usize = std::env::var("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH")
         .unwrap_or_else(|_| "512".into())
         .parse()?;
-    let Some((model_path, tokenizer_path)) = resolve_local_paths(def).await? else {
+    let Some((model_path, tokenizer_path)) = resolve_model_paths(def).await? else {
         return Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
             dimensions,
             // `YORISHIRO_EMBEDDING_PROVIDER=local` is already set, so pointing at the OpenAI-compatible variables here would answer a question this operator did not ask.
             remedy: "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files could not be \
-                     located or fetched: set YORISHIRO_LOCAL_MODEL_PATH and \
-                     YORISHIRO_LOCAL_TOKENIZER_PATH",
+                     located or fetched",
         }));
     };
     let model_path = model_path.display().to_string();
@@ -333,24 +363,19 @@ async fn build_local_provider(
     Ok(std::sync::Arc::new(provider))
 }
 
-/// The model and tokenizer paths the local provider should load, fetching them on first use if that is what this deployment needs.
+/// The model and tokenizer paths the local provider should load, fetching them on first use if absent.
 ///
-/// Three cases, in order:
+/// Two cases:
 ///
-/// 1. Either path variable is set: use both paths as given and fetch nothing, even if a file is missing.
-///    An operator who names a path has told us where the file is, so a typo there must fail loudly.
-///    Downloading half a gigabyte to a different location because their path was wrong is worse than refusing to start, and it would leave them debugging a provider that loaded bytes they never pointed at.
-///    This asymmetry against the fetching branch below is deliberate, not an omission left to be tidied up later by unifying the two.
-/// 2. Nothing is set and the default `models/` path already holds *both* files: use them, fetch nothing.
-///    A deployment that placed the files there by hand keeps working exactly as before.
-///    Exactly one of them present is an error rather than a fall-through to case 3; see below.
-/// 3. Nothing is set and *neither* file is at the default path: fetch into the cache directory under `HOME`, which is both where the download lands and where a later start looks first, so only the first start pays for it.
+/// 1. The default `models/<short_id>/` path holds *both* files: use them, fetch nothing.
+///    Exactly one of them present is an error rather than a fall-through to fetch; see below.
+/// 2. Neither file is at the default path: fetch into the cache directory under `HOME`, which is both where the download lands and where a later start looks first, so only the first start pays for it.
 ///
-/// `Ok(None)` is case 3 with no resolvable `HOME`, which degrades to [`UnconfiguredEmbeddingProvider`] rather than failing.
+/// `Ok(None)` is case 2 with no resolvable `HOME`, which degrades to [`UnconfiguredEmbeddingProvider`] rather than failing.
 /// That is the one degrading path here, and it differs from a failed fetch on whether a retry could ever help: an unresolvable `HOME` is a permanent property of the deployment, so no restart fixes it and the useful answer is a log naming the two variables an operator can set.
 /// A network failure or a digest mismatch fails the start instead, so a supervisor's `Restart=on-failure` retries a transient outage and heals by itself, and so that unverified model bytes are never loaded, which is the whole reason the digests are checked.
 /// Degrading is right for the unset-provider case [`UnconfiguredEmbeddingProvider`] was built for, but `YORISHIRO_EMBEDDING_PROVIDER=local` is explicit operator intent to run embeddings, so quietly serving a deployment whose search is dead would answer a request nobody made.
-/// What the default `models/` path's contents mean for [`resolve_local_paths`].
+/// What the default `models/` path's contents mean for [`resolve_model_paths`].
 #[derive(Debug, PartialEq, Eq)]
 enum DefaultPathOutcome {
     /// Both files are there: load them, fetch nothing.
@@ -361,7 +386,7 @@ enum DefaultPathOutcome {
     Fetch,
 }
 
-/// Split out from [`resolve_local_paths`] so the rule can be tested without a filesystem: it is the one decision here where the wrong answer is silent rather than loud.
+/// Split out from [`resolve_model_paths`] so the rule can be tested without a filesystem: it is the one decision here where the wrong answer is silent rather than loud.
 ///
 /// Exactly one file present is a half-executed intent, not an empty default path: someone put that file there on purpose and the other is missing.
 /// Fetching around it would quietly ignore the file they chose and embed with a different model, which can disagree with the vectors already in the index while every status stays green.
@@ -374,25 +399,17 @@ fn default_path_outcome(model_exists: bool, tokenizer_exists: bool) -> DefaultPa
     }
 }
 
-/// The default repo-local path a model's files live at when nothing else is configured, scoped by `def.short_id` so two models' default files can never collide or be silently substituted for one another.
+/// The repo-local path a model's files live at, scoped by `def.short_id` so two models' default files can never collide or be silently substituted for one another.
 /// A deployment that flips `YORISHIRO_LOCAL_MODEL` finds nothing at its new model's default path rather than finding the previous model's files and loading them under the new model's name, which would pass every check this provider runs, since the mismatch is between which weights loaded and what the deployment now believes it configured, not anything visible from the files themselves.
 fn default_paths(def: &model_fetch::LocalModelDef) -> (std::path::PathBuf, std::path::PathBuf) {
     let dir = std::path::PathBuf::from("models").join(def.short_id);
     (dir.join("model.safetensors"), dir.join("tokenizer.json"))
 }
 
-async fn resolve_local_paths(
+async fn resolve_model_paths(
     def: &model_fetch::LocalModelDef,
 ) -> anyhow::Result<Option<(std::path::PathBuf, std::path::PathBuf)>> {
-    let configured_model = std::env::var("YORISHIRO_LOCAL_MODEL_PATH").ok();
-    let configured_tokenizer = std::env::var("YORISHIRO_LOCAL_TOKENIZER_PATH").ok();
     let (default_model, default_tokenizer) = default_paths(def);
-    if configured_model.is_some() || configured_tokenizer.is_some() {
-        return Ok(Some((
-            configured_model.map_or(default_model, Into::into),
-            configured_tokenizer.map_or(default_tokenizer, Into::into),
-        )));
-    }
 
     match default_path_outcome(default_model.exists(), default_tokenizer.exists()) {
         DefaultPathOutcome::UseBoth => return Ok(Some((default_model, default_tokenizer))),
@@ -404,9 +421,7 @@ async fn resolve_local_paths(
             };
             anyhow::bail!(
                 "'{}' is present but '{}' is missing: the local embedding provider needs both. \
-                 Add the missing file, or remove '{}' to have both fetched automatically, \
-                 or set YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH to files \
-                 this deployment already has",
+                 Add the missing file, or remove '{}' to have both fetched automatically",
                 present.display(),
                 missing.display(),
                 present.display()
@@ -419,7 +434,7 @@ async fn resolve_local_paths(
         Some(paths) => Ok(Some(paths)),
         None => {
             tracing::warn!(
-                "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files are missing and HOME does not resolve, so there is nowhere to fetch them to: set YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH to files this deployment already has. Continuing with no embedding provider; search and recall will error."
+                "YORISHIRO_EMBEDDING_PROVIDER=local, but the model files are missing and HOME does not resolve, so there is nowhere to fetch them to. Continuing with no embedding provider; search and recall will error."
             );
             Ok(None)
         }
@@ -458,7 +473,7 @@ mod tests {
                     assert!(message.contains(new), "{message}");
                     assert!(message.contains("different model"), "{message}");
                 }
-                OnnxVarFate::Removed => {
+                OnnxVarFate::Removed { .. } => {
                     assert!(message.contains("no longer has any effect"), "{message}");
                     assert!(!message.contains("different model"), "{message}");
                 }

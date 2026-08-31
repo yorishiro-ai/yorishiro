@@ -3,8 +3,7 @@
 //! `YORISHIRO_EMBEDDING_PROVIDER=local` needs a safetensors checkpoint and its tokenizer, neither of which is in the repository: the smaller of the two models here is about 522 MiB, which does not belong in git.
 //! Rather than making an operator fetch them by hand, the default path is fetched on first use and verified against a hardcoded digest.
 //!
-//! Only the *default* path is ever fetched.
-//! An operator who sets `YORISHIRO_LOCAL_MODEL_PATH` or `YORISHIRO_LOCAL_TOKENIZER_PATH` has told us where the file already is, so a wrong path there fails loudly instead of quietly downloading half a gigabyte somewhere they did not ask for; see [`super::build_local_provider`].
+//! The model and tokenizer files live at `models/<short_id>/model.safetensors` and `models/<short_id>/tokenizer.json` for the selected model, or are fetched into `$HOME/.cache/yorishiro/models/<short_id>/` on first use when absent.
 
 use std::path::{Path, PathBuf};
 
@@ -189,7 +188,7 @@ async fn ensure_file(
         //
         // The digest guards the wire, not the disk. This destination only ever receives bytes that already passed both length and SHA256, moved in by an atomic rename within one filesystem, so the mechanism cannot itself produce a bad file here.
         // Getting one needs an outside writer or disk corruption, and corruption that mangles a safetensors header fails loudly in `LocalEmbeddingProvider::load` regardless.
-        // The quiet case, a valid but different model swapped in, needs someone holding the service user's write access, and they could as easily set `YORISHIRO_LOCAL_MODEL_PATH` or replace the `models/<short_id>/` files, neither of which is checked at all.
+        // The quiet case, a valid but different model swapped in, needs someone holding the service user's write access, and they could as easily replace the `models/<short_id>/` files, which is not checked at all.
         //
         // Re-hashing only this tier would also invert the design: files an operator placed themselves are deliberately unverified, since a custom model cannot match a digest pinned to this definition's, so re-checking at read time the one tier that was already verified at write time, at hundreds of megabytes on every single start forever, would spend the cost exactly where it buys least.
         //

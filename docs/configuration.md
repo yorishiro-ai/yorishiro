@@ -81,37 +81,34 @@ Pooling is always mean pooling for either model: that is what both were trained 
 | Variable | Description |
 |---|---|
 | `YORISHIRO_LOCAL_MODEL` | Which model to load: `nomic-embed-text-v1.5` or `multilingual-e5-base`. Unset defaults to `multilingual-e5-base`, since this codebase's search and recall are not English-only. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default |
-| `YORISHIRO_LOCAL_MODEL_PATH` | Path to the `.safetensors` model file. Unset, the model is fetched automatically on first use (see below), into a path scoped by the selected model so two models' cached files never collide; set, the file must already exist at the given path and boot fails with a message naming both this path and `YORISHIRO_LOCAL_TOKENIZER_PATH` if it does not |
-| `YORISHIRO_LOCAL_TOKENIZER_PATH` | Path to the tokenizer's `tokenizer.json`. Same behaviour as `YORISHIRO_LOCAL_MODEL_PATH`: fetched automatically when unset, required to exist when set |
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`, unchanged regardless of which model is selected). Must fit the selected model's own upper bound (`8192` for nomic-embed-text-v1.5, `512` for multilingual-e5-base); the default already satisfies both, so it needs no per-model adjustment on its own |
 
 Switching `YORISHIRO_LOCAL_MODEL` on a deployment that already has embedded workspaces does not itself move any workspace to the new model: the write-time model check ("Moving a workspace between embedding models" above) refuses writes for a workspace still stamped with the old one until `reindex_embeddings` runs against it.
 
 These variables were named `YORISHIRO_ONNX_*` before this provider moved from `ort`/ONNX to candle.
 A deployment that still has an old name set fails to start, but the message differs by what became of that variable.
-`YORISHIRO_ONNX_MODEL_PATH`, `YORISHIRO_ONNX_TOKENIZER_PATH`, and `YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` were renamed: the message names both the old and new variable, since a stale one of these would otherwise go unnoticed while this provider's normal resolution ran instead (using the `models/<short_id>/` default files if both are present, fetching the selected model if neither is, or erroring on an incomplete pair), silently starting a different model than the one the deployment thinks it has.
+`YORISHIRO_ONNX_MODEL_PATH` and `YORISHIRO_ONNX_TOKENIZER_PATH` were renamed: the message names both the old and new variable, since a stale one of these would otherwise go unnoticed while this provider's normal resolution ran instead.
+`YORISHIRO_LOCAL_MODEL_PATH` and `YORISHIRO_LOCAL_TOKENIZER_PATH` were then removed altogether in a later release: the operator-chosen path was structurally unbound from the model identifier (which comes from `YORISHIRO_LOCAL_MODEL`), so a mismatch could never be detected at write time, and the separation was removed entirely.
+`YORISHIRO_ONNX_MAX_SEQUENCE_LENGTH` was renamed to `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH`.
 `YORISHIRO_ONNX_POOLING` and `YORISHIRO_ONNX_QUERY_INSTRUCTION` were removed outright rather than renamed (see above and "Known gap" in this repository's own history for why), so a stale one of these carries no such risk: nothing reads it, and there is no other behaviour left for it to have selected. The message says so rather than claiming the same risk as the renamed variables.
-Either way, remove the old variable (or rename it to its replacement, for the renamed three) before starting again.
+Remove every old variable (or rename it to its replacement, for the renamed ones) before starting again.
 
 #### Fetching the model
 
 The model and tokenizer are not in the repository: nomic-embed-text-v1.5's model file is about 522 MiB, multilingual-e5-base's about 1.04 GiB.
-When neither `YORISHIRO_LOCAL_MODEL_PATH` nor `YORISHIRO_LOCAL_TOKENIZER_PATH` is set and nothing is at the default `models/<short_id>/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/<short_id>/` and verified against a SHA256 built into the binary.
+When nothing is at the default `models/<short_id>/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/<short_id>/` and verified against a SHA256 built into the binary.
 That directory is also where later starts look first, so only the first one pays the download.
 `<short_id>` scopes both the default and cache paths to the selected model (`nomic-embed-text-v1.5` or `multilingual-e5-base`), so switching `YORISHIRO_LOCAL_MODEL` never finds the other model's cached files at its own path.
 
 Verification happens at download time, not at every read.
 A file only reaches that directory by passing both checks and then being moved into place atomically, so a later start treats what is already there as the product of that earlier verified download rather than hashing it again on every start.
 It does check the cached file's size, which is free and catches a truncated file; one of the wrong size is removed and fetched again, so that case repairs itself rather than being loaded as though it were sound.
-Files you supply yourself, at `models/<short_id>/` or through either path variable, are not checked at all: no digest can be pinned for a model of your choosing, and it may deliberately be a different one.
-That trust extends to identity, not just bytes: this provider reports `def.id` (the catalog model named by `YORISHIRO_LOCAL_MODEL`) regardless of what the supplied checkpoint actually is, so a custom `nomic-embed-text-v1.5` path holding a different model's weights is stamped onto a workspace and compared by the write-time model check as if it really were nomic-embed-text-v1.5.
+Files you supply yourself, at `models/<short_id>/`, are not checked at all: no digest can be pinned for a model of your choosing, and it may deliberately be a different one.
+That trust extends to identity, not just bytes: this provider reports `def.id` (the catalog model named by `YORISHIRO_LOCAL_MODEL`) regardless of what the supplied checkpoint actually is, so a custom `nomic-embed-text-v1.5` checkpoint holding a different model's weights is stamped onto a workspace and compared by the write-time model check as if it really were nomic-embed-text-v1.5.
 Both models are pinned to a fixed revision rather than a branch, so the bytes behind their digests cannot change underneath a deployment.
 
 The download blocks whatever triggered it, and the log line before it says so.
 That is usually a server start, but not always: `cargo loco task create_workspace`, `cargo loco task resync_embeddings`, and `cargo loco task reindex_embeddings` build an embedding provider too, so any of them can be what pulls the model on a fresh machine, and a task that appears to be sitting still is most likely doing this.
-
-Setting either path variable turns the fetch off entirely, for both files.
-An operator naming a path has said where the file is, so a wrong path there fails the start rather than downloading the model to somewhere else.
 Each variable defaults independently, so setting only one leaves the other at its `models/<short_id>/` default.
 
 Placing the files at the default `models/<short_id>/` path by hand also works and is never overwritten.
