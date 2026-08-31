@@ -17,7 +17,7 @@ Open state for the rebuild (what's ported, what's next, what's never been raced)
 ## Where the rules live
 
 - @.claude/rules/loco-architecture.md repository layout, migrations, models, the SeaORM entity API, the RLS/two-pool `db.rs` architecture.
-- @.claude/rules/editions.md the `ee/` boundary, BUSL-1.1 vs. paid, how a feature's edition is decided.
+- @.claude/rules/editions.md the `ee/` boundary, BUSL-1.1 vs. `ee/LICENSE`, how a feature's edition is decided.
 - @.claude/rules/ee-composition.md how `ee/` is wired into the crate, and where the licence gate sits.
 - @.claude/rules/error-handling.md `YorishiroError`, `ResultExt`, `into_http_parts()`.
 - @.claude/rules/module-structure.md `src/` layout, MCP handlers, router integration, visibility and dead code.

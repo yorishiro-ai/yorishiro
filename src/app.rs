@@ -17,12 +17,12 @@ use crate::{controllers, tasks};
 
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
-/// This is the paid-edition boundary: one binary carries both editions, and the licence decides at
+/// This is the enterprise-edition boundary: one binary carries both editions, and the licence decides at
 /// runtime which surfaces answer.
 ///
 /// **Per request, not per boot.** Mounting the gated routes conditionally at startup would be
 /// simpler and is wrong: `LicenceState::is_active` compares `exp` against the current time on every
-/// call precisely so a key that lapses while the process runs stops unlocking paid features without
+/// call precisely so a key that lapses while the process runs stops unlocking enterprise features without
 /// a restart (see `ee::services::licence`). A route set decided once at boot cannot un-mount, which
 /// would turn that property into a silent enforcement hole.
 ///
@@ -142,7 +142,7 @@ impl Hooks for App {
             crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
         ));
 
-        // The paid edition's own wiring.
+        // The enterprise edition's own wiring.
         //
         // An absent or invalid licence key warns and continues rather than failing boot: unlike
         // `require_min_sqlite_connections` above, this misconfiguration announces itself the moment
@@ -154,10 +154,11 @@ impl Hooks for App {
             // The three features named here are `ee::models::origin::list_with_upstream_changes`,
             // `ee::models::marketplace::list_marketplace` and `insert_next_version`, each of which
             // hardcodes `DatabaseBackend::Postgres` and would otherwise fail at execution time
-            // naming a query rather than the configuration behind it. Nothing else reports the paid
-            // edition's state at boot here, since `TenantScopedAuthenticator` below is not installed.
+            // naming a query rather than the configuration behind it. Nothing else reports the
+            // enterprise edition's state at boot here, since `TenantScopedAuthenticator` below is
+            // not installed.
             tracing::warn!(
-                "some paid features are unavailable on SQLite: browsing the marketplace, publishing \
+                "some enterprise features are unavailable on SQLite: browsing the marketplace, publishing \
                  a template version, and listing template-origin updates each run a PostgreSQL-only \
                  query and will fail when reached. Point DATABASE_URL at PostgreSQL to use them; \
                  everything else works on this backend"
@@ -182,7 +183,7 @@ impl Hooks for App {
         // The embedding and worker-class resolver seams, replacing the defaults inserted above.
         // Both return `None` for a workspace with no row of its own, so a deployment that never
         // assigns one is unaffected; which compute a tenant's jobs run on, and against which
-        // embedding backend, is the paid-edition decision that keeps these tables in `ee/`.
+        // embedding backend, is the enterprise-edition decision that keeps these tables in `ee/`.
         ctx.shared_store.insert(std::sync::Arc::new(
             crate::ee::services::embedding_resolver::EmbeddingKeyResolver,
         )
@@ -195,7 +196,7 @@ impl Hooks for App {
         Ok(ctx)
     }
 
-    /// The community routes first, then the paid edition's on top, which is the shape the product
+    /// The community routes first, then the enterprise edition's on top, which is the shape the product
     /// describes: `ee/` adds paths rather than replacing any.
     ///
     /// `marketplace`, `stripe`, `oauth` and `inference::gated_routes` take the gate, and the rest
@@ -203,7 +204,7 @@ impl Hooks for App {
     /// widening that set is a product decision rather than something to inherit from where a layer
     /// is attached.
     ///
-    /// `stripe` and `oauth` are gated because billing and SSO login are paid-edition features, which
+    /// `stripe` and `oauth` are gated because billing and SSO login are enterprise-edition features, which
     /// is a decision about what each feature is rather than about what protects it. Both still need
     /// their own configuration to do anything, and the webhook still verifies its Stripe signature;
     /// neither of those made them community routes.
@@ -232,7 +233,7 @@ impl Hooks for App {
             .add_route(controllers::template_library::routes())
             .add_route(controllers::whoami::routes())
             .add_route(controllers::workspaces::routes())
-            // The paid edition's routes, mounted unconditionally; see this function's doc comment
+            // The enterprise edition's routes, mounted unconditionally; see this function's doc comment
             // for which of them carry the gate and why.
             .add_route(crate::ee::controllers::dashboard::routes())
             .add_route(crate::ee::controllers::embedding::routes())
@@ -295,7 +296,7 @@ impl Hooks for App {
         tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
         tasks.register(tasks::maintenance::Maintenance);
         tasks.register(tasks::maintenance_status::MaintenanceStatus);
-        // The paid edition's tasks. Registering only makes them available to `cargo loco task`;
+        // The enterprise edition's tasks. Registering only makes them available to `cargo loco task`;
         // neither runs at boot, so this changes nothing for a deployment that never invokes them.
         tasks.register(crate::ee::tasks::seed_official_templates::SeedOfficialTemplates);
         tasks.register(crate::ee::tasks::create_tenant_api_key::CreateTenantApiKey);

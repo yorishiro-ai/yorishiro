@@ -33,7 +33,7 @@
 //! `Routes::layer` wraps each handler's own `MethodRouter`, so a layer cannot reach a route it was
 //! not attached to. That is exactly why the assertion is worth keeping: it does not guard a leak
 //! this code can produce, it guards the change that widens where the layer is applied. Without it,
-//! moving the gate up to cover every paid route would be a silent product change that no test
+//! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
@@ -242,7 +242,7 @@ async fn stripe_webhook_is_gated() {
 /// a test process is), so 200 here means the request reached the handler and nothing else.
 ///
 /// This is the half that catches a gate applied too broadly: without it, a change that gated every
-/// paid route would still pass the unlicensed assertions.
+/// enterprise route would still pass the unlicensed assertions.
 #[tokio::test]
 #[serial]
 async fn oauth_login_is_gated() {

@@ -1,7 +1,7 @@
 //! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login`.
 //!
 //! All three routes carry the licence gate, so an unlicensed deployment answers `404` to every one of them before any of the below runs.
-//! SSO login is a paid-edition feature, which is a decision about what the feature is; needing configuration on top of that does not make it a community route.
+//! SSO login is a enterprise-edition feature, which is a decision about what the feature is; needing configuration on top of that does not make it a community route.
 //!
 //! They are also opt-in within a licensed deployment: `OAuthConfig::from_env()` resolves to `Ok(None)` unless `YORISHIRO_OAUTH_ISSUER_URL` is set, in which case `authorize`/`callback` return `404 Not Found` before doing anything else, indistinguishable from the route simply not existing.
 //! A set issuer with a missing `client_id`/`client_secret` is a different case, `Err`, and answers `500` naming the misconfiguration rather than either `404`.

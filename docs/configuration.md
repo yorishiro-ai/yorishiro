@@ -46,11 +46,11 @@ An entity written while a reindex is in flight goes through the ordinary guarded
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector width (default: `768`). Every vector in a deployment must share this width; the local provider verifies it at startup with a probe inference, the OpenAI-compatible provider verifies it per response |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | OpenAI-compatible provider only. `true` includes a `dimensions` field in the embeddings request. Default `false`, since some OpenAI-compatible implementations (vLLM, Ollama, LM Studio) reject a `dimensions` field they don't recognise |
 
-### A workspace's own embedding provider (paid edition)
+### A workspace's own embedding provider (enterprise edition)
 
 `PUT /api/workspace/embedding-key` points one workspace's own embedding work at a different provider than the deployment-wide one above, instead of every workspace sharing `YORISHIRO_EMBEDDING_BASE_URL`.
 Not part of the base edition: this is the same split as `PUT /api/workspace/llm-key`, which assigns LLM inference credentials per workspace already.
-Which workspace uses which compute backend is a paid-edition decision.
+Which workspace uses which compute backend is a enterprise-edition decision.
 
 | Field | Description |
 |---|---|
@@ -165,7 +165,7 @@ Once you do set `MAILER_HOST`, `MAILER_USER` and `MAILER_PASSWORD` become requir
 No `config/*.yaml` sets `override_filter`.
 
 loco builds that default from a fixed module whitelist plus **one** entry for the application crate, taken from `Hooks::app_name()` (`loco-rs-1.1.0/src/logger.rs:192-210`).
-One entry is enough because this workspace has one application crate: the paid edition compiles into it rather than being a crate of its own.
+One entry is enough because this workspace has one application crate: the enterprise edition compiles into it rather than being a crate of its own.
 
 A second application crate would need naming in `override_filter`, or its events would be dropped by the filter with nothing in the symptom to point at why.
 
@@ -222,10 +222,10 @@ Postgres's `pg_loco_queue` dequeue uses `FOR UPDATE SKIP LOCKED`, so multiple pr
 `SQLite`'s `sqlt_loco_queue` dequeue uses `BEGIN IMMEDIATE`, which takes the file's one write lock, so a second process pointed at the same `SQLite` file serializes behind the first.
 Running more than one worker process against a `SQLite`-backed queue therefore buys resilience (a second process to pick up work if the first dies) but not throughput.
 
-### A workspace's own worker-class assignment (paid edition)
+### A workspace's own worker-class assignment (enterprise edition)
 
 `PUT /api/workspace/worker-class` pins one workspace's embedding-sync jobs to `tenant_private` or `official` compute instead of the shared pool every workspace uses by default.
-Not part of the base edition: which compute a tenant's jobs run on is the same paid-edition decision that already assigns LLM/embedding credentials per workspace (`PUT /api/workspace/llm-key`, `PUT /api/workspace/embedding-key`).
+Not part of the base edition: which compute a tenant's jobs run on is the same enterprise-edition decision that already assigns LLM/embedding credentials per workspace (`PUT /api/workspace/llm-key`, `PUT /api/workspace/embedding-key`).
 
 | Field | Description |
 |---|---|

@@ -1,4 +1,4 @@
-//! The paid edition.
+//! The enterprise edition.
 //!
 //! Everything under this directory is licensed by `ee/LICENSE`, which adds a Competing Use
 //! restriction and requires a licence key for production use. The root `LICENSE` (BUSL-1.1) covers

@@ -11,14 +11,14 @@ mod system;
 mod template_library;
 mod workspaces;
 
-// The paid edition's own request suites are declared here because one crate has one
+// The enterprise edition's own request suites are declared here because one crate has one
 // integration-test binary.
-// `hosted_setup` is `ee/`'s own setup suite under a non-colliding name: base's `setup` is
+// `ee_setup` is `ee/`'s own setup suite under a non-colliding name: base's `setup` is
 // already declared above, and two modules of that name cannot coexist here.
 mod dashboard;
+mod ee_setup;
 mod embedding;
 mod entity_columns;
-mod hosted_setup;
 mod inference;
 mod licence_gate;
 mod marketplace;
