@@ -19,10 +19,10 @@ version: ${VERSION}
 version_schema: none
 section: net
 priority: optional
-maintainer: Yorishiro Contributors <noreply@yorishiro.ai>
+maintainer: Yorishiro Contributors
 description: |
   An MCP-native, multi-tenant knowledge store with user-defined schemas.
-  Includes the paid features (billing, SSO, marketplace, LLM-backed fill).
+  Includes the enterprise features (billing, SSO, marketplace, LLM-backed fill).
   Those stay disabled until YORISHIRO_LICENSE_KEY is set; everything else works without one.
 vendor: Yorishiro
 homepage: https://github.com/yorishiro-ai/yorishiro
@@ -126,7 +126,7 @@ contents:
   # silently dropped on exactly the systems most likely to be used for a deployment.
   - src: ./LICENSE
     dst: /usr/share/doc/yorishiro/copyright
-  # The paid licence in /etc for the same reason as the environment file above, and not as
+  # The enterprise licence in /etc for the same reason as the environment file above, and not as
   # `copyright.ee`: the `path-include` covers the name `copyright` exactly, so this shipped
   # inside the package and was deleted at unpack on every minimal image -- the enterprise
   # edition delivering everything except the licence it is distributed under.
