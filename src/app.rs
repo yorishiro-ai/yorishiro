@@ -11,6 +11,7 @@ use loco_rs::{
     task::Tasks,
 };
 use std::path::Path;
+use tokio::task::spawn;
 
 #[allow(unused_imports)]
 use crate::{controllers, tasks};
@@ -85,7 +86,15 @@ impl Hooks for App {
         environment: &Environment,
         config: Config,
     ) -> Result<BootResult> {
-        create_app::<Self, Migrator>(mode, environment, config).await
+        let result = create_app::<Self, Migrator>(mode, environment, config).await?;
+
+        // Startup reindex detection: check if any workspace's stored vectors
+        // were embedded with a model that differs from the current provider.
+        // If so, enqueue a non-blocking reindex so the server stays responsive
+        // while vectors are updated.
+        spawn_startup_reindex(result.app_context.clone());
+
+        Ok(result)
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
@@ -323,4 +332,122 @@ impl Hooks for App {
         crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
         Ok(())
     }
+}
+
+/// Spawns a background task that detects and enqueues startup reindex for any workspace
+/// whose stored vectors were embedded with a model that differs from the current provider.
+///
+/// This runs after migrations have applied (see `boot` above), and in a spawned task so the
+/// server stays responsive while the check runs.  On SQLite there is no embedding column,
+/// so this is a no-op.
+fn spawn_startup_reindex(ctx: AppContext) {
+    spawn(async move {
+        // Resolve the deployment's current provider to compare against workspace stamps.
+        let provider = match crate::services::embedding::build_embedding_provider().await {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::warn!(
+                    "startup reindex: failed to build embedding provider, skipping detection: {err}"
+                );
+                return;
+            }
+        };
+        if provider
+            .embed_batch(&[])
+            .await
+            .is_err()
+        {
+            tracing::warn!("startup reindex: embedding provider must be configured");
+            return;
+        }
+
+        // Fetch all workspaces that have an embedding model stamp.
+        // We compare each workspace's stamped model against the provider's model name.
+        // If they differ, enqueue a reindex.
+        use sea_orm::{EntityTrait, QuerySelect};
+
+        let workspaces: Vec<_> = match crate::models::identity_workspaces::Entity::find()
+            .select_only()
+            .column(crate::models::_entities::identity_workspaces::Column::Id)
+            .column(crate::models::_entities::identity_workspaces::Column::EmbeddingModel)
+            .column(crate::models::_entities::identity_workspaces::Column::EmbeddingDimensions)
+            .column_as(
+                crate::models::_entities::identity_tenants::Column::EmbeddingModel,
+                "tenant_model",
+            )
+            .column_as(
+                crate::models::_entities::identity_tenants::Column::EmbeddingDimensions,
+                "tenant_dimensions",
+            )
+            .left_join(crate::models::identity_tenants::Entity)
+            .into_model::<crate::services::embedding::sync::EmbeddingChainRow>()
+            .all(&ctx.db)
+            .await
+        {
+            Ok(ws) => ws,
+            Err(err) => {
+                tracing::error!("startup reindex: failed to list workspaces: {err}");
+                return;
+            }
+        };
+
+        for ws in &workspaces {
+            let Some(stamped_model) = &ws.embedding_model else {
+                // No stamp — no reindex needed. First-write stamping will handle it.
+                continue;
+            };
+
+            if stamped_model.as_str() == provider.model_name() {
+                // Already matches — no reindex needed.
+                continue;
+            }
+
+            tracing::info!(
+                workspace_id = %ws.id,
+                stamped_model = stamped_model,
+                provider_model = provider.model_name(),
+                "startup reindex: model mismatch, enqueueing reindex"
+            );
+
+            // Enqueue reindex. If queue is not configured, log a warning.
+            match ctx.queue_provider {
+                Some(ref queue) => {
+                    let args = serde_json::to_value(super::workers::reindex::ReindexArgs {
+                        workspace_id: ws.id,
+                    });
+                    let Ok(args) = args else {
+                        tracing::error!("startup reindex: failed to serialize args");
+                        continue;
+                    };
+                    let enqueue_result = queue
+                        .enqueue(
+                            ReindexWorker::class_name(),
+                            ReindexWorker::queue(),
+                            args,
+                            None,
+                            None,
+                        )
+                        .await;
+                    if let Err(err) = enqueue_result {
+                        tracing::error!(
+                            workspace_id = %ws.id,
+                            error = %err,
+                            "startup reindex: failed to enqueue reindex"
+                        );
+                    } else {
+                        tracing::info!(
+                            workspace_id = %ws.id,
+                            "startup reindex: enqueue success"
+                        );
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        workspace_id = %ws.id,
+                        "startup reindex: queue not configured, cannot enqueue reindex"
+                    );
+                }
+            }
+        }
+    });
 }

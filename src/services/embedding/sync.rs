@@ -402,11 +402,12 @@ pub struct ResolvedEmbedding {
 
 /// A row returned by `resolve_embedding_chain`: workspace and tenant columns in one query.
 #[derive(sea_orm::FromQueryResult)]
-struct EmbeddingChainRow {
-    embedding_model: Option<String>,
-    embedding_dimensions: Option<i32>,
-    tenant_model: Option<String>,
-    tenant_dimensions: Option<i32>,
+pub struct EmbeddingChainRow {
+    pub id: Uuid,
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
+    pub tenant_model: Option<String>,
+    pub tenant_dimensions: Option<i32>,
 }
 
 /// Resolves the full three-tier embedding chain for a workspace in a single query:
