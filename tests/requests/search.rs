@@ -53,7 +53,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 async fn search_with_no_embedding_provider_configured_returns_502() {
     // Force unconfigured provider even if model files exist in cache: the test asserts on the
     // provider-missing path, not on the local provider succeeding.
-    std::env::set_var("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    unsafe { std::env::set_var("YORISHIRO_EMBEDDING_PROVIDER", "none") };
 
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let Setup { read_key } = setup(&ctx).await;
