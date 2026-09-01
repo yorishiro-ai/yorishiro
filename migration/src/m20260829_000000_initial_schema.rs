@@ -1502,7 +1502,7 @@ impl MigrationTrait for Migration {
             table,
             &[(
                 "identity_api_key_audit_log_action_check",
-                "action IN ('undo_migration_job', 'set_maintenance', 'reindex_embeddings')",
+                "action IN ('undo_migration_job', 'set_maintenance')",
             )],
         )
         .await?;
