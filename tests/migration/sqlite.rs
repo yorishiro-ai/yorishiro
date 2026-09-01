@@ -4,6 +4,7 @@ use sea_orm_migration::sea_orm::Database;
 
 #[tokio::test]
 async fn all_migrations_apply_to_a_fresh_sqlite_file() {
+    crate::migration::require_sqlite_backend();
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir.path().join("yorishiro.sqlite3");
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -17,6 +18,7 @@ async fn all_migrations_apply_to_a_fresh_sqlite_file() {
 
 #[tokio::test]
 async fn all_migrations_roll_back_and_reapply_on_sqlite() {
+    crate::migration::require_sqlite_backend();
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir.path().join("yorishiro.sqlite3");
     let url = format!("sqlite://{}?mode=rwc", db_path.display());

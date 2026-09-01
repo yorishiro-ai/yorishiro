@@ -24,8 +24,20 @@ fn cleanup(path: &str) {
     let _ = std::fs::remove_file(format!("{path}-journal"));
 }
 
+fn require_sqlite_backend() {
+    let url = std::env::var("DATABASE_URL").unwrap_or_default();
+    if !url.starts_with("sqlite://") && !url.starts_with("sqlite::memory:") {
+        eprintln!(
+            "skipping SQLite-only test (DATABASE_URL={} is not SQLite)",
+            url
+        );
+        std::process::exit(0);
+    }
+}
+
 #[tokio::test]
 async fn migration_sqlite_max_connections_10_five_times() {
+    require_sqlite_backend();
     for _run in 1..=RUNS {
         let path = sqlite_path();
         let db = Database::connect(&format!("sqlite://{}?mode=rwc", path))
