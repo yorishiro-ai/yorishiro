@@ -49,12 +49,9 @@ impl Task for ReindexEmbeddings {
         let provider = embedding::build_embedding_provider()
             .await
             .map_err(|err| Error::Message(format!("failed to build embedding provider: {err}")))?;
-        provider
-            .embed_batch(&[])
-            .await
-            .map_err(|err| {
-                Error::Message(format!("embedding provider must be configured: {err}"))
-            })?;
+        provider.embed_batch(&[]).await.map_err(|err| {
+            Error::Message(format!("embedding provider must be configured: {err}"))
+        })?;
 
         // Skip when the workspace already matches and the user didn't ask for force.
         // The REST endpoint (which is the primary entry point) always enqueues to give
@@ -74,7 +71,8 @@ impl Task for ReindexEmbeddings {
                 println!(
                     "workspace {} already stamped with model {:?}; nothing to reindex \
                      (add force:true to reindex despite matching model)",
-                    workspace_id, provider.model_name()
+                    workspace_id,
+                    provider.model_name()
                 );
                 return Ok(());
             }

@@ -47,9 +47,7 @@ pub struct ReindexWorker {
 #[async_trait]
 impl BackgroundWorker<ReindexArgs> for ReindexWorker {
     fn build(ctx: &AppContext) -> Self {
-        Self {
-            ctx: ctx.clone(),
-        }
+        Self { ctx: ctx.clone() }
     }
 
     async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
@@ -61,9 +59,7 @@ impl BackgroundWorker<ReindexArgs> for ReindexWorker {
         provider
             .embed_batch(&[])
             .await
-            .map_err(|e| {
-                loco_rs::Error::Message(format!("provider must be configured: {e}"))
-            })?;
+            .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
 
         // Fetch all entity IDs for this workspace.
         let candidates = Self::fetch_candidates(&self.ctx.db, args.workspace_id).await?;
@@ -88,7 +84,9 @@ impl BackgroundWorker<ReindexArgs> for ReindexWorker {
         if !outcome.failures.is_empty() {
             return Err(loco_rs::Error::Message(format!(
                 "reindex incomplete: {} entities, {} reindexed, {} failed",
-                outcome.total, outcome.reindexed, outcome.failures.len()
+                outcome.total,
+                outcome.reindexed,
+                outcome.failures.len()
             )));
         }
 
@@ -104,16 +102,15 @@ impl ReindexWorker {
         db: &DatabaseConnection,
         workspace_id: Uuid,
     ) -> loco_rs::Result<Vec<ReindexCandidateId>> {
-        let candidates: Vec<_> = ReindexCandidateId::find_by_statement(
-            Statement::from_sql_and_values(
+        let candidates: Vec<_> =
+            ReindexCandidateId::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
                 "SELECT id FROM content_entities WHERE workspace_id = $1",
                 [workspace_id.into()],
-            ),
-        )
-        .all(db)
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+            ))
+            .all(db)
+            .await
+            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
         Ok(candidates)
     }
 }
@@ -128,13 +125,9 @@ impl ReindexWorker {
 ///
 /// # Errors
 /// Returns `loco_rs::Error` when the queue is configured but the enqueue fails.
-pub async fn enqueue_reindex(
-    ctx: &AppContext,
-    workspace_id: Uuid,
-) -> loco_rs::Result<String> {
-    let args = serde_json::to_value(ReindexArgs { workspace_id }).map_err(|e| {
-        loco_rs::Error::Message(format!("serialize reindex args: {e}"))
-    })?;
+pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::Result<String> {
+    let args = serde_json::to_value(ReindexArgs { workspace_id })
+        .map_err(|e| loco_rs::Error::Message(format!("serialize reindex args: {e}")))?;
 
     let job_id = ctx
         .queue_provider

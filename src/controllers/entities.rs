@@ -166,9 +166,13 @@ pub async fn reindex_workspace(
         )));
     }
 
-    let job_id = reindex::enqueue_reindex(&ctx, workspace_id).await.map_err(|e| {
-        ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(e.to_string())))
-    })?;
+    let job_id = reindex::enqueue_reindex(&ctx, workspace_id)
+        .await
+        .map_err(|e| {
+            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+                e.to_string()
+            )))
+        })?;
 
     // Recorded on the same RLS-scoped transaction as the request itself: this is a
     // migration-scope operation that the audit log must capture.

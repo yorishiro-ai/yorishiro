@@ -292,7 +292,9 @@ impl Hooks for App {
         queue
             .register(EmbeddingSyncWorkerOfficial::build(ctx))
             .await?;
-        queue.register(EmbeddingSyncWorkerShared::build(ctx)).await?;
+        queue
+            .register(EmbeddingSyncWorkerShared::build(ctx))
+            .await?;
         queue.register(ReindexWorker::build(ctx)).await
     }
 
@@ -352,11 +354,7 @@ fn spawn_startup_reindex(ctx: AppContext) {
                 return;
             }
         };
-        if provider
-            .embed_batch(&[])
-            .await
-            .is_err()
-        {
+        if provider.embed_batch(&[]).await.is_err() {
             tracing::warn!("startup reindex: embedding provider must be configured");
             return;
         }
