@@ -33,7 +33,7 @@ impl Default for SearchQuery {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct SearchHit {
     pub entity: EntityRecord,
     /// pgvector cosine distance (the `<=>` operator).
@@ -42,7 +42,7 @@ pub struct SearchHit {
     pub distance: Option<f64>,
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct SearchRow {
     id: Uuid,
     workspace_id: Uuid,

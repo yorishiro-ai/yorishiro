@@ -14,7 +14,7 @@ use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::content_entities;
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct CreateEntityArgs {
     /// Name of the schema this entity conforms to.
     /// The workspace's current active version is used.
@@ -25,12 +25,12 @@ pub struct CreateEntityArgs {
     pub data: Value,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct GetEntityArgs {
     pub id: Uuid,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct UpdateEntityArgs {
     pub id: Uuid,
     /// Replacement entity body.
@@ -38,17 +38,17 @@ pub struct UpdateEntityArgs {
     pub data: Value,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct DeleteEntityArgs {
     pub id: Uuid,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct MigrationDryRunArgs {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.

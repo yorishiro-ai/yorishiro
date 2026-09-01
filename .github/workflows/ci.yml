@@ -2,8 +2,8 @@ name: CI
 
 # Covers this repository's layout: the root package (`yorishiro`) and `migration/`, with the paid
 # edition compiled in as the `ee/` module rather than a package of its own.
-# Deliberately minimal: cargo check/clippy/fmt-check/test against a Postgres service, matching what `make check clippy fmt-check test` already runs locally.
-# master's own ci.yml is untouched; it is correct for master's own structure.
+# Deliberately minimal: cargo check/clippy/fmt-check runs once, then test runs in parallel
+# for postgres and sqlite backends via a matrix.
 
 on:
   push:
@@ -29,15 +29,49 @@ concurrency:
 permissions:
   checks: write
   contents: read
+  actions: write
 
 env:
   CARGO_TERM_COLOR: always
-  DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+  RUSTC_WRAPPER: "sccache"
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Run sccache-action
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check
+        run: cargo check --locked --workspace
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --tests -- -D warnings
+
+      - name: Show sccache stats
+        run: sccache --show-stats
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - backend: postgres
+            loco_env: test_postgres
+            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          # - backend: sqlite
+          #   loco_env: test_sqlite
+          #   database_url: 'sqlite::memory:'
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -52,7 +86,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-
     steps:
       - uses: actions/checkout@v7
 
@@ -60,38 +93,23 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # Request tests each create their own throwaway database via `CREATE DATABASE`, which copies `template1`: a fresh Postgres image's template1 carries neither extension, and every request test would fail migrating content_entities.embedding (pgvector) or the trigram index (pg_trgm) without this.
-      # See .claude/rules/testing.md.
       - name: Install pgvector and pg_trgm into template1
+        if: matrix.backend == 'postgres'
         run: |
           PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d template1 \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
-      # sccache caches compiled objects by content hash, complementing rust-cache's file-level target/ caching.
-      # Installing it is separate from using it: the action exports SCCACHE_PATH and nothing else, so without the "Route rustc through sccache" step below sccache is present and never invoked, and without SCCACHE_GHA_ENABLED it caches to local disk on an ephemeral runner, which can never hit.
-      - uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Run sccache-action
+        uses: mozilla-actions/sccache-action@v0.0.11
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # PRs can only ever restore from develop's cache and their own, never write back to develop's key, so only a push to develop needs to save.
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-
-      # After rust-cache, deliberately: rust-cache folds RUST*-prefixed env vars into its cache key, so setting RUSTC_WRAPPER before it would change the key and orphan the cache a save-if run already wrote.
-      # Still before the first cargo invocation below, which is all sccache needs.
-      - name: Route rustc through sccache
-        run: |
-          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check
-        run: cargo check --locked --workspace
-
-      - name: Clippy
-        run: cargo clippy --locked --workspace --tests -- -D warnings
-
-      # Reaches migration/'s own tests (including the two SQLite-file migration tests, run with no DATABASE_URL and no feature flag: SeaORM's DatabaseConnection is runtime-polymorphic across backends here, so there is no compile-time "sqlite" feature to select the way master's pre-rebuild Engine-generic layer needed) because it runs against the whole workspace, not a single -p package.
-      - name: Test
+      - name: Run tests
+        env:
+          LOCO_ENV: ${{ matrix.loco_env }}
+          DATABASE_URL: ${{ matrix.database_url }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
         run: cargo test --locked --workspace
+
+      - name: Show sccache stats
+        run: sccache --show-stats

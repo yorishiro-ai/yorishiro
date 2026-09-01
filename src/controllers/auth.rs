@@ -18,7 +18,7 @@ use crate::models::identity_api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole, WorkspaceSummary};
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SignupRequest {
     /// The plaintext token from an `admin create-invite`-issued invitation.
     /// Omit it to create a fresh tenant and join it as `Owner` instead.
@@ -29,7 +29,7 @@ pub struct SignupRequest {
     pub display_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct SignupResponse {
     pub user_id: Uuid,
     pub email: String,
@@ -140,7 +140,7 @@ async fn signup_without_invite(
     ))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
@@ -150,7 +150,7 @@ pub struct LoginRequest {
     pub workspace_id: Option<Uuid>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct LoginResponse {
     /// The freshly issued API key's plaintext.
     /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.

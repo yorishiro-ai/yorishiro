@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates tests/fixtures/e5_reference_embeddings.json from a real sentence-transformers run of intfloat/multilingual-e5-base.
+"""Generates tests/fixtures/multilingual-e5-base_reference_embeddings.json from a real sentence-transformers run of intfloat/multilingual-e5-base.
 
 Unlike tests/fixtures/nomic_reference_embeddings.json (generated once from the now-removed ort implementation and irreplaceable), this fixture is regenerable: rerun this script inside the Docker image built from this directory's Dockerfile whenever the pinned revision changes.
 

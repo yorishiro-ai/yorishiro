@@ -9,7 +9,7 @@ use crate::models::content_schemas::{self, SchemaRecord};
 
 /// One line of a JSONL export: a tagged union so schema/entity/relation records can be told apart on read-back without a separate line-position convention.
 /// `Deserialize` is derived so `models::import::import_jsonl` can read the same shape back in.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
 pub enum ExportRecord {
     Schema(SchemaRecord),

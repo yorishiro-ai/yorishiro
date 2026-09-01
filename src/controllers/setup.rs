@@ -27,7 +27,7 @@ fn wizard_enabled() -> bool {
     matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct SetupStatusResponse {
     /// True when the wizard is enabled and no tenant exists yet: the client should show the setup form instead of the login form.
     pub setup_required: bool,
@@ -42,14 +42,14 @@ pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRes
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SetupRequest {
     pub email: String,
     pub password: String,
     pub display_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct SetupResponse {
     pub user_id: Uuid,
     pub email: String,

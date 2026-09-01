@@ -33,7 +33,7 @@ SQLiteではベクトル検索が移植されていないため、`content_entit
 
 すべての書き込みは、ベクトルを書く前にワークスペース自身の刻印(`identity_workspaces.embedding_model`/`embedding_dimensions`)と設定済みプロバイダを照合し、一致しなければ`422`で拒否する(`sync_embedding`の書き込み時モデルチェック、`services/embedding/sync.rs`)。
 これが存在する理由は、`content_entities.embedding`が幅の決まった単一カラムだからである。
-異なる2つのモデルが同じ幅を偶然生成することはあり得(現時点ではnomic-embed-text-v1.5とmultilingual-e5-baseはどちらも768次元)、Postgresにはどのモデルがそのベクトルを生成したかを知る手段が無く、幅しか分からない。
+異なる2つのモデルが同じ幅を偶然生成することはあり得(現時点ではサポートされているモデルはどちらも768次元)、Postgresにはどのモデルがそのベクトルを生成したかを知る手段が無く、幅しか分からない。
 このチェックが無ければ、デプロイの`YORISHIRO_EMBEDDING_PROVIDER`/`YORISHIRO_LOCAL_MODEL`をワークスペースが埋め込まれたときとは別のモデルに向けてしまった場合、比較不能なベクトルが何のエラーも出さずに書き込まれ、検索の質だけが静かに落ちる。
 刻印の無いワークスペース(両方の値が`NULL`)は書き込み時点でデプロイ既定値を引き継ぎ、`sync_embedding`は最初の成功した埋め込み時にそのプロバイダのモデルと次元数を刻印する。テナントはワークスペース全体の既定値として`embedding_model`/`embedding_dimensions`を設定できる。ワークスペースの刻印がテナント既定を優先し、テナント既定がデプロイ既定を優先する。
 
@@ -51,7 +51,7 @@ REST APIでもリインデックスを登録できる。`POST /api/migration-job
 
 | 変数 | 説明 |
 |---|---|
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local`でローカルプロバイダを選択する(後述)。それ以外の値、または未設定の場合はOpenAI互換プロバイダを選択する |
+| `YORISHIRO_EMBEDDING_PROVIDER` | プロバイダの選択: `none`で埋め込みを完全に無効化。`local`でローカルプロバイダを選択。`YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL`の両方が未設定の場合もローカルプロバイダを選択。`YORISHIRO_EMBEDDING_BASE_URL`と`YORISHIRO_EMBEDDING_MODEL`の両方が設定されている場合、この変数より優先されOpenAI互換プロバイダを選択する |
 | `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI互換プロバイダのみ。OpenAI互換の埋め込みエンドポイントのベースURL(LM Studio、Ollama、vLLM、または実際のOpenAI)。例: `http://localhost:11434`。`YORISHIRO_EMBEDDING_MODEL`とあわせて設定が必要。どちらか一方でも未設定だと、起動は埋め込みバックエンド未設定のまま進み(失敗しない)、埋め込み呼び出しはすべてリクエスト時に`ProviderUnreachable`で失敗するようになる |
 | `YORISHIRO_EMBEDDING_MODEL` | OpenAI互換プロバイダのみ。埋め込みリクエストの`model`フィールドに送られるモデル名で、プロバイダごとに自分自身の名前を刻む。ローカルプロバイダはこの変数と無関係に読み込んだモデルを刻印し、埋め込みプロバイダが何も設定されずに作成されたワークスペースは刻印を持たない(`NULL`)。埋め込みプロバイダが設定された状態で最初の埋め込みが成功すると、`sync_embedding`がそのワークスペースにモデルと次元数を刻印する |
 | `YORISHIRO_EMBEDDING_API_KEY` | OpenAI互換プロバイダのみ。`YORISHIRO_EMBEDDING_BASE_URL`に送るベアラートークン。既定は空文字列で、トークンを確認しないローカルサーバー(LM Studio、Ollama)にはこれが正しい |
@@ -88,16 +88,15 @@ base版には含まれない。
 ### ローカルプロバイダ(`YORISHIRO_EMBEDDING_PROVIDER=local`)
 
 `safetensors`形式のチェックポイントからプロセス内でモデルを実行し、外部の埋め込みサービスを使わない。
-選べるモデルは2つあり、どちらも768次元である。`nomic-embed-text-v1.5`(`candle-transformers`の`nomic_bert`、RoPEとSwiGLU MLPを持つBERT亜種)と`multilingual-e5-base`(`candle-transformers`の`xlm_roberta`)。
-プーリングはどちらのモデルでも常にmeanプーリングである。両方ともそう学習されているため、プーリング方式を選ばせる余地自体が無い。
+1つのモデルがある: `multilingual-e5-base` (`candle-transformers`の`xlm_roberta`)、768次元。
+プーリングは常にmeanプーリングである。そう学習されているため、プーリング方式を選ばせる余地自体が無い。
 
 `multilingual-e5-base`はクエリ/パッセージのプレフィックス付きテキストで学習されている。検索クエリは`"query: " + テキスト`として、保存するドキュメントは`"passage: " + テキスト`として埋め込まれ、これはこのプロバイダが自動的に付与するため呼び出し側からは見えない。
-`nomic-embed-text-v1.5`にこの種のプレフィックスは無い。
 
 | 変数 | 説明 |
 |---|---|
-| `YORISHIRO_LOCAL_MODEL` | どのモデルを読み込むか。`nomic-embed-text-v1.5`または`multilingual-e5-base`。未設定の既定は`multilingual-e5-base`である。このコードベースの検索とrecallは英語専用ではないためである。認識できない値は、既定へ黙って倒れるのではなく、有効な値を名指ししたメッセージとともに起動を失敗させる |
-| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`、どのモデルを選んでも変わらない)。選択中のモデル自身の上限には収まっている必要がある(nomic-embed-text-v1.5は`8192`、multilingual-e5-baseは`512`)。既定値は両方の上限を既に満たしているので、モデルに合わせて調整する必要はない |
+| `YORISHIRO_LOCAL_MODEL` | どのモデルを読み込むか。`multilingual-e5-base`。未設定の既定は`multilingual-e5-base`である。このコードベースの検索とrecallは英語専用ではないためである。認識できない値は、既定へ黙って倒れるのではなく、有効な値を名指ししたメッセージとともに起動を失敗させる。`nomic-embed-text-v1.5`は削除され、置き換え先と`reindex_embeddings`を名指しするメッセージとともに起動失敗する。 |
+| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`)。選択中のモデル自身の上限には収まっている必要がある(768次元のモデルの上限は全て `512` 以下に収まっている)。既定値はどのモデルの上限も満たしているので、モデルに合わせて調整する必要はない |
 
 デプロイに既に埋め込み済みのワークスペースがある状態で`YORISHIRO_LOCAL_MODEL`を切り替えても、それだけではどのワークスペースも新しいモデルには移らない。書き込み時モデルチェック(前述の「ワークスペースを別の埋め込みモデルへ移す」)が、旧モデルのまま刻印されたワークスペースへの書き込みを、そのワークスペースに対して`reindex_embeddings`が実行されるまで拒否し続ける。
 
@@ -175,13 +174,20 @@ base版には含まれない。
 
 ## `config/production.yaml`が必要とする変数
 
-必要なのは次の3つだけで、それ以外は無い。
+未設定の`production.yaml`は、外部依存なしでローカルのSQLiteファイルに対して起動する。PostgresもRedisも埋め込みバックエンドも不要で、単一テナントの試用に十分である。
+データベースの既定値は`sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc`、`HOST`は`http://localhost`、キューは`DATABASE_URL`のスキームから派生する。
 
-| 変数 | 説明 |
-|---|---|
-| `DATABASE_URL` | データベースの接続URI。本番のデータベースに安全な既定値は存在しないため、既定値を持たない |
-| `QUEUE_URL` | キューバックエンド自身のURI。どの`queue.kind`でも必要になる(次節を参照) |
-| `HOST` | この配備が外部から到達されるホスト名またはアドレス |
+必要に応じて上書きする:
+
+| 変数 | 既定値 | 説明 |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | RLS、マルチテナンシー、ベクトル検索には`postgres://`を指定 |
+| `HOST` | `http://localhost` | 外部から到達可能なホスト名またはアドレス |
+| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL`から派生(`postgres`→`Postgres`、`sqlite`→`Sqlite`) | 分離されたキューバックエンドが必要な場合のみ`Redis`を設定 |
+| `QUEUE_URL` | SQLite/Postgres使用時は`DATABASE_URL`を共用 | `YORISHIRO_QUEUE_KIND=Redis`の場合のみ必須 |
+| `YORISHIRO_EMBEDDING_BASE_URL` | 未設定 | OpenAI互換埋め込みエンドポイント。`YORISHIRO_EMBEDDING_MODEL`とあわせてそのプロバイダを選択 |
+| `YORISHIRO_EMBEDDING_MODEL` | 未設定 | OpenAI互換プロバイダのモデル名 |
+| `YORISHIRO_EMBEDDING_PROVIDER` | 未設定(`local`) | `none`で無効化、`local`でローカルプロバイダを選択。未設定もローカルを選択 |
 
 これ以外にこのファイルが読む値は、既定値を持つか、設定したときだけ有効になるオプトインのいずれかである。
 
@@ -233,18 +239,18 @@ loco-rsは3種のキュープロバイダ(Postgres、SQLite、Redis/Valkey。`Qu
 | 変数 | 説明 |
 |---|---|
 | `YORISHIRO_QUEUE_KIND` | `Sqlite`(`development.yaml`での既定。同ファイルのデータベース既定値に合わせてあり、未設定のまま起動してもPostgresを必要としない)、`Postgres`、`Redis`のいずれか。`Redis`で起動するには`worker_redis`という Cargo feature のコンパイルが必要(このワークスペースの`Cargo.toml`で有効化済み)。無効のまま起動すると"No queue provider feature was selected and compiled"で失敗する |
-| `QUEUE_URL` | キューバックエンド自身の接続URI。`development.yaml`では、両者のバックエンドが一致していれば`DATABASE_URL`が既定値になる。したがって未設定のまま起動すればキューはデータベースと同じSQLiteファイルに入り、PostgreSQLのデプロイならキューも同じPostgreSQLインスタンスに入る。一致しない場合、つまりPostgreSQLの`DATABASE_URL`に対して`YORISHIRO_QUEUE_KIND=Sqlite`を明示した場合は、スキームの異なるURIを渡す代わりにキュー専用のSQLiteファイルにフォールバックする。`production.yaml`はこのファイル自身の「暗黙のフォールバックを許さない」方針どおり、どの`kind`でも既定値なしで必須とする |
+| `QUEUE_URL` | キューバックエンド自身の接続URI。`YORISHIRO_QUEUE_KIND`が`DATABASE_URL`から派生(`Sqlite`または`Postgres`)している場合、既定値は`DATABASE_URL`。デプロイが未設定ならキューはデータベースと同じファイル/インスタンスに入る。`YORISHIRO_QUEUE_KIND=Redis`の場合のみ必須。`DATABASE_URL`に対して`YORISHIRO_QUEUE_KIND`を手動で`Sqlite`に設定した場合、スキームの異なるURIを渡す代わりにキュー専用のSQLiteファイルにフォールバックする |
 | `YORISHIRO_QUEUE_WORKERS` | ジョブを並列に取り出すワーカー数(既定: `2`)。Postgresは`FOR UPDATE SKIP LOCKED`で行を確保するため、この値を上げるとそのバックエンドでは実際に並列度が上がる。SQLite は`BEGIN IMMEDIATE`により、この値に関わらずデキューが直列化される |
 | `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | ジョブが`processing`のまま留まってよい分数で、これを超えるとreaperがそのジョブを`Queued`へ戻す(既定: `30`)。Locoのreaperはopt-inで既定では無効。無効のままだと、実行中に落ちたワーカー(クラッシュ、強制終了)が持っていたジョブは`processing`のまま永久に残る。ほかの何もそのジョブを`processing`から動かさず、`fail_job`は`perform`自体がエラーを返したときにしか走らないためである。健全なジョブが正当にかかりうる最長時間より大きい値を設定すること。そうしないと、reaperはまだ本当に進行中の作業を戻してしまう |
 
 `development.yaml`は`YORISHIRO_QUEUE_WORKERS`/`YORISHIRO_QUEUE_REAPER_AGE_MINUTES`を読む代わりに、同じreaperを固定値(`num_workers: 2`、`age_minutes: 10`)で有効化している。
 ローカルの開発環境にはデプロイごとに調整する理由が無いためである。
 `production.yaml`は両方とも読む。
-`config/test.yaml`には`queue:`ブロック自体が無く(理由は`.claude/rules/testing.md`を参照)、ここでの説明はいずれも当てはまらない。
+`config/test_postgres.yaml`には`queue:`ブロック自体が無く(理由は`.claude/rules/testing.md`を参照)、ここでの説明はいずれも当てはまらない。
 
-`config/sqlite.yaml`(手動確認用のSQLite階層、`docs/ja/sqlite.md`)も`queue: kind: Sqlite`と`workers.mode: BackgroundQueue`を、他の2環境と同じ形で設定している。
 loco-rsのSQLiteキュープロバイダ(`bgworker::sqlt`)は、アプリ自身のSQLite接続とは独立した`sqlx::SqlitePool`を自前で張る。
 `db.rs`のRLS対応プール経由ではない(SQLiteにはそもそもRLSが無い)ので、これは同じファイルであれ別のファイルであれ、本当に独立したプールになる。
+`production.yaml`がSQLiteデータベースを使う場合、そのキュープールはアプリ自身と同じファイルに対して張られる。
 実ファイルに対して直接計測した結果: アプリが同じファイルに対して書き込みトランザクションを開いたままの状態でキュー側から並行して書き込むと、失敗はせず、sqlx自身の既定値である5秒の`busy_timeout`を待った上でロック解放後に成功した。
 このコードベース自身の実装では、embedding-syncのenqueue呼び出しはリクエスト自身の書き込みトランザクションが既にコミットされた後にしか実行されないため、この状況が1つのリクエストの中で発生することはない。
 問題になり得るとすれば、最初のリクエストの書き込みトランザクションがまだ開いている間に、別のリクエストが本当に並行して走るケースだけである。

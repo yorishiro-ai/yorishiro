@@ -18,7 +18,7 @@ use crate::models::identity_maintenance::{self, MaintenanceMode, MaintenanceStat
 
 /// The state as the API reports it.
 /// `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct MaintenanceResponse {
     /// `off`, `read-only` or `full-lock`.
     pub mode: String,
@@ -39,7 +39,7 @@ impl From<MaintenanceState> for MaintenanceResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SetMaintenanceRequest {
     /// `off`, `read-only` or `full-lock`, spelled as the CLI spells them.
     pub mode: String,

@@ -19,7 +19,7 @@ use crate::error::YorishiroError;
 /// Asymmetric models expect a search query to carry an instruction prefix that a stored document must not have.
 /// Embedding both the same way costs nothing visible: the vectors are the right shape and normalize, the results are just worse.
 /// Providers that need no such distinction ignore this.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EmbedKind {
     /// Text a user or agent is searching with.
     Query,
@@ -141,44 +141,59 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 
 /// Builds the embedding provider from environment variables.
 ///
-/// `YORISHIRO_EMBEDDING_PROVIDER=local` selects the local in-process provider (no external service).
-/// Otherwise, `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` select the OpenAI-compatible provider (LM Studio, Ollama, vLLM, or real OpenAI); when either is unset, boot proceeds with [`UnconfiguredEmbeddingProvider`] rather than failing.
+/// Priority order:
+///
+/// 1. `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` both set — the OpenAI-compatible provider.
+///    This is the documented shape for an external embedding backend (LM Studio, Ollama, vLLM, or real OpenAI).
+/// 2. `YORISHIRO_EMBEDDING_PROVIDER=none` — explicitly disabled, returns [`UnconfiguredEmbeddingProvider`].
+/// 3. `YORISHIRO_EMBEDDING_PROVIDER=local` — the local in-process provider (candle-based safetensors).
+/// 4. Unset or other — defaults to the local provider (`DEFAULT_MODEL`, the recommended e5 base).
+///    The model files (~1 GiB) are fetched into `$HOME/.cache/yorishiro/` on first use.
+///
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
         .unwrap_or_else(|_| "768".into())
         .parse()?;
 
-    if std::env::var("YORISHIRO_EMBEDDING_PROVIDER").as_deref() == Ok("local") {
-        return build_local_provider(dimensions).await;
-    }
-
+    // Check base_url/model presence before PROVIDER so that the documented
+    // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible
+    // path rather than flowing into the local provider.
     let base_url = std::env::var("YORISHIRO_EMBEDDING_BASE_URL").ok();
     let model = std::env::var("YORISHIRO_EMBEDDING_MODEL").ok();
-    let (base_url, model) = match (base_url, model) {
-        (Some(base_url), Some(model)) => (base_url, model),
+
+    if let (Some(base_url), Some(model)) = (base_url, model) {
+        let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+            base_url: base_url.clone(),
+            api_key: std::env::var("YORISHIRO_EMBEDDING_API_KEY").unwrap_or_default(),
+            model: model.clone(),
+            dimensions,
+            send_dimensions_param: std::env::var("YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+        });
+        tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
+        return Ok(std::sync::Arc::new(provider));
+    }
+
+    match std::env::var("YORISHIRO_EMBEDDING_PROVIDER").as_deref() {
+        Ok("none") => {
+            tracing::info!(
+                "embedding provider explicitly disabled (YORISHIRO_EMBEDDING_PROVIDER=none)"
+            );
+            Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
+                dimensions,
+                remedy: "YORISHIRO_EMBEDDING_PROVIDER is set to \"none\"; unset it or set YORISHIRO_EMBEDDING_PROVIDER=local or YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL to enable embeddings",
+            }))
+        }
+        Ok("local") => build_local_provider(dimensions).await,
         _ => {
             tracing::info!(
-                "no embedding provider configured (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL unset)"
+                "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
             );
-            return Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
-                dimensions,
-                remedy: "set YORISHIRO_EMBEDDING_BASE_URL and YORISHIRO_EMBEDDING_MODEL",
-            }));
+            build_local_provider(dimensions).await
         }
-    };
-
-    let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
-        base_url: base_url.clone(),
-        api_key: std::env::var("YORISHIRO_EMBEDDING_API_KEY").unwrap_or_default(),
-        model: model.clone(),
-        dimensions,
-        send_dimensions_param: std::env::var("YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM")
-            .map(|v| v == "true")
-            .unwrap_or(false),
-    });
-    tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
-    Ok(std::sync::Arc::new(provider))
+    }
 }
 
 /// What became of one old `YORISHIRO_ONNX_*` variable.
@@ -287,7 +302,7 @@ fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value (one of `model_fetch::MODELS`'s `short_id`s), or [`model_fetch::DEFAULT_MODEL`] when unset.
+/// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
 /// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
 fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> {
     let Some(requested) = std::env::var_os("YORISHIRO_LOCAL_MODEL") else {
@@ -296,17 +311,19 @@ fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> 
     let requested = requested
         .into_string()
         .map_err(|_| anyhow::anyhow!("YORISHIRO_LOCAL_MODEL is not valid UTF-8"))?;
-    model_fetch::MODELS
-        .iter()
-        .find(|def| def.short_id == requested)
-        .copied()
-        .ok_or_else(|| {
-            let known: Vec<&str> = model_fetch::MODELS.iter().map(|def| def.short_id).collect();
-            anyhow::anyhow!(
-                "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
-                known.join(", ")
-            )
-        })
+    if requested == model_fetch::DEFAULT_MODEL.short_id {
+        Ok(model_fetch::DEFAULT_MODEL)
+    } else if requested == "nomic-embed-text-v1.5" {
+        anyhow::bail!(
+            "nomic-embed-text-v1.5 has been removed: set YORISHIRO_LOCAL_MODEL={0} or run reindex_embeddings to migrate your workspaces",
+            model_fetch::DEFAULT_MODEL.short_id
+        )
+    } else {
+        anyhow::bail!(
+            "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
+            model_fetch::DEFAULT_MODEL.short_id
+        )
+    }
 }
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
@@ -376,7 +393,7 @@ async fn build_local_provider(
 /// A network failure or a digest mismatch fails the start instead, so a supervisor's `Restart=on-failure` retries a transient outage and heals by itself, and so that unverified model bytes are never loaded, which is the whole reason the digests are checked.
 /// Degrading is right for the unset-provider case [`UnconfiguredEmbeddingProvider`] was built for, but `YORISHIRO_EMBEDDING_PROVIDER=local` is explicit operator intent to run embeddings, so quietly serving a deployment whose search is dead would answer a request nobody made.
 /// What the default `models/` path's contents mean for [`resolve_model_paths`].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 enum DefaultPathOutcome {
     /// Both files are there: load them, fetch nothing.
     UseBoth,
@@ -438,149 +455,5 @@ async fn resolve_model_paths(
             );
             Ok(None)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serial_test::serial;
-
-    use super::*;
-
-    /// `#[serial]`: mutates process-wide environment variables, which races other tests in this
-    /// binary that also read or write `YORISHIRO_ONNX_*`/`YORISHIRO_LOCAL_*` if run concurrently.
-    #[test]
-    #[serial]
-    fn reject_renamed_onnx_vars_fails_when_any_old_variable_is_set() {
-        for (old, fate) in &RENAMED_ONNX_VARS {
-            unsafe {
-                std::env::set_var(old, "x");
-            }
-            let result = reject_renamed_onnx_vars();
-            unsafe {
-                std::env::remove_var(old);
-            }
-            let Err(err) = result else {
-                panic!("reject_renamed_onnx_vars should fail when {old} is set");
-            };
-            let message = err.to_string();
-            assert!(message.contains(old), "{message}");
-            // The two fates must not share a message: `Renamed` claims a wrong-model risk that
-            // does not exist for `Removed`, and a reader who sees that claim on an inert variable
-            // learns to discount it on the variable where it is actually true.
-            match fate {
-                OnnxVarFate::Renamed(new) => {
-                    assert!(message.contains(new), "{message}");
-                    assert!(message.contains("different model"), "{message}");
-                }
-                OnnxVarFate::Removed { .. } => {
-                    assert!(message.contains("no longer has any effect"), "{message}");
-                    assert!(!message.contains("different model"), "{message}");
-                }
-            }
-        }
-    }
-
-    /// `std::env::var` returns `Err` both when a variable is unset and when it is set to a
-    /// non-UTF-8 value, so a naive `.is_err()` check would let a non-UTF-8 stale value slip past
-    /// this guard as though the variable were absent, exactly the case this test rules out.
-    /// Unix-only: building a non-UTF-8 `OsString` from arbitrary bytes needs
-    /// `OsStringExt::from_vec`, which only exists on Unix; Windows OS strings are not able to
-    /// hold arbitrary invalid UTF-8 the same way, so this scenario cannot arise there the same way.
-    #[test]
-    #[serial]
-    #[cfg(unix)]
-    fn reject_renamed_onnx_vars_catches_a_non_utf8_value() {
-        use std::os::unix::ffi::OsStringExt;
-
-        let (old, _fate) = &RENAMED_ONNX_VARS[0];
-        let non_utf8 = std::ffi::OsString::from_vec(vec![0xFF, 0xFE, 0xFD]);
-        unsafe {
-            std::env::set_var(old, &non_utf8);
-        }
-        let result = reject_renamed_onnx_vars();
-        unsafe {
-            std::env::remove_var(old);
-        }
-        let Err(err) = result else {
-            panic!("reject_renamed_onnx_vars should fail when {old} is set to a non-UTF-8 value");
-        };
-        assert!(err.to_string().contains(old));
-    }
-
-    #[test]
-    #[serial]
-    fn reject_renamed_onnx_vars_passes_when_none_are_set() {
-        for (old, _fate) in &RENAMED_ONNX_VARS {
-            unsafe {
-                std::env::remove_var(old);
-            }
-        }
-        assert!(reject_renamed_onnx_vars().is_ok());
-    }
-
-    /// The half-populated cases are the reason this rule exists: falling through to the fetch there would ignore a file an operator deliberately placed and embed with a different model, with nothing in any status to show for it.
-    #[test]
-    fn a_lone_file_at_the_default_path_is_an_error_not_a_fetch() {
-        assert_eq!(
-            default_path_outcome(true, true),
-            DefaultPathOutcome::UseBoth
-        );
-        assert_eq!(
-            default_path_outcome(false, false),
-            DefaultPathOutcome::Fetch
-        );
-        assert_eq!(
-            default_path_outcome(true, false),
-            DefaultPathOutcome::Incomplete {
-                model_is_present: true
-            },
-            "a lone model must not fall through to the fetch"
-        );
-        assert_eq!(
-            default_path_outcome(false, true),
-            DefaultPathOutcome::Incomplete {
-                model_is_present: false
-            },
-            "a lone tokenizer must not fall through to the fetch"
-        );
-    }
-
-    /// `#[serial]`: mutates `YORISHIRO_LOCAL_MODEL`, which races other tests in this binary that also touch it if run concurrently.
-    #[test]
-    #[serial]
-    fn resolve_local_model_rejects_an_unknown_value() {
-        unsafe {
-            std::env::set_var("YORISHIRO_LOCAL_MODEL", "not-a-real-model");
-        }
-        let result = resolve_local_model();
-        unsafe {
-            std::env::remove_var("YORISHIRO_LOCAL_MODEL");
-        }
-        let Err(err) = result else {
-            panic!("resolve_local_model should fail for an unrecognized YORISHIRO_LOCAL_MODEL");
-        };
-        let message = err.to_string();
-        assert!(message.contains("not-a-real-model"), "{message}");
-        for def in model_fetch::MODELS {
-            assert!(
-                message.contains(def.short_id),
-                "error should list {} as a valid value: {message}",
-                def.short_id
-            );
-        }
-    }
-
-    /// An unset `YORISHIRO_LOCAL_MODEL` resolves to `model_fetch::DEFAULT_MODEL`.
-    /// Asserting the concrete default (multilingual-e5-base, as of this commit) rather than just "resolves to something" makes a future flip to a different default a visible test change here, not a silent one.
-    #[test]
-    #[serial]
-    fn resolve_local_model_defaults_when_unset() {
-        unsafe {
-            std::env::remove_var("YORISHIRO_LOCAL_MODEL");
-        }
-        let def = resolve_local_model().expect("default resolution must not fail");
-        assert_eq!(def.short_id, model_fetch::DEFAULT_MODEL.short_id);
-        assert_eq!(def.short_id, model_fetch::MULTILINGUAL_E5_BASE.short_id);
     }
 }

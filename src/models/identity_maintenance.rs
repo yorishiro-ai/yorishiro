@@ -32,7 +32,7 @@ impl ActiveModel {}
 impl Entity {}
 
 /// What the deployment is currently refusing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MaintenanceMode {
     /// Serving normally.
@@ -64,7 +64,7 @@ impl MaintenanceMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct MaintenanceState {
     pub mode: MaintenanceMode,
     pub retry_after: u32,

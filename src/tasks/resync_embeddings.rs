@@ -19,7 +19,7 @@ use crate::services::embedding;
 /// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
 pub struct ResyncEmbeddings;
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct CandidateId {
     id: Uuid,
 }

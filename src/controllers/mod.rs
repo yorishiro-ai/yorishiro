@@ -23,7 +23,7 @@ use crate::error::YorishiroError;
 /// The `limit`/`offset` query-string pair every list endpoint accepts.
 /// `#[serde(flatten)]` this into a request's own `Params` struct alongside its filters, the same
 /// way `models::pagination::ListParams` is embedded into a table's own `ListXQuery`.
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Default, serde::Deserialize)]
 pub struct PageParams {
     pub limit: Option<i64>,
     pub offset: Option<i64>,

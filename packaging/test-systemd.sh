@@ -16,13 +16,13 @@
 # different binaries behind the same unit name, which made "it starts under systemd" a separate
 # fact about each. There is one binary now.
 #
-# The unconfigured-start section is also narrower than it was. It used to assert
-# ExecMainStatus=78 and NRestarts=0, because the unit carried `RestartPreventExitStatus=78` and
-# the binary returned that code for an unusable configuration. This binary delegates to
-# `loco_rs::cli::main` and returns no such code, so the directive is gone from the unit (see
-# `packaging/yorishiro.service`) and those two assertions would fail on every run. What is still
-# checked is that the unit reaches a failed state rather than appearing to work, and that the
-# journal names what is missing.
+# The unconfigured-start section exercises the zero-config default: production.yaml boots
+# against a local SQLite file with no external dependencies (DATABASE_URL defaults to
+# sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
+# queue derives from DATABASE_URL's scheme), so an unconfigured install starts successfully
+# and serves a single-tenant trial instance. Embeddings are disabled to avoid fetching the
+# ~1 GiB model in CI. The later phase sets DATABASE_URL/QUEUE_URL to Postgres explicitly
+# to verify that path as well.
 
 set -uo pipefail
 
@@ -71,57 +71,44 @@ if [ -z "$booted" ]; then
 fi
 
 # --------------------------------------------------------------------------------------------
-note "an unconfigured start reaches a failed state"
+note "an unconfigured start succeeds (SQLite trial default)"
 # --------------------------------------------------------------------------------------------
 docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" || {
   echo "installing the package failed" >&2; exit 1
 }
+
+# Disable embeddings to avoid the ~1 GiB model fetch in CI.
+# The zero-config defaults are SQLite + local provider, but fetching a gigabyte is
+# impractical for a smoke test that should complete in under a minute.
+docker exec "$APP" bash -c "cat > /etc/yorishiro/yorishiro.env <<EOF
+YORISHIRO_EMBEDDING_PROVIDER=none
+EOF"
+
+docker exec "$APP" systemctl reset-failed yorishiro >/dev/null 2>&1
 docker exec "$APP" systemctl start yorishiro >/dev/null 2>&1
-# Long enough for the unit's start limit to be reached: `StartLimitBurst=5` at `RestartSec=5s`
-# needs about 25 seconds of retrying before systemd gives up and marks it failed. An earlier
-# version waited 15, which is two restarts in, and the unit was still `activating` then: the
-# assertion below reported a real defect rather than a timing artefact, since without a start
-# limit it would have stayed `activating` however long the wait.
-#
-# Polled rather than slept flat, so this takes the time it needs and no more.
+# Short timeout: no model fetch means a fast boot (~2-3 seconds).
 for _ in $(seq 1 20); do
-  case "$(docker exec "$APP" systemctl is-failed yorishiro 2>/dev/null)" in
-    failed|inactive) break ;;
-  esac
+  docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
   sleep 3
 done
 
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
-  echo "failed=$(systemctl is-failed yorishiro)"' 2>&1)
+  echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
 
-# `is-active` is checked as well as `is-failed`, because the failure this guards against is a
-# unit that sits in `activating` forever: `is-failed` answers `activating` in that case, which is
-# neither `failed` nor a working service, and monitoring that watches unit state never sees it.
 if grep -q 'active=active' <<<"$state"; then
-  bad "an unconfigured service is reported active: $state"
+  ok "the unconfigured service is active"
 else
-  ok "an unconfigured service is not active"
+  bad "expected active for unconfigured boot, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
 fi
-if grep -qE 'failed=(failed|inactive)' <<<"$state"; then
-  ok "systemd reports a terminal state, not activating"
+if grep -q 'ping=200' <<<"$state"; then
+  ok "the unconfigured service answers /_ping"
 else
-  bad "expected failed or inactive, got: $(grep -o 'failed=[a-z-]*' <<<"$state")"
-fi
-
-journal=$(docker exec "$APP" journalctl -u yorishiro --no-pager -n 40 2>&1)
-# Whichever of the three it stops on, not `DATABASE_URL` specifically: the config file is a Tera
-# template rendered top to bottom, and `host:` sits above `database:`, so an entirely unset
-# machine fails on HOST. Measured rather than assumed, after an earlier version of this check
-# asserted DATABASE_URL and would have failed on every run.
-if grep -qE 'HOST|DATABASE_URL|QUEUE_URL' <<<"$journal"; then
-  ok "the journal names the variable it stopped on"
-else
-  bad "the journal names none of HOST/DATABASE_URL/QUEUE_URL: $(echo "$journal" | tail -3 | tr '\n' ' ')"
+  bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"
 fi
 
 # --------------------------------------------------------------------------------------------
-note "a configured service starts and serves"
+note "a configured service starts and serves (Postgres)"
 # --------------------------------------------------------------------------------------------
 docker exec "$PG" psql -U yorishiro -d yorishiro \
   -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
@@ -131,12 +118,11 @@ docker exec "$PG" psql -U yorishiro -d yorishiro \
 # lookups stop working: an artefact of running systemd in Docker, not something an operator meets
 # on a real host.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-docker exec "$APP" bash -c "cat >> /etc/yorishiro/yorishiro.env <<EOF
+docker exec "$APP" bash -c "cat > /etc/yorishiro/yorishiro.env <<EOF
 DATABASE_URL=postgres://yorishiro:secret@$PGIP:5432/yorishiro
 QUEUE_URL=postgres://yorishiro:secret@$PGIP:5432/yorishiro
 HOST=http://127.0.0.1:5150
-YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1
-YORISHIRO_EMBEDDING_MODEL=unused
+YORISHIRO_EMBEDDING_PROVIDER=none
 EOF"
 
 docker exec "$APP" bash -c '

@@ -34,7 +34,7 @@ impl ActiveModel {}
 impl Entity {}
 
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TemplateRecord {
     pub id: uuid::Uuid,
     pub tenant_id: uuid::Uuid,
@@ -141,7 +141,7 @@ pub async fn resolve_template_definition(
 
 /// Input for creating a new template.
 /// `visibility` is not settable here: every template starts as tenant-private.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct CreateTemplateInput {
     pub name: String,
     pub description: Option<String>,
@@ -154,7 +154,7 @@ pub struct CreateTemplateInput {
 
 /// Input for updating an existing template.
 /// Every field is optional; `None` leaves the existing value unchanged.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct UpdateTemplateInput {
     pub name: Option<String>,
     pub description: Option<String>,

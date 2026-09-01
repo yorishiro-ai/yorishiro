@@ -19,14 +19,13 @@ if [ ! -e "$ENVFILE" ]; then
 #
 # Every variable and its default: /usr/share/yorishiro/docs/configuration.md
 #
-# The three below have no working default under LOCO_ENV=production, which is what
-# the unit runs. They are left commented out rather than filled in: a predictable
-# user and password here would start the service against whatever local database
-# happened to accept them, and an installation that fails loudly is better than one
-# that silently connects to the wrong place with credentials everyone knows.
+# production.yaml ships defaults for every variable (SQLite database, queue deriving
+# from DATABASE_URL's scheme, HOST=http://localhost), so the environment file below
+# is only needed when you override those defaults: point DATABASE_URL at PostgreSQL,
+# set HOST to a reachable address for external callers, or set YORISHIRO_QUEUE_KIND
+# to Redis for a separate queue backend.
 
 # DATABASE_URL=postgres://USER:PASSWORD@localhost:5432/yorishiro
-# QUEUE_URL=postgres://USER:PASSWORD@localhost:5432/yorishiro
 # HOST=http://localhost:5150
 ENVEOF
     chmod 0640 "$ENVFILE"

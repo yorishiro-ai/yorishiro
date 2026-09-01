@@ -74,6 +74,30 @@ impl Hooks for App {
         env!("CARGO_CRATE_NAME")
     }
 
+    /// Overrides Loco's default `load_config` so that `Environment::Test` auto-selects
+    /// the matching config file: `DATABASE_URL` starting with `sqlite://` loads
+    /// `test_sqlite.yaml`, everything else loads `test_postgres.yaml`.
+    /// Both harnesses (`request_with_create_db` and `request_with_create_sqlite`)
+    /// override `config.database.uri` after loading, so the config's own URI is
+    /// effectively a no-op, but the queue and server settings differ between backends.
+    async fn load_config(env: &Environment) -> Result<Config> {
+        let env = match env {
+            Environment::Test => {
+                let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                    "postgres://loco:loco@localhost:5432/yorishiro_test".into()
+                });
+                let backend = if url.starts_with("sqlite://") {
+                    "test_sqlite"
+                } else {
+                    "test_postgres"
+                };
+                Environment::Any(backend.into())
+            }
+            other => other.clone(),
+        };
+        env.load()
+    }
+
     fn app_version() -> String {
         format!(
             "{} ({})",

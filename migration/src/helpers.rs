@@ -7,6 +7,19 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::DbBackend;
 
+/// Forces every migration to run inside one transaction, on every backend.
+/// Postgres already defaults to this. SQLite's own default is `false`
+/// (`should_use_transaction`'s own default in sea-orm-migration), which lets a
+/// migration's DDL statements interleave across different pooled connections
+/// once max_connections > 1. Measured: a DROP TRIGGER/CREATE TRIGGER pair
+/// (SQLite has no CREATE OR REPLACE TRIGGER) fails "already exists" under that
+/// interleaving. Every migration file's own `use_transaction` override should
+/// call this rather than repeating `Some(true)` inline, so a future migration
+/// file cannot forget it and reintroduce the bug.
+pub fn use_transaction() -> Option<bool> {
+    Some(true)
+}
+
 /// `id UUID PRIMARY KEY DEFAULT uuidv7()`.
 ///
 /// SQLite has no `uuidv7()` to default to, so on that backend the column carries no default at all: every insert must supply its own id.

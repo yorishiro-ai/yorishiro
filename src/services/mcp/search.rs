@@ -16,7 +16,7 @@ use crate::models::search;
 use crate::services::auth::ApiKeyScope;
 use crate::services::rate_limit::charge_search_tokens;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {
     /// Natural-language query text.
     /// Vectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.

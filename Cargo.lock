@@ -7768,7 +7768,7 @@ dependencies = [
 
 [[package]]
 name = "yorishiro"
-version = "0.1.0"
+version = "0.60.0"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -16,19 +16,19 @@ use crate::models::identity_api_key_audit_log;
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateEntityRequest {
     pub schema_name: String,
     pub entity_type: String,
     pub data: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct UpdateEntityRequest {
     pub data: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ListEntitiesParams {
     pub entity_type: Option<String>,
     /// JSON-encoded containment filter, e.g. `{"status":"active"}`.
@@ -194,7 +194,7 @@ pub async fn reindex_workspace(
     Ok(Json(ReindexResponse { job_id }))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct ReindexResponse {
     /// The job ID assigned by the queue provider.
     pub job_id: String,

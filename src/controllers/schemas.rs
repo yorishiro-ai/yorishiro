@@ -16,7 +16,7 @@ use crate::models::content_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::identity_templates;
 use crate::templates::{self, TemplateSummary};
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct CreateSchemaResponse {
     pub schema: SchemaRecord,
     pub diff: VersioningDiff,
@@ -36,7 +36,7 @@ pub async fn list_schemas(
 /// `template_id` accepts both kinds of template, because a caller holding an id should not have to know which kind it is: a built-in id (`"task-management"`, see `GET /api/templates`) served from the binary, or a UUID from the tenant's template library (`GET /api/template-library`).
 ///
 /// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(untagged)]
 pub enum CreateSchemaRequest {
     Definition(MetaSchemaDefinition),

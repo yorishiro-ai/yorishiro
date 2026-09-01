@@ -12,7 +12,7 @@ use crate::error::YorishiroError;
 use crate::models::search::{self, SearchHit};
 use crate::services::rate_limit::charge_search_tokens;
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SearchEntitiesParams {
     pub query_text: String,
     pub entity_type: Option<String>,
