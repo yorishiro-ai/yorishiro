@@ -350,8 +350,25 @@ impl Hooks for App {
 /// This runs after migrations have applied (see `boot` above), and in a spawned task so the
 /// server stays responsive while the check runs.  On SQLite there is no embedding column,
 /// so this is a no-op.
+///
+/// **Community edition only.**  This feature compares every workspace's stamped model name
+/// against the deployment-wide provider; under EE a workspace can carry its own assignment
+/// (see `ee::services::embedding_resolver`), so the comparison would flag every workspace as
+/// a mismatch and reindex them with the wrong provider.  Skip when a licence is active —
+/// `is_active()` evaluates `exp` against the current clock each time, so a lapsed key still
+/// allows CE behaviour without a restart.
 fn spawn_startup_reindex(ctx: AppContext) {
     spawn(async move {
+        // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
+        if ctx
+            .shared_store
+            .get::<crate::ee::services::licence::LicenceState>()
+            .is_some_and(|state| state.is_active())
+        {
+            tracing::debug!("startup reindex: enterprise licence active, skipping");
+            return;
+        }
+
         // Resolve the deployment's current provider to compare against workspace stamps.
         let provider = match crate::services::embedding::build_embedding_provider().await {
             Ok(p) => p,
