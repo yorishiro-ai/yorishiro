@@ -413,6 +413,11 @@ pub struct EmbeddingChainRow {
 /// identify which workspace needs reindexing.
 /// Separate from `EmbeddingChainRow` so the startup check's select does not
 /// accidentally drift out of sync with `resolve_embedding_chain`'s column list.
+/// `embedding_dimensions` and `tenant_dimensions` are present even though the
+/// startup check only compares models: keeping the same column list as the
+/// existing `resolve_embedding_chain` select means a future change to either
+/// query's columns is visible as a compile-time mismatch, not a silent
+/// `FromQueryResult` decode failure.
 #[derive(Debug, Clone, sea_orm::FromQueryResult)]
 pub struct StartupReindexRow {
     pub id: Uuid,
