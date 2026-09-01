@@ -23,7 +23,7 @@ use crate::services::embedding;
 /// PostgreSQL only, for the same reason as `resync_embeddings`: `content_entities` has no `embedding` column at all on SQLite.
 pub struct ReindexEmbeddings;
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct CandidateId {
     id: Uuid,
 }

@@ -295,7 +295,7 @@ pub const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;
 
 /// A relation together with the entity on the other end of it, relative to the entity `neighbors_batch` was called for.
 /// `direction` is `"out"` when the queried entity is the relation's source (the neighbor is the target) and `"in"` when it's the target (the neighbor is the source).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Neighbor {
     pub relation_id: Uuid,
     pub relation_type: String,
@@ -304,7 +304,7 @@ pub struct Neighbor {
     pub entity: EntityRecord,
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct BatchNeighborRow {
     pivot_id: Uuid,
     relation_id: Uuid,

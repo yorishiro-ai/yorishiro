@@ -20,7 +20,7 @@ pub const DEFAULT_RECALL_DEPTH: i64 = 1;
 /// Upper bound on `depth`, clamped in `recall_context`, to prevent runaway fan-out queries on dense graphs.
 pub const MAX_RECALL_DEPTH: i64 = 3;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct RecallRelation {
     pub relation_type: String,
     pub direction: String,
@@ -31,7 +31,7 @@ pub struct RecallRelation {
     pub hop_distance: i32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct RecallContext {
     /// The requested entity, always with its full `data`.
     pub entity: EntityRecord,
@@ -43,7 +43,7 @@ pub struct RecallContext {
 }
 
 /// Parameters for [`recall_context`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct RecallQuery {
     /// Maximum number of relations/neighbors to fetch per hop.
     pub limit: i64,

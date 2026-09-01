@@ -4,7 +4,7 @@
 //! Gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
 //! `0` means unlimited, and so does an unset variable as far as this module is concerned: both resolve to `Ok(None)` and disable the wizard.
 //! What differs is who arrives here with it unset, which is an edition-level default rather than anything this module decides.
-//! The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so an enterprise-edition deployment is single-tenant and the wizard is on; `ee/`'s binary sets nothing, so the enterprise edition defaults to unlimited and the wizard is off unless an operator asks for a cap.
+//! The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so a self-hosted deployment is single-tenant and the wizard is on; `ee/`'s binary sets nothing, so the enterprise edition defaults to unlimited and the wizard is off unless an operator asks for a cap.
 
 use axum::Json;
 use axum::extract::State;
@@ -27,7 +27,7 @@ fn wizard_enabled() -> bool {
     matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct SetupStatusResponse {
     /// True when the wizard is enabled and no tenant exists yet: the client should show the setup form instead of the login form.
     pub setup_required: bool,
@@ -42,14 +42,14 @@ pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRes
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SetupRequest {
     pub email: String,
     pub password: String,
     pub display_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct SetupResponse {
     pub user_id: Uuid,
     pub email: String,

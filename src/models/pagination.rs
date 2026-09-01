@@ -12,7 +12,7 @@ pub const MAX_LIST_LIMIT: i64 = 200;
 /// `limit`/`offset`, clamped to `[1, MAX_LIST_LIMIT]` and `[0, ∞)` respectively.
 /// A table's own `ListXQuery` embeds this alongside its own filters, rather than redeclaring
 /// `limit`/`offset` itself.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ListParams {
     pub limit: i64,
     pub offset: i64,

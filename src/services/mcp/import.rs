@@ -12,7 +12,7 @@ use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::import;
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct ImportJsonlArgs {
     /// JSON Lines document in the same format `export_jsonl`/`GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line, newline-separated.
     pub jsonl: String,

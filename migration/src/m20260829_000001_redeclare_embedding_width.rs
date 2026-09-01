@@ -6,6 +6,10 @@ pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
+    fn use_transaction(&self) -> Option<bool> {
+        helpers::use_transaction()
+    }
+
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Re-declare the embedding column as vector(768) to match the default model
         // (`intfloat/multilingual-e5-base`, 768-dim).

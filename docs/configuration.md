@@ -44,7 +44,7 @@ A startup reindex detection runs automatically after boot on PostgreSQL. It chec
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local` selects the local in-process provider (see below). Anything else, or unset, selects the OpenAI-compatible provider |
+| `YORISHIRO_EMBEDDING_PROVIDER` | Provider selection: `none` disables embeddings entirely; `local` selects the local in-process provider (see below). Unset with no `YORISHIRO_EMBEDDING_BASE_URL`/`YORISHIRO_EMBEDDING_MODEL` also defaults to local. If `YORISHIRO_EMBEDDING_BASE_URL` and `YORISHIRO_EMBEDDING_MODEL` are both set, they take precedence over this variable and select the OpenAI-compatible provider instead |
 | `YORISHIRO_EMBEDDING_BASE_URL` | OpenAI-compatible provider only. Base URL of an OpenAI-compatible embeddings endpoint (LM Studio, Ollama, vLLM, or real OpenAI), e.g. `http://localhost:11434`. Required together with `YORISHIRO_EMBEDDING_MODEL`: if either is unset, boot proceeds with no embedding backend configured rather than failing, and every embed call fails at request time with `ProviderUnreachable` instead |
 | `YORISHIRO_EMBEDDING_MODEL` | OpenAI-compatible provider only. Model name sent in the `model` field of the embeddings request. Every provider stamps its own model this way on the first successful entity embed; the local provider stamps the model it loaded regardless of this variable. Workspaces start with no stamp (`NULL` for both `embedding_model` and `embedding_dimensions`), and `sync_embedding` records the stamp on the first successful embed. A tenant can also set its own `embedding_model`/`embedding_dimensions` as a default for all its workspaces |
 | `YORISHIRO_EMBEDDING_API_KEY` | OpenAI-compatible provider only. Bearer token sent to `YORISHIRO_EMBEDDING_BASE_URL`. Empty by default, which is correct for a local server (LM Studio, Ollama) that doesn't check one |
@@ -141,13 +141,20 @@ Size the budget with that skew in mind if the deployment's search traffic is mos
 
 ## What `config/production.yaml` requires
 
-Three variables, and nothing else:
+An unconfigured `production.yaml` boots against a local SQLite file with no external dependencies — no Postgres, no Redis, no embedding backend.
+The defaults (`sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc` for the database, `http://localhost` for `HOST`, queue deriving from `DATABASE_URL`'s scheme) are enough for a single-tenant trial instance.
 
-| Variable | Description |
-|---|---|
-| `DATABASE_URL` | The database connection URI. No default, since there is no safe one for a production database |
-| `QUEUE_URL` | The queue backend's own URI, required on every `queue.kind` (see the section below) |
-| `HOST` | The externally reachable hostname or address this deployment answers on |
+Override only what you need:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | Point at a `postgres://` URI for RLS, multi-tenancy, or vector search |
+| `HOST` | `http://localhost` | Externally reachable hostname or address |
+| `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` (`postgres`→`Postgres`, `sqlite`→`Sqlite`) | Set to `Redis` only when you need a separate queue backend |
+| `QUEUE_URL` | Shares `DATABASE_URL` when SQLite/Postgres is used | Required only when `YORISHIRO_QUEUE_KIND=Redis` |
+| `YORISHIRO_EMBEDDING_BASE_URL` | Unset | OpenAI-compatible embeddings endpoint; together with `YORISHIRO_EMBEDDING_MODEL` selects that provider |
+| `YORISHIRO_EMBEDDING_MODEL` | Unset | Model name for the OpenAI-compatible provider |
+| `YORISHIRO_EMBEDDING_PROVIDER` | Unset (`local`) | `none` disables embeddings; `local` selects the local provider; unset defaults to local |
 
 Everything else this file reads either has a default or is opt-in.
 
@@ -188,16 +195,15 @@ Both `development.yaml` and `production.yaml` template a whole alternative `queu
 | Variable | Description |
 |---|---|
 | `YORISHIRO_QUEUE_KIND` | `Sqlite` (default in `development.yaml`, matching that file's database default so an unconfigured start needs no Postgres), `Postgres`, or `Redis`. Booting with `Redis` needs the `worker_redis` Cargo feature compiled in (enabled in this workspace's `Cargo.toml`) or startup fails with "No queue provider feature was selected and compiled" |
-| `QUEUE_URL` | The queue backend's own connection URI. In `development.yaml` it defaults to `DATABASE_URL` whenever the two backends agree, so an unconfigured start keeps its queue in the same SQLite file as its database and a PostgreSQL deployment keeps its queue in the same PostgreSQL instance. Where they disagree, which takes setting `YORISHIRO_QUEUE_KIND=Sqlite` against a PostgreSQL `DATABASE_URL`, the queue falls back to its own SQLite file rather than being handed a URI of the wrong scheme; `production.yaml` requires it explicitly with no default on every kind, matching that file's own no-silent-fallback convention |
+| `QUEUE_URL` | The queue backend's own connection URI. Defaults to `DATABASE_URL` whenever `YORISHIRO_QUEUE_KIND` derives from `DATABASE_URL` (`Sqlite` or `Postgres`), so an unconfigured deployment keeps its queue in the same file/instance as its database. Required only when `YORISHIRO_QUEUE_KIND=Redis` (an external backend with no shared-uri pattern). Where `YORISHIRO_QUEUE_KIND` is explicitly set to `Sqlite` against a PostgreSQL `DATABASE_URL`, the queue falls back to its own SQLite file rather than being handed a URI of the wrong scheme |
 | `YORISHIRO_QUEUE_WORKERS` | How many workers dequeue jobs in parallel (default: `2`). Postgres claims a row with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism on that backend; `SQLite`'s `BEGIN IMMEDIATE` serializes every dequeue regardless of this number |
 | `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` | Minutes a job may sit in `processing` before the reaper requeues it as `Queued` (default: `30`). Loco's own reaper is opt-in and off by default: without it, a job a worker died on while it was running (a crash, a forced kill) stays `processing` forever, since nothing else moves a job out of that state, `fail_job` only runs when `perform` itself returns an error. Set this above the longest a healthy job can legitimately take, or the reaper requeues work that is still genuinely in progress |
 
 `development.yaml` enables the same reaper with fixed values (`num_workers: 2`, `age_minutes: 10`) rather than reading `YORISHIRO_QUEUE_WORKERS`/`YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, since a local development environment has no reason to tune them per deployment; `production.yaml` reads both.
-`config/test.yaml` has no `queue:` block at all (`docs`/`.claude/rules/testing.md` covers why), so none of this applies there.
+`config/test_postgres.yaml` has no `queue:` block at all (`docs`/`.claude/rules/testing.md` covers why), so none of this applies there.
 
-`config/sqlite.yaml` (the manual-verification SQLite tier, `docs/sqlite.md`) also configures `queue: kind: Sqlite` with `workers.mode: BackgroundQueue`, the same as the other two environments.
 loco-rs's `SQLite` queue provider (`bgworker::sqlt`) opens its own `sqlx::SqlitePool`, independent of the application's own `SQLite` connection, so it is a genuinely separate pool against the same or a different file, not routed through `db.rs`'s RLS-aware pool (`SQLite` has no RLS to be aware of).
-Measured directly against a real file: a concurrent write from the queue pool while the application holds an open write transaction on the same file waits out `sqlx`'s own 5-second default `busy_timeout` and succeeds once that transaction releases the lock, rather than failing.
+When `production.yaml` uses an SQLite database, that queue pool is against the same file as the application's own connection; a concurrent write from the queue pool while the application holds an open write transaction waits out `sqlx`'s own 5-second default `busy_timeout` and succeeds once that transaction releases the lock, rather than failing.
 In this codebase specifically, the embedding-sync enqueue call only runs after the request's own write transaction has already committed, so this scenario does not arise from a single request; it would only matter for a genuinely concurrent second request racing the first's still-open transaction, and `content_entities::create` is one fast `INSERT`, well under the 5-second budget.
 
 ## Running workers on a separate process or host

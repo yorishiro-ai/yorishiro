@@ -1,14 +1,28 @@
 # Loco configuration file documentation
 #
 # This is the production environment.
-# It differs from development in one deliberate way: anything that is a secret or an address takes no default.
-# `get_env(name="X")` with no `default` fails at startup if `X` is unset, which is what you want: a production app that silently falls back to a development secret or a localhost database is worse than one that refuses to boot.
 #
-# Three variables are required, and nothing else is:
-#   DATABASE_URL, QUEUE_URL, HOST.
+# Nothing is required: an unconfigured start boots against a local SQLite file with no
+# external dependencies — no Postgres, no Redis, no embedding backend — and serves a
+# single-tenant trial instance.
+# The default database is `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` (an
+# absolute path, independent of the process's CWD), and the queue derives its kind from
+# `DATABASE_URL`'s scheme, so SQLite-to-SQLite is automatic when both are unset.
+# `HOST` defaults to `http://localhost`, which is enough for a trial instance that nobody
+# needs to reach externally.
 #
-# Everything else this file reads has a default, or is opt-in and renders only when you set it.
-# A variable is required here only when this deployment genuinely cannot run without it, since a required variable for a feature nothing uses is a boot failure with no remedy but to invent a value.
+# To use PostgreSQL as the database, set `DATABASE_URL` to a `postgres://` URI.
+# When you do, `YORISHIRO_QUEUE_KIND` defaults to `Postgres` and the queue uses `DATABASE_URL`
+# as its connection URI (the same instance), so you need only one database running.
+# Setting `YORISHIRO_QUEUE_KIND=Redis` explicitly still overrides this derivation and requires
+# `QUEUE_URL` to be set.
+#
+# The enterprise edition variables below are not rendered by this file (they are read
+# directly via `std::env::var` in `ee/`), but listed here for completeness so this
+# document is the single reference for every configuration option:
+#   YORISHIRO_BIND          - Network bind address used by `ee/`'s OAuth redirect URI logic
+#   YORISHIRO_CONFIG_PATH   - Path to a config file for licence key resolution (unused in production)
+#   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
 
 # Application logging configuration
 logger:
@@ -32,8 +46,8 @@ server:
   # loopback is unreachable from outside it.
   binding: <%= get_env(name="BINDING", default="0.0.0.0") %>
   # The UI hostname or IP address that mailers will point to.
-  # Required: links in outgoing mail have to name the real host.
-  host: <%= get_env(name="HOST") %>
+  # Defaults to localhost for an unconfigured trial instance.
+  host: <%= get_env(name="HOST", default="http://localhost") %>
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
     # Stamps every request/response with an `x-request-id` header, generating one if the caller sent none.
@@ -56,9 +70,12 @@ workers:
 # Queue Configuration
 #
 # YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Defaults to Postgres, matching this deployment's default queue provider.
-# QUEUE_URL takes no default here, matching this file's own no-silent-fallback convention for anything that names a real backend.
-<% if get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Redis" %>
+# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
+# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
+# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
+# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
+# non-SQLite queue), matching this file's own no-silent-fallback convention.
+<% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL") %>
@@ -67,10 +84,10 @@ queue:
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
-<% elif get_env(name="YORISHIRO_QUEUE_KIND", default="Postgres") == "Sqlite" %>
+<% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
 queue:
   kind: Sqlite
-  uri: <%= get_env(name="QUEUE_URL") %>
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>
   dangerously_flush: false
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper:
@@ -81,7 +98,7 @@ queue:
   kind: Postgres
 
   # Postgres connection URI. Commonly the same value as DATABASE_URL.
-  uri: <%= get_env(name="QUEUE_URL") %>
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
   # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
 
@@ -131,9 +148,10 @@ mailer:
 
 # Database Configuration
 database:
-  # Database connection URI. Required — there is no safe default for a
-  # production database.
-  uri: <%= get_env(name="DATABASE_URL") %>
+  # Database connection URI.
+  # Defaults to a local SQLite file for an unconfigured trial instance.
+  # Point at PostgreSQL when you need RLS, multi-tenancy, or vector search.
+  uri: <%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>
   # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   # Set the timeout duration when acquiring a connection.

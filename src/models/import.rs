@@ -14,7 +14,7 @@ pub use crate::models::export::ExportRecord;
 
 /// Outcome of a successful `import_jsonl` call: how many records of each kind were inserted.
 /// The whole import runs on the caller's RLS-scoped request transaction, so an error return means the caller never calls `Authorized::commit()` and nothing is applied (rollback on drop).
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 pub struct ImportResult {
     pub schemas: u64,
     pub entities: u64,

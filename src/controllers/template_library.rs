@@ -35,7 +35,7 @@ pub async fn get_template(
     Ok(Json(template))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateTemplateRequest {
     pub name: String,
     pub description: Option<String>,
@@ -70,7 +70,7 @@ pub async fn create_template(
     Ok((StatusCode::CREATED, Json(template)))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct UpdateTemplateRequest {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -113,7 +113,7 @@ pub async fn delete_template(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ForkTemplateRequest {
     pub name: String,
 }

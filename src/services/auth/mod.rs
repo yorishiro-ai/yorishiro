@@ -17,7 +17,7 @@ pub(crate) const KEY_SECRET_BYTES: usize = 24;
 /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
 /// The serde representation matches the DB `scope` column ('read'/'write'/'schema'/'migration').
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ApiKeyScope {
@@ -57,7 +57,7 @@ impl ApiKeyScope {
 }
 
 /// Workspace, tenant, and scope information resolved by API key authentication.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthContext {
     pub api_key_id: Uuid,
     pub workspace_id: Uuid,

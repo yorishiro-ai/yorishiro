@@ -1,8 +1,8 @@
-# Builds and runs generate.py, producing tests/fixtures/e5_reference_embeddings.json on stdout.
+# Builds and runs generate.py, producing tests/fixtures/multilingual-e5-base_reference_embeddings.json on stdout.
 #
 # Usage (from the repository root):
 #   docker build -t yorishiro-e5-reference tests/fixtures/generate_e5_reference
-#   docker run --rm yorishiro-e5-reference > tests/fixtures/e5_reference_embeddings.json
+#   docker run --rm yorishiro-e5-reference > tests/fixtures/multilingual-e5-base_reference_embeddings.json
 #
 # torch/sentence-transformers/transformers are pinned directly; their own transitive dependencies
 # (numpy, tokenizers, safetensors, and so on) are not pinned here and resolve to whatever is

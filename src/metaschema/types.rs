@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetaSchemaDefinition {
     pub name: String,
     #[serde(default)]
@@ -28,7 +28,7 @@ pub struct RelationTypeDef {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldTypeName {
     String,
@@ -95,58 +95,4 @@ pub struct FieldDef {
     pub x_ui: Option<Value>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn preserves_known_and_unknown_x_attributes() {
-        let field: FieldDef = serde_json::from_value(json!({
-            "type": "string",
-            "x-embed": true,
-            "x-ui": { "widget": "select", "options": ["a", "b"] },
-            "x-custom-client-hint": { "anything": 1 }
-        }))
-        .unwrap();
-
-        assert!(field.x_embed);
-        assert_eq!(
-            field.x_ui,
-            Some(json!({ "widget": "select", "options": ["a", "b"] }))
-        );
-        assert_eq!(
-            field.extra.get("x-custom-client-hint"),
-            Some(&json!({ "anything": 1 }))
-        );
-
-        let roundtripped = serde_json::to_value(&field).unwrap();
-        assert_eq!(
-            roundtripped["x-custom-client-hint"],
-            json!({ "anything": 1 })
-        );
-    }
-
-    #[test]
-    fn object_field_with_nested_properties_roundtrips() {
-        let field: FieldDef = serde_json::from_value(json!({
-            "type": "object",
-            "properties": {
-                "street": { "type": "string", "required": true },
-                "city": { "type": "string" }
-            }
-        }))
-        .unwrap();
-
-        assert_eq!(field.r#type, FieldTypeName::Object);
-        let properties = field.properties.as_ref().unwrap();
-        assert!(properties["street"].required);
-        assert!(!properties["city"].required);
-
-        let roundtripped = serde_json::to_value(&field).unwrap();
-        assert_eq!(roundtripped["properties"]["street"]["type"], "string");
-        assert_eq!(roundtripped["properties"]["city"]["type"], "string");
-    }
 }

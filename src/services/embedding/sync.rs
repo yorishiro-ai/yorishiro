@@ -224,7 +224,7 @@ pub async fn sync_embedding_for_record(
 }
 
 /// Whether [`reindex_embedding_for_record`] actually wrote a fresh vector for this entity.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 enum ReindexStep {
     /// The entity had `x-embed` fields and the write landed: this row's vector now reflects the new model.
     Reindexed,
@@ -382,7 +382,7 @@ pub async fn reindex_workspace(
 ///    use those as the fallback.
 /// 3. Deployment default: the system default dimensions (always available, e.g. from
 ///    `YORISHIRO_EMBEDDING_DIMENSIONS`, defaulting to 768).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ResolvedEmbedding {
     /// The workspace's own model stamp, or `None` when the workspace has no stamp of its own.
     /// The caller uses this to determine whether first-write stamping is needed.
@@ -418,7 +418,7 @@ pub struct EmbeddingChainRow {
 /// existing `resolve_embedding_chain` select means a future change to either
 /// query's columns is visible as a compile-time mismatch, not a silent
 /// `FromQueryResult` decode failure.
-#[derive(Debug, Clone, sea_orm::FromQueryResult)]
+#[derive(Clone, sea_orm::FromQueryResult)]
 pub struct StartupReindexRow {
     pub id: Uuid,
     pub embedding_model: Option<String>,

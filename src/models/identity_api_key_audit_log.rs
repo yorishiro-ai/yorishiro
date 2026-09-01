@@ -37,7 +37,7 @@ impl Entity {}
 
 /// The closed set of operations this table records.
 /// Matches `action`'s CHECK constraint string-for-string; a variant added here without a matching value in the constraint fails every insert at the database, not silently.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditAction {
     /// `content_entities::undo_job`: a `Migration`-scoped batch undo, restoring every entity a job's snapshots cover.
@@ -60,7 +60,7 @@ impl AuditAction {
 
 /// The acting key, for [`record`]: what an audited operation attributes itself to.
 /// A thin, owned copy of the fields of `auth::AuthContext`/`auth::CreatedApiKey` that `record` actually needs, so this module doesn't have to depend on `services::auth` for a handful of UUIDs.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct AuditActor {
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,

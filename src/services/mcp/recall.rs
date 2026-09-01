@@ -13,7 +13,7 @@ use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct RecallContextArgs {
     pub entity_id: Uuid,
     /// Maximum number of relations/neighbors to include per hop (defaults to 20 if omitted).

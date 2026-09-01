@@ -1,23 +1,9 @@
 name: CodeQL
 
-# Replaces GitHub's default CodeQL setup, which analyzed javascript-typescript alongside rust: this branch's tree carries zero .js/.ts/.tsx/.jsx files (ee/web, master's frontend, isn't part of this rebuild yet), so that language's job always failed with "CodeQL could not process any code written in JavaScript/TypeScript" rather than reporting a clean scan.
-# rust is the only language actually present, so it's the only one analyzed here.
-# If a future SSR/UI PR adds JS/TS back to the tree, add it to the matrix below in that same PR, so the workflow content and the tree it's analyzing change together.
-
-# There is deliberately no `push:` trigger, and adding one back would analyze every merged tree twice.
-# A `pull_request` run checks out `refs/pull/N/merge`, the simulated result of merging the branch, not the branch head.
-# That tree is what lands on develop: for #271 the merge ref `72ca158c` and develop's merge commit `fd32e23d` both have tree `8d8dfb05`, so a push run would have re-analyzed content this workflow had already cleared, at 8 to 10 minutes a time.
-# Analysis of develop is therefore not missing; it happens before the merge rather than after it.
 on:
-  pull_request:
-    branches: [develop]
-    paths-ignore:
-      - "docs/**"
-      - "ee/docs/**"
-      - "**.md"
-      - ".github/dependabot.yml"
   schedule:
     - cron: "0 3 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

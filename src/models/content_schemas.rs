@@ -45,7 +45,7 @@ pub const ORIGIN_STATUS_DETACHED: &str = "detached";
 
 /// Represents a row in the `content_schemas` table.
 /// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SchemaRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -181,7 +181,7 @@ pub async fn get_by_id(
 ///
 /// Lives here rather than in `ee/` because it names `content_schemas` fields (`schema_id`, `version`) this module already owns.
 /// The endpoint that produces one (`ee/`'s `GET /api/schemas/upstream-changes`) is what makes following it enterprise, not the shape of the value itself.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct UpstreamChange {
     pub schema_id: Uuid,
     pub schema_name: String,
@@ -195,7 +195,7 @@ pub struct UpstreamChange {
 
 /// A row in a schema listing.
 /// A lightweight summary that omits the `definition` body, used as the entry point for MCP clients (LLMs) to discover what schemas exist for a workspace.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct SchemaSummary {
     pub id: Uuid,
     pub name: String,

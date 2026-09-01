@@ -32,6 +32,10 @@ pub struct Migration;
 /// The `ALTER TABLE` form is what keeps the two backends' end states different in the way they are supposed to be different.
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
+    fn use_transaction(&self) -> Option<bool> {
+        helpers::use_transaction()
+    }
+
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // identity_tenants
         // Idempotent (`duplicate_object` swallowed): every `GRANT ... TO yorishiro_app` in a later migration, and every RLS-scoped connection's `after_connect` (`src/db.rs`), requires this role to already exist.

@@ -14,7 +14,7 @@ use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::content_relations;
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct CreateRelationArgs {
     pub source_id: Uuid,
     pub target_id: Uuid,
@@ -24,17 +24,17 @@ pub struct CreateRelationArgs {
     pub properties: Option<Value>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct GetRelationArgs {
     pub id: Uuid,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct DeleteRelationArgs {
     pub id: Uuid,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct ListRelationsArgs {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
@@ -48,7 +48,7 @@ pub struct ListRelationsArgs {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct SetRelationStatusArgs {
     pub id: Uuid,
     /// "active", "deprecated" or "archived".

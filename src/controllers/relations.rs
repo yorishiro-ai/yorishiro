@@ -12,7 +12,7 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, WriteScope};
 use crate::models::content_relations::{self, RelationRecord};
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateRelationRequest {
     pub source_id: Uuid,
     pub target_id: Uuid,
@@ -20,7 +20,7 @@ pub struct CreateRelationRequest {
     pub properties: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ListRelationsParams {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
@@ -32,7 +32,7 @@ pub struct ListRelationsParams {
     pub page: crate::controllers::PageParams,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
     pub status: String,

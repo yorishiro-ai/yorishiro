@@ -13,12 +13,12 @@ use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::identity_templates;
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct GetTemplateLibraryItemArgs {
     pub id: Uuid,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct ListTemplateLibraryArgs {
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,

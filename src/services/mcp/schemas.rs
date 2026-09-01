@@ -16,17 +16,17 @@ use crate::metaschema::MetaSchemaDefinition;
 use crate::models::content_schemas;
 use crate::services::auth::ApiKeyScope;
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct GetActiveSchemaArgs {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct GetSchemaByIdArgs {
     pub schema_id: Uuid,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct GetEntityTypeJsonSchemaArgs {
     /// Name of the active schema.
     pub schema_name: String,
@@ -34,7 +34,7 @@ pub struct GetEntityTypeJsonSchemaArgs {
     pub entity_type: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct ListSchemasArgs {
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
@@ -42,7 +42,7 @@ pub struct ListSchemasArgs {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct CreateSchemaArgs {
     /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
     /// If a schema with the same name already exists, whether the change is breaking or non-breaking is detected automatically and it is registered as a new version.

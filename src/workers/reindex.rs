@@ -28,13 +28,13 @@ use crate::workers::embedding_sync::WorkerClass;
 ///
 /// `worker_class` determines which tag the job lands under in the queue, so that
 /// tag-restricted worker processes dequeue only their own jobs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ReindexArgs {
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
 }
 
-#[derive(Debug, FromQueryResult)]
+#[derive(FromQueryResult)]
 struct ReindexCandidateId {
     id: Uuid,
 }

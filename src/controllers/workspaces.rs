@@ -47,7 +47,7 @@ pub async fn list_workspaces(
     Ok(Json(workspaces))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateWorkspaceRequest {
     pub name: String,
     /// Cap on the number of entities this workspace may hold.
@@ -85,7 +85,7 @@ pub async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct WorkspaceDetail {
     pub id: Uuid,
     pub tenant_id: Uuid,

@@ -114,8 +114,6 @@ contents:
     dst: /usr/share/yorishiro/config/production.yaml
   - src: ./config/development.yaml
     dst: /usr/share/yorishiro/config/development.yaml
-  - src: ./config/sqlite.yaml
-    dst: /usr/share/yorishiro/config/sqlite.yaml
   # In /usr/share/yorishiro rather than /usr/share/doc: the same dpkg `path-exclude` that drops
   # LICENSE would drop this, and the settings reference is what the environment file points at.
   - src: ./docs/configuration.md

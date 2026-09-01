@@ -37,6 +37,9 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [postgres]
 
     services:
       db:
