@@ -33,7 +33,7 @@ SQLiteではベクトル検索が移植されていないため、`content_entit
 
 すべての書き込みは、ベクトルを書く前にワークスペース自身の刻印(`identity_workspaces.embedding_model`/`embedding_dimensions`)と設定済みプロバイダを照合し、一致しなければ`422`で拒否する(`sync_embedding`の書き込み時モデルチェック、`services/embedding/sync.rs`)。
 これが存在する理由は、`content_entities.embedding`が幅の決まった単一カラムだからである。
-異なる2つのモデルが同じ幅を偶然生成することはあり得(現時点ではnomic-embed-text-v1.5とmultilingual-e5-baseはどちらも768次元)、Postgresにはどのモデルがそのベクトルを生成したかを知る手段が無く、幅しか分からない。
+異なる2つのモデルが同じ幅を偶然生成することはあり得(現時点ではサポートされているモデルはどちらも768次元)、Postgresにはどのモデルがそのベクトルを生成したかを知る手段が無く、幅しか分からない。
 このチェックが無ければ、デプロイの`YORISHIRO_EMBEDDING_PROVIDER`/`YORISHIRO_LOCAL_MODEL`をワークスペースが埋め込まれたときとは別のモデルに向けてしまった場合、比較不能なベクトルが何のエラーも出さずに書き込まれ、検索の質だけが静かに落ちる。
 刻印の無いワークスペース(両方の値が`NULL`)は書き込み時点でデプロイ既定値を引き継ぎ、`sync_embedding`は最初の成功した埋め込み時にそのプロバイダのモデルと次元数を刻印する。テナントはワークスペース全体の既定値として`embedding_model`/`embedding_dimensions`を設定できる。ワークスペースの刻印がテナント既定を優先し、テナント既定がデプロイ既定を優先する。
 
@@ -88,16 +88,15 @@ base版には含まれない。
 ### ローカルプロバイダ(`YORISHIRO_EMBEDDING_PROVIDER=local`)
 
 `safetensors`形式のチェックポイントからプロセス内でモデルを実行し、外部の埋め込みサービスを使わない。
-選べるモデルは2つあり、どちらも768次元である。`nomic-embed-text-v1.5`(`candle-transformers`の`nomic_bert`、RoPEとSwiGLU MLPを持つBERT亜種)と`multilingual-e5-base`(`candle-transformers`の`xlm_roberta`)。
-プーリングはどちらのモデルでも常にmeanプーリングである。両方ともそう学習されているため、プーリング方式を選ばせる余地自体が無い。
+1つのモデルがある: `multilingual-e5-base` (`candle-transformers`の`xlm_roberta`)、768次元。
+プーリングは常にmeanプーリングである。そう学習されているため、プーリング方式を選ばせる余地自体が無い。
 
 `multilingual-e5-base`はクエリ/パッセージのプレフィックス付きテキストで学習されている。検索クエリは`"query: " + テキスト`として、保存するドキュメントは`"passage: " + テキスト`として埋め込まれ、これはこのプロバイダが自動的に付与するため呼び出し側からは見えない。
-`nomic-embed-text-v1.5`にこの種のプレフィックスは無い。
 
 | 変数 | 説明 |
 |---|---|
-| `YORISHIRO_LOCAL_MODEL` | どのモデルを読み込むか。`nomic-embed-text-v1.5`または`multilingual-e5-base`。未設定の既定は`multilingual-e5-base`である。このコードベースの検索とrecallは英語専用ではないためである。認識できない値は、既定へ黙って倒れるのではなく、有効な値を名指ししたメッセージとともに起動を失敗させる |
-| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`、どのモデルを選んでも変わらない)。選択中のモデル自身の上限には収まっている必要がある(nomic-embed-text-v1.5は`8192`、multilingual-e5-baseは`512`)。既定値は両方の上限を既に満たしているので、モデルに合わせて調整する必要はない |
+| `YORISHIRO_LOCAL_MODEL` | どのモデルを読み込むか。`multilingual-e5-base`。未設定の既定は`multilingual-e5-base`である。このコードベースの検索とrecallは英語専用ではないためである。認識できない値は、既定へ黙って倒れるのではなく、有効な値を名指ししたメッセージとともに起動を失敗させる。`nomic-embed-text-v1.5`は削除され、置き換え先と`reindex_embeddings`を名指しするメッセージとともに起動失敗する。 |
+| `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | 入力1件あたりの最大トークン数。これを超える分は切り詰められる(既定: `512`)。選択中のモデル自身の上限には収まっている必要がある(768次元のモデルの上限は全て `512` 以下に収まっている)。既定値はどのモデルの上限も満たしているので、モデルに合わせて調整する必要はない |
 
 デプロイに既に埋め込み済みのワークスペースがある状態で`YORISHIRO_LOCAL_MODEL`を切り替えても、それだけではどのワークスペースも新しいモデルには移らない。書き込み時モデルチェック(前述の「ワークスペースを別の埋め込みモデルへ移す」)が、旧モデルのまま刻印されたワークスペースへの書き込みを、そのワークスペースに対して`reindex_embeddings`が実行されるまで拒否し続ける。
 

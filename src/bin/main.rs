@@ -2,7 +2,7 @@ use loco_rs::cli;
 use yorishiro::app::App;
 use yorishiro::migration::Migrator;
 
-/// A self-hosted deployment is single-tenant unless it says otherwise, which is also what enables the first-run setup wizard.
+/// An enterprise-edition deployment is single-tenant unless it says otherwise, which is also what enables the first-run setup wizard.
 /// `YORISHIRO_MAX_TENANTS` unset would otherwise resolve to `Ok(None)`, which `setup::wizard_enabled` reads as "no cap, so no wizard", leaving a fresh install with no way to create its first tenant through the product.
 /// An operator who wants more than one tenant sets the variable, and that setting is honoured unchanged; `0` still means unlimited.
 ///
@@ -14,7 +14,7 @@ use yorishiro::migration::Migrator;
 /// `Ok(None)`, the identical value it returns when the variable is unset, and
 /// `setup::wizard_enabled` requires `Ok(Some(_))`. So "no cap" and "no wizard" are the same state,
 /// and there is no third value expressing unlimited-with-wizard. Defaulting to unlimited here would
-/// therefore silently remove the first-run setup wizard from every self-hosted install that never
+/// therefore silently remove the first-run setup wizard from every enterprise-edition install that never
 /// sets the variable.
 /// A hosted deployment wanting more than one tenant sets `YORISHIRO_MAX_TENANTS` explicitly, which
 /// is cheap for an operator who is provisioning the deployment anyway.

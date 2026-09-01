@@ -251,7 +251,7 @@ fn resolve_entity_type<'a>(
 }
 
 /// Checks the workspace's `max_entities` cap before an insert.
-/// `NULL` means unlimited, the default for self-hosted deployments.
+/// `NULL` means unlimited, the default for the enterprise edition.
 async fn check_entity_quota(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

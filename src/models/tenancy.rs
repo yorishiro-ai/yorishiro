@@ -482,7 +482,7 @@ fn workspace_count_lock_key(tenant_id: Uuid) -> String {
 }
 
 /// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
-/// `None` means unlimited, which is the default so self-hosted deployments are never capped unless an operator explicitly sets a limit.
+/// `None` means unlimited, which is the default so enterprise-edition deployments are never capped unless an operator explicitly sets a limit.
 ///
 /// `embedding` is the deployment's model and dimension count. It is no longer stamped onto the workspace at creation: the workspace keeps `NULL` for both `embedding_model` and `embedding_dimensions`, and `sync_embedding` stamps the first successful embed (first-write stamping). This avoids the defect where a workspace created without an embedding provider would receive a sentinel stamp that blocks future model resolution.
 ///
@@ -548,7 +548,7 @@ pub async fn create_workspace(
 
 /// Sets a tenant's `max_workspaces` cap.
 ///
-/// A self-hosted deployment never calls this (its tenants keep whatever cap they were created with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap that comes with a plan change.
+/// An enterprise-edition deployment never calls this (its tenants keep whatever cap they were created with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap that comes with a plan change.
 pub async fn set_tenant_max_workspaces(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

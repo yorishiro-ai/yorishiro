@@ -287,7 +287,7 @@ fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value (one of `model_fetch::MODELS`'s `short_id`s), or [`model_fetch::DEFAULT_MODEL`] when unset.
+/// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
 /// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
 fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> {
     let Some(requested) = std::env::var_os("YORISHIRO_LOCAL_MODEL") else {
@@ -296,17 +296,19 @@ fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> 
     let requested = requested
         .into_string()
         .map_err(|_| anyhow::anyhow!("YORISHIRO_LOCAL_MODEL is not valid UTF-8"))?;
-    model_fetch::MODELS
-        .iter()
-        .find(|def| def.short_id == requested)
-        .copied()
-        .ok_or_else(|| {
-            let known: Vec<&str> = model_fetch::MODELS.iter().map(|def| def.short_id).collect();
-            anyhow::anyhow!(
-                "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
-                known.join(", ")
-            )
-        })
+    if requested == model_fetch::DEFAULT_MODEL.short_id {
+        Ok(model_fetch::DEFAULT_MODEL)
+    } else if requested == "nomic-embed-text-v1.5" {
+        anyhow::bail!(
+            "nomic-embed-text-v1.5 has been removed: set YORISHIRO_LOCAL_MODEL={0} or run reindex_embeddings to migrate your workspaces",
+            model_fetch::DEFAULT_MODEL.short_id
+        )
+    } else {
+        anyhow::bail!(
+            "YORISHIRO_LOCAL_MODEL={requested:?} is not a known local model; valid values are: {}",
+            model_fetch::DEFAULT_MODEL.short_id
+        )
+    }
 }
 
 /// `YORISHIRO_EMBEDDING_PROVIDER=local`'s branch of [`build_embedding_provider`].
@@ -572,7 +574,7 @@ mod tests {
     }
 
     /// An unset `YORISHIRO_LOCAL_MODEL` resolves to `model_fetch::DEFAULT_MODEL`.
-    /// Asserting the concrete default (multilingual-e5-base, as of this commit) rather than just "resolves to something" makes a future flip to a different default a visible test change here, not a silent one.
+    /// Asserting the concrete default rather than just "resolves to something" makes a future flip to a different default a visible test change here, not a silent one.
     #[test]
     #[serial]
     fn resolve_local_model_defaults_when_unset() {
@@ -581,6 +583,5 @@ mod tests {
         }
         let def = resolve_local_model().expect("default resolution must not fail");
         assert_eq!(def.short_id, model_fetch::DEFAULT_MODEL.short_id);
-        assert_eq!(def.short_id, model_fetch::MULTILINGUAL_E5_BASE.short_id);
     }
 }

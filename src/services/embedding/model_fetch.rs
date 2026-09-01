@@ -64,42 +64,12 @@ pub struct LocalModelDef {
 }
 
 /// The `candle-transformers` model family a [`LocalModelDef`] loads through.
-/// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not leak into callers; every definition below still looks like a plain model description from the outside.
+/// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not leak into callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
-    /// `candle_transformers::models::nomic_bert::NomicBertModel`: a BERT variant with rotary position embeddings and a SwiGLU MLP.
-    NomicBert,
     /// `candle_transformers::models::xlm_roberta::XLMRobertaModel`.
     XlmRoberta,
 }
-
-/// `nomic-embed-text-v1.5`, this provider's original model, kept selectable rather than removed: an existing nomic-embedded deployment needs a path forward (`YORISHIRO_LOCAL_MODEL=nomic-embed-text-v1.5`, or `reindex_embeddings` to move off it) besides a forced reindex the moment it upgrades, and the write-time model check needs this definition to exist as a comparison target regardless of which model is the default.
-/// Prefix-free: nomic-embed-text-v1.5's recommended `search_query:`/`search_document:` prefixes are a known, deliberately deferred gap tracked separately (see this repository's own issue tracker), not implemented here to avoid invalidating the irreplaceable `ort`-parity fixture and every existing nomic-embedded deployment's vectors in the same change that adds multi-model selection.
-pub(super) static NOMIC: LocalModelDef = LocalModelDef {
-    id: "nomic-ai/nomic-embed-text-v1.5",
-    short_id: "nomic-embed-text-v1.5",
-    revision: "e9b6763023c676ca8431644204f50c2b100d9aab",
-    model: Artifact {
-        remote_path: "model.safetensors",
-        local_name: "model.safetensors",
-        sha256: "9e7d262b1fe5ea350782829496efa831901b77486bbde1cea54a4c822d010d5c",
-        size: 546_938_168,
-        description: "model",
-    },
-    tokenizer: Artifact {
-        remote_path: "tokenizer.json",
-        local_name: "tokenizer.json",
-        sha256: "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
-        size: 711_396,
-        description: "tokenizer",
-    },
-    dimensions: 768,
-    // nomic-embed-text-v1.5's own `n_positions` (`candle_transformers::models::nomic_bert::Config::default().n_positions`): the rotary embedding table's actual size, safe to truncate to directly.
-    max_sequence_length: 8192,
-    query_prefix: "",
-    document_prefix: "",
-    architecture: Architecture::NomicBert,
-};
 
 /// `intfloat/multilingual-e5-base`, this provider's default; see [`DEFAULT_MODEL`]'s own doc comment for why.
 /// Multilingual (250,002-token XLM-RoBERTa vocabulary, entirely different from nomic's), which is the point of making it the default: this codebase's search and recall are not English-only.
@@ -132,7 +102,8 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
 };
 
 /// Every model this provider can be configured to load, in the order `YORISHIRO_LOCAL_MODEL`'s error message lists them.
-pub(super) const MODELS: &[&LocalModelDef] = &[&NOMIC, &MULTILINGUAL_E5_BASE];
+#[allow(dead_code)]
+pub(super) const MODELS: &[&LocalModelDef] = &[&MULTILINGUAL_E5_BASE];
 
 /// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
 ///
@@ -437,14 +408,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("cannot create test dir");
 
-        let in_flight = dir.join(format!("{}.partial.999999", NOMIC.tokenizer.local_name));
-        let unrelated = dir.join(NOMIC.tokenizer.local_name);
-        let other_artifact = dir.join(format!("{}.partial.1", NOMIC.model.local_name));
+        // "tokenizer.json" and "model.safetensors" are the only file names MODELS ever uses.
+        // Hardcoding them rather than reaching for MULTILINGUAL_E5_BASE keeps the test
+        // independent of any particular model definition, so a future model swap does not
+        // silently change what files this sweep exercises.
+        let in_flight = dir.join("tokenizer.json.partial.999999");
+        let unrelated = dir.join("tokenizer.json");
+        let other_artifact = dir.join("model.safetensors.partial.1");
         for path in [&in_flight, &unrelated, &other_artifact] {
             std::fs::write(path, b"x").expect("cannot write fixture");
         }
 
-        let abandoned = dir.join(format!("{}.partial.12345", NOMIC.tokenizer.local_name));
+        let abandoned = dir.join("tokenizer.json.partial.12345");
         std::fs::write(&abandoned, b"x").expect("cannot write fixture");
         // Backdating the mtime is what makes this a test of the age rule rather than of the filename prefix alone.
         let long_ago =
@@ -454,7 +429,16 @@ mod tests {
             .set_modified(long_ago)
             .expect("cannot backdate fixture");
 
-        sweep_stale_partials(&dir, &NOMIC.tokenizer);
+        sweep_stale_partials(
+            &dir,
+            &Artifact {
+                remote_path: "tokenizer.json",
+                local_name: "tokenizer.json",
+                sha256: "0".repeat(64).as_str(),
+                size: 0,
+                description: "tokenizer",
+            },
+        );
 
         assert!(!abandoned.exists(), "an abandoned partial must be removed");
         assert!(
@@ -480,22 +464,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("yorishiro-fetch-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
-        let path = ensure_file(&dir, &NOMIC, &NOMIC.tokenizer)
+        // Use DEFAULT_MODEL directly instead of hardcoding its fields, so a future model
+        // change automatically updates what this test exercises.
+        let path = ensure_file(&dir, DEFAULT_MODEL, &DEFAULT_MODEL.tokenizer)
             .await
             .expect("fetch failed");
         let bytes = std::fs::read(&path).expect("downloaded file unreadable");
-        assert_eq!(bytes.len() as u64, NOMIC.tokenizer.size);
-        assert_eq!(hex_encode(&Sha256::digest(&bytes)), NOMIC.tokenizer.sha256);
+        assert_eq!(bytes.len() as u64, DEFAULT_MODEL.tokenizer.size);
+        assert_eq!(
+            hex_encode(&Sha256::digest(&bytes)),
+            DEFAULT_MODEL.tokenizer.sha256
+        );
 
         // A file already in place is used as-is rather than fetched again, which is what keeps only the first start paying for the download.
-        let again = ensure_file(&dir, &NOMIC, &NOMIC.tokenizer)
+        let again = ensure_file(&dir, DEFAULT_MODEL, &DEFAULT_MODEL.tokenizer)
             .await
             .expect("second call failed");
         assert_eq!(again, path);
 
         // A cached file of the wrong length must be replaced rather than returned: it passed its digest before some earlier rename, but nothing has looked at it since, and loading it would embed against corrupt bytes with every status still healthy.
         std::fs::write(&path, b"truncated").expect("cannot truncate the cached file");
-        let repaired = ensure_file(&dir, &NOMIC, &NOMIC.tokenizer)
+        let repaired = ensure_file(&dir, DEFAULT_MODEL, &DEFAULT_MODEL.tokenizer)
             .await
             .expect("a corrupt cached file must be refetched, not returned");
         assert_eq!(repaired, path);
@@ -503,23 +492,23 @@ mod tests {
             std::fs::metadata(&path)
                 .expect("refetched file missing")
                 .len(),
-            NOMIC.tokenizer.size,
+            DEFAULT_MODEL.tokenizer.size,
             "the corrupt cached file should have been replaced by a complete one"
         );
         assert_eq!(
             hex_encode(&Sha256::digest(
                 std::fs::read(&path).expect("refetched file unreadable")
             )),
-            NOMIC.tokenizer.sha256
+            DEFAULT_MODEL.tokenizer.sha256
         );
 
         // A digest that does not match the bytes must fail and leave no partial file to be mistaken for a good one later.
         let corrupt = Artifact {
             sha256: "0000000000000000000000000000000000000000000000000000000000000000",
             local_name: "corrupt.json",
-            ..NOMIC.tokenizer
+            ..DEFAULT_MODEL.tokenizer
         };
-        let err = ensure_file(&dir, &NOMIC, &corrupt)
+        let err = ensure_file(&dir, DEFAULT_MODEL, &corrupt)
             .await
             .expect_err("a wrong digest must be rejected");
         assert!(err.to_string().contains("SHA256"), "{err}");

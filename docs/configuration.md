@@ -25,7 +25,7 @@ Search simply returns worse results for it, so this is worth checking after a re
 ### Moving a workspace between embedding models
 
 Every write checks the workspace's own stamp (`identity_workspaces.embedding_model`/`embedding_dimensions`) against the configured provider before writing a vector, and refuses the write with `422` on a mismatch (`sync_embedding`'s write-time model check, `services/embedding/sync.rs`).
-This exists because `content_entities.embedding` is a single fixed-width column: two different models can happen to produce the same width (nomic-embed-text-v1.5 and multilingual-e5-base both produce 768 dimensions, as of this writing) and Postgres has no way to tell which model actually produced a given vector, only how wide it is.
+This exists because `content_entities.embedding` is a single fixed-width column: two different models can happen to produce the same width (both currently supported models produce 768 dimensions, as of this writing) and Postgres has no way to tell which model actually produced a given vector, only how wide it is.
 Without this check, pointing a deployment's `YORISHIRO_EMBEDDING_PROVIDER`/`YORISHIRO_LOCAL_MODEL` at a different model than a workspace was embedded with would silently write vectors that are not comparable to the ones already stored, degrading search with no error anywhere.
 A workspace that has no stamp of its own (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default at write time, and `sync_embedding` stamps the first successful embed with the current provider's model and dimensions.
 A tenant can also set its own `embedding_model`/`embedding_dimensions` as a default for all its workspaces; workspace stamps take priority over tenant defaults, which take priority over the deployment default.
@@ -76,15 +76,14 @@ There is no caching: an assignment made through this endpoint takes effect on th
 ### Local provider (`YORISHIRO_EMBEDDING_PROVIDER=local`)
 
 Runs a model in-process from a `safetensors` checkpoint, with no external embedding service.
-Two models are selectable, both 768-dimensional: `nomic-embed-text-v1.5` (`candle-transformers`' `nomic_bert`, a BERT variant with rotary position embeddings and a SwiGLU MLP) and `multilingual-e5-base` (`candle-transformers`' `xlm_roberta`).
-Pooling is always mean pooling for either model: that is what both were trained with, so there is nothing left for a pooling setting to select between.
+One model is available: `multilingual-e5-base` (`candle-transformers`' `xlm_roberta`), 768-dimensional.
+Pooling is always mean pooling: that is what was trained with, so there is nothing left for a pooling setting to select between.
 
 `multilingual-e5-base` is trained on query/passage-prefixed text: a search query is embedded as `"query: " + text` and a stored document as `"passage: " + text`, applied automatically by this provider and invisible to callers.
-`nomic-embed-text-v1.5` uses no such prefix.
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_LOCAL_MODEL` | Which model to load: `nomic-embed-text-v1.5` or `multilingual-e5-base`. Unset defaults to `multilingual-e5-base`, since this codebase's search and recall are not English-only. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default |
+| `YORISHIRO_LOCAL_MODEL` | Which model to load: `multilingual-e5-base`. Unset defaults to `multilingual-e5-base`, since this codebase's search and recall are not English-only. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default. `nomic-embed-text-v1.5` was removed and now fails startup with a message pointing at the replacement and `reindex_embeddings`. |
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`, unchanged regardless of which model is selected). Must fit the selected model's own upper bound (`8192` for nomic-embed-text-v1.5, `512` for multilingual-e5-base); the default already satisfies both, so it needs no per-model adjustment on its own |
 
 Switching `YORISHIRO_LOCAL_MODEL` on a deployment that already has embedded workspaces does not itself move any workspace to the new model: the write-time model check ("Moving a workspace between embedding models" above) refuses writes for a workspace still stamped with the old one until `reindex_embeddings` runs against it.
@@ -99,17 +98,17 @@ Remove every old variable (or rename it to its replacement, for the renamed ones
 
 #### Fetching the model
 
-The model and tokenizer are not in the repository: nomic-embed-text-v1.5's model file is about 522 MiB, multilingual-e5-base's about 1.04 GiB.
+The model and tokenizer are not in the repository: multilingual-e5-base's model file is about 1.04 GiB.
 When nothing is at the default `models/<short_id>/` path, both files are fetched on first use into `$HOME/.cache/yorishiro/models/<short_id>/` and verified against a SHA256 built into the binary.
 That directory is also where later starts look first, so only the first one pays the download.
-`<short_id>` scopes both the default and cache paths to the selected model (`nomic-embed-text-v1.5` or `multilingual-e5-base`), so switching `YORISHIRO_LOCAL_MODEL` never finds the other model's cached files at its own path.
+`<short_id>` scopes both the default and cache paths to the selected model, so switching `YORISHIRO_LOCAL_MODEL` never finds the other model's cached files at its own path.
 
 Verification happens at download time, not at every read.
 A file only reaches that directory by passing both checks and then being moved into place atomically, so a later start treats what is already there as the product of that earlier verified download rather than hashing it again on every start.
 It does check the cached file's size, which is free and catches a truncated file; one of the wrong size is removed and fetched again, so that case repairs itself rather than being loaded as though it were sound.
 Files you supply yourself, at `models/<short_id>/`, are not checked at all: no digest can be pinned for a model of your choosing, and it may deliberately be a different one.
-That trust extends to identity, not just bytes: this provider reports `def.id` (the catalog model named by `YORISHIRO_LOCAL_MODEL`) regardless of what the supplied checkpoint actually is, so a custom `nomic-embed-text-v1.5` checkpoint holding a different model's weights is stamped onto a workspace and compared by the write-time model check as if it really were nomic-embed-text-v1.5.
-Both models are pinned to a fixed revision rather than a branch, so the bytes behind their digests cannot change underneath a deployment.
+That trust extends to identity, not just bytes: this provider reports `def.id` (the catalog model named by `YORISHIRO_LOCAL_MODEL`) regardless of what the supplied checkpoint actually is, so a custom checkpoint holding a different model's weights is stamped onto a workspace and compared by the write-time model check as if it were the intended model.
+The model is pinned to a fixed revision rather than a branch, so the bytes behind its digest cannot change underneath a deployment.
 
 The download blocks whatever triggered it, and the log line before it says so.
 That is usually a server start, but not always: `cargo loco task create_workspace`, `cargo loco task resync_embeddings`, and `cargo loco task reindex_embeddings` build an embedding provider too, so any of them can be what pulls the model on a fresh machine, and a task that appears to be sitting still is most likely doing this.
