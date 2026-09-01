@@ -10,4 +10,3 @@ pub use yorishiro::migration::{Migrator, MigratorTrait};
 
 mod postgres;
 mod sqlite;
-mod sqlite_tx;
