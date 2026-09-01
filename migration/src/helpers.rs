@@ -95,7 +95,9 @@ pub async fn grant(
 
 /// Creates `table`, with each `(constraint_name, expr)` in `checks` applied as a table-level CHECK.
 ///
-/// SQLite's `ALTER TABLE` supports only rename/add-column/drop-column, so a named `ADD CONSTRAINT` after the fact (Postgres's usual shape in this crate) doesn't work there: the checks go inline into the `CREATE TABLE` for SQLite instead, and as separate `ALTER TABLE ... ADD CONSTRAINT` statements for Postgres, matching every migration file's existing raw-SQL style on that backend byte-for-byte.
+/// SQLite's `ALTER TABLE` supports only rename/add-column/drop-column, so a named `ADD CONSTRAINT` after the fact (Postgres's usual shape in this crate) doesn't work there: the checks go inline into the `CREATE TABLE` for SQLite instead, and as `ALTER TABLE ... ADD CONSTRAINT` statements for Postgres.
+///
+/// SeaORM's `TableAlterStatement` has no `add_constraint` builder — `execute_unprepared` is Loco's own documented pattern for these.
 pub async fn create_table_with_checks(
     manager: &SchemaManager<'_>,
     table_name: &str,
@@ -119,6 +121,37 @@ pub async fn create_table_with_checks(
                 .await?;
         }
     }
+    Ok(())
+}
+
+/// Adds or replaces a table-level CHECK constraint on Postgres; a no-op on SQLite.
+///
+/// SeaORM's `TableAlterStatement` has no `add_constraint` builder, so `execute_unprepared` is used — this wraps the pattern in a named helper so migration files call `helpers::add_check_constraint` rather than raw SQL directly.
+/// `drop_if_exists` controls whether an existing constraint with the same name is dropped first (true = add or replace, false = only-add).
+pub async fn add_check_constraint(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    constraint_name: &str,
+    expr: &str,
+    drop_if_exists: bool,
+) -> Result<(), DbErr> {
+    if manager.get_database_backend() == DbBackend::Sqlite {
+        return Ok(());
+    }
+    if drop_if_exists {
+        manager
+            .get_connection()
+            .execute_unprepared(&format!(
+                "ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint_name};"
+            ))
+            .await?;
+    }
+    manager
+        .get_connection()
+        .execute_unprepared(&format!(
+            "ALTER TABLE {table} ADD CONSTRAINT {constraint_name} CHECK ({expr});"
+        ))
+        .await?;
     Ok(())
 }
 
