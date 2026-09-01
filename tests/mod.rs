@@ -6,16 +6,37 @@ mod requests;
 mod services;
 mod tasks;
 
-/// Skip when `DATABASE_URL` is not a SQLite URL, so these tests do not run in the
-/// postgres-only CI matrix entry. Local `cargo test` (where DATABASE_URL defaults to
-/// postgres) also skips them; set `DATABASE_URL=sqlite::memory:` to run them locally.
-pub(crate) fn require_sqlite_backend() {
+/// Returns `true` when `DATABASE_URL` points to SQLite, `false` otherwise.
+/// Callers should do `if !require_sqlite_backend() { return; }` to skip
+/// without terminating the test binary (a bare `process::exit` kills every
+/// other test in the process).
+pub(crate) fn require_sqlite_backend() -> bool {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
     if !url.starts_with("sqlite://") && !url.starts_with("sqlite::memory:") {
         eprintln!(
             "skipping SQLite-only test (DATABASE_URL={} is not SQLite)",
             url
         );
-        std::process::exit(0);
+        false
+    } else {
+        true
+    }
+}
+
+/// Returns `true` when `YORISHIRO_TEST_BACKEND` is unset or matches `expected`.
+/// Used by CI matrix entries so that backend-gated tests only run on their own
+/// backend; unset means run everything (local `cargo test` default).
+/// Callers should do `if !require_test_backend("sqlite") { return; }` to skip
+/// without terminating the test binary.
+pub(crate) fn require_test_backend(expected: &str) -> bool {
+    let backend = std::env::var("YORISHIRO_TEST_BACKEND").unwrap_or_default();
+    if !backend.is_empty() && backend != expected {
+        eprintln!(
+            "skipping {} test (YORISHIRO_TEST_BACKEND={} targets {})",
+            expected, backend, expected
+        );
+        false
+    } else {
+        true
     }
 }

@@ -61,7 +61,12 @@ async fn seeded_sqlite_db() -> (sea_orm::DatabaseConnection, uuid::Uuid) {
 /// `list`, `export_all`, `create`, `update` and `delete`.
 #[tokio::test]
 async fn content_entities_crud_on_sqlite() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let (db, workspace_id) = seeded_sqlite_db().await;
 
     let input = CreateEntityInput {
@@ -131,7 +136,12 @@ async fn content_entities_crud_on_sqlite() {
 /// Guards both outcomes its `match` distinguishes: a snapshot whose entity still exists (`restored`) and one whose entity was deleted since (`missing`, via `DbErr::RecordNotUpdated`).
 #[tokio::test]
 async fn undo_job_restores_and_counts_a_missing_entity_on_sqlite() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let (db, workspace_id) = seeded_sqlite_db().await;
 
     let input = CreateEntityInput {
