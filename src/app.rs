@@ -16,7 +16,8 @@ use tokio::task::spawn;
 #[allow(unused_imports)]
 use crate::{controllers, tasks};
 
-use crate::workers::reindex::ReindexWorker;
+use crate::workers::embedding_sync::WorkerClass;
+use crate::workers::reindex::ReindexWorkerShared;
 
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
@@ -295,7 +296,9 @@ impl Hooks for App {
         queue
             .register(EmbeddingSyncWorkerShared::build(ctx))
             .await?;
-        queue.register(ReindexWorker::build(ctx)).await
+        queue
+            .register(ReindexWorkerShared::build(ctx))
+            .await
     }
 
     #[allow(unused_variables)]
@@ -410,19 +413,16 @@ fn spawn_startup_reindex(ctx: AppContext) {
             // Enqueue reindex. If queue is not configured, log a warning.
             match ctx.queue_provider {
                 Some(ref queue) => {
-                    let args = serde_json::to_value(super::workers::reindex::ReindexArgs {
+                    let args = super::workers::reindex::ReindexArgs {
                         workspace_id: ws.id,
-                    });
-                    let Ok(args) = args else {
-                        tracing::error!("startup reindex: failed to serialize args");
-                        continue;
+                        worker_class: WorkerClass::Shared,
                     };
                     let enqueue_result = queue
                         .enqueue(
-                            ReindexWorker::class_name(),
-                            ReindexWorker::queue(),
+                            ReindexWorkerShared::class_name(),
+                            ReindexWorkerShared::queue(),
                             args,
-                            None,
+                            Some(ReindexWorkerShared::tags()),
                             None,
                         )
                         .await;

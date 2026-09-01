@@ -52,14 +52,6 @@ pub enum YorishiroError {
     #[error("backend unavailable: {message}")]
     BackendUnavailable { message: String },
 
-    /// A write to `workspace_id` is blocked because a startup reindex is in progress.
-    /// The write-time model check uses this to refuse new writes until the reindex finishes.
-    #[error("reindex in progress for workspace {workspace_id}: {message}")]
-    ReindexInProgress {
-        workspace_id: String,
-        message: String,
-    },
-
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -92,7 +84,6 @@ impl YorishiroError {
             Self::ProviderUnreachable { .. } => "provider_unreachable",
             Self::BackendUnsupported { .. } => "backend_unsupported",
             Self::BackendUnavailable { .. } => "backend_unavailable",
-            Self::ReindexInProgress { .. } => "reindex_in_progress",
             Self::Internal(_) => "internal",
         }
     }
@@ -175,13 +166,6 @@ impl YorishiroError {
             Self::BackendUnavailable { message } => (
                 503,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
-            ),
-            Self::ReindexInProgress {
-                workspace_id,
-                message,
-            } => (
-                409,
-                serde_json::json!({ "error": { "code": code, "message": message, "workspace_id": workspace_id } }),
             ),
             Self::Internal(err) => {
                 tracing::error!(error = %err, "internal error");

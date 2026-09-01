@@ -6,6 +6,11 @@
 //! The REST endpoint (`POST /api/migration-jobs/reindex`) enqueues this worker,
 //! which runs under the same advisory lock as the `reindex_embeddings` task,
 //! so both entry points are serialized per workspace.
+//!
+//! **Tag routing**: like `embedding_sync`, each `WorkerClass` gets its own worker type
+//! carrying a single fixed tag, so `--worker=worker-class:shared` etc. picks up only the
+//! jobs that belong to that tag. Without this, a tag-restricted worker would dequeue zero
+//! reindex jobs.
 
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
@@ -17,11 +22,16 @@ use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::services::embedding;
+use crate::workers::embedding_sync::WorkerClass;
 
-/// Arguments for the `reindex_worker` background worker.
+/// Arguments for a reindex worker job: workspace id and the resolved worker class tag.
+///
+/// `worker_class` determines which tag the job lands under in the queue, so that
+/// tag-restricted worker processes dequeue only their own jobs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReindexArgs {
     pub workspace_id: Uuid,
+    pub worker_class: WorkerClass,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -29,93 +39,102 @@ struct ReindexCandidateId {
     id: Uuid,
 }
 
-/// Background worker that runs a workspace reindex.
+/// Shared implementation of the reindex worker's `perform` body: builds the provider,
+/// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
 ///
-/// Reuses the same `reindex_workspace_with_lock` machinery as the `reindex_embeddings`
-/// task, so both entry points share the advisory lock serialization and
-/// restamp-on-full-success invariant.
-///
-/// This is the worker half of the REST endpoint: the endpoint enqueues this worker
-/// and the dequeue side runs the same lock-and-reindex path.
-///
-/// Registered in `Hooks::connect_workers` under `class_name()` like the three
-/// embedding sync workers: one `WorkerClass` per type, each tagged with its own.
-pub struct ReindexWorker {
-    ctx: AppContext,
-}
+/// Shared by all three worker types below, which differ only in the tag `tags()` returns.
+async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
+    // Build and verify the provider: a reindex fails fast if the provider is
+    // unconfigured, same as the task.
+    let provider = embedding::build_embedding_provider()
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("build provider: {e}")))?;
+    provider
+        .embed_batch(&[])
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
 
-#[async_trait]
-impl BackgroundWorker<ReindexArgs> for ReindexWorker {
-    fn build(ctx: &AppContext) -> Self {
-        Self { ctx: ctx.clone() }
+    // Fetch all entity IDs for this workspace.
+    let candidates = fetch_candidates(&ctx.db, args.workspace_id).await?;
+    let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
+
+    // Acquire the session-scoped lock and run the reindex.
+    let db_handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
+        loco_rs::Error::Message(
+            "reindex requires the tenant pool, which this deployment did not build".into(),
+        )
+    })?;
+    let outcome = crate::db::reindex_workspace_with_lock(
+        db_handle.tenant.pool().clone(),
+        args.workspace_id,
+        &ctx.db,
+        &candidate_ids,
+        provider.as_ref(),
+    )
+    .await
+    .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+
+    if !outcome.failures.is_empty() {
+        return Err(loco_rs::Error::Message(format!(
+            "reindex incomplete: {} entities, {} reindexed, {} failed",
+            outcome.total,
+            outcome.reindexed,
+            outcome.failures.len()
+        )));
     }
 
-    async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-        // Build and verify the provider: a reindex fails fast if the provider is
-        // unconfigured, same as the task.
-        let provider = embedding::build_embedding_provider()
-            .await
-            .map_err(|e| loco_rs::Error::Message(format!("build provider: {e}")))?;
-        provider
-            .embed_batch(&[])
-            .await
-            .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
+    Ok(())
+}
 
-        // Fetch all entity IDs for this workspace.
-        let candidates = Self::fetch_candidates(&self.ctx.db, args.workspace_id).await?;
-        let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
+/// Fetch all entity IDs for a workspace via raw SQL.
+///
+/// PostgreSQL only: `content_entities` has no `embedding` column on SQLite.
+async fn fetch_candidates(
+    db: &DatabaseConnection,
+    workspace_id: Uuid,
+) -> loco_rs::Result<Vec<ReindexCandidateId>> {
+    let candidates: Vec<_> = ReindexCandidateId::find_by_statement(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT id FROM content_entities WHERE workspace_id = $1",
+        [workspace_id.into()],
+    ))
+    .all(db)
+    .await
+    .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+    Ok(candidates)
+}
 
-        // Acquire the session-scoped lock and run the reindex.
-        let db_handle = self.ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
-            loco_rs::Error::Message(
-                "reindex requires the tenant pool, which this deployment did not build".into(),
-            )
-        })?;
-        let outcome = crate::db::reindex_workspace_with_lock(
-            db_handle.tenant.pool().clone(),
-            args.workspace_id,
-            &self.ctx.db,
-            &candidate_ids,
-            provider.as_ref(),
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
-
-        if !outcome.failures.is_empty() {
-            return Err(loco_rs::Error::Message(format!(
-                "reindex incomplete: {} entities, {} reindexed, {} failed",
-                outcome.total,
-                outcome.reindexed,
-                outcome.failures.len()
-            )));
+/// Declares one `WorkerClass`'s reindex worker type: a thin struct giving `tags()` a fixed single tag,
+/// so that class's reindex jobs are visible only to a worker process asking for it.
+macro_rules! reindex_worker_for_class {
+    ($worker_ty:ident, $class:expr) => {
+        #[doc = concat!("`ReindexWorker` restricted to `", stringify!($class), "` jobs.")]
+        pub struct $worker_ty {
+            ctx: AppContext,
         }
 
-        Ok(())
-    }
+        #[async_trait]
+        impl BackgroundWorker<ReindexArgs> for $worker_ty {
+            fn build(ctx: &AppContext) -> Self {
+                Self { ctx: ctx.clone() }
+            }
+
+            fn tags() -> Vec<String> {
+                vec![$class.tag().to_string()]
+            }
+
+            async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
+                perform_reindex(&self.ctx, &args).await
+            }
+        }
+    };
 }
 
-impl ReindexWorker {
-    /// Fetch all entity IDs for a workspace via raw SQL.
-    ///
-    /// PostgreSQL only: `content_entities` has no `embedding` column on SQLite.
-    async fn fetch_candidates(
-        db: &DatabaseConnection,
-        workspace_id: Uuid,
-    ) -> loco_rs::Result<Vec<ReindexCandidateId>> {
-        let candidates: Vec<_> =
-            ReindexCandidateId::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT id FROM content_entities WHERE workspace_id = $1",
-                [workspace_id.into()],
-            ))
-            .all(db)
-            .await
-            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
-        Ok(candidates)
-    }
-}
+reindex_worker_for_class!(ReindexWorkerTenantPrivate, WorkerClass::TenantPrivate);
+reindex_worker_for_class!(ReindexWorkerOfficial, WorkerClass::Official);
+reindex_worker_for_class!(ReindexWorkerShared, WorkerClass::Shared);
 
-/// Enqueue a reindex job for `workspace_id` through Loco's queue.
+/// Enqueue a reindex job for `workspace_id` through Loco's queue, tagged with the resolved worker class.
 ///
 /// The caller must check that `ctx.queue_provider` is configured: a missing provider
 /// means `perform_later` would return a job ID while silently discarding the job,
@@ -126,18 +145,29 @@ impl ReindexWorker {
 /// # Errors
 /// Returns `loco_rs::Error` when the queue is configured but the enqueue fails.
 pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::Result<String> {
-    let args = serde_json::to_value(ReindexArgs { workspace_id })
-        .map_err(|e| loco_rs::Error::Message(format!("serialize reindex args: {e}")))?;
+    let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+        .await
+    {
+        Ok(worker_class) => worker_class,
+        Err(err) => {
+            tracing::warn!(workspace_id = %workspace_id, error = %err.0, "failed to resolve worker class, defaulting to shared");
+            WorkerClass::Shared
+        }
+    };
+    let args = ReindexArgs {
+        workspace_id,
+        worker_class,
+    };
 
     let job_id = ctx
         .queue_provider
         .as_ref()
         .ok_or_else(|| loco_rs::Error::Message("no queue provider configured".into()))?
         .enqueue(
-            ReindexWorker::class_name(),
-            ReindexWorker::queue(),
+            ReindexWorkerShared::class_name(),
+            ReindexWorkerShared::queue(),
             args,
-            None,
+            Some(ReindexWorkerShared::tags()),
             None,
         )
         .await?

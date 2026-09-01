@@ -56,7 +56,7 @@ impl WorkerClass {
     /// The `tags()` value this class routes through.
     ///
     /// `worker-class:<variant>` rather than the bare variant name: a future tag dimension (region, priority band) added to the same job would otherwise collide on an unprefixed string with no way to tell which dimension it came from.
-    fn tag(self) -> &'static str {
+    pub(crate) fn tag(self) -> &'static str {
         match self {
             Self::TenantPrivate => "worker-class:tenant-private",
             Self::Official => "worker-class:official",
