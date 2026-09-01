@@ -45,6 +45,13 @@ pub enum YorishiroError {
     #[error("not implemented for backend: {message}")]
     BackendUnsupported { message: String },
 
+    /// A required backend component (queue provider, embedding provider) is not configured.
+    /// Distinct from `ProviderUnreachable` (502, provider is unreachable) and `ProviderBusy` (503,
+    /// provider is busy): this variant covers the "not configured at all" case where no backend
+    /// component exists to contact or wait for.
+    #[error("backend unavailable: {message}")]
+    BackendUnavailable { message: String },
+
     /// A write to `workspace_id` is blocked because a startup reindex is in progress.
     /// The write-time model check uses this to refuse new writes until the reindex finishes.
     #[error("reindex in progress for workspace {workspace_id}: {message}")]
@@ -84,6 +91,7 @@ impl YorishiroError {
             Self::ProviderBusy { .. } => "provider_busy",
             Self::ProviderUnreachable { .. } => "provider_unreachable",
             Self::BackendUnsupported { .. } => "backend_unsupported",
+            Self::BackendUnavailable { .. } => "backend_unavailable",
             Self::ReindexInProgress { .. } => "reindex_in_progress",
             Self::Internal(_) => "internal",
         }
@@ -164,9 +172,16 @@ impl YorishiroError {
                 501,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
-            Self::ReindexInProgress { message, .. } => (
-                409,
+            Self::BackendUnavailable { message } => (
+                503,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
+            ),
+            Self::ReindexInProgress {
+                workspace_id,
+                message,
+            } => (
+                409,
+                serde_json::json!({ "error": { "code": code, "message": message, "workspace_id": workspace_id } }),
             ),
             Self::Internal(err) => {
                 tracing::error!(error = %err, "internal error");

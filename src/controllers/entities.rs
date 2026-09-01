@@ -161,9 +161,10 @@ pub async fn reindex_workspace(
     // at all.  A 503 with a clear message lets the operator know this needs a queue config
     // rather than puzzling over a successful 202 with no actual work happening.
     if ctx.queue_provider.is_none() {
-        return Err(ApiError(crate::error::YorishiroError::not_found(
-            "reindex requires a queue provider (configure queue: in the server config)",
-        )));
+        return Err(ApiError(crate::error::YorishiroError::BackendUnavailable {
+            message: "reindex requires a queue provider (configure queue: in the server config)"
+                .into(),
+        }));
     }
 
     let job_id = reindex::enqueue_reindex(&ctx, workspace_id)
