@@ -378,7 +378,7 @@ fn spawn_startup_reindex(ctx: AppContext) {
                 "tenant_dimensions",
             )
             .left_join(crate::models::identity_tenants::Entity)
-            .into_model::<crate::services::embedding::sync::EmbeddingChainRow>()
+            .into_model::<crate::services::embedding::sync::StartupReindexRow>()
             .all(&ctx.db)
             .await
         {

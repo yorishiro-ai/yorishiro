@@ -403,6 +403,18 @@ pub struct ResolvedEmbedding {
 /// A row returned by `resolve_embedding_chain`: workspace and tenant columns in one query.
 #[derive(sea_orm::FromQueryResult)]
 pub struct EmbeddingChainRow {
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
+    pub tenant_model: Option<String>,
+    pub tenant_dimensions: Option<i32>,
+}
+
+/// A workspace row for startup reindex detection: includes `id` so the caller can
+/// identify which workspace needs reindexing.
+/// Separate from `EmbeddingChainRow` so the startup check's select does not
+/// accidentally drift out of sync with `resolve_embedding_chain`'s column list.
+#[derive(Debug, Clone, sea_orm::FromQueryResult)]
+pub struct StartupReindexRow {
     pub id: Uuid,
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<i32>,
