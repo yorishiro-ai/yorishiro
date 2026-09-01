@@ -15,6 +15,8 @@ use std::path::Path;
 #[allow(unused_imports)]
 use crate::{controllers, tasks};
 
+use crate::workers::reindex::ReindexWorker;
+
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
 /// This is the enterprise-edition boundary: one binary carries both editions, and the licence decides at
@@ -264,7 +266,12 @@ impl Hooks for App {
         )))
     }
 
-    /// Registers all three `WorkerClass` worker types, not just one: `Queue::register` keys a handler by `class_name()`, and `enqueue_for_class` enqueues under whichever of the three types matches the resolved `WorkerClass`, so a type left unregistered here would have jobs enqueue successfully but never dequeue (loco-rs has no "unregistered handler" error at enqueue time, only silence at dequeue time).
+    /// Registers all three `WorkerClass` worker types and the reindex worker:
+    /// `Queue::register` keys a handler by `class_name()`, and `enqueue_for_class`
+    /// enqueues under whichever of the three types matches the resolved `WorkerClass`,
+    /// so a type left unregistered here would have jobs enqueue successfully but never
+    /// dequeue (loco-rs has no "unregistered handler" error at enqueue time, only silence
+    /// at dequeue time).
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
         use crate::workers::embedding_sync::{
             EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
@@ -276,7 +283,8 @@ impl Hooks for App {
         queue
             .register(EmbeddingSyncWorkerOfficial::build(ctx))
             .await?;
-        queue.register(EmbeddingSyncWorkerShared::build(ctx)).await
+        queue.register(EmbeddingSyncWorkerShared::build(ctx)).await?;
+        queue.register(ReindexWorker::build(ctx)).await
     }
 
     #[allow(unused_variables)]

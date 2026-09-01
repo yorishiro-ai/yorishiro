@@ -413,7 +413,9 @@ struct EmbeddingChainRow {
 /// workspace stamp → tenant default → deployment default.
 ///
 /// `conn` can be any connection trait: a transaction or a pooled database connection.
-async fn resolve_embedding_chain(
+/// Public because the `reindex_embeddings` task and the startup reindex logic both
+/// need to read the workspace's model stamp to decide whether reindex is necessary.
+pub async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
