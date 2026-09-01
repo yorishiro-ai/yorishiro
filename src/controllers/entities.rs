@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -14,6 +14,7 @@ use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, Writ
 use crate::models::content_entities::{self, EntityRecord, UndoReport};
 use crate::models::identity_api_key_audit_log;
 use crate::workers::embedding_sync;
+use crate::workers::reindex;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEntityRequest {
@@ -135,6 +136,70 @@ pub async fn undo_migration_job(
     Ok(Json(report))
 }
 
+/// Enqueues a reindex job for this workspace.
+///
+/// `MigrationScope`, not `WriteScope`: reindex is a migration operation (replacing vectors from
+/// an old model with a new one), and the same audit trail that gates `undo` applies here too.
+///
+/// `POST /api/migration-jobs/reindex` returns 202 immediately with the job ID; the actual
+/// reindex runs asynchronously in a background worker, serialised by an advisory lock.
+/// A second request for the same workspace while the first is still running enqueues another
+/// job that blocks on the same lock; the REST API cannot reject the second without knowing
+/// how long the first has left, and a reindex over a large workspace may legitimately take
+/// a long time.
+///
+/// Returns 503 when no queue provider is configured: `perform_later` would silently return
+/// a job ID while discarding the job, which is worse than no endpoint at all.
+pub async fn reindex_workspace(
+    State(ctx): State<AppContext>,
+    authorized: Authorized<MigrationScope>,
+) -> Result<Json<ReindexResponse>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+
+    // Check queue provider before enqueue: a missing provider means `perform_later` would
+    // return a job ID while silently discarding the job, which is worse than no endpoint
+    // at all.  A 503 with a clear message lets the operator know this needs a queue config
+    // rather than puzzling over a successful 202 with no actual work happening.
+    if ctx.queue_provider.is_none() {
+        return Err(ApiError(crate::error::YorishiroError::BackendUnavailable {
+            message: "reindex requires a queue provider (configure queue: in the server config)"
+                .into(),
+        }));
+    }
+
+    let job_id = reindex::enqueue_reindex(&ctx, workspace_id)
+        .await
+        .map_err(|e| {
+            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+                e.to_string()
+            )))
+        })?;
+
+    // Recorded on the same RLS-scoped transaction as the request itself: this is a
+    // migration-scope operation that the audit log must capture.
+    identity_api_key_audit_log::record(
+        authorized.txn(),
+        identity_api_key_audit_log::AuditActor {
+            workspace_id,
+            tenant_id: authorized.ctx.tenant_id,
+            api_key_id: authorized.ctx.api_key_id,
+            user_id: authorized.ctx.user_id,
+        },
+        identity_api_key_audit_log::AuditAction::ReindexEmbeddings,
+        serde_json::json!({ "job_id": job_id }),
+    )
+    .await?;
+    authorized.commit().await?;
+
+    Ok(Json(ReindexResponse { job_id }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReindexResponse {
+    /// The job ID assigned by the queue provider.
+    pub job_id: String,
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/entities")
@@ -149,4 +214,5 @@ pub fn migration_routes() -> Routes {
     Routes::new()
         .prefix("api/migration-jobs")
         .add("/{job_id}/undo", post(undo_migration_job))
+        .add("/reindex", post(reindex_workspace))
 }

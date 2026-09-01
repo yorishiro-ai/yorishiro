@@ -45,6 +45,13 @@ pub enum YorishiroError {
     #[error("not implemented for backend: {message}")]
     BackendUnsupported { message: String },
 
+    /// A required backend component (queue provider, embedding provider) is not configured.
+    /// Distinct from `ProviderUnreachable` (502, provider is unreachable) and `ProviderBusy` (503,
+    /// provider is busy): this variant covers the "not configured at all" case where no backend
+    /// component exists to contact or wait for.
+    #[error("backend unavailable: {message}")]
+    BackendUnavailable { message: String },
+
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -76,6 +83,7 @@ impl YorishiroError {
             Self::ProviderBusy { .. } => "provider_busy",
             Self::ProviderUnreachable { .. } => "provider_unreachable",
             Self::BackendUnsupported { .. } => "backend_unsupported",
+            Self::BackendUnavailable { .. } => "backend_unavailable",
             Self::Internal(_) => "internal",
         }
     }
@@ -153,6 +161,10 @@ impl YorishiroError {
             ),
             Self::BackendUnsupported { message } => (
                 501,
+                serde_json::json!({ "error": { "code": code, "message": message } }),
+            ),
+            Self::BackendUnavailable { message } => (
+                503,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::Internal(err) => {

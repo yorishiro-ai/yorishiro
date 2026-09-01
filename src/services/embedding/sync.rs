@@ -402,18 +402,38 @@ pub struct ResolvedEmbedding {
 
 /// A row returned by `resolve_embedding_chain`: workspace and tenant columns in one query.
 #[derive(sea_orm::FromQueryResult)]
-struct EmbeddingChainRow {
-    embedding_model: Option<String>,
-    embedding_dimensions: Option<i32>,
-    tenant_model: Option<String>,
-    tenant_dimensions: Option<i32>,
+pub struct EmbeddingChainRow {
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
+    pub tenant_model: Option<String>,
+    pub tenant_dimensions: Option<i32>,
+}
+
+/// A workspace row for startup reindex detection: includes `id` so the caller can
+/// identify which workspace needs reindexing.
+/// Separate from `EmbeddingChainRow` so the startup check's select does not
+/// accidentally drift out of sync with `resolve_embedding_chain`'s column list.
+/// `embedding_dimensions` and `tenant_dimensions` are present even though the
+/// startup check only compares models: keeping the same column list as the
+/// existing `resolve_embedding_chain` select means a future change to either
+/// query's columns is visible as a compile-time mismatch, not a silent
+/// `FromQueryResult` decode failure.
+#[derive(Debug, Clone, sea_orm::FromQueryResult)]
+pub struct StartupReindexRow {
+    pub id: Uuid,
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
+    pub tenant_model: Option<String>,
+    pub tenant_dimensions: Option<i32>,
 }
 
 /// Resolves the full three-tier embedding chain for a workspace in a single query:
 /// workspace stamp → tenant default → deployment default.
 ///
 /// `conn` can be any connection trait: a transaction or a pooled database connection.
-async fn resolve_embedding_chain(
+/// Public because the `reindex_embeddings` task and the startup reindex logic both
+/// need to read the workspace's model stamp to decide whether reindex is necessary.
+pub async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<ResolvedEmbedding, YorishiroError> {

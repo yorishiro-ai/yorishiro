@@ -44,6 +44,8 @@ pub enum AuditAction {
     UndoMigrationJob,
     /// `identity_maintenance::set`: a `Migration`-scoped maintenance mode change.
     SetMaintenance,
+    /// `embedding::reindex_workspace`: a `Migration`-scoped embedding reindex, replacing all vectors in a workspace with those from a new model.
+    ReindexEmbeddings,
 }
 
 impl AuditAction {
@@ -51,6 +53,7 @@ impl AuditAction {
         match self {
             Self::UndoMigrationJob => "undo_migration_job",
             Self::SetMaintenance => "set_maintenance",
+            Self::ReindexEmbeddings => "reindex_embeddings",
         }
     }
 }

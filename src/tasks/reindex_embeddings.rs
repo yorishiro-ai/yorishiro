@@ -53,6 +53,31 @@ impl Task for ReindexEmbeddings {
             Error::Message(format!("embedding provider must be configured: {err}"))
         })?;
 
+        // Skip when the workspace already matches and the user didn't ask for force.
+        // The REST endpoint (which is the primary entry point) always enqueues to give
+        // the caller an immediate answer and a job to track; the task is the direct
+        // CLI path and benefits from the same shortcut so the operator doesn't have to
+        // guess whether the workspace needs reindexing before calling.
+        let force: bool = vars
+            .cli_arg("force")
+            .ok()
+            .map(|v| v.parse().unwrap_or(false))
+            .unwrap_or(false);
+        if !force {
+            let chain = embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id)
+                .await
+                .map_err(|err| Error::Message(err.to_string()))?;
+            if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {
+                println!(
+                    "workspace {} already stamped with model {:?}; nothing to reindex \
+                     (add force:true to reindex despite matching model)",
+                    workspace_id,
+                    provider.model_name()
+                );
+                return Ok(());
+            }
+        }
+
         let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
             "SELECT id FROM content_entities WHERE workspace_id = $1",
