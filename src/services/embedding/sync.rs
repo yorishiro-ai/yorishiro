@@ -107,16 +107,13 @@ pub async fn sync_embedding(
     if let Some(expected) = effective_model
         && expected.as_str() != provider.model_name()
     {
-        return Err(YorishiroError::ValidationFailed {
+        return Err(YorishiroError::ReindexInProgress {
+            workspace_id: workspace_id.to_string(),
             message: format!(
                 "this workspace expects model {expected:?}, but the configured \
                  embedding provider is {:?}",
                 provider.model_name()
             ),
-            details: vec![],
-            hint: "point the deployment at the workspace's effective model, or run \
-                   reindex_embeddings to switch it over"
-                .into(),
         });
     }
 
