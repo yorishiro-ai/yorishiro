@@ -134,6 +134,21 @@ reindex_worker_for_class!(ReindexWorkerTenantPrivate, WorkerClass::TenantPrivate
 reindex_worker_for_class!(ReindexWorkerOfficial, WorkerClass::Official);
 reindex_worker_for_class!(ReindexWorkerShared, WorkerClass::Shared);
 
+/// Enqueues `args` on the worker type matching `args.worker_class`, so the queued tag
+/// is the one the caller resolved.
+///
+/// Exhaustively matched, with no `_` arm: a fourth `WorkerClass` without its worker type
+/// fails to compile rather than falling through to the wrong queue.
+pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<()> {
+    let _job_id = match args.worker_class {
+        WorkerClass::TenantPrivate => ReindexWorkerTenantPrivate::perform_later(ctx, args).await?,
+        WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args).await?,
+        WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args).await?,
+    };
+    // Job ID discarded: callers that need it unwrap the Option themselves.
+    Ok(())
+}
+
 /// Enqueue a reindex job for `workspace_id` through Loco's queue, tagged with the resolved worker class.
 ///
 /// The caller must check that `ctx.queue_provider` is configured: a missing provider
@@ -159,19 +174,25 @@ pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::R
         worker_class,
     };
 
-    let job_id = ctx
-        .queue_provider
-        .as_ref()
-        .ok_or_else(|| loco_rs::Error::Message("no queue provider configured".into()))?
-        .enqueue(
-            ReindexWorkerShared::class_name(),
-            ReindexWorkerShared::queue(),
-            args,
-            Some(ReindexWorkerShared::tags()),
-            None,
-        )
-        .await?
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    // Use perform_later so tags() is read through the correct worker type's impl.
+    // unwrap_or_else: perform_later returns Option<String> for the job_id in BackgroundQueue mode;
+    // if None, generate one so the caller has something to track.
+    let job_id = match ctx.queue_provider {
+        Some(_) => match worker_class {
+            WorkerClass::TenantPrivate => {
+                ReindexWorkerTenantPrivate::perform_later(ctx, args.clone()).await
+            }
+            WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args.clone()).await,
+            WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args.clone()).await,
+        }
+        .ok()
+        .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        None => {
+            return Err(loco_rs::Error::Message(
+                "no queue provider configured".into(),
+            ));
+        }
+    };
 
     Ok(job_id)
 }

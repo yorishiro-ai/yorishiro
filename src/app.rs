@@ -17,7 +17,9 @@ use tokio::task::spawn;
 use crate::{controllers, tasks};
 
 use crate::workers::embedding_sync::WorkerClass;
-use crate::workers::reindex::ReindexWorkerShared;
+use crate::workers::reindex::{
+    ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
+};
 
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
@@ -297,8 +299,11 @@ impl Hooks for App {
             .register(EmbeddingSyncWorkerShared::build(ctx))
             .await?;
         queue
-            .register(ReindexWorkerShared::build(ctx))
-            .await
+            .register(ReindexWorkerTenantPrivate::build(ctx))
+            .await?;
+        queue.register(ReindexWorkerOfficial::build(ctx)).await?;
+        queue.register(ReindexWorkerShared::build(ctx)).await?;
+        Ok(())
     }
 
     #[allow(unused_variables)]
@@ -410,41 +415,34 @@ fn spawn_startup_reindex(ctx: AppContext) {
                 "startup reindex: model mismatch, enqueueing reindex"
             );
 
-            // Enqueue reindex. If queue is not configured, log a warning.
-            match ctx.queue_provider {
-                Some(ref queue) => {
-                    let args = super::workers::reindex::ReindexArgs {
-                        workspace_id: ws.id,
-                        worker_class: WorkerClass::Shared,
-                    };
-                    let enqueue_result = queue
-                        .enqueue(
-                            ReindexWorkerShared::class_name(),
-                            ReindexWorkerShared::queue(),
-                            args,
-                            Some(ReindexWorkerShared::tags()),
-                            None,
-                        )
-                        .await;
-                    if let Err(err) = enqueue_result {
-                        tracing::error!(
+            // Resolve the worker class for this workspace and dispatch through the correct type.
+            let worker_class =
+                match crate::controllers::extractors::resolve_worker_class(&ctx, ws.id).await {
+                    Ok(cls) => cls,
+                    Err(err) => {
+                        tracing::warn!(
                             workspace_id = %ws.id,
-                            error = %err,
-                            "startup reindex: failed to enqueue reindex"
+                            error = %err.0,
+                            "startup reindex: failed to resolve worker class, defaulting to shared"
                         );
-                    } else {
-                        tracing::info!(
-                            workspace_id = %ws.id,
-                            "startup reindex: enqueue success"
-                        );
+                        WorkerClass::Shared
                     }
-                }
-                None => {
-                    tracing::warn!(
-                        workspace_id = %ws.id,
-                        "startup reindex: queue not configured, cannot enqueue reindex"
-                    );
-                }
+                };
+            let args = super::workers::reindex::ReindexArgs {
+                workspace_id: ws.id,
+                worker_class,
+            };
+            if let Err(err) = super::workers::reindex::enqueue_for_class(&ctx, args).await {
+                tracing::error!(
+                    workspace_id = %ws.id,
+                    error = %err,
+                    "startup reindex: failed to enqueue reindex"
+                );
+            } else {
+                tracing::info!(
+                    workspace_id = %ws.id,
+                    "startup reindex: enqueue success"
+                );
             }
         }
     });
