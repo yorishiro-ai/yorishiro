@@ -74,25 +74,25 @@ impl Hooks for App {
         env!("CARGO_CRATE_NAME")
     }
 
-    /// Overrides Loco's default `load_config` so that `Environment::Test` loads a named
-    /// config file instead of the now-deleted `test.yaml`.
-    ///
-    /// `request_with_create_db` (loco-rs 1.1.0) always calls `load_config` with
-    /// `Environment::Test` because it hardcodes `Environment::Test` internally;
-    /// this redirect ensures the file it reads matches the Postgres-only harness.
-    ///
-    /// `YORISHIRO_TEST_CONFIG` selects the target config name (default: `test_postgres`).
-    /// This is an env var, not a compiled-in constant, so an operator can steer the harness
-    /// at boot — every other default in this codebase uses the same pattern (queue kind from
-    /// `DATABASE_URL`'s scheme, embedding model from `YORISHIRO_LOCAL_MODEL`, and so on).
-    /// Note that `request_with_create_db`'s Postgres-only nature (it issues `CREATE DATABASE`)
-    /// means pointing this at `test_sqlite` will fail at that step, not silently succeed
-    /// against a SQLite database.
+    /// Overrides Loco's default `load_config` so that `Environment::Test` auto-selects
+    /// the matching config file: `DATABASE_URL` starting with `sqlite://` loads
+    /// `test_sqlite.yaml`, everything else loads `test_postgres.yaml`.
+    /// Both harnesses (`request_with_create_db` and `request_with_create_sqlite`)
+    /// override `config.database.uri` after loading, so the config's own URI is
+    /// effectively a no-op, but the queue and server settings differ between backends.
     async fn load_config(env: &Environment) -> Result<Config> {
         let env = match env {
-            Environment::Test => Environment::Any(
-                std::env::var("YORISHIRO_TEST_CONFIG").unwrap_or_else(|_| "test_postgres".into()),
-            ),
+            Environment::Test => {
+                let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                    "postgres://loco:loco@localhost:5432/yorishiro_test".into()
+                });
+                let backend = if url.starts_with("sqlite://") {
+                    "test_sqlite"
+                } else {
+                    "test_postgres"
+                };
+                Environment::Any(backend.into())
+            }
             other => other.clone(),
         };
         env.load()
