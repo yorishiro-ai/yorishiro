@@ -46,11 +46,15 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     Setup { read_key }
 }
 
-/// No `YORISHIRO_EMBEDDING_BASE_URL`/`_MODEL` is set in the test environment, so the deployment boots with `UnconfiguredEmbeddingProvider` and any actual search attempt surfaces as 502, not a panic or a silent empty result.
+/// `YORISHIRO_EMBEDDING_PROVIDER=none` forces `build_embedding_provider` to return `UnconfiguredEmbeddingProvider` regardless of cached model files, so any actual search attempt surfaces as 502, not a panic or a silent empty result.
 /// Search fails loudly and namedly rather than the boot process itself failing for every deployment that hasn't configured embeddings yet.
 #[tokio::test]
 #[serial]
 async fn search_with_no_embedding_provider_configured_returns_502() {
+    // Force unconfigured provider even if model files exist in cache: the test asserts on the
+    // provider-missing path, not on the local provider succeeding.
+    std::env::set_var("YORISHIRO_EMBEDDING_PROVIDER", "none");
+
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let Setup { read_key } = setup(&ctx).await;
 
