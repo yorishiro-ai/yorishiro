@@ -72,9 +72,7 @@ mailer:
     secure: false
 
 database:
-  # A bare `sqlite://path` is relative to the process's CWD; an absolute path avoids surprises
-  # depending on where `cargo loco start` is run from.
-  uri: <%= get_env(name="DATABASE_URL", default="sqlite://yorishiro-sqlite.sqlite3?mode=rwc") %>
+  uri: <%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: 500
   idle_timeout: 500
