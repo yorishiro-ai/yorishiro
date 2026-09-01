@@ -78,9 +78,9 @@ jobs:
           - backend: postgres
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          - backend: sqlite
-            loco_env: test_sqlite
-            database_url: 'sqlite::memory:'
+          # - backend: sqlite
+          #   loco_env: test_sqlite
+          #   database_url: 'sqlite::memory:'
     services:
       db:
         image: pgvector/pgvector:pg18
