@@ -4,6 +4,7 @@
 # SQLite tests are gated by require_sqlite_backend() (DATABASE_URL scheme check).
 # Default database URL for PostgreSQL tests.
 # Override with: make test DATABASE_URL=postgres://user:pass@host:port/db
+# Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:5432/yorishiro
 LOCO_ENV ?= test_postgres
 ENVIRONMENT ?= development
@@ -26,15 +27,15 @@ fmt-check:
 # SQLite tests are gated by require_sqlite_backend() which checks the
 # DATABASE_URL scheme; set DATABASE_URL to an SQLite URL to run them.
 test:
-	DATABASE_URL=$(DATABASE_URL) \
-	LOCO_ENV=$(LOCO_ENV) \
+	DATABASE_URL='$(DATABASE_URL)' \
+	LOCO_ENV='$(LOCO_ENV)' \
 	cargo test --locked --workspace $(ARGS)
 
 test-postgres:
-	$(MAKE) test DATABASE_URL=$(DATABASE_URL)
+	$(MAKE) test DATABASE_URL='$(DATABASE_URL)'
 
 test-sqlite:
-	$(MAKE) test DATABASE_URL=sqlite://:memory:
+	$(MAKE) test DATABASE_URL='sqlite://:memory:'
 
 build:
 	cargo build --locked -p yorishiro --bin yorishiro
@@ -45,9 +46,12 @@ task: build
 	LOCO_ENV=$(LOCO_ENV) \
 	./target/debug/yorishiro task $(NAME) $(ARGS)
 
-# make doctor [ENVIRONMENT=production]
+# make doctor ENVIRONMENT=production DATABASE_URL=postgres://...
 doctor: build
-	DATABASE_URL=$(DATABASE_URL) \
+ifndef DATABASE_URL
+	$(error DATABASE_URL is required for doctor: set it explicitly)
+endif
+	DATABASE_URL='$(DATABASE_URL)' \
 	./target/debug/yorishiro doctor -e $(ENVIRONMENT)
 
 # Warm the cargo registry cache without building.

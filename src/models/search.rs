@@ -109,6 +109,32 @@ fn scope_clause(
     (sql, values)
 }
 
+/// SQLite-aware variant of scope_clause: omits the JSONB containment filter
+/// because SQLite has no `data @> filter` operator.
+fn scope_clause_sqlite(
+    workspace_id: Uuid,
+    query: &SearchQuery,
+    next_param: usize,
+    is_sqlite: bool,
+) -> (String, Vec<sea_orm::Value>) {
+    let mut sql = format!(" AND e.workspace_id = ${next_param}");
+    let mut values: Vec<sea_orm::Value> = vec![workspace_id.into()];
+    let mut n = next_param + 1;
+
+    if let Some(entity_type) = &query.entity_type {
+        sql.push_str(&format!(" AND e.entity_type = ${n}"));
+        values.push(entity_type.clone().into());
+        n += 1;
+    }
+    // JSONB containment (`data @> filter`) is PostgreSQL-only; skip on SQLite.
+    if let (false, Some(filter)) = (is_sqlite, &query.filter) {
+        sql.push_str(&format!(" AND e.data @> ${n}"));
+        values.push(filter.clone().into());
+    }
+
+    (sql, values)
+}
+
 const HIT_COLUMNS: &str = "e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, \
      e.data, e.created_at, e.updated_at, e.created_by, e.updated_by";
 
@@ -123,57 +149,70 @@ pub async fn search_by_vector(
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
     let limit = query.limit.clamp(1, 200);
+    let is_sqlite = conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
 
-    let (scope_sql, scope_values) = scope_clause(workspace_id, &query, 2);
-    let vector_sql = format!(
-        "SELECT {HIT_COLUMNS}, (e.embedding <=> $1) AS distance \
-         FROM content_entities e \
-         WHERE e.embedding IS NOT NULL{scope_sql} \
-         ORDER BY e.embedding <=> $1 \
-         LIMIT {limit}"
-    );
-    let mut vector_values: Vec<sea_orm::Value> = vec![pgvector::Vector::from(vector).into()];
-    vector_values.extend(scope_values);
+    let mut rows: Vec<SearchRow> = vec![];
 
-    let mut rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        &vector_sql,
-        vector_values,
-    ))
-    .all(conn)
-    .await
-    .internal()?;
+    // Vector half: only runs on PostgreSQL (SQLite has no embedding column).
+    if !is_sqlite {
+        let (scope_sql, scope_values) = scope_clause(workspace_id, &query, 2);
+        let vector_sql = format!(
+            "SELECT {HIT_COLUMNS}, (e.embedding <=> $1) AS distance \
+             FROM content_entities e \
+             WHERE e.embedding IS NOT NULL{scope_sql} \
+             ORDER BY e.embedding <=> $1 \
+             LIMIT {limit}"
+        );
+        let mut vector_values: Vec<sea_orm::Value> = vec![pgvector::Vector::from(vector).into()];
+        vector_values.extend(scope_values);
 
-    // Trigram half, for what the vector half cannot reach: entities with no embedding at all.
+        rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            &vector_sql,
+            vector_values,
+        ))
+        .all(conn)
+        .await
+        .internal()?;
+    }
+
+    // Trigram/FTS5 half, for what the vector half cannot reach: entities with no embedding at all.
     // Only run when there is room left: a full page of vector hits already outranks every trigram-only match.
     if (rows.len() as i64) < limit {
         let remaining = limit - rows.len() as i64;
-        let (scope_sql, mut scope_values) = scope_clause(workspace_id, &query, 2);
+        let (scope_sql, scope_values) = scope_clause_sqlite(workspace_id, &query, 2, is_sqlite);
 
-        let trigram_rows = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if is_sqlite {
             // SQLite has no pg_trgm, so full-text search uses the FTS5 virtual table
-            // created in the migration. The FTS5 table mirrors `content_entities` via the
-            // `content=`/`content_rowid=` sync pattern, so it auto-updates on INSERT/UPDATE/DELETE.
-            // `workspace_id` is stored as an FTS5 column for filtering without MATCH.
-            // SQLite FTS5 has no built-in similarity function, so we skip ordering by rank
-            // and return matches in document-order (which is insertion order).
+            // created in the migration. The FTS5 table mirrors `content_entities` and is
+            // kept in sync via triggers. `workspace_id` is stored as an FTS5 column for
+            // filtering without MATCH. SQLite FTS5 has no built-in similarity function,
+            // so we skip ordering by rank and return matches in document-order (which is
+            // insertion order).
+            //
+            // `rowid` is the FTS5 hidden rowid column that links the virtual table to the
+            // backing table, so `e.id = fts_content_entities.rowid` is the join condition.
+            // FTS5 MATCH inside a join uses the unaliased virtual table name (not the
+            // `f` alias) because `MATCH` is a keyword-like operator that does not resolve
+            // against the join alias on all SQLite/FTS5 versions.
             let fts_sql = format!(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
-                 FROM content_entities e, fts_content_entities f \
-                 WHERE e.id = f.rowid{scope_sql} AND f MATCH $1 \
+                 FROM content_entities e, fts_content_entities \
+                 WHERE e.id = fts_content_entities.rowid{scope_sql} \
+                 AND data MATCH $1 \
                  LIMIT {remaining}"
             );
             let mut fts_values: Vec<sea_orm::Value> = vec![query_text.into()];
-            fts_values.append(&mut scope_values);
+            fts_values.extend(scope_values);
 
-            SearchRow::find_by_statement(Statement::from_sql_and_values(
+            rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
                 &fts_sql,
                 fts_values,
             ))
             .all(conn)
             .await
-            .internal()?
+            .internal()?;
         } else {
             // PostgreSQL uses pg_trgm for fuzzy text matching.
             // `data::text` casts the JSONB column to text for trigram comparison.
@@ -186,19 +225,19 @@ pub async fn search_by_vector(
                  LIMIT {remaining}"
             );
             let mut trigram_values: Vec<sea_orm::Value> = vec![query_text.into()];
-            trigram_values.append(&mut scope_values);
+            trigram_values.extend(scope_values);
 
-            SearchRow::find_by_statement(Statement::from_sql_and_values(
+            let trigram_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
                 &trigram_sql,
                 trigram_values,
             ))
             .all(conn)
             .await
-            .internal()?
-        };
+            .internal()?;
 
-        rows.extend(trigram_rows);
+            rows.extend(trigram_rows);
+        }
     }
 
     Ok(rows.into_iter().map(SearchRow::into_hit).collect())

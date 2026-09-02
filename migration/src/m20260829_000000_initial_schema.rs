@@ -892,11 +892,11 @@ impl MigrationTrait for Migration {
         .await?;
 
         // FTS5 virtual table for text search fallback on SQLite.
-        // SQLite has no pg_trgm, so full-text search uses FTS5 with the content-table
-        // sync pattern: the virtual table mirrors `content_entities` and auto-updates
-        // on INSERT/UPDATE/DELETE to the backing table.
-        // `workspace_id` is declared as an FTS5 column (using the `content=`/`content_rowid=`
-        // syntax) so it is stored alongside the indexed tokens and can be filtered in queries.
+        // SQLite has no pg_trgm, so full-text search uses FTS5 with an external content
+        // table. The virtual table uses the hidden rowid to link to content_entities.id,
+        // and triggers keep it in sync on INSERT/UPDATE/DELETE.
+        // `workspace_id` is declared as an FTS5 column (using `content_rowid=` syntax)
+        // so it is stored alongside the indexed tokens and can be filtered in queries.
         helpers::sqlite_only(
             manager,
             "CREATE VIRTUAL TABLE fts_content_entities USING fts5(\
@@ -911,7 +911,35 @@ impl MigrationTrait for Migration {
         // This must run after the virtual table exists but before any real data is inserted.
         helpers::sqlite_only(
             manager,
-            "INSERT INTO fts_content_entities(fts_content_entities) VALUES('reindex')",
+            "INSERT INTO fts_content_entities(fts_content_entities) VALUES('rebuild')",
+        )
+        .await?;
+        // Triggers keep the FTS5 virtual table in sync with the backing table.
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
+             BEGIN \
+                INSERT INTO fts_content_entities(rowid, data, workspace_id) \
+                VALUES(NEW.id, NEW.data, NEW.workspace_id); \
+             END",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
+             BEGIN \
+                DELETE FROM fts_content_entities WHERE rowid = OLD.id; \
+                INSERT INTO fts_content_entities(rowid, data, workspace_id) \
+                VALUES(NEW.id, NEW.data, NEW.workspace_id); \
+             END",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
+             BEGIN \
+                DELETE FROM fts_content_entities WHERE rowid = OLD.id; \
+             END",
         )
         .await?;
 
@@ -1872,6 +1900,7 @@ impl MigrationTrait for Migration {
             "content_relations",
             "content_entity_snapshots",
             "content_entity_column_preferences",
+            "fts_content_entities",
             "content_entities",
             "content_schemas",
             "identity_api_key_audit_log",

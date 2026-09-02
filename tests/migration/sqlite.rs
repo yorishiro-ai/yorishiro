@@ -61,7 +61,7 @@ async fn all_migrations_roll_back_and_reapply_on_sqlite() {
         .expect("reapply all migrations after rollback");
 }
 
-// Verification: all 4 migrations run to completion on SQLite,
+// Verification: all migrations run to completion on SQLite,
 // repeated 5 times to exercise pooled-connection interleaving.
 // Without the transaction guard in helpers::use_transaction(), DDL statements
 // interleave across pooled connections and the DROP/CREATE TRIGGER pair fails.
@@ -71,13 +71,15 @@ async fn migration_sqlite_max_connections_10_five_times() {
         return;
     }
     let dir = tempfile::tempdir().expect("create tempdir");
-    let path = sqlite_path(dir.path());
-    let db = Database::connect(&format!("sqlite://{}?mode=rwc", path.display()))
-        .await
-        .expect("connect sqlite");
+    for _ in 0..5 {
+        let path = sqlite_path(dir.path());
+        let db = Database::connect(&format!("sqlite://{}?mode=rwc", path.display()))
+            .await
+            .expect("connect sqlite");
 
-    Migrator::up(&db, None).await.expect("migration failed");
+        Migrator::up(&db, None).await.expect("migration failed");
 
-    drop(db);
-    cleanup(&path);
+        drop(db);
+        cleanup(&path);
+    }
 }
