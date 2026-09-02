@@ -25,7 +25,12 @@ fn cleanup(path: &str) {
 
 #[tokio::test]
 async fn all_migrations_apply_to_a_fresh_sqlite_file() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir.path().join("yorishiro.sqlite3");
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -39,7 +44,12 @@ async fn all_migrations_apply_to_a_fresh_sqlite_file() {
 
 #[tokio::test]
 async fn all_migrations_roll_back_and_reapply_on_sqlite() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir.path().join("yorishiro.sqlite3");
     let url = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -64,7 +74,12 @@ async fn all_migrations_roll_back_and_reapply_on_sqlite() {
 // interleave across pooled connections and the DROP/CREATE TRIGGER pair fails.
 #[tokio::test]
 async fn migration_sqlite_max_connections_10_five_times() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     for _run in 1..=RUNS {
         let path = sqlite_path();
         let db = Database::connect(&format!("sqlite://{}?mode=rwc", path))

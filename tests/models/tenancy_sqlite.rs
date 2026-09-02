@@ -36,7 +36,12 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[tokio::test]
 #[serial]
 async fn a_first_tenant_can_be_created_on_sqlite() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let db = sqlite_db().await;
     let tenant = create_tenant(&db, "first tenant")
         .await
@@ -47,7 +52,12 @@ async fn a_first_tenant_can_be_created_on_sqlite() {
 #[tokio::test]
 #[serial]
 async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let db = sqlite_db().await;
     // A generous limit: if SQLite's cap were reading this instead of being hardcoded to 1, the second create below would wrongly succeed.
     with_max_tenants("1000", async {
@@ -73,7 +83,12 @@ async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
 #[tokio::test]
 #[serial]
 async fn an_invite_gets_an_id_on_sqlite() {
-    super::super::require_sqlite_backend();
+    if !super::super::require_test_backend("sqlite") {
+        return;
+    }
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let db = sqlite_db().await;
     let tenant = create_tenant(&db, "invite tenant")
         .await

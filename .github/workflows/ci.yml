@@ -96,7 +96,7 @@ jobs:
       - name: Install pgvector and pg_trgm into template1
         if: matrix.backend == 'postgres'
         run: |
-          PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d template1 \
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d template1 \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
@@ -107,9 +107,11 @@ jobs:
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
+          YORISHIRO_TEST_BACKEND: ${{ matrix.backend }}
+          DB_MAX_CONNECTIONS: "100"
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace -- --test-threads=1
 
       - name: Show sccache stats
         run: sccache --show-stats
