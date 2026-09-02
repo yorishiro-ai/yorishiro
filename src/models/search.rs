@@ -111,6 +111,8 @@ fn scope_clause(
 
 /// SQLite-aware variant of scope_clause: omits the JSONB containment filter
 /// because SQLite has no `data @> filter` operator.
+/// Callers must check `query.filter.is_some()` before calling on SQLite
+/// and return `BackendUnsupported`; see `search_by_vector` for the check.
 fn scope_clause_sqlite(
     workspace_id: Uuid,
     query: &SearchQuery,
@@ -180,6 +182,15 @@ pub async fn search_by_vector(
     // Only run when there is room left: a full page of vector hits already outranks every trigram-only match.
     if (rows.len() as i64) < limit {
         let remaining = limit - rows.len() as i64;
+
+        // SQLite has no JSONB containment operator to replace `data @> filter`.
+        if is_sqlite && query.filter.is_some() {
+            return Err(YorishiroError::BackendUnsupported {
+                message: "content filtering is not supported on SQLite (no JSONB @> operator)"
+                    .to_string(),
+            });
+        }
+
         let (scope_sql, scope_values) = scope_clause_sqlite(workspace_id, &query, 2, is_sqlite);
 
         if is_sqlite {

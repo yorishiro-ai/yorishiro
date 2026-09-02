@@ -937,7 +937,8 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
              BEGIN \
-                DELETE FROM fts_content_entities WHERE rowid = OLD.rowid; \
+                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id) \
+                VALUES('delete', OLD.rowid, OLD.data, OLD.workspace_id); \
                 INSERT INTO fts_content_entities(rowid, data, workspace_id) \
                 VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
              END",
@@ -947,7 +948,8 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
              BEGIN \
-                DELETE FROM fts_content_entities WHERE rowid = OLD.rowid; \
+                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id) \
+                VALUES('delete', OLD.rowid, OLD.data, OLD.workspace_id); \
              END",
         )
         .await?;
