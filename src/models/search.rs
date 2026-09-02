@@ -200,7 +200,7 @@ pub async fn search_by_vector(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
                  FROM content_entities e, fts_content_entities \
                  WHERE e.rowid = fts_content_entities.rowid{scope_sql} \
-                 AND data MATCH $1 \
+                 AND fts_content_entities.data MATCH $1 \
                  LIMIT {remaining}"
             );
             let mut fts_values: Vec<sea_orm::Value> = vec![query_text.into()];
