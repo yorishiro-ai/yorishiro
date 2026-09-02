@@ -41,11 +41,35 @@ mod worker_class;
 ///
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
+    // Terminate lingering sessions before closing pools. `close()` on sqlx
+    // pools doesn't terminate existing connections — it only prevents new
+    // ones — so `DROP DATABASE` fails on "other sessions".
+    //
+    // `ctx.db.get_postgres_connection_pool()` is the pool that `ctx.db` uses,
+    // which connects to the test database (e.g., `_loco_test_xxx`). Sessions
+    // leaked by `request_with_create_db` hold connections on that database.
+    // We acquire a connection from this pool, run `pg_terminate_backend`
+    // (which only works on the same database), then close the pool.
+    // Docker's postgres image creates `POSTGRES_USER` roles as superusers,
+    // so `pg_terminate_backend` works in CI; on local dev it degrades
+    // gracefully when the user lacks `pg_signal_backend` privileges.
+    let test_pool = ctx.db.get_postgres_connection_pool();
+    if let Ok(mut conn) = test_pool.acquire().await {
+        let _ = sqlx::query(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+             WHERE datname = current_database()\
+             AND pid <> pg_backend_pid()",
+        )
+        .execute(conn.as_mut())
+        .await;
+    }
+
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;
     }
-    ctx.db.get_postgres_connection_pool().close().await;
+    // Close ctx.db — it may hold active connections from transactions.
+    ctx.db.close_by_ref().await.ok();
 }
 
 /// SQLite variant of `close_app_pools`.

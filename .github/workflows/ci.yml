@@ -93,9 +93,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install pgvector and pg_trgm into template1
+      - name: Grant superuser to yorishiro and install extensions
         if: matrix.backend == 'postgres'
         run: |
+          PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d postgres \
+            -c 'ALTER ROLE yorishiro SUPERUSER;'
           PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d template1 \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
