@@ -25,13 +25,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/rust-setup
         with:
-          cache-directories: ~/.cache/ort.pyke.io
+          use-sccache: 'false'
 
       # The library, not the binary: this job exists to catch Windows-only compile breakage, and the
       # lib carries both editions since `ee/` compiles into this crate rather than its own.
