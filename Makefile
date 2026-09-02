@@ -1,13 +1,9 @@
 # Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
 
-# CI mirrors this structure: check / clippy / fmt-check run once, then test runs
-# per-backend via the BACKEND variable (postgres by default).
-# YORISHIRO_TEST_BACKEND is set by ci.yml per matrix entry; locally unset to run
-# all tests (backend gate falls through to require_sqlite_backend).
+# CI mirrors this structure: check / clippy / fmt-check run once, then test runs.
+# SQLite tests are gated by require_sqlite_backend() (DATABASE_URL scheme check).
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:25433/yorishiro
 LOCO_ENV ?= test_postgres
-YORISHIRO_TEST_BACKEND ?=
-BACKEND ?= postgres
 ENVIRONMENT ?= development
 
 .PHONY: check clippy fmt fmt-check test test-postgres test-sqlite build task doctor
@@ -25,19 +21,18 @@ fmt-check:
 	cargo fmt --all -- --check
 
 # Run the full suite against the selected backend (postgres by default).
-# Sets YORISHIRO_TEST_BACKEND so that backend-gated tests only exercise
-# their own backend; see tests/mod.rs::require_test_backend().
+# SQLite tests are gated by require_sqlite_backend() which checks the
+# DATABASE_URL scheme; set DATABASE_URL to an SQLite URL to run them.
 test:
 	DATABASE_URL=$(DATABASE_URL) \
 	LOCO_ENV=$(LOCO_ENV) \
-	YORISHIRO_TEST_BACKEND=$(YORISHIRO_TEST_BACKEND) \
 	cargo test --locked --workspace $(ARGS)
 
 test-postgres:
-	$(MAKE) test BACKEND=postgres YORISHIRO_TEST_BACKEND=postgres
+	$(MAKE) test DATABASE_URL=postgres://yorishiro:yorishiro@localhost:25433/yorishiro
 
 test-sqlite:
-	$(MAKE) test BACKEND=sqlite YORISHIRO_TEST_BACKEND=sqlite DATABASE_URL=sqlite://:memory:
+	$(MAKE) test DATABASE_URL=sqlite://:memory:
 
 build:
 	cargo build --locked -p yorishiro --bin yorishiro

@@ -133,19 +133,16 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-setup
 
-      # The action exports SCCACHE_PATH but not RUSTC_WRAPPER, so cargo has to be pointed at
-      # sccache explicitly, and that happens after rust-cache below since rust-cache folds
-      # RUST*-prefixed env vars into its cache key.
-      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # rust-cache: each arch needs ~/.cache/ort.pyke.io (embedding cache), separate from
+      # sccache, so it stays as the caller's own step after the composite.
+      - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
 

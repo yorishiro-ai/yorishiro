@@ -36,9 +36,6 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[tokio::test]
 #[serial]
 async fn a_first_tenant_can_be_created_on_sqlite() {
-    if !super::super::require_test_backend("sqlite") {
-        return;
-    }
     if !super::super::require_sqlite_backend() {
         return;
     }
@@ -52,9 +49,6 @@ async fn a_first_tenant_can_be_created_on_sqlite() {
 #[tokio::test]
 #[serial]
 async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
-    if !super::super::require_test_backend("sqlite") {
-        return;
-    }
     if !super::super::require_sqlite_backend() {
         return;
     }
@@ -83,9 +77,6 @@ async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
 #[tokio::test]
 #[serial]
 async fn an_invite_gets_an_id_on_sqlite() {
-    if !super::super::require_test_backend("sqlite") {
-        return;
-    }
     if !super::super::require_sqlite_backend() {
         return;
     }

@@ -42,12 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
-
-      - name: Run sccache-action
-        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -89,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
 
@@ -100,14 +97,10 @@ jobs:
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
-      - name: Run sccache-action
-        uses: mozilla-actions/sccache-action@v0.0.11
-
       - name: Run tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
-          YORISHIRO_TEST_BACKEND: ${{ matrix.backend }}
           DB_MAX_CONNECTIONS: "100"
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
