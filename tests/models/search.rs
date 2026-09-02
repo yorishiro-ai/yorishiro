@@ -1126,18 +1126,37 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
             use yorishiro::models::_entities::content_entities::Column;
 
-            // Use content_entities::update_and_fetch which handles SQLite's lack of
-            // embedding column internally. Fetch the current row, modify its data, and
-            // save it back.
-            let mut active: content_entities::ActiveModel = content_entities::Entity::find_by_id(matching.id)
-                .one(&ctx.db)
-                .await
-                .expect("fetch entity for update")
-                .expect("entity exists")
-                .into();
-            active.data = sea_orm::ActiveValue::Set(serde_json::json!({
-                "title": "quarterly board meeting notes"
-            }));
+            // Fetch using raw SQL (Entity::find_by_id selects embedding which doesn't
+            // exist on SQLite). EntityRecord is a FromQueryResult type with the same
+            // columns but no embedding field.
+            use yorishiro::models::content_entities::EntityRecord;
+            let rec = EntityRecord::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
+                 created_at, updated_at, created_by, updated_by \
+                 FROM content_entities WHERE id = $1",
+                [matching.id.into()],
+            ))
+            .one(&ctx.db)
+            .await
+            .expect("fetch entity for update")
+            .expect("entity exists");
+
+            // Build an ActiveModel with the fetched fields and update.
+            let active = content_entities::ActiveModel {
+                id: sea_orm::ActiveValue::Set(rec.id),
+                workspace_id: sea_orm::ActiveValue::Set(rec.workspace_id),
+                schema_id: sea_orm::ActiveValue::Set(rec.schema_id),
+                schema_version: sea_orm::ActiveValue::Set(rec.schema_version),
+                entity_type: sea_orm::ActiveValue::Set(rec.entity_type),
+                data: sea_orm::ActiveValue::Set(serde_json::json!({
+                    "title": "quarterly board meeting notes"
+                })),
+                created_at: sea_orm::ActiveValue::Set(rec.created_at.into()),
+                updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
+                created_by: sea_orm::ActiveValue::Set(rec.created_by),
+                updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
+            };
             active.update(&ctx.db).await.expect("update entity");
 
             // Old phrase should no longer match.
