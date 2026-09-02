@@ -96,7 +96,7 @@ jobs:
       - name: Install pgvector and pg_trgm into template1
         if: matrix.backend == 'postgres'
         run: |
-          PGPASSWORD=yorishiro psql -h localhost -U yorishiro -d template1 \
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d template1 \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
