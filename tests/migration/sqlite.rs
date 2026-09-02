@@ -19,6 +19,7 @@ fn cleanup(path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
     let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+    let _ = std::fs::remove_file(path.with_extension("sqlite3-journal"));
 }
 
 #[tokio::test]
