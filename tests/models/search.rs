@@ -563,9 +563,15 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 // pool, and `close_app_pools` cannot close them — they accumulate and exhaust
 // the pool across test runs, causing CI to hang. Skip in CI; run manually to
 // exercise the lock serialization path.
+//
+// # Post-hoc note (2026-09-02)
+// This comment was written during investigation of #313, which blamed advisory-lock
+// detachment for a CI pool-exhaustion panic. #315 later proved that spawn_startup_reindex's
+// connection leak was the actual cause of that panic. The ignore was removed and the test
+// was run 10 consecutive times (10/10 pass), confirming the detachment itself is not a live
+// problem. The ignore is now unnecessary.
 #[tokio::test]
 #[serial]
-#[ignore = "flaky in CI: detached connections from advisory lock exhaust pool"]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
@@ -1031,5 +1037,106 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 
         crate::requests::close_app_pools(&ctx).await;
     })
+    .await;
+}
+
+/// The FTS5 fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text` via the
+/// FTS5 virtual table, when the entity has no embedding; an entity with neither an embedding nor
+/// an FTS5 match must not appear.
+///
+/// On SQLite, `content_entities` has no `embedding` column, so the search function's trigram half
+/// is replaced by an FTS5 MATCH query against the `fts_content_entities` virtual table created in
+/// the migration. This test boots against a SQLite file database to confirm the FTS5 path works
+/// end to end, including schema creation and entity insertion (which triggers FTS5 auto-sync).
+#[tokio::test]
+#[serial]
+#[ignore = "SQLite model tests: run with --include-ignored"]
+async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
+    // Gate: only run when DATABASE_URL points at SQLite.
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_default();
+    if !db_url.starts_with("sqlite://") && !db_url.starts_with("sqlite:") {
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir
+        .path()
+        .join(format!("yorishiro_fts5_{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
+    crate::requests::request_with_create_sqlite::<App, _, _>(
+        db_path.clone(),
+        |_request, ctx| async move {
+            let tenant = identity_tenants::ActiveModel {
+                name: sea_orm::ActiveValue::Set("fts5-test".into()),
+                ..Default::default()
+            };
+            let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+                .await
+                .expect("insert tenant");
+
+            let workspace = identity_workspaces::ActiveModel {
+                tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+                name: sea_orm::ActiveValue::Set("main".into()),
+                status: sea_orm::ActiveValue::Set(
+                    yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
+                ),
+                ..Default::default()
+            };
+            let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+                .await
+                .expect("insert workspace");
+
+            let def = serde_json::from_value(note_definition()).expect("parse definition");
+            content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+                .await
+                .expect("create schema");
+
+            // Create an entity whose title contains the search phrase.
+            let matching = content_entities::create(
+                &ctx.db,
+                workspace.id,
+                content_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({ "title": "quarterly roadmap review" }),
+                },
+                None,
+            )
+            .await
+            .expect("create matching entity");
+
+            // Create an entity whose title does not match.
+            content_entities::create(
+                &ctx.db,
+                workspace.id,
+                content_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({ "title": "completely unrelated grocery list" }),
+                },
+                None,
+            )
+            .await
+            .expect("create unrelated entity");
+
+            // Neither entity has an embedding (SQLite has no embedding column), so both rely on
+            // the FTS5 fallback path.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly roadmap",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector");
+
+            assert_eq!(hits.len(), 1, "hits: {hits:?}");
+            assert_eq!(hits[0].entity.id, matching.id);
+            assert!(hits[0].distance.is_none(), "fts5-only hit has no distance");
+
+            crate::requests::close_app_pools_sqlite(&ctx, &db_path).await;
+        },
+    )
     .await;
 }

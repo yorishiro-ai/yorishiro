@@ -149,24 +149,55 @@ pub async fn search_by_vector(
     if (rows.len() as i64) < limit {
         let remaining = limit - rows.len() as i64;
         let (scope_sql, mut scope_values) = scope_clause(workspace_id, &query, 2);
-        let trigram_sql = format!(
-            "SELECT {HIT_COLUMNS}, NULL::float8 AS distance \
-             FROM content_entities e \
-             WHERE e.embedding IS NULL{scope_sql} AND (e.data::text) % $1 \
-             ORDER BY similarity(e.data::text, $1) DESC \
-             LIMIT {remaining}"
-        );
-        let mut trigram_values: Vec<sea_orm::Value> = vec![query_text.into()];
-        trigram_values.append(&mut scope_values);
 
-        let trigram_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            &trigram_sql,
-            trigram_values,
-        ))
-        .all(conn)
-        .await
-        .internal()?;
+        let trigram_rows = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            // SQLite has no pg_trgm, so full-text search uses the FTS5 virtual table
+            // created in the migration. The FTS5 table mirrors `content_entities` via the
+            // `content=`/`content_rowid=` sync pattern, so it auto-updates on INSERT/UPDATE/DELETE.
+            // `workspace_id` is stored as an FTS5 column for filtering without MATCH.
+            // SQLite FTS5 has no built-in similarity function, so we skip ordering by rank
+            // and return matches in document-order (which is insertion order).
+            let fts_sql = format!(
+                "SELECT {HIT_COLUMNS}, NULL AS distance \
+                 FROM content_entities e, fts_content_entities f \
+                 WHERE e.id = f.rowid{scope_sql} AND f MATCH $1 \
+                 LIMIT {remaining}"
+            );
+            let mut fts_values: Vec<sea_orm::Value> = vec![query_text.into()];
+            fts_values.append(&mut scope_values);
+
+            SearchRow::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                &fts_sql,
+                fts_values,
+            ))
+            .all(conn)
+            .await
+            .internal()?
+        } else {
+            // PostgreSQL uses pg_trgm for fuzzy text matching.
+            // `data::text` casts the JSONB column to text for trigram comparison.
+            // `similarity()` returns a float between 0 and 1 for ranking.
+            let trigram_sql = format!(
+                "SELECT {HIT_COLUMNS}, NULL::float8 AS distance \
+                 FROM content_entities e \
+                 WHERE e.embedding IS NULL{scope_sql} AND (e.data::text) % $1 \
+                 ORDER BY similarity(e.data::text, $1) DESC \
+                 LIMIT {remaining}"
+            );
+            let mut trigram_values: Vec<sea_orm::Value> = vec![query_text.into()];
+            trigram_values.append(&mut scope_values);
+
+            SearchRow::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                &trigram_sql,
+                trigram_values,
+            ))
+            .all(conn)
+            .await
+            .internal()?
+        };
+
         rows.extend(trigram_rows);
     }
 

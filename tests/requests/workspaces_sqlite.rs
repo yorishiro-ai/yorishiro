@@ -53,7 +53,11 @@ async fn issue_key_for(
 #[serial]
 #[ignore = "SQLite request tests: run with --include-ignored"]
 async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
-    let db_path = format!("/tmp/yorishiro_ws_test_{}.sqlite3", uuid::Uuid::new_v4());
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir
+        .path()
+        .join(format!("yorishiro_ws_{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
@@ -122,7 +126,11 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
 #[serial]
 #[ignore = "SQLite request tests: run with --include-ignored"]
 async fn workspaces_endpoints_require_authentication_sqlite() {
-    let db_path = format!("/tmp/yorishiro_ws_test_{}.sqlite3", uuid::Uuid::new_v4());
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir
+        .path()
+        .join(format!("yorishiro_ws_{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);

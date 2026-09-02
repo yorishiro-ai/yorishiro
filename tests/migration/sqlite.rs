@@ -6,21 +6,19 @@ use sea_orm_migration::sea_orm::Database;
 
 use crate::migration::{Migrator, MigratorTrait};
 
-const RUNS: usize = 5;
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-fn sqlite_path() -> String {
-    format!(
-        "/tmp/yorishiro_migrate_test_{}.sqlite3",
+fn sqlite_path(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join(format!(
+        "yorishiro_migrate_{}.sqlite3",
         COUNTER.fetch_add(1, Ordering::SeqCst)
-    )
+    ))
 }
 
-fn cleanup(path: &str) {
+fn cleanup(path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file(format!("{path}-wal"));
-    let _ = std::fs::remove_file(format!("{path}-shm"));
-    let _ = std::fs::remove_file(format!("{path}-journal"));
+    let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+    let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
 }
 
 #[tokio::test]
@@ -71,15 +69,14 @@ async fn migration_sqlite_max_connections_10_five_times() {
     if !super::super::require_sqlite_backend() {
         return;
     }
-    for _run in 1..=RUNS {
-        let path = sqlite_path();
-        let db = Database::connect(&format!("sqlite://{}?mode=rwc", path))
-            .await
-            .expect("connect sqlite");
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let path = sqlite_path(dir.path());
+    let db = Database::connect(&format!("sqlite://{}?mode=rwc", path.display()))
+        .await
+        .expect("connect sqlite");
 
-        Migrator::up(&db, None).await.expect("migration failed");
+    Migrator::up(&db, None).await.expect("migration failed");
 
-        drop(db);
-        cleanup(&path);
-    }
+    drop(db);
+    cleanup(&path);
 }

@@ -2,11 +2,13 @@
 
 # CI mirrors this structure: check / clippy / fmt-check run once, then test runs.
 # SQLite tests are gated by require_sqlite_backend() (DATABASE_URL scheme check).
-DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:25433/yorishiro
+# Default database URL for PostgreSQL tests.
+# Override with: make test DATABASE_URL=postgres://user:pass@host:port/db
+DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:5432/yorishiro
 LOCO_ENV ?= test_postgres
 ENVIRONMENT ?= development
 
-.PHONY: check clippy fmt fmt-check test test-postgres test-sqlite build task doctor
+.PHONY: check clippy fmt fmt-check test test-postgres test-sqlite build task doctor fetch
 
 check:
 	cargo check --locked --workspace
@@ -29,7 +31,7 @@ test:
 	cargo test --locked --workspace $(ARGS)
 
 test-postgres:
-	$(MAKE) test DATABASE_URL=postgres://yorishiro:yorishiro@localhost:25433/yorishiro
+	$(MAKE) test DATABASE_URL=$(DATABASE_URL)
 
 test-sqlite:
 	$(MAKE) test DATABASE_URL=sqlite://:memory:
@@ -47,6 +49,11 @@ task: build
 doctor: build
 	DATABASE_URL=$(DATABASE_URL) \
 	./target/debug/yorishiro doctor -e $(ENVIRONMENT)
+
+# Warm the cargo registry cache without building.
+# Useful after clearing ~/.cargo/registry so the next check/build does not steal download time.
+fetch:
+	cargo fetch --locked
 
 # Convenience alias: check + fmt + clippy (CI check job).
 check-all: fmt-check check clippy

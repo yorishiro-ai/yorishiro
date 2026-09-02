@@ -54,10 +54,11 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[serial]
 #[ignore = "SQLite request tests: run with --include-ignored"]
 async fn create_schema_from_a_builtin_template_sqlite() {
-    let db_path = format!(
-        "/tmp/yorishiro_schema_test_{}.sqlite3",
-        uuid::Uuid::new_v4()
-    );
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir
+        .path()
+        .join(format!("yorishiro_schema_{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let Setup { key } = setup(&ctx).await;
 
