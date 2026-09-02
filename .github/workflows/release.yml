@@ -133,10 +133,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: ./.github/actions/rust-setup
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
+
+      - uses: ./.github/actions/rust-setup
 
       # rust-cache: each arch needs ~/.cache/ort.pyke.io (embedding cache), separate from
       # sccache, so it stays as the caller's own step after the composite.
