@@ -39,8 +39,24 @@ mod worker_class;
 /// `config/test.yaml` has no `queue:` block, so it is `None` for every test that boots through `request_with_create_db`.
 /// `queue.rs` is the exception, supplying its own SQLite queue config: that provider opens its own `sqlx::SqlitePool` against a file in a `TempDir` rather than a connection to the throwaway database, so it cannot hold the session that would fail `DROP DATABASE`, and the file goes with the `TempDir`.
 ///
+/// `spawn_startup_reindex` spawns a background task that holds a connection from `ctx.db` for its entire lifetime.
+/// Without shutdown-and-await, that task would still hold a session when pools are closed,
+/// causing `DROP DATABASE` to panic with "being accessed by other users".
+/// `close_app_pools` signals shutdown and awaits the task *before* closing pools.
+///
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
+    // Signal shutdown to the startup reindex background task and await its actual
+    // completion before closing pools. This structurally closes the race: if the task
+    // is mid-await when signaled, we wait for that await to return (at which point it
+    // sees the flag and exits) rather than closing pools while the task still holds a
+    // ctx.db connection.
+    if let Some(handle) = ctx
+        .shared_store
+        .remove::<yorishiro::app::StartupReindexHandle>()
+    {
+        handle.shutdown_and_wait().await;
+    }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;

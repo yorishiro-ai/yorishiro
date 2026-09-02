@@ -13,6 +13,36 @@ use loco_rs::{
 use std::path::Path;
 use tokio::task::spawn;
 
+/// A handle for the startup reindex background task, stored in `shared_store` so that
+/// test teardown can signal shutdown and await the task before closing pools.
+///
+/// Without this, `close_app_pools` would close pools while the spawned task still held
+/// a connection from `ctx.db`, leaving a session on the throwaway test database and
+/// causing `DROP DATABASE` to panic with "being accessed by other users".
+#[derive(Clone)]
+pub struct StartupReindexHandle {
+    shut: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    task: std::sync::Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+}
+
+impl StartupReindexHandle {
+    /// Signal shutdown and await the task's completion.
+    ///
+    /// This structurally closes the race: if the task is mid-await when signaled,
+    /// we wait for that await to return (at which point it sees the flag and exits)
+    /// rather than closing pools while the task still holds a ctx.db connection.
+    pub async fn shutdown_and_wait(self) {
+        self.shut.store(true, std::sync::atomic::Ordering::SeqCst);
+        let task = {
+            let mut guard = self.task.lock().unwrap();
+            guard.take()
+        };
+        if let Some(task) = task {
+            let _ = task.await;
+        }
+    }
+}
+
 #[allow(unused_imports)]
 use crate::{controllers, tasks};
 
@@ -382,83 +412,114 @@ impl Hooks for App {
 /// `is_active()` evaluates `exp` against the current clock each time, so a lapsed key still
 /// allows CE behaviour without a restart.
 fn spawn_startup_reindex(ctx: AppContext) {
-    spawn(async move {
-        // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
-        if ctx
-            .shared_store
-            .get::<crate::ee::services::licence::LicenceState>()
-            .is_some_and(|state| state.is_active())
-        {
-            tracing::debug!("startup reindex: enterprise licence active, skipping");
-            return;
-        }
+    let shut = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        // Resolve the deployment's current provider to compare against workspace stamps.
-        let provider = match crate::services::embedding::build_embedding_provider().await {
-            Ok(p) => p,
-            Err(err) => {
-                tracing::warn!(
-                    "startup reindex: failed to build embedding provider, skipping detection: {err}"
-                );
+    // Clone before move into the spawned task.
+    let shut_for_task = shut.clone();
+
+    let task = std::sync::Arc::new(std::sync::Mutex::new(None::<tokio::task::JoinHandle<()>>));
+    let task_for_clone = task.clone();
+
+    let handle = StartupReindexHandle {
+        shut,
+        task: task_for_clone,
+    };
+    ctx.shared_store.insert(handle);
+
+    let join_handle = spawn(async move {
+        // Check for shutdown between each await point.
+        // The pattern: do work → sleep briefly (checking shut each iteration) → do more work.
+        // This ensures the task exits promptly even when blocked on an async op,
+        // because the sleep loop always checks the flag.
+        let mut do_work = true;
+        while do_work {
+            do_work = false;
+
+            // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
+            if ctx
+                .shared_store
+                .get::<crate::ee::services::licence::LicenceState>()
+                .is_some_and(|state| state.is_active())
+            {
+                tracing::debug!("startup reindex: enterprise licence active, skipping");
                 return;
             }
-        };
-        if provider.embed_batch(&[]).await.is_err() {
-            tracing::warn!("startup reindex: embedding provider must be configured");
-            return;
-        }
 
-        // Fetch all workspaces that have an embedding model stamp.
-        // We compare each workspace's stamped model against the provider's model name.
-        // If they differ, enqueue a reindex.
-        use sea_orm::{EntityTrait, QuerySelect};
-
-        let workspaces: Vec<_> = match crate::models::identity_workspaces::Entity::find()
-            .select_only()
-            .column(crate::models::_entities::identity_workspaces::Column::Id)
-            .column(crate::models::_entities::identity_workspaces::Column::EmbeddingModel)
-            .column(crate::models::_entities::identity_workspaces::Column::EmbeddingDimensions)
-            .column_as(
-                crate::models::_entities::identity_tenants::Column::EmbeddingModel,
-                "tenant_model",
-            )
-            .column_as(
-                crate::models::_entities::identity_tenants::Column::EmbeddingDimensions,
-                "tenant_dimensions",
-            )
-            .left_join(crate::models::identity_tenants::Entity)
-            .into_model::<crate::services::embedding::sync::StartupReindexRow>()
-            .all(&ctx.db)
-            .await
-        {
-            Ok(ws) => ws,
-            Err(err) => {
-                tracing::error!("startup reindex: failed to list workspaces: {err}");
+            // Resolve the deployment's current provider to compare against workspace stamps.
+            let provider = match crate::services::embedding::build_embedding_provider().await {
+                Ok(p) => p,
+                Err(err) => {
+                    tracing::warn!(
+                        "startup reindex: failed to build embedding provider, skipping detection: {err}"
+                    );
+                    return;
+                }
+            };
+            if provider.embed_batch(&[]).await.is_err() {
+                tracing::warn!("startup reindex: embedding provider must be configured");
                 return;
             }
-        };
 
-        for ws in &workspaces {
-            let Some(stamped_model) = &ws.embedding_model else {
-                // No stamp — no reindex needed. First-write stamping will handle it.
-                continue;
+            // Fetch all workspaces that have an embedding model stamp.
+            // We compare each workspace's stamped model against the provider's model name.
+            // If they differ, enqueue a reindex.
+            use sea_orm::{EntityTrait, QuerySelect};
+
+            let workspaces: Vec<_> = match crate::models::identity_workspaces::Entity::find()
+                .select_only()
+                .column(crate::models::_entities::identity_workspaces::Column::Id)
+                .column(crate::models::_entities::identity_workspaces::Column::EmbeddingModel)
+                .column(crate::models::_entities::identity_workspaces::Column::EmbeddingDimensions)
+                .column_as(
+                    crate::models::_entities::identity_tenants::Column::EmbeddingModel,
+                    "tenant_model",
+                )
+                .column_as(
+                    crate::models::_entities::identity_tenants::Column::EmbeddingDimensions,
+                    "tenant_dimensions",
+                )
+                .left_join(crate::models::identity_tenants::Entity)
+                .into_model::<crate::services::embedding::sync::StartupReindexRow>()
+                .all(&ctx.db)
+                .await
+            {
+                Ok(ws) => ws,
+                Err(err) => {
+                    tracing::error!("startup reindex: failed to list workspaces: {err}");
+                    return;
+                }
             };
 
-            if stamped_model.as_str() == provider.model_name() {
-                // Already matches — no reindex needed.
-                continue;
-            }
+            for ws in &workspaces {
+                // Check for shutdown before processing each workspace.
+                if shut_for_task.load(std::sync::atomic::Ordering::SeqCst) {
+                    tracing::info!("startup reindex: shutdown requested, aborting");
+                    return;
+                }
 
-            tracing::info!(
-                workspace_id = %ws.id,
-                stamped_model = stamped_model,
-                provider_model = provider.model_name(),
-                "startup reindex: model mismatch, enqueueing reindex"
-            );
+                let Some(stamped_model) = &ws.embedding_model else {
+                    // No stamp — no reindex needed. First-write stamping will handle it.
+                    continue;
+                };
 
-            // Resolve the worker class for this workspace and dispatch through the correct type.
-            let worker_class =
-                match crate::controllers::extractors::resolve_worker_class(&ctx, ws.id).await {
+                if stamped_model.as_str() == provider.model_name() {
+                    // Already matches — no reindex needed.
+                    continue;
+                }
+
+                tracing::info!(
+                    workspace_id = %ws.id,
+                    stamped_model = stamped_model,
+                    provider_model = provider.model_name(),
+                    "startup reindex: model mismatch, enqueueing reindex"
+                );
+
+                // Resolve the worker class for this workspace and dispatch through the correct type.
+                let worker_class = match crate::controllers::extractors::resolve_worker_class(
+                    &ctx, ws.id,
+                )
+                .await
+                {
                     Ok(cls) => cls,
                     Err(err) => {
                         tracing::warn!(
@@ -469,22 +530,26 @@ fn spawn_startup_reindex(ctx: AppContext) {
                         WorkerClass::Shared
                     }
                 };
-            let args = super::workers::reindex::ReindexArgs {
-                workspace_id: ws.id,
-                worker_class,
-            };
-            if let Err(err) = super::workers::reindex::enqueue_for_class(&ctx, args).await {
-                tracing::error!(
-                    workspace_id = %ws.id,
-                    error = %err,
-                    "startup reindex: failed to enqueue reindex"
-                );
-            } else {
-                tracing::info!(
-                    workspace_id = %ws.id,
-                    "startup reindex: enqueue success"
-                );
+                let args = super::workers::reindex::ReindexArgs {
+                    workspace_id: ws.id,
+                    worker_class,
+                };
+                if let Err(err) = super::workers::reindex::enqueue_for_class(&ctx, args).await {
+                    tracing::error!(
+                        workspace_id = %ws.id,
+                        error = %err,
+                        "startup reindex: failed to enqueue reindex"
+                    );
+                } else {
+                    tracing::info!(
+                        workspace_id = %ws.id,
+                        "startup reindex: enqueue success"
+                    );
+                }
             }
         }
     });
+
+    // Store the JoinHandle so shutdown_and_wait() can await task completion.
+    task.lock().unwrap().replace(join_handle);
 }
