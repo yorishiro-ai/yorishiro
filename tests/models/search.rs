@@ -1121,6 +1121,94 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             assert_eq!(hits[0].entity.id, matching.id);
             assert!(hits[0].distance.is_none(), "fts5-only hit has no distance");
 
+            // Test the FTS5 UPDATE trigger: modify the entity's data so the old search
+            // phrase no longer matches, then confirm a search for the new phrase finds it.
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            use yorishiro::models::_entities::content_entities::Column;
+
+            // Fetch using raw SQL (Entity::find_by_id selects embedding which doesn't
+            // exist on SQLite).
+            use yorishiro::models::content_entities::EntityRecord;
+            let rec = EntityRecord::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
+                 created_at, updated_at, created_by, updated_by \
+                 FROM content_entities WHERE id = $1",
+                [matching.id.into()],
+            ))
+            .one(&ctx.db)
+            .await
+            .expect("fetch entity for update")
+            .expect("entity exists");
+
+            // Build ActiveModel and update.
+            let active = content_entities::ActiveModel {
+                id: sea_orm::ActiveValue::Set(rec.id),
+                workspace_id: sea_orm::ActiveValue::Set(rec.workspace_id),
+                schema_id: sea_orm::ActiveValue::Set(rec.schema_id),
+                schema_version: sea_orm::ActiveValue::Set(rec.schema_version),
+                entity_type: sea_orm::ActiveValue::Set(rec.entity_type),
+                data: sea_orm::ActiveValue::Set(serde_json::json!({
+                    "title": "quarterly board meeting notes"
+                })),
+                created_at: sea_orm::ActiveValue::Set(rec.created_at),
+                updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
+                created_by: sea_orm::ActiveValue::Set(rec.created_by),
+                updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
+            };
+            active.update(&ctx.db).await.expect("update entity");
+
+            // Old phrase should no longer match.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly roadmap",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector after update");
+            assert_eq!(
+                hits.len(),
+                0,
+                "old phrase must not match after update: {hits:?}"
+            );
+
+            // New phrase should find it.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly board meeting",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector after update");
+            assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
+            assert_eq!(hits[0].entity.id, matching.id);
+
+            // Test the FTS5 DELETE trigger: delete the entity and confirm MATCH finds nothing.
+            content_entities::Entity::delete_many()
+                .filter(Column::Id.eq(matching.id))
+                .exec(&ctx.db)
+                .await
+                .expect("delete entity");
+
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly board meeting",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector after delete");
+            assert_eq!(
+                hits.len(),
+                0,
+                "deleted entity must not appear in FTS5: {hits:?}"
+            );
+
             crate::requests::close_app_pools_sqlite(&ctx, &db_path).await;
         },
     )
