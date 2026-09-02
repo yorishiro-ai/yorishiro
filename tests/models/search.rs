@@ -1143,6 +1143,10 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             .expect("entity exists");
 
             // Build an ActiveModel with the fetched fields and update.
+            // On SQLite, `ActiveModelTrait::update` tries to decode the return value
+            // as a `content_entities::Model` which includes `embedding` — doesn't exist
+            // on SQLite. Use `update_without_returning` (same pattern as the production
+            // `update_and_fetch` function).
             let active = content_entities::ActiveModel {
                 id: sea_orm::ActiveValue::Set(rec.id),
                 workspace_id: sea_orm::ActiveValue::Set(rec.workspace_id),
@@ -1156,8 +1160,12 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
                 created_by: sea_orm::ActiveValue::Set(rec.created_by),
                 updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
+                embedding: Default::default(),
             };
-            active.update(&ctx.db).await.expect("update entity");
+            active
+                .update_without_returning(&ctx.db)
+                .await
+                .expect("update entity");
 
             // Old phrase should no longer match.
             let hits = search::search_by_vector(
