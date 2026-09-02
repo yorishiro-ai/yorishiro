@@ -1,0 +1,36 @@
+name: Rust setup
+description: Shared checkout + toolchain + sccache setup for Rust workflows
+
+inputs:
+  ref:
+    description: Git ref to checkout (optional; omitted for default branch)
+    required: false
+  persist-credentials:
+    description: Forwarded to actions/checkout (release.yml pins to false)
+    required: false
+    default: 'true'
+  components:
+    description: Extra rustup components (empty for query-only jobs; "rustfmt, clippy" for check)
+    required: false
+  use-sccache:
+    description: Whether to install sccache (false for windows-weekly.yml where caching doesn't pay off)
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ inputs.ref }}
+        persist-credentials: ${{ inputs.persist-credentials }}
+
+    - name: Set up Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    - name: Run sccache-action
+      if: inputs.use-sccache == 'true'
+      uses: mozilla-actions/sccache-action@v0.0.11

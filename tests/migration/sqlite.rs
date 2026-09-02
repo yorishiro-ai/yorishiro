@@ -25,9 +25,6 @@ fn cleanup(path: &str) {
 
 #[tokio::test]
 async fn all_migrations_apply_to_a_fresh_sqlite_file() {
-    if !super::super::require_test_backend("sqlite") {
-        return;
-    }
     if !super::super::require_sqlite_backend() {
         return;
     }
@@ -44,9 +41,6 @@ async fn all_migrations_apply_to_a_fresh_sqlite_file() {
 
 #[tokio::test]
 async fn all_migrations_roll_back_and_reapply_on_sqlite() {
-    if !super::super::require_test_backend("sqlite") {
-        return;
-    }
     if !super::super::require_sqlite_backend() {
         return;
     }
@@ -74,9 +68,6 @@ async fn all_migrations_roll_back_and_reapply_on_sqlite() {
 // interleave across pooled connections and the DROP/CREATE TRIGGER pair fails.
 #[tokio::test]
 async fn migration_sqlite_max_connections_10_five_times() {
-    if !super::super::require_test_backend("sqlite") {
-        return;
-    }
     if !super::super::require_sqlite_backend() {
         return;
     }
