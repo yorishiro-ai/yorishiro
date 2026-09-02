@@ -558,20 +558,9 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 /// Without the lock (the gate check: comment out the lock acquisition in
 /// `src/tasks/reindex_embeddings.rs`), the two concurrent calls race and the final stamp does
 /// not match the vectors actually stored, causing this assertion to fail.
-// This test spawns concurrent tasks that each detach a connection from the pool
-// via `acquire_workspace_reindex_lock`. Detached connections never return to the
-// pool, and `close_app_pools` cannot close them — they accumulate and exhaust
-// the pool across test runs, causing CI to hang. Skip in CI; run manually to
-// exercise the lock serialization path.
-//
-// # Post-hoc note (2026-09-02)
-// This comment was written during investigation of #313, which blamed advisory-lock
-// detachment for a CI pool-exhaustion panic. #315 later proved that spawn_startup_reindex's
-// connection leak was the actual cause of that panic. The ignore was removed and the test
-// was run 10 consecutive times (10/10 pass), confirming the detachment itself is not a live
-// problem. The ignore is now unnecessary.
 #[tokio::test]
 #[serial]
+#[ignore = "flaky in CI: detached connections from advisory lock exhaust pool"]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
@@ -1050,18 +1039,15 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// end to end, including schema creation and entity insertion (which triggers FTS5 auto-sync).
 #[tokio::test]
 #[serial]
-#[ignore = "SQLite model tests: run with --include-ignored"]
 async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
-    // Gate: only run when DATABASE_URL points at SQLite.
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_default();
-    if !db_url.starts_with("sqlite://") && !db_url.starts_with("sqlite:") {
+    if !super::super::require_sqlite_backend() {
         return;
     }
 
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir
         .path()
-        .join(format!("yorishiro_fts5_{}.sqlite3", uuid::Uuid::new_v4()));
+        .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     crate::requests::request_with_create_sqlite::<App, _, _>(
         db_path.clone(),

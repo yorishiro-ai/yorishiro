@@ -13,12 +13,14 @@ use yorishiro::models::tenancy::{self, MembershipRole};
 /// file database with `test_sqlite.yaml` config.
 #[tokio::test]
 #[serial]
-#[ignore = "SQLite request tests: run with --include-ignored"]
 async fn signup_then_login_round_trip_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir
         .path()
-        .join(format!("yorishiro_auth_{}.sqlite3", uuid::Uuid::new_v4()));
+        .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
@@ -108,12 +110,14 @@ async fn signup_then_login_round_trip_sqlite() {
 /// `create_workspace` then `create_api_key`.
 #[tokio::test]
 #[serial]
-#[ignore = "SQLite request tests: run with --include-ignored"]
 async fn signup_without_invite_creates_its_own_tenant_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("create tempdir");
     let db_path = dir
         .path()
-        .join(format!("yorishiro_auth_{}.sqlite3", uuid::Uuid::new_v4()));
+        .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let signup_response = request
