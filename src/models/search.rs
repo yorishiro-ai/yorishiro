@@ -190,15 +190,16 @@ pub async fn search_by_vector(
             // so we skip ordering by rank and return matches in document-order (which is
             // insertion order).
             //
-            // `rowid` is the FTS5 hidden rowid column that links the virtual table to the
-            // backing table, so `e.id = fts_content_entities.rowid` is the join condition.
-            // FTS5 MATCH inside a join uses the unaliased virtual table name (not the
-            // `f` alias) because `MATCH` is a keyword-like operator that does not resolve
-            // against the join alias on all SQLite/FTS5 versions.
+            // `content_entities` is a normal rowid table (its PK `id` is UUID TEXT, not
+            // INTEGER), so the implicit rowid is the join key. The FTS5 virtual table
+            // uses that implicit rowid (no `content_rowid=` override).
+            // FTS5 MATCH inside a join uses the unaliased virtual table name because
+            // `MATCH` is a keyword-like operator that does not resolve against the
+            // join alias on all SQLite/FTS5 versions.
             let fts_sql = format!(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
                  FROM content_entities e, fts_content_entities \
-                 WHERE e.id = fts_content_entities.rowid{scope_sql} \
+                 WHERE e.rowid = fts_content_entities.rowid{scope_sql} \
                  AND data MATCH $1 \
                  LIMIT {remaining}"
             );

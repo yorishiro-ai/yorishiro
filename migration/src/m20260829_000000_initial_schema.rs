@@ -893,17 +893,22 @@ impl MigrationTrait for Migration {
 
         // FTS5 virtual table for text search fallback on SQLite.
         // SQLite has no pg_trgm, so full-text search uses FTS5 with an external content
-        // table. The virtual table uses the hidden rowid to link to content_entities.id,
-        // and triggers keep it in sync on INSERT/UPDATE/DELETE.
-        // `workspace_id` is declared as an FTS5 column (using `content_rowid=` syntax)
-        // so it is stored alongside the indexed tokens and can be filtered in queries.
+        // table. `content_entities` is a normal rowid table (its PK `id` is TEXT/UUID,
+        // not an INTEGER AUTOINCREMENT column), so it has an implicit rowid.
+        // The virtual table defaults to using that implicit rowid (no `content_rowid=`
+        // override) because SQLite only accepts integers as rowid — a UUID TEXT fails
+        // with "datatype mismatch" on trigger execution.
+        // `workspace_id` is declared as an FTS5 column so it can be filtered without
+        // MATCH.
+        //
+        // We also need to repopulate the FTS5 index from the content table.
+        // This must run after the virtual table exists but before any real data is inserted.
         helpers::sqlite_only(
             manager,
             "CREATE VIRTUAL TABLE fts_content_entities USING fts5(\
                 data,\
                 workspace_id,\
-                content=content_entities,\
-                content_rowid=id\
+                content=content_entities\
             )",
         )
         .await?;
@@ -915,12 +920,16 @@ impl MigrationTrait for Migration {
         )
         .await?;
         // Triggers keep the FTS5 virtual table in sync with the backing table.
+        // The FTS5 table uses the content table's implicit rowid (not the UUID `id`),
+        // so triggers must reference `NEW.rowid` / `OLD.rowid`, not `NEW.id` / `OLD.id`.
+        // The `rowid` column is omitted from INSERT so SQLite assigns it automatically
+        // by looking up the content table's implicit rowid.
         helpers::sqlite_only(
             manager,
             "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
              BEGIN \
                 INSERT INTO fts_content_entities(rowid, data, workspace_id) \
-                VALUES(NEW.id, NEW.data, NEW.workspace_id); \
+                VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
              END",
         )
         .await?;
@@ -928,9 +937,9 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
              BEGIN \
-                DELETE FROM fts_content_entities WHERE rowid = OLD.id; \
+                DELETE FROM fts_content_entities WHERE rowid = OLD.rowid; \
                 INSERT INTO fts_content_entities(rowid, data, workspace_id) \
-                VALUES(NEW.id, NEW.data, NEW.workspace_id); \
+                VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
              END",
         )
         .await?;
@@ -938,7 +947,7 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
              BEGIN \
-                DELETE FROM fts_content_entities WHERE rowid = OLD.id; \
+                DELETE FROM fts_content_entities WHERE rowid = OLD.rowid; \
              END",
         )
         .await?;
