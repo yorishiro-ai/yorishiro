@@ -46,12 +46,16 @@ mod worker_class;
 ///
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
-    // Signal shutdown to the startup reindex background task before closing pools.
-    // The task checks a shutdown flag at each iteration and exits early when signaled.
-    // If the task is still running and holds a ctx.db connection, closing the pool
-    // leaves a session on the throwaway database, and DROP DATABASE panics.
-    if let Some(shut) = ctx.shared_store.get::<yorishiro::app::StartupReindexShut>() {
-        shut.signal();
+    // Signal shutdown to the startup reindex background task and await its actual
+    // completion before closing pools. This structurally closes the race: if the task
+    // is mid-await when signaled, we wait for that await to return (at which point it
+    // sees the flag and exits) rather than closing pools while the task still holds a
+    // ctx.db connection.
+    if let Some(handle) = ctx
+        .shared_store
+        .remove::<yorishiro::app::StartupReindexHandle>()
+    {
+        handle.shutdown_and_wait().await;
     }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;

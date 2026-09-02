@@ -19,32 +19,27 @@ use tokio::task::spawn;
 /// Without this, `close_app_pools` would close pools while the spawned task still held
 /// a connection from `ctx.db`, leaving a session on the throwaway test database and
 /// causing `DROP DATABASE` to panic with "being accessed by other users".
+#[derive(Clone)]
 pub struct StartupReindexHandle {
     shut: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    task: Option<tokio::task::JoinHandle<()>>,
+    task: std::sync::Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl StartupReindexHandle {
-    pub fn shutdown(&self) {
+    /// Signal shutdown and await the task's completion.
+    ///
+    /// This structurally closes the race: if the task is mid-await when signaled,
+    /// we wait for that await to return (at which point it sees the flag and exits)
+    /// rather than closing pools while the task still holds a ctx.db connection.
+    pub async fn shutdown_and_wait(self) {
         self.shut.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub async fn wait(self) {
-        if let Some(task) = self.task {
+        let task = {
+            let mut guard = self.task.lock().unwrap();
+            guard.take()
+        };
+        if let Some(task) = task {
             let _ = task.await;
         }
-    }
-}
-
-/// A lightweight cloneable handle for shutting down the startup reindex task.
-/// Stored in `shared_store` so tests can access it via `get::<StartupReindexShut>`.
-/// `Arc<AtomicBool>` is `Clone + Send + Sync`, satisfying `SharedStore::get`'s bounds.
-#[derive(Clone)]
-pub struct StartupReindexShut(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
-
-impl StartupReindexShut {
-    pub fn signal(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -422,11 +417,16 @@ fn spawn_startup_reindex(ctx: AppContext) {
     // Clone before move into the spawned task.
     let shut_for_task = shut.clone();
 
-    // Store a cloneable shutdown handle so tests can signal shutdown via shared_store.
-    // `StartupReindexShut` is `Clone + Send + Sync` which satisfies `SharedStore::get`'s bounds.
-    ctx.shared_store.insert(StartupReindexShut(shut.clone()));
+    let task = std::sync::Arc::new(std::sync::Mutex::new(None::<tokio::task::JoinHandle<()>>));
+    let task_for_clone = task.clone();
 
-    let _handle = spawn(async move {
+    let handle = StartupReindexHandle {
+        shut,
+        task: task_for_clone,
+    };
+    ctx.shared_store.insert(handle);
+
+    let join_handle = spawn(async move {
         // Check for shutdown between each await point.
         // The pattern: do work → sleep briefly (checking shut each iteration) → do more work.
         // This ensures the task exits promptly even when blocked on an async op,
@@ -549,4 +549,7 @@ fn spawn_startup_reindex(ctx: AppContext) {
             }
         }
     });
+
+    // Store the JoinHandle so shutdown_and_wait() can await task completion.
+    task.lock().unwrap().replace(join_handle);
 }
