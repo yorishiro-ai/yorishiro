@@ -2,11 +2,8 @@
 # compiles into this crate as a module (`src/lib.rs`'s `#[path = "../ee/mod.rs"]`), and what a
 # deployment serves is decided at runtime by the licence layer, not by which file was installed.
 #
-# There is deliberately no `yorishiro-ce` package any more. Its reason to exist was that the
-# community binary carried no code from `ee/` on disk, which a separate `cargo build -p` made
-# true. That is no longer expressible: with one binary there is no on-disk separation to assert,
-# so a community package could only claim an absence that is not there. `conflicts` below still
-# names it, so a machine carrying the old package can move to this one.
+# The `conflicts` block below still names the retired `yorishiro-ce`, so a machine carrying
+# the old package can move to this one.
 name: yorishiro
 arch: ${ARCH}
 platform: linux
@@ -56,16 +53,10 @@ depends:
 # That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
 # produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
 # source, same dependencies. The C library's own headers decide which versioned symbols the
-# compiler selects. An earlier version of this comment attributed the floor to "the onnxruntime
-# that `ort` links", which is not what the binary says.
+# compiler selects.
 #
-# `2.39` matches what this project supports: the current LTS releases, Ubuntu 24.04 and
-# AlmaLinux 10, both of which ship glibc 2.39. So the build host and the support target agree,
-# and neither has to move for the other.
-#
-# It said `2.38` until this was measured, which let the package install on a glibc 2.38 system
-# where the binary could not then start. That is what `test-install.sh`'s fedora:39 block was
-# failing on.
+# `2.39` matches what this project supports: Ubuntu 24.04 and AlmaLinux 10,
+# both of which ship glibc 2.39. The build host and the support target agree.
 #
 # Read this from the binary rather than from its symbol table. `objdump -T` shows the two
 # `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol

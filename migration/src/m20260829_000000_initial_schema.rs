@@ -18,14 +18,11 @@ pub struct Migration;
 
 /// The whole schema, as one migration.
 ///
-/// This replaces the twenty-four incremental files this repository carried until now.
-/// They recorded the order the schema was built in, which is worth keeping while a deployment might be part-way through that order; no deployment is.
-/// `seaql_migrations` held twenty-three rows and this file is the only row that will ever exist alongside a fresh database, so the history they preserved has no reader.
+/// A fresh database applies this single file and gets the complete schema in one pass.
+/// **This is not backward compatible and is not meant to be.** A database that applied a different migration history cannot apply this file: the version names do not match, and nothing here checks for or migrates from that state. Such a database is recreated, not upgraded.
 ///
-/// **This is not backward compatible and is not meant to be.** A database already carrying the twenty-three-row history cannot apply this file: the version names do not match, and nothing here checks for or migrates from that state. Such a database is recreated, not upgraded.
-///
-/// Two things from the old files are absent rather than merged, because merging them would have written statements that were immediately overwritten:
-/// the pre-`audit` pair of `authenticate_api_key` overloads, dropped and recreated one file later, and nothing else.
+/// Two things from the old file list are absent rather than merged, because merging them would have written statements that were immediately overwritten:
+/// the pair of `authenticate_api_key` overloads that used to be created without `audit` and recreated with it in a later file, and nothing else.
 ///
 /// Everything that looks like a later patch is still in its original position rather than folded into the table it patches.
 /// That is deliberate for the two Postgres-only fixes at the end: `identity_workspace_worker_classes`'s CHECK and `identity_templates.created_by`'s `ON DELETE SET NULL` are absent on SQLite by design, and folding them into the shared `CREATE TABLE` would hand that backend constraints it is documented as not having.
@@ -857,9 +854,8 @@ impl MigrationTrait for Migration {
 
         // Embeddings live in a separate `content_entity_embeddings` table so that:
         // 1. SQLite can store vectors as raw LE f32 BLOBs (pgvector has no equivalent)
-        // 2. The `content_entities` model no longer carries `PgVector`, eliminating
-        //    every Postgres/SQLite branching in `content_entities` that existed
-        //    around `select_record_columns` / `insert_and_fetch` / `update_and_fetch`.
+        // 2. `content_entities` has no `PgVector` column, so its read/write path is
+        //    the same on both backends with no branching around column lists.
         //
         // Fresh database: content_entities has no `embedding` column at all.
         // content_entity_embeddings(entity_id UUID, embedding vector(768)) holds
@@ -985,8 +981,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Strict form, on purpose (old file lines 378-382, 386-387).
-        // yorishiro_app sets both app.current_tenant and app.current_workspace on every connection, so reaching this table without a workspace set is a bug.
+        // Strict form, on purpose: yorishiro_app sets both app.current_tenant and app.current_workspace, so reaching this table without a workspace set is a bug.
         // Raising surfaces that bug; a lenient policy would instead read it as an empty workspace and hide it.
         helpers::enable_rls_with_policy(
             manager,
@@ -998,8 +993,8 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Old file granted this schema-wide (line 415: GRANT ... ON ALL TABLES IN SCHEMA content).
-        // One schema no longer separates content tables from identity tables, so the grant is individualized per table here instead.
+        // Every table is granted individually: all tables share one schema, so a
+        // wildcard grant would sweep in tables that must stay ungranted.
         helpers::grant(
             manager,
             "SELECT, INSERT, UPDATE, DELETE",
@@ -1658,7 +1653,8 @@ impl MigrationTrait for Migration {
         helpers::grant(manager, "SELECT, INSERT", "identity_api_key_audit_log").await?;
 
         // Both overloads, with `audit` in the returned column list.
-        // The incremental history created them without that column and dropped and recreated them one file later, because `RETURNS TABLE`'s column list cannot be widened with ALTER FUNCTION; there is no earlier version to drop here, so they are simply created in their final shape.
+        // `RETURNS TABLE`'s column list cannot be widened with ALTER FUNCTION, so both
+        // overloads are created in their final shape from the start.
         // `authenticate` (services::auth) needs `audit` to populate `AuthContext`, which is what `require_audit` reads to decide whether a key may reach the audit-log read endpoint.
         //
         // No-op on SQLite: no stored function exists on that backend, and `authenticate_sqlite` is the entity-API replica that stands in for it.
@@ -1795,7 +1791,7 @@ impl MigrationTrait for Migration {
         // 1. `identity_workspace_worker_classes.worker_class` accepted any string.
         //
         // Its siblings carry this constraint (`identity_tenant_memberships.role`, `identity_api_keys.scope`, the audit log's `action`), for the reason `action`'s own migration states: a CHECK is what stops a typo'd value from silently becoming a fourth thing nothing filters on.
-        // The original migration argued the serde round-trip made it unnecessary, which guarantees only that *this* writer emits a valid value: a manual UPDATE, a data-fix script, or a future code path reaching the column directly are all outside that guarantee, and this column decides which worker process dequeues a job.
+        // A serde round-trip guarantees only that *this* writer emits a valid value: a manual UPDATE, a data-fix script, or a future code path reaching the column directly are all outside that guarantee, and this column decides which worker process dequeues a job.
         // The three values are `WorkerClass::as_db_str`'s own output, so a variant added there without adding it here fails closed at the database rather than routing jobs to a queue nothing reads.
         //
         // **PostgreSQL only, and SQLite is left without this constraint.** SQLite's `ALTER TABLE` cannot add one to an existing table, and the only way to gain it there is to rebuild the table and copy every row.
@@ -1808,16 +1804,15 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // 2. `identity_templates.created_by` had no ON DELETE, so it defaulted to NO ACTION and a user who had authored a template could not be deleted at all.
+        // 2. `identity_templates.created_by` defaults to NO ON DELETE, which would prevent deleting a user who authored a template.
         //
-        // SET NULL, matching `fork_of` on this same table, and chosen rather than inherited: the column is nullable, a template outlives the account that wrote it, and the alternatives are both wrong here.
+        // SET NULL, matching `fork_of` on this same table: the column is nullable, a template outlives the account that wrote it, and the alternatives are both wrong here.
         // CASCADE would delete a tenant's templates because an author closed their account, destroying data belonging to the tenant rather than to the user.
-        // RESTRICT keeps today's behaviour, where the only way to delete such a user is to delete or re-author every template they ever wrote.
+        // RESTRICT requires deleting or re-authoring every template a user ever wrote before the user can be deleted.
         // Losing the authorship attribution is the acceptable half of that trade; losing the template is not.
         //
-        // **PostgreSQL only, and this is a real gap rather than an engine detail.** `identity_templates` exists on SQLite too: it is created unconditionally above, and the `pg_only`/`sqlite_only` calls cover the `tags` column's type and a GIN index, not the table itself.
+        // **PostgreSQL only.** `identity_templates` exists on SQLite too: it is created unconditionally above, and the `pg_only`/`sqlite_only` calls cover the `tags` column's type and a GIN index, not the table itself.
         // SQLite cannot alter a foreign key's action in place, so `created_by` keeps NO ACTION there and deleting a user who authored a template still fails with `FOREIGN KEY constraint failed` (measured directly against a SQLite file, not inferred).
-        // Closing it means the same table rebuild the CHECK above declines, for the same reason.
         helpers::pg_only(
             manager,
             "ALTER TABLE identity_templates \
@@ -1862,7 +1857,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // The triggers are replaced rather than left alone, because they are the specific in-place rewrite this column exists to record.
+        // The triggers are recreated so they stamp `updated_at` on the same in-place rewrite this column exists to record.
         // A trigger that detaches a schema without stamping `updated_at` would leave the column recording every change except the one its own justification names.
         helpers::pg_only(
             manager,
@@ -1904,9 +1899,6 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Everything this migration created, in an order that never drops a table another still references.
-        // The incremental history reversed each file in turn, which meant restoring intermediate states: a pre-`audit` `authenticate_api_key`, an unstamped detach trigger, a foreign key without its `ON DELETE`.
-        // None of those states exists any more, so reversing this migration is simply removing what it made.
-        //
         // Triggers and policies go with their tables; the two functions and the role do not, so they are named.
         helpers::pg_only(
             manager,
