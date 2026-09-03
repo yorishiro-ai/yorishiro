@@ -119,6 +119,7 @@ jobs:
         if: matrix.backend == 'postgres'
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          LOCO_ENV: test_postgres
         run: |
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities

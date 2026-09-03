@@ -69,6 +69,9 @@ entities: build
 		-e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=yorishiro -e POSTGRES_DB=yorishiro \
 		-p 15433:5432 pgvector/pgvector:pg18
 	@until docker exec yorishiro-entities-pg pg_isready -U yorishiro > /dev/null 2>&1; do sleep 1; done
+	docker exec yorishiro-entities-pg psql -U yorishiro -d yorishiro \
+		-c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+		-c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15433/yorishiro ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
 	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15433/yorishiro ./target/debug/yorishiro db entities
