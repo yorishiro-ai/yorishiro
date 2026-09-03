@@ -92,7 +92,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install loco CLI
-        run: cargo install loco-cli --locked --version $(grep 'loco-rs = { version' Cargo.toml | head -1 | sed 's/.*version = "//;s/".*//' | tr -d '=')
+        run: cargo install loco --locked --version $(grep 'loco-rs = { version' Cargo.toml | head -1 | sed 's/.*version = "//;s/".*//' | tr -d '=')
 
       - name: Install pgvector and pg_trgm into template1 (postgres only)
         if: matrix.backend == 'postgres'
