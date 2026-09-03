@@ -1,6 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use sea_orm::{FromQueryResult, Statement};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::models::content_entities;
@@ -8,20 +9,46 @@ use crate::services::embedding;
 
 /// `cargo loco task resync_embeddings workspace_id:<uuid>`
 ///
-/// Re-syncs embeddings for entities whose `embedding` column is still NULL: an operational recovery command for entities that fell out of search because no sync ever completed for them.
+/// Re-syncs embeddings for entities that have no row in `content_entity_embeddings`: an operational recovery command for entities that fell out of search because no sync ever completed for them.
 ///
-/// Two things leave an entity in that state. A sync that was enqueued but never succeeded (an embedding provider outage that outlasts the job's own retries), and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the `pg_trgm` fuzzy fallback.
+/// Two things leave an entity in that state. A sync that was enqueued but never succeeded (an embedding provider outage that outlasts the job's own retries), and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the pg_trgm / FTS5 fuzzy fallback.
 ///
-/// PostgreSQL only. `content_entities` has no `embedding` column at all on SQLite (vector search is not ported to that backend), so the `embedding IS NULL` query below cannot run there.
+/// Uses a LEFT JOIN anti-join against `content_entity_embeddings` so the query works on both PostgreSQL and SQLite.
 ///
 /// This calls `sync_embedding_for_record`, the same guarded path a normal entity write uses, deliberately: if the deployment's configured provider does not match a workspace's stamped model (`services/embedding/sync.rs`'s write-time model check), every candidate here fails for that reason and none get a vector.
 /// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
 /// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
 pub struct ResyncEmbeddings;
 
-#[derive(FromQueryResult)]
-struct CandidateId {
+#[derive(FromQueryResult, Clone)]
+struct CandidateRow {
     id: Uuid,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+    schema_version: i32,
+    entity_type: String,
+    data: Value,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    created_by: Option<Uuid>,
+    updated_by: Option<Uuid>,
+}
+
+impl From<CandidateRow> for content_entities::EntityRecord {
+    fn from(row: CandidateRow) -> Self {
+        content_entities::EntityRecord {
+            id: row.id,
+            workspace_id: row.workspace_id,
+            schema_id: row.schema_id,
+            schema_version: row.schema_version,
+            entity_type: row.entity_type,
+            data: row.data,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            created_by: row.created_by,
+            updated_by: row.updated_by,
+        }
+    }
 }
 
 #[async_trait]
@@ -48,34 +75,40 @@ impl Task for ResyncEmbeddings {
             Error::Message(format!("embedding provider must be configured: {err}"))
         })?;
 
-        let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT id FROM content_entities WHERE workspace_id = $1 AND embedding IS NULL",
+        // Single anti-join fetch: gets entity rows that have no embedding row, in one round trip instead of two.
+        let candidates = CandidateRow::find_by_statement(Statement::from_sql_and_values(
+            app_context.db.get_database_backend(),
+            "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
+             e.entity_type, e.data, e.created_at, e.updated_at, \
+             e.created_by, e.updated_by \
+             FROM content_entities e \
+             LEFT JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+             WHERE e.workspace_id = $1 AND ee.entity_id IS NULL",
             [workspace_id.into()],
         ))
         .all(&app_context.db)
         .await
         .map_err(|err| Error::Message(err.to_string()))?;
 
-        // One query for every candidate's current row, instead of one per candidate: the embedding-provider call and the UPDATE it triggers still happen per entity below (an external HTTP call and a per-row write, neither of which batches the same way), but the read that feeds them does not need its own round trip per row.
-        let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
-        let records = content_entities::get_batch(&app_context.db, workspace_id, &candidate_ids)
-            .await
-            .map_err(|err| Error::Message(err.to_string()))?;
-
         let mut synced = 0;
         let mut failed = 0;
         for candidate in &candidates {
-            let Some(record) = records.get(&candidate.id) else {
-                // Deleted between the candidate scan above and this batch fetch.
-                failed += 1;
-                eprintln!("  entity {} no longer exists", candidate.id);
-                continue;
+            let record = content_entities::EntityRecord {
+                id: candidate.id,
+                workspace_id: candidate.workspace_id,
+                schema_id: candidate.schema_id,
+                schema_version: candidate.schema_version,
+                entity_type: candidate.entity_type.clone(),
+                data: candidate.data.clone(),
+                created_at: candidate.created_at,
+                updated_at: candidate.updated_at,
+                created_by: candidate.created_by,
+                updated_by: candidate.updated_by,
             };
             let result = embedding::sync::sync_embedding_for_record(
                 &app_context.db,
                 workspace_id,
-                record,
+                &record,
                 provider.as_ref(),
             )
             .await;

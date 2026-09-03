@@ -128,6 +128,22 @@ pub(super) async fn authorize(
     let presented_key = extract_bearer_key(parts)?;
     let headers = header_pairs(parts);
 
+    // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
+    // directly against ctx.db and opens a plain transaction, mirroring the REST adapter's
+    // `Authorized<R>` SQLite extractor.
+    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return match auth::authorize_sqlite(&ctx.db, presented_key, required).await {
+            Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
+            Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
+                Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
+            }
+            Err(YorishiroError::Unauthenticated) => {
+                Err(ErrorData::invalid_request("authentication failed", None))
+            }
+            Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+        };
+    }
+
     let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
     let auth_impl =
         authenticator(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
@@ -153,6 +169,22 @@ pub(super) async fn verify(
 ) -> Result<VerifyOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
     let headers = header_pairs(parts);
+
+    // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
+    // directly against ctx.db instead of going through the Authenticator seam, mirroring the REST
+    // adapter's `AuthContext` extractor (extractors.rs) and `Verified<R>` extractor.
+    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return match auth::authorize_scope_sqlite(&ctx.db, presented_key, required).await {
+            Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
+            Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
+                Ok(VerifyOutcome::ScopeDenied(err_to_tool_result(err)))
+            }
+            Err(YorishiroError::Unauthenticated) => {
+                Err(ErrorData::invalid_request("authentication failed", None))
+            }
+            Err(err) => Err(ErrorData::internal_error(err.to_string(), None)),
+        };
+    }
 
     let db = db_handle(ctx).map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
     let auth_impl =

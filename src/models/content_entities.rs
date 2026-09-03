@@ -632,7 +632,7 @@ pub async fn snapshot(
 ) -> Result<(), YorishiroError> {
     let result = conn
         .execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
+            conn.get_database_backend(),
             "INSERT INTO content_entity_snapshots \
                 (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
              SELECT $1, workspace_id, id, schema_id, schema_version, data \

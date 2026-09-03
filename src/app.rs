@@ -223,17 +223,16 @@ impl Hooks for App {
             .insert(crate::ee::services::licence::LicenceState::from_env());
 
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            // The three features named here are `ee::models::origin::list_with_upstream_changes`,
-            // `ee::models::marketplace::list_marketplace` and `insert_next_version`, each of which
-            // hardcodes `DatabaseBackend::Postgres` and would otherwise fail at execution time
+            // The three ee/ features named here use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, or correlated subqueries with advisory locks) and would otherwise fail at execution time
             // naming a query rather than the configuration behind it. Nothing else reports the
             // enterprise edition's state at boot here, since `TenantScopedAuthenticator` below is
             // not installed.
+            // Vector search works on this backend via sqlite-vec; JSONB filtering does not.
             tracing::warn!(
                 "some enterprise features are unavailable on SQLite: browsing the marketplace, publishing \
                  a template version, and listing template-origin updates each run a PostgreSQL-only \
                  query and will fail when reached. Point DATABASE_URL at PostgreSQL to use them; \
-                 everything else works on this backend"
+                 vector search and everything else works on this backend"
             );
         } else {
             // Replaces the default authenticator inserted above (`Arc<dyn Authenticator>` is keyed
