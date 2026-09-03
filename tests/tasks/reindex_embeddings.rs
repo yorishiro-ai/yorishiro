@@ -92,7 +92,7 @@ async fn embedding_is_set(ctx: &loco_rs::app::AppContext, entity_id: uuid::Uuid)
     }
     Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+        "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
         [entity_id.into()],
     ))
     .one(&ctx.db)

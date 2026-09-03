@@ -1924,6 +1924,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         for table in [
+            "content_entity_embeddings",
             "content_relations",
             "content_entity_snapshots",
             "content_entity_column_preferences",

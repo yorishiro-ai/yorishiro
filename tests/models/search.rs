@@ -239,10 +239,9 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             .expect("query embedding")
             .map(|r| r.has_embedding)
         };
-        assert_eq!(
-            stored,
-            Some(false),
-            "the refused write must not have touched the embedding column"
+        assert!(
+            stored != Some(true),
+            "the refused write must not have created an embedding row: {stored:?}"
         );
 
         crate::requests::close_app_pools(&ctx).await;
@@ -369,10 +368,9 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             .expect("query embedding")
             .map(|r| r.has_embedding)
         };
-        assert_eq!(
-            stored,
-            Some(false),
-            "the refused write must not have touched the embedding column"
+        assert!(
+            stored != Some(true),
+            "the refused write must not have created an embedding row: {stored:?}"
         );
 
         crate::requests::close_app_pools(&ctx).await;

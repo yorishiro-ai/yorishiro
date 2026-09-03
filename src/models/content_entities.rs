@@ -33,7 +33,7 @@ impl ActiveModel {}
 impl Entity {}
 
 /// The RLS-scoped request path's view of a `content_entities` row.
-/// Distinct from the generated `Model` because `Model` carries `embedding` (`Option<PgVector>`), which this API never returns: the search/embedding pipeline manages that column separately.
+/// Distinct from the generated `Model` because it excludes `embedding` (stored separately in `content_entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
 /// `created_by`/`updated_by` are `None` for entities touched by an unattributed API key.
 #[derive(Clone, Debug, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct EntityRecord {
