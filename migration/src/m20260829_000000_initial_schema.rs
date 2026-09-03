@@ -78,6 +78,36 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
+        // Tenant-level embedding defaults support the three-tier inheritance chain:
+        // system → tenant → workspace.  A tenant without its own assignment returns
+        // NULL for both columns, so workspaces under it fall back to the deployment
+        // default.  A tenant with an explicit default makes that the fallback for all
+        // its workspaces unless a workspace overrides it.
+        helpers::pg_only(
+            manager,
+            "ALTER TABLE identity_tenants ADD COLUMN embedding_model TEXT, \
+             ADD COLUMN embedding_dimensions INTEGER",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "ALTER TABLE identity_tenants ADD COLUMN embedding_model TEXT; \
+             ALTER TABLE identity_tenants ADD COLUMN embedding_dimensions INTEGER",
+        )
+        .await?;
+        // Clear the 'unconfigured' sentinel: existing databases have
+        // `identity_workspaces.embedding_model = 'unconfigured'` from when no
+        // embedding provider was configured at creation time.  Leaving those rows
+        // would cause write-time model checks to fail for every subsequent embed.
+        // Reset them to NULL so the first real embed stamps the correct model.
+        helpers::pg_only(
+            manager,
+            "UPDATE identity_workspaces \
+             SET embedding_model = NULL, embedding_dimensions = NULL \
+             WHERE embedding_model = 'unconfigured'",
+        )
+        .await?;
+
         // identity_users
         // password_hash is nullable: a user may be OAuth-provisioned instead of password-based.
         let table = Table::create()
@@ -848,18 +878,65 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // sea_query has no pgvector column type, so the embedding column is added with raw SQL.
-        // The width is declared here only so the HNSW index below can be built against it: an unconstrained `vector` column cannot carry an HNSW index.
-        // The width is dropped again after the index exists, and PostgreSQL keeps the index across that type change, so one index suffices because a workspace's vectors are all one width.
+        // Embeddings live in a separate `content_entity_embeddings` table so that:
+        // 1. SQLite can store vectors as raw LE f32 BLOBs (pgvector has no equivalent)
+        // 2. The `content_entities` model no longer carries `PgVector`, eliminating
+        //    every Postgres/SQLite branching in `content_entities` that existed
+        //    around `select_record_columns` / `insert_and_fetch` / `update_and_fetch`.
+        // 3. SQLite can use sqlite-vec's vec0 operators on that table.
         //
-        // No-op on SQLite: there is no pgvector/sqlite-vec column here yet, so this backend has no `embedding` column at all until vector search is ported.
+        // PostgreSQL path: create the embeddings table, copy existing vectors from
+        // `content_entities.embedding`, drop the old column, build an HNSW index,
+        // then declare the width as `vector(768)` permanently so the index is
+        // reproducible by tools like REINDEX or pg_dump/restore.
         helpers::pg_only(
             manager,
-            "ALTER TABLE content_entities ADD COLUMN embedding vector(768)",
+            "ALTER TABLE content_entities ADD COLUMN embedding vector(768); \
+             CREATE TABLE content_entity_embeddings (\
+                 entity_id UUID PRIMARY KEY REFERENCES content_entities(id) ON DELETE CASCADE,\
+                 embedding vector(768)\
+             ); \
+             INSERT INTO content_entity_embeddings(entity_id, embedding) \
+             SELECT id, embedding FROM content_entities WHERE embedding IS NOT NULL; \
+             CREATE INDEX entities_embedding_hnsw ON content_entity_embeddings \
+             USING hnsw (embedding vector_cosine_ops); \
+             ALTER TABLE content_entities DROP COLUMN embedding; \
+             ALTER TABLE content_entities ALTER COLUMN embedding TYPE vector(768)",
         )
         .await?;
 
-        // The multi-column composite is expressible through `create_index`; the GIN/HNSW/trigram
+        // SQLite path: `content_entity_embeddings` stores vectors as opaque BLOBs.
+        // entity_id is the join key (not implicit rowid): VACUUM may renumber
+        // implicit rowids, so we must never join on them (see sqlite.org/lang_vacuum.html).
+        // SQLite never had an `embedding` column on `content_entities` — vectors are
+        // stored exclusively in this table.
+        manager
+            .create_table(
+                Table::create()
+                    .table(Alias::new("content_entity_embeddings"))
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Alias::new("entity_id"))
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Alias::new("embedding")).blob())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_entity_embeddings_entity_id")
+                            .from(
+                                Alias::new("content_entity_embeddings"),
+                                Alias::new("entity_id"),
+                            )
+                            .to(Alias::new("content_entities"), Alias::new("id"))
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // The multi-column composite is expressible through `create_index`; the GIN/trigram
         // indexes that follow are not.
         manager
             .create_index(
@@ -873,16 +950,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // GIN/HNSW/trigram indexes: Postgres-only (pgvector, pg_trgm), no-ops on SQLite.
-        // Vector search is not ported to SQLite yet.
+        // GIN/trigram indexes: Postgres-only (pgvector, pg_trgm), no-ops on SQLite.
         helpers::pg_only(
             manager,
             "CREATE INDEX entities_data_gin ON content_entities USING GIN (data jsonb_path_ops)",
-        )
-        .await?;
-        helpers::pg_only(
-            manager,
-            "CREATE INDEX entities_embedding_hnsw ON content_entities USING hnsw (embedding vector_cosine_ops)",
         )
         .await?;
         helpers::pg_only(
@@ -895,11 +966,10 @@ impl MigrationTrait for Migration {
         // SQLite has no pg_trgm, so full-text search uses FTS5 with an external content
         // table. `content_entities` is a normal rowid table (its PK `id` is TEXT/UUID,
         // not an INTEGER AUTOINCREMENT column), so it has an implicit rowid.
-        // The virtual table defaults to using that implicit rowid (no `content_rowid=`
-        // override) because SQLite only accepts integers as rowid — a UUID TEXT fails
-        // with "datatype mismatch" on trigger execution.
-        // `workspace_id` is declared as an FTS5 column so it can be filtered without
-        // MATCH.
+        // `entity_id UNINDEXED` stores the UUID join key without building an inverted
+        // index on it (it is never MATCHed — only used for the `e.id = fts.entity_id`
+        // join). `workspace_id` is declared as an FTS5 column so it can be filtered
+        // without MATCH (UNINDEXED is implicit for declared columns).
         //
         // We also need to repopulate the FTS5 index from the content table.
         // This must run after the virtual table exists but before any real data is inserted.
@@ -908,6 +978,7 @@ impl MigrationTrait for Migration {
             "CREATE VIRTUAL TABLE fts_content_entities USING fts5(\
                 data,\
                 workspace_id,\
+                entity_id UNINDEXED,\
                 content=content_entities\
             )",
         )
@@ -920,16 +991,15 @@ impl MigrationTrait for Migration {
         )
         .await?;
         // Triggers keep the FTS5 virtual table in sync with the backing table.
-        // The FTS5 table uses the content table's implicit rowid (not the UUID `id`),
-        // so triggers must reference `NEW.rowid` / `OLD.rowid`, not `NEW.id` / `OLD.id`.
-        // The `rowid` column is omitted from INSERT so SQLite assigns it automatically
-        // by looking up the content table's implicit rowid.
+        // `entity_id` is written as `NEW.id` / `OLD.id` (not rowid) so the FTS5
+        // join in `search.rs` (`e.id = fts.entity_id`) works regardless of VACUUM
+        // or any other renumbering. The `rowid` is still needed by FTS5 internally.
         helpers::sqlite_only(
             manager,
             "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(rowid, data, workspace_id) \
-                VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
+                INSERT INTO fts_content_entities(rowid, data, workspace_id, entity_id) \
+                VALUES(NEW.id, NEW.data, NEW.workspace_id, NEW.id); \
              END",
         )
         .await?;
@@ -937,10 +1007,10 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id) \
-                VALUES('delete', OLD.rowid, OLD.data, OLD.workspace_id); \
-                INSERT INTO fts_content_entities(rowid, data, workspace_id) \
-                VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
+                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id, entity_id) \
+                VALUES('delete', OLD.id, OLD.data, OLD.workspace_id, OLD.id); \
+                INSERT INTO fts_content_entities(rowid, data, workspace_id, entity_id) \
+                VALUES(NEW.id, NEW.data, NEW.workspace_id, NEW.id); \
              END",
         )
         .await?;
@@ -948,16 +1018,9 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id) \
-                VALUES('delete', OLD.rowid, OLD.data, OLD.workspace_id); \
+                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id, entity_id) \
+                VALUES('delete', OLD.id, OLD.data, OLD.workspace_id, OLD.id); \
              END",
-        )
-        .await?;
-
-        // Widen the column back to unconstrained `vector` now that the HNSW index is built. No-op on SQLite, matching the ADD COLUMN above.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE content_entities ALTER COLUMN embedding TYPE vector",
         )
         .await?;
 
@@ -1599,7 +1662,7 @@ impl MigrationTrait for Migration {
             table,
             &[(
                 "identity_api_key_audit_log_action_check",
-                "action IN ('undo_migration_job', 'set_maintenance')",
+                "action IN ('undo_migration_job', 'set_maintenance', 'reindex_embeddings')",
             )],
         )
         .await?;

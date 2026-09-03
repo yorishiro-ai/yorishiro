@@ -143,6 +143,10 @@ impl Hooks for App {
         environment: &Environment,
         config: Config,
     ) -> Result<BootResult> {
+        // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
+        // The call site in main.rs already covers all CLI subcommands.
+        crate::db::register_sqlite_extensions();
+
         let result = create_app::<Self, Migrator>(mode, environment, config).await?;
 
         // Startup reindex detection: check if any workspace's stored vectors

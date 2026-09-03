@@ -6,7 +6,7 @@
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QuerySelect,
+    QuerySelect, Statement,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -149,13 +149,27 @@ pub async fn sync_embedding(
     Ok(())
 }
 
-/// Writes an already-computed embedding vector to `content_entities.embedding`, with no check against the workspace's stamped model or dimensions.
-/// Returns whether the row was actually written: `false` means the `updated_at` guard below skipped the write because the entity changed since `snapshot_updated_at` was read, not an error.
+/// Writes an already-computed embedding vector into `content_entity_embeddings`, with no
+/// check against the workspace's stamped model or dimensions.
 ///
-/// [`sync_embedding`] wraps this with both checks for the normal write path, and ignores the returned bool: a skipped write there means a newer sync for the same entity is already in flight or has already landed, so nothing needs redoing.
-/// [`reindex_workspace`] calls this directly instead: its entire job is changing which model a workspace's vectors were embedded with, so a check that refuses a write on exactly that mismatch would refuse its own writes on every row.
-/// Safe to bypass here only because `reindex_workspace` restamps `identity_workspaces.embedding_model` itself, and only after every row succeeds: the stamp and the actual column contents genuinely disagree for its own duration, which is the situation `sync_embedding`'s check exists to prevent everywhere else.
-/// `reindex_workspace` does *not* ignore the returned bool the way `sync_embedding` does: unlike an ordinary sync, a skipped reindex write means this entity's current data was never actually re-embedded with the new model, so counting it as reindexed would let the workspace restamp while that row still holds the old model's vector.
+/// Returns whether the row was actually written: `false` means the `updated_at` guard below
+/// skipped the write because the entity changed since `snapshot_updated_at` was read, not an
+/// error.
+///
+/// [`sync_embedding`] wraps this with both checks for the normal write path, and ignores the
+/// returned bool: a skipped write there means a newer sync for the same entity is already in
+/// flight or has already landed, so nothing needs redoing.
+/// [`reindex_workspace`] calls this directly instead: its entire job is changing which model
+/// a workspace's vectors were embedded with, so a check that refuses a write on exactly that
+/// mismatch would refuse its own writes on every row.
+/// Safe to bypass here only because `reindex_workspace` restamps
+/// `identity_workspaces.embedding_model` itself, and only after every row succeeds: the stamp
+/// and the actual column contents genuinely disagree for its own duration, which is the
+/// situation `sync_embedding`'s check exists to prevent everywhere else.
+/// `reindex_workspace` does *not* ignore the returned bool the way `sync_embedding` does:
+/// unlike an ordinary sync, a skipped reindex write means this entity's current data was
+/// never actually re-embedded with the new model, so counting it as reindexed would let the
+/// workspace restamp while that row still holds the old model's vector.
 async fn embed_and_write(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -163,21 +177,61 @@ async fn embed_and_write(
     snapshot_updated_at: chrono::DateTime<chrono::Utc>,
     vector: Vec<f32>,
 ) -> Result<bool, YorishiroError> {
-    // `updated_at` as a write condition prevents a vector computed from stale data from overwriting a newer one when concurrent syncs for the same entity finish out of order.
-    // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later sync.
-    use crate::models::_entities::content_entities;
+    // `updated_at` as a write condition prevents a vector computed from stale data from
+    // overwriting a newer one when concurrent syncs for the same entity finish out of order.
+    // Writing the embedding itself doesn't change `updated_at`, so this never blocks a later
+    // sync.
+    //
+    // We use raw SQL because the vector column lives in a separate table whose shape differs
+    // between PostgreSQL (`vector(768)`) and SQLite (`BLOB`), and SeaORM has no builder for
+    // this cross-backend shape.  The `updated_at` guard is a WHERE clause on
+    // `content_entities`, which is shared.
+    let backend = conn.get_database_backend();
 
-    let pg_vector = pgvector::Vector::from(vector);
-    let rows_affected = content_entities::Entity::update_many()
-        .col_expr(content_entities::Column::Embedding, Expr::value(pg_vector))
-        .filter(content_entities::Column::WorkspaceId.eq(workspace_id))
-        .filter(content_entities::Column::Id.eq(entity_id))
-        .filter(content_entities::Column::UpdatedAt.eq(snapshot_updated_at))
-        .exec(conn)
+    // SQLite stores vectors as raw LE f32 bytes in the BLOB column.
+    let blob_bytes = if backend == sea_orm::DatabaseBackend::Sqlite {
+        let raw =
+            unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
+        raw.to_vec()
+    } else {
+        Vec::new()
+    };
+
+    let rows_affected = conn
+        .execute_raw(Statement::from_sql_and_values(
+            backend,
+            "INSERT INTO content_entity_embeddings (entity_id, embedding) \
+             VALUES ($1, $2) \
+             ON CONFLICT(entity_id) \
+             DO UPDATE SET embedding = $2 \
+               WHERE content_entity_embeddings.entity_id = $1 \
+                 AND EXISTS ( \
+                   SELECT 1 FROM content_entities \
+                   WHERE content_entities.id = content_entity_embeddings.entity_id \
+                     AND content_entities.workspace_id = $3 \
+                     AND content_entities.updated_at = $4 \
+                 ) \
+             RETURNING 1",
+            if backend == sea_orm::DatabaseBackend::Postgres {
+                vec![
+                    entity_id.into(),
+                    pgvector::Vector::from(vector).into(),
+                    workspace_id.into(),
+                    snapshot_updated_at.into(),
+                ]
+            } else {
+                vec![
+                    entity_id.into(),
+                    sea_orm::Value::from(blob_bytes),
+                    workspace_id.into(),
+                    snapshot_updated_at.into(),
+                ]
+            },
+        ))
         .await
         .internal()?;
 
-    if rows_affected.rows_affected == 0 {
+    if rows_affected.rows_affected() == 0 {
         tracing::debug!(
             %entity_id,
             "embed_and_write: entity was deleted or updated since this snapshot, write skipped"

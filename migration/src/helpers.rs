@@ -137,37 +137,6 @@ pub async fn create_table_with_checks(
     Ok(())
 }
 
-/// Adds or replaces a table-level CHECK constraint on Postgres; a no-op on SQLite.
-///
-/// SeaORM's `TableAlterStatement` has no `add_constraint` builder, so `execute_unprepared` is used — this wraps the pattern in a named helper so migration files call `helpers::add_check_constraint` rather than raw SQL directly.
-/// `drop_if_exists` controls whether an existing constraint with the same name is dropped first (true = add or replace, false = only-add).
-pub async fn add_check_constraint(
-    manager: &SchemaManager<'_>,
-    table: &str,
-    constraint_name: &str,
-    expr: &str,
-    drop_if_exists: bool,
-) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::Sqlite {
-        return Ok(());
-    }
-    if drop_if_exists {
-        manager
-            .get_connection()
-            .execute_unprepared(&format!(
-                "ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint_name};"
-            ))
-            .await?;
-    }
-    manager
-        .get_connection()
-        .execute_unprepared(&format!(
-            "ALTER TABLE {table} ADD CONSTRAINT {constraint_name} CHECK ({expr});"
-        ))
-        .await?;
-    Ok(())
-}
-
 /// Runs `sql` only on Postgres; a no-op on SQLite.
 ///
 /// For raw statements with no SQLite equivalent at all (role creation, column-level GRANTs, `plpgsql` functions/triggers, GIN/HNSW/trigram indexes, pgvector DDL): a table-scoped CHECK that SQLite *can* express instead moves into that table's `Table::create()` for the SQLite backend rather than routing through here, since skipping it there would silently drop a real constraint rather than an engine-specific optimization.

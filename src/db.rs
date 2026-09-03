@@ -8,9 +8,48 @@ use async_trait::async_trait;
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
+use sqlite_vec::sqlite3_vec_init;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
+
+/// Registers SQLite extensions (sqlite-vec) so every connection opened on a SQLite URL
+/// auto-loads them.
+///
+/// Called from two places — `src/bin/main.rs` (covers all CLI subcommands) and
+/// `App::boot` (covers the test harness, which never runs `main.rs`) — each guarded by
+/// `std::sync::Once::call_once` so the C-level registration is atomic and idempotent.
+///
+/// The registration must happen **before** any SQLite connection opens: `loco-rs 1.1.0`'s
+/// `cli::main` calls `create_context::<H>` unconditionally at line 777, before the
+/// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
+/// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method
+/// runs.
+/// Public entry point for `main.rs` and `App::boot` to call.
+pub fn register_sqlite_extensions() {
+    use std::mem::transmute;
+
+    // `libsqlite3-sys` is a direct dependency (pinned to the same version that
+    // `sqlx-sqlite 0.9.0` resolves) so we can call `sqlite3_auto_extension`
+    // without fighting an E0432 FFI mismatch.
+    use libsqlite3_sys::sqlite3_auto_extension;
+
+    // The target type is `sqlite3_auto_extension_callback` — a C function pointer
+    // that clippy's transmute-checker wants spelled out literally; it is a foreign
+    // type with opaque internals so we suppress the lint instead of duplicating
+    // libsqlite3-sys's bindgen output.
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    #[allow(clippy::missing_transmute_annotations)]
+    REGISTER.call_once(|| unsafe {
+        // `sqlite3_vec_init` is declared in `sqlite-vec` as a bare C function
+        // pointer; `sqlite3_auto_extension` expects a function pointer matching
+        // `void(*)(sqlite3*, char**, const sqlite3_api_routines*)`, which is the
+        // same signature (cast to *const () is safe because both are FFI-safe).
+        sqlite3_auto_extension(Some(transmute::<*const (), _>(
+            sqlite3_vec_init as *const (),
+        )));
+    });
+}
 
 /// Where the deployment's data lives, for tenant-scoped request handling.
 #[async_trait]

@@ -34,8 +34,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
 serial_test = { version = "4.0.1" }
 sha2 = { version = "0.11.0" }
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
-tokio = { version = "1.53.1", default-features = false, features = ["rt-multi-thread"] }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono", "json"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread"] }
 tracing = { version = "0.1.44" }
 # sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side needs rather than the root's own narrower requirement.
 # This does not cost ee/ anything at build time: Cargo resolves one crate's features as the union across the whole workspace regardless of which member's manifest declares which subset, so ee/'s build already carried this same union before this table existed; only the declaration was split across two files, not the resolved set.
@@ -96,6 +96,11 @@ candle-transformers = { version = "0.11.0" }
 tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
 # `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter (search.rs, sync.rs), without pinning a second, possibly-mismatched version.
 pgvector = { version = "0.4.2", default-features = false }
+sqlite-vec = "=0.1.9"
+# Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
+# re-export libsqlite3_sys from its own sqlx dependency, so we reach it
+# directly here and avoid the version-mismatch E0432.
+libsqlite3-sys = "=0.37.0"
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
 jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }  # licence key verification (ee/services/licence.rs)
