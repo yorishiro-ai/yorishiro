@@ -94,9 +94,6 @@ jobs:
       - name: Build yorishiro binary
         run: cargo build --locked -p yorishiro --bin yorishiro
 
-      - name: Install sea-orm-cli for entities regen
-        run: cargo install sea-orm-cli --locked --features postgres-vector --version $(grep 'sea-orm = { version' Cargo.toml | head -1 | sed 's/.*version = "//;s/".*//' | tr -d '=')
-
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
         run: |
@@ -108,6 +105,7 @@ jobs:
         if: matrix.backend == 'postgres'
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          LOCO_ENV: test_postgres
         run: ./target/debug/yorishiro db migrate
 
       - name: Run migrations (sqlite)
