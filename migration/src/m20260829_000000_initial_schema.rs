@@ -514,27 +514,24 @@ impl MigrationTrait for Migration {
                             .to(Alias::new("identity_templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
+                    // FK to identity_users: created_by SET NULL for PostgreSQL (a template outlives
+                    // its author).  SQLite declares inline here because ALTER TABLE has no
+                    // ADD CONSTRAINT on that backend — the difference in ON DELETE action is
+                    // baked into the CREATE TABLE per-backend rather than patched afterward.
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_identity_templates_created_by")
+                            .from(Alias::new("identity_templates"), Alias::new("created_by"))
+                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .on_delete(if manager.get_database_backend() == DbBackend::Sqlite {
+                                ForeignKeyAction::NoAction
+                            } else {
+                                ForeignKeyAction::SetNull
+                            }),
+                    )
                     .to_owned(),
             )
             .await?;
-
-        // FK to identity_users: created_by SET NULL for PostgreSQL (a template outlives
-        // its author).  SQLite gets NO ACTION because that backend cannot add a
-        // constraint with ON DELETE to an existing table.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_templates \
-             ADD CONSTRAINT fk_identity_templates_created_by \
-             FOREIGN KEY (created_by) REFERENCES identity_users(id) ON DELETE SET NULL;",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            "ALTER TABLE identity_templates \
-             ADD CONSTRAINT fk_identity_templates_created_by \
-             FOREIGN KEY (created_by) REFERENCES identity_users(id);",
-        )
-        .await?;
 
         // sea_query's ColumnDef has no TEXT[] helper, so this column is added as raw SQL
         // right after create_table.  SQLite has no array type at all: the equivalent

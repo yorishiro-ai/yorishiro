@@ -66,9 +66,9 @@ jobs:
           - backend: postgres
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          # - backend: sqlite
-          #   loco_env: test_sqlite
-          #   database_url: sqlite:///yorishiro-test.sqlite3?mode=rwc
+          - backend: sqlite
+            loco_env: test_sqlite
+            database_url: sqlite://yorishiro-test.sqlite3?mode=rwc
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -90,12 +90,34 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install pgvector and pg_trgm into template1
+      - name: Install pgvector and pg_trgm into template1 (postgres only)
         if: matrix.backend == 'postgres'
         run: |
           docker exec ${{ job.services.db.id }} psql -U yorishiro -d template1 \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+
+      - name: Run migrations (postgres)
+        if: matrix.backend == 'postgres'
+        env:
+          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+        run: DATABASE_URL='$(DATABASE_URL)' LOCO_ENV='$(LOCO_ENV)' cargo loco db migrate --locked
+
+      - name: Run migrations (sqlite)
+        if: matrix.backend == 'sqlite'
+        env:
+          DATABASE_URL: sqlite://yorishiro-test.sqlite3?mode=rwc
+          LOCO_ENV: test_sqlite
+        run: cargo loco db migrate --locked
+
+      - name: Verify _entities/ matches a fresh regen
+        if: matrix.backend == 'postgres'
+        env:
+          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+        run: |
+          rm -f src/models/_entities/*.rs
+          DATABASE_URL='$(DATABASE_URL)' LOCO_ENV='test_postgres' cargo loco db entities --locked
+          git diff --exit-code src/models/_entities/
 
       - name: Run tests
         env:
