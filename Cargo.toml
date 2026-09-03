@@ -11,6 +11,13 @@ default-run = "yorishiro"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace.dependencies]
+# sea-orm-migration is shared by the migration crate and the app crate (the app runs `Migrator::migrate` at boot).
+sea-orm-migration = { version = "2.0", features = [
+  "runtime-tokio-rustls",
+  "sqlx-postgres",
+  "sqlx-sqlite",
+] }
+
 # `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot.
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust).
