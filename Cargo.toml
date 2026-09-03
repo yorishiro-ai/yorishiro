@@ -48,11 +48,6 @@ axum.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 regex = { version = "1.13.1" }
-sea-orm-migration = { version = "2.0.2", features = [
-  "runtime-tokio-rustls",
-  "sqlx-postgres",
-  "sqlx-sqlite",
-] }
 sea-orm.workspace = true
 chrono.workspace = true
 uuid.workspace = true

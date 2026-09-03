@@ -7668,7 +7668,6 @@ dependencies = [
  "rstest",
  "schemars",
  "sea-orm",
- "sea-orm-migration",
  "sea-query",
  "serde",
  "serde_json",
