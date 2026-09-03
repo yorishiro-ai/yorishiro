@@ -12,7 +12,7 @@ default-run = "yorishiro"
 
 [workspace.dependencies]
 # sea-orm-migration is shared by the migration crate and the app crate (the app runs `Migrator::migrate` at boot).
-sea-orm-migration = { version = "2.0", features = [
+sea-orm-migration = { version = "2.0.2", features = [
   "runtime-tokio-rustls",
   "sqlx-postgres",
   "sqlx-sqlite",
