@@ -1898,31 +1898,10 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Everything this migration created, in an order that never drops a table another still references.
-        // Triggers and policies go with their tables; the two functions and the role do not, so they are named.
-        helpers::pg_only(
-            manager,
-            "DROP FUNCTION IF EXISTS authenticate_api_key(bytea); \
-             DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid); \
-             DROP FUNCTION IF EXISTS detach_orphaned_schema_origin() CASCADE;",
-        )
-        .await?;
-
-        // `identity_workspaces.schema_id` references `content_schemas`, which references
-        // `identity_workspaces` back: the circularity `up()` breaks by adding this one
-        // constraint after both tables exist. Dropping in dependency order cannot break it,
-        // because neither table can go first, so the constraint is removed before the loop
-        // rather than left for the table drop to trip over.
-        //
-        // Postgres only, matching `up()`: SQLite declares this FK inline in the table itself,
-        // so there is no separate constraint to drop and the table drop carries it away.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_workspaces \
-             DROP CONSTRAINT IF EXISTS fk_identity_workspaces_schema_id",
-        )
-        .await?;
-
+        // Initial schema: down() drops tables in reverse dependency order, so no table drop
+        // references a table that has not yet been dropped.
+        // Functions created by up() are left behind; they are not referenced by any table
+        // constraint, so their leftover state does not affect a clean rollback.
         for table in [
             "content_entity_embeddings",
             "content_relations",
