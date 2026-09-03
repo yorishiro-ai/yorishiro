@@ -94,10 +94,10 @@ jobs:
       - name: Build yorishiro binary
         run: cargo build --locked -p yorishiro --bin yorishiro
 
-      - name: Install pgvector and pg_trgm into template1 (postgres only)
+      - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
         run: |
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d template1 \
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
