@@ -126,17 +126,17 @@ jobs:
           LOCO_ENV: test_postgres
           DB_CONNECT_TIMEOUT: "5000"
         run: |
+          count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
           # Self-diagnostic: confirm sea-orm-cli was actually available and generated files
           which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
           count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           if [ "$count" -lt 10 ]; then
-            echo "ERROR: Expected 20+ entity files, got $count. db entities did not generate files."
-            echo "sea-orm-cli must be installed with --features postgres-vector for vector column support."
+            echo "ERROR: Expected 20+ entity files, got $count after db entities."
             exit 1
           fi
-          echo "Generated $count entity files"
+          echo "Generated $count entity files (had $count_before before)"
           git diff --exit-code src/models/_entities/
 
       - name: Run tests
