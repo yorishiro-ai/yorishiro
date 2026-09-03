@@ -126,10 +126,13 @@ jobs:
           LOCO_ENV: test_postgres
           DB_CONNECT_TIMEOUT: "5000"
         run: |
+          # Diagnose: confirm the migration-created tables actually exist.
+          # This is the branching point if db entities ever produces 0 files again.
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro -c '\dt' || true
+          # Run db entities (the determinism check).
           count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
-          # Self-diagnostic: confirm sea-orm-cli was actually available and generated files
           which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
           count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           if [ "$count" -lt 10 ]; then
