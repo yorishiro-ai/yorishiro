@@ -2,6 +2,7 @@
 
 pub use super::content_entities::Entity as ContentEntities;
 pub use super::content_entity_column_preferences::Entity as ContentEntityColumnPreferences;
+pub use super::content_entity_embeddings::Entity as ContentEntityEmbeddings;
 pub use super::content_entity_snapshots::Entity as ContentEntitySnapshots;
 pub use super::content_relations::Entity as ContentRelations;
 pub use super::content_schemas::Entity as ContentSchemas;

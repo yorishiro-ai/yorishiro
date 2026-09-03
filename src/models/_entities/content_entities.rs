@@ -3,7 +3,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "content_entities")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -23,6 +23,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_one = "super::content_entity_embeddings::Entity")]
+    ContentEntityEmbeddings,
     #[sea_orm(
         belongs_to = "super::content_schemas::Entity",
         from = "Column::SchemaId",
@@ -55,6 +57,12 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     IdentityWorkspaces,
+}
+
+impl Related<super::content_entity_embeddings::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ContentEntityEmbeddings.def()
+    }
 }
 
 impl Related<super::content_schemas::Entity> for Entity {
