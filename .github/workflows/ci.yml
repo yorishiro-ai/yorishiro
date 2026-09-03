@@ -61,6 +61,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - backend: postgres
@@ -101,14 +102,14 @@ jobs:
         if: matrix.backend == 'postgres'
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-        run: DATABASE_URL='$(DATABASE_URL)' LOCO_ENV='$(LOCO_ENV)' cargo loco db migrate --locked
+        run: DATABASE_URL='$(DATABASE_URL)' LOCO_ENV='$(LOCO_ENV)' cargo loco db migrate
 
       - name: Run migrations (sqlite)
         if: matrix.backend == 'sqlite'
         env:
           DATABASE_URL: sqlite://yorishiro-test.sqlite3?mode=rwc
           LOCO_ENV: test_sqlite
-        run: cargo loco db migrate --locked
+        run: cargo loco db migrate
 
       - name: Verify _entities/ matches a fresh regen
         if: matrix.backend == 'postgres'
@@ -116,7 +117,7 @@ jobs:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
         run: |
           rm -f src/models/_entities/*.rs
-          DATABASE_URL='$(DATABASE_URL)' LOCO_ENV='test_postgres' cargo loco db entities --locked
+          DATABASE_URL='$(DATABASE_URL)' LOCO_ENV='test_postgres' cargo loco db entities
           git diff --exit-code src/models/_entities/
 
       - name: Run tests
