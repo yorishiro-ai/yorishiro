@@ -91,8 +91,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install loco CLI
-        run: cargo install loco --locked --version $(grep 'loco-rs = { version' Cargo.toml | head -1 | sed 's/.*version = "//;s/".*//' | tr -d '=')
+      - name: Build yorishiro binary
+        run: cargo build --locked -p yorishiro --bin yorishiro
 
       - name: Install pgvector and pg_trgm into template1 (postgres only)
         if: matrix.backend == 'postgres'
@@ -105,14 +105,14 @@ jobs:
         if: matrix.backend == 'postgres'
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-        run: loco db migrate
+        run: ./target/debug/yorishiro db migrate
 
       - name: Run migrations (sqlite)
         if: matrix.backend == 'sqlite'
         env:
           DATABASE_URL: sqlite://yorishiro-test.sqlite3?mode=rwc
           LOCO_ENV: test_sqlite
-        run: loco db migrate
+        run: ./target/debug/yorishiro db migrate
 
       - name: Verify _entities/ matches a fresh regen
         if: matrix.backend == 'postgres'
@@ -120,7 +120,7 @@ jobs:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
         run: |
           rm -f src/models/_entities/*.rs
-          loco db entities
+          ./target/debug/yorishiro db entities
           git diff --exit-code src/models/_entities/
 
       - name: Run tests
