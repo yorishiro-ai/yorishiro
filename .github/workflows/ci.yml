@@ -95,7 +95,7 @@ jobs:
         run: cargo build --locked -p yorishiro --bin yorishiro
 
       - name: Install sea-orm-cli with postgres-vector feature
-        run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector
+        run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector,sqlx-postgres,sqlx-sqlite,sqlx-postgres,sqlx-sqlite
 
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
