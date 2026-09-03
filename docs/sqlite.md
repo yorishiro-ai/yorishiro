@@ -1,45 +1,48 @@
-# SQLite support
+# SQLite mode
 
-Yorishiro runs on SQLite for evaluation and single-tenant personal use.  It is not positioned for multi-tenant hosting, since SQLite has no row-level security to isolate tenants.
+Yorishiro can run on SQLite instead of PostgreSQL.  Use this mode to try Yorishiro out on your own machine, or for a single-person workspace that does not share data with anyone else.
 
-## Limitations
+Do not use SQLite for multi-tenant hosting.  It stores all data in a single file with no database-level tenant isolation.  PostgreSQL is required when two or more tenants share the same deployment.
 
-### No multi-tenant isolation
+## What works on SQLite
 
-SQLite stores all data in a single file with no database-enforced tenant separation.  The application applies filtering, but a single missed filter would be a silent isolation break.  Use PostgreSQL for any deployment hosting more than one tenant.
+- **Entity CRUD.**  Create, read, update, and delete content entities.
+- **Entity search.**  Text search across all entities.
+- **Vector search.**  Similarity search using embedded vectors.
+- **Full-text search.**  Text search for entities that have no embedding.
+- **API key authentication.**  Create and use API keys.
+- **Embedding sync.**  Generate and store vectors the same way as PostgreSQL.
+- **Snapshots and undo.**  Restore entities from a snapshot (requires a prior snapshot created on PostgreSQL).
 
-### Vector search works
+## What does not work on SQLite
 
-Vector similarity search uses the [sqlite-vec](https://github.com/asg017/sqlite-vec) extension, which loads via `sqlite3_auto_extension` at boot.  The `content_entity_embeddings` table stores vectors as raw LE f32 BLOBs (no PgVector equivalent).  KNN search runs as a full cosine-distance scan ordered by `vec_distance_cosine(ee.embedding, $1)`, which is fast at current scale.  The `content_entities` table itself has no `embedding` column — all vector queries join through `content_entity_embeddings`.
-
-### Full-text search uses FTS5
-
-SQLite has no pg_trgm.  The fallback path for entities with no embedding uses the FTS5 virtual table `fts_content_entities`, created by the migration and kept in sync via triggers.  The FTS5 table carries an `entity_id UNINDEXED` column so that joins use the UUID ID (not implicit rowid, which VACUUM may renumber).  Content is stored in the `data` column, not the auto-populated `content` column, so triggers explicitly INSERT `NEW.id` / `OLD.id` rather than `NEW.rowid` / `OLD.rowid`.
-
-### JSONB filtering is not available
-
-SQLite has no `@>` containment operator.  The `filter` query parameter (JSONB containment) returns `BackendUnsupported` on SQLite.
-
-### No advisory locks
-
-SQLite allows only one write transaction at a time, so advisory locks are unnecessary.  `db::lock_for_update` returns `Ok(())` on SQLite.
-
-### Id generation
-
-Columns with `uuidv7()` defaults on PostgreSQL generate their own id on SQLite through `ActiveModelBehavior::before_save`.  Code using the `Entity::insert(...).on_conflict(...)` builder path (which skips `before_save`) sets ids explicitly via `db::sqlite_generated_id`.
-
-### Embedding sync
-
-The `embeddings` table `content_entity_embeddings` exists on both backends.  Embedding generation and sync work the same way on SQLite; the only difference is the storage format (BLOB vs. PgVector).
-
-## Boot-time behavior
-
-On SQLite, the `DbHandle` (PostgreSQL tenant pool) and `Authenticator` seam are not built.  Authentication goes directly against `ctx.db`.  The boot-time `tracing::warn` lists only the enterprise features that use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, advisory locks); vector search works on this backend.
+- **Multiple tenants.**  SQLite supports exactly one tenant.  The tenant cap is hardcoded to 1 and cannot be changed.
+- **JSONB filtering.**  The `filter` query parameter (JSONB containment) is unavailable and returns an error.
+- **Enterprise features requiring PostgreSQL SQL.**  Features that depend on `unnest`, `CROSS JOIN LATERAL`, or advisory locks are unavailable.
+- **SQLite snapshots.**  The snapshot feature writes using PostgreSQL-only SQL.  A snapshot created on PostgreSQL can be restored on SQLite, but creating one on SQLite is not supported.
 
 ## Configuration
 
-`config/sqlite.yaml` sets `max_connections: 10`.  SQLite requires at least 2 connections: one for the request transaction and one for the independent `last_used_at` update.  Boot fails with a clear error if `max_connections < 2`.
+Copy the example SQLite config and set the environment to use it:
+
+```sh
+cp config/sqlite.yaml.example config/sqlite.yaml
+export LOCO_ENV=sqlite
+```
+
+`config/sqlite.yaml` sets `max_connections: 10`.  At least 2 connections are required.  The server will refuse to start if `max_connections` is less than 2.
+
+## Trying it out
+
+Start the server as normal.  The boot log will note that enterprise features depending on PostgreSQL-specific SQL are unavailable, and that vector search works on this backend.
+
+Authentication bypasses the tenant pool and connects directly to the database.  This is simpler but also means there is no row-level security.  The application trusts that the single tenant will not tamper with data belonging to others — which is a non-issue when there is only one tenant.
 
 ## Testing
 
-Integration tests (`tests/`) run against PostgreSQL only.  SQLite is a manual-verification-only environment (`LOCO_ENV=sqlite`), not wired into the test suite, since `CREATE DATABASE` (used by the test harness) has no SQLite equivalent.
+The test suite runs against PostgreSQL only.  SQLite is a manual-verification environment.  To verify changes against SQLite:
+
+```sh
+export LOCO_ENV=sqlite
+cargo run
+```
