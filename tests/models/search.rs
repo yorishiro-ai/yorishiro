@@ -1196,26 +1196,55 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
             assert_eq!(hits[0].entity.id, matching.id);
 
-            // Test the FTS5 DELETE trigger: delete the entity and confirm MATCH finds nothing.
+            // Test the FTS5 DELETE trigger: delete the entity and verify the FTS5 side is actually
+            // cleaned up (a bare search-by-vector assertion would be true even if the FTS5 row
+            // lingered, because the join against content_entities would already find no match).
             content_entities::Entity::delete_many()
                 .filter(Column::Id.eq(matching.id))
                 .exec(&ctx.db)
                 .await
                 .expect("delete entity");
 
-            let hits = search::search_by_vector(
-                &ctx.db,
-                workspace.id,
-                vec![0.0_f32; 768],
-                "quarterly board meeting",
-                search::SearchQuery::default(),
-            )
-            .await
-            .expect("search_by_vector after delete");
+            let fts_count: Option<i64> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    cnt: i64,
+                }
+                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE rowid = $1",
+                    [matching.id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("fts count")
+                .map(|r| r.cnt)
+            };
             assert_eq!(
-                hits.len(),
-                0,
-                "deleted entity must not appear in FTS5: {hits:?}"
+                fts_count,
+                Some(0),
+                "fts_content_entities must not contain the deleted row after trigger"
+            );
+            // match (which would be true even if the FTS5 row lingered).
+            let fts_count: Option<i64> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    cnt: i64,
+                }
+                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE rowid = $1",
+                    [matching.id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("fts count")
+                .map(|r| r.cnt)
+            };
+            assert_eq!(
+                fts_count,
+                Some(0),
+                "fts_content_entities must not contain the deleted row after trigger"
             );
 
             crate::requests::close_app_pools_sqlite(&ctx, &db_path).await;

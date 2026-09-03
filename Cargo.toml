@@ -23,7 +23,7 @@ default-run = "yorishiro"
 # `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is now environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot, not only the `kind: Postgres` this deployment happens to default to.
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default (unlike `worker`), and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust; Cargo.lock grew from 1154 to 1181 lines when this was first measured).
-loco-rs = { version = "1.1.0", features = ["worker_redis"] }
+loco-rs = { version = "=1.1.0", features = ["worker_redis"] }
 anyhow = { version = "1.0.104" }
 async-trait = { version = "0.1.92" }
 axum = { version = "0.8.9" }

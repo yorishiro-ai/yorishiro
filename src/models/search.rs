@@ -207,6 +207,13 @@ pub async fn search_by_vector(
             // FTS5 MATCH inside a join uses the unaliased virtual table name because
             // `MATCH` is a keyword-like operator that does not resolve against the
             // join alias on all SQLite/FTS5 versions.
+            // FTS5 MATCH parses the bound value as its own query language (FTS5 boolean operators,
+            // quoted phrases, `-word` exclusions). We must not pass raw user input there: a `"` or
+            // `NOT` or `-word` in an entity title would be interpreted as FTS5 syntax, causing
+            // syntax errors or silently altering the query. Wrap the text in FTS5 phrase-quotes
+            // (`"..."`) and escape internal `"` as `""` so the input is treated as a literal phrase.
+            let query_phrase = format!("\"{}\"", query_text.replace('"', "\"\""));
+
             let fts_sql = format!(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
                  FROM content_entities e, fts_content_entities \
@@ -214,7 +221,7 @@ pub async fn search_by_vector(
                  AND fts_content_entities.data MATCH $1 \
                  LIMIT {remaining}"
             );
-            let mut fts_values: Vec<sea_orm::Value> = vec![query_text.into()];
+            let mut fts_values: Vec<sea_orm::Value> = vec![query_phrase.into()];
             fts_values.extend(scope_values);
 
             rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
