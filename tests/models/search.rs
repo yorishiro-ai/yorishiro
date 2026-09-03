@@ -559,7 +559,6 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 /// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
 #[serial]
-#[ignore = "flaky in CI: detached connections from advisory lock exhaust pool"]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
     request_with_create_db::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {

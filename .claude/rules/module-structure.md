@@ -14,7 +14,7 @@ MCP middleware (rate limiting, request-body limits on the `/mcp` route specifica
   A scope denial and a business-logic error are both successful tool results carrying `is_error: true`, which is what an MCP client expects; only a protocol-level failure (`ErrorData`) is an `Err`.
   Returning a denial as `Err` would change what clients see.
 - **These exits cannot become a single `?`.**
-  That would need the handler to return `Result<CallToolResult, SomeToolExit>`, and `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.0.1`, `handler/server/router/tool.rs:202`), so anything else fails to compile inside `#[tool]`.
+  That would need the handler to return `Result<CallToolResult, SomeToolExit>`, and `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.2.0`, `handler/server/router/tool.rs:202`), so anything else fails to compile inside `#[tool]`.
   Confirmed by building it: the attempt fails with `E0271`, expecting `Result<CallToolResult, ErrorData>`.
   `rmcp` does have an `IntoCallToolResult for Result<T, E>` that would map an `Err` payload to a successful `is_error: true` response, but the `#[tool]` attribute never reaches it.
   Revisit only if `rmcp` relaxes that function type.

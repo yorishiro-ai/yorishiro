@@ -25,8 +25,8 @@ pub struct Migration;
 /// the pair of `authenticate_api_key` overloads that used to be created without `audit` and recreated with it in a later file, and nothing else.
 ///
 /// Everything that looks like a later patch is still in its original position rather than folded into the table it patches.
-/// That is deliberate for the two Postgres-only fixes at the end: `identity_workspace_worker_classes`'s CHECK and `identity_templates.created_by`'s `ON DELETE SET NULL` are absent on SQLite by design, and folding them into the shared `CREATE TABLE` would hand that backend constraints it is documented as not having.
-/// The `ALTER TABLE` form is what keeps the two backends' end states different in the way they are supposed to be different.
+/// That is deliberate for the Postgres-only `identity_templates.created_by` FK (`ON DELETE SET NULL`) and the `tags TEXT[]` column, both absent on SQLite by design.
+/// Remaining `ALTER` statements are structural necessities: circular FK resolution, sea-query type limitations (no TEXT[]), backend-branching FK ON DELETE, and RLS enablement syntax.
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {
@@ -346,6 +346,14 @@ impl MigrationTrait for Migration {
                     )
                     .col(helpers::created_at())
                     .col(ColumnDef::new(Alias::new("last_used_at")).timestamp_with_time_zone())
+                    // audit: independent of scope.  A key is `scope=read, audit=true` to
+                    // read the audit log without write access.
+                    .col(
+                        ColumnDef::new(Alias::new("audit"))
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -497,7 +505,8 @@ impl MigrationTrait for Migration {
                             .from(Alias::new("identity_templates"), Alias::new("tenant_id"))
                             .to(Alias::new("identity_tenants"), Alias::new("id")),
                     )
-                    // Self-referential: deleting a template others were forked from must leave the forks usable, losing only the pointer back.
+                    // Self-referential: deleting a template others were forked from must leave
+                    // the forks usable, losing only the pointer back.
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_fork_of")
@@ -505,18 +514,32 @@ impl MigrationTrait for Migration {
                             .to(Alias::new("identity_templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_identity_templates_created_by")
-                            .from(Alias::new("identity_templates"), Alias::new("created_by"))
-                            .to(Alias::new("identity_users"), Alias::new("id")),
-                    )
                     .to_owned(),
             )
             .await?;
 
-        // sea_query's ColumnDef has no TEXT[] helper, so this column is added as raw SQL right after create_table.
-        // SQLite has no array type at all: the equivalent column there holds the same tag list JSON-encoded (a TEXT column of a JSON array), read/written as such by the application on that backend rather than as a native Postgres array.
+        // FK to identity_users: created_by SET NULL for PostgreSQL (a template outlives
+        // its author).  SQLite gets NO ACTION because that backend cannot add a
+        // constraint with ON DELETE to an existing table.
+        helpers::pg_only(
+            manager,
+            "ALTER TABLE identity_templates \
+             ADD CONSTRAINT fk_identity_templates_created_by \
+             FOREIGN KEY (created_by) REFERENCES identity_users(id) ON DELETE SET NULL;",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "ALTER TABLE identity_templates \
+             ADD CONSTRAINT fk_identity_templates_created_by \
+             FOREIGN KEY (created_by) REFERENCES identity_users(id);",
+        )
+        .await?;
+
+        // sea_query's ColumnDef has no TEXT[] helper, so this column is added as raw SQL
+        // right after create_table.  SQLite has no array type at all: the equivalent
+        // column there holds the same tag list JSON-encoded (a TEXT column of a JSON
+        // array), read/written as such by the application on that backend.
         helpers::pg_only(
             manager,
             "ALTER TABLE identity_templates ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';",
@@ -655,6 +678,16 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Alias::new("origin_snapshot")).json_binary())
                     .col(helpers::created_at())
+                    // `updated_at` on every mutable table, including this one: the
+                    // `detach_orphaned_schema_origin` trigger rewrites `origin_status`
+                    // in place when a parent template is deleted, so a row could change
+                    // with nothing recording when.
+                    .col(
+                        ColumnDef::new(Alias::new("updated_at"))
+                            .timestamp_with_time_zone()
+                            .null()
+                            .default(Expr::current_timestamp()),
+                    )
                     .check(Expr::cust("status IN ('active', 'archived')"))
                     .check(Expr::cust("origin_status IN ('linked', 'detached')"))
                     .foreign_key(
@@ -742,21 +775,26 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Deleting a template must not destroy the copies made from it, and must stop them claiming to follow something that is gone.
-        // A trigger rather than application code, so a delete arriving from the admin CLI or a migration is covered too.
+        // Deleting a template must not destroy the copies made from it, and must stop them
+        // claiming to follow something that is gone.  A trigger rather than application
+        // code, so a delete arriving from the admin CLI or a migration is covered too.
         //
-        // Defined here (alongside content_schemas, the table it writes to) even though it fires on identity_templates, matching the old DDL's own ordering choice of placing it next to content.schemas rather than next to identity.templates.
+        // Defined here (alongside content_schemas, the table it writes to) even though it
+        // fires on identity_templates, matching the old DDL's own ordering choice of
+        // placing it next to content.schemas rather than next to identity.templates.
+        //
+        // The trigger also stamps `updated_at` on the in-place rewrite.
         helpers::pg_only(
             manager,
-            "CREATE FUNCTION detach_orphaned_schema_origin() RETURNS TRIGGER AS $$
-             BEGIN
-               UPDATE content_schemas
-                  SET origin_status = 'detached'
-                WHERE origin_template_id = OLD.id
-                  AND origin_status = 'linked';
-               RETURN OLD;
-             END;
-             $$ LANGUAGE plpgsql SECURITY DEFINER;",
+            &format!(
+                "CREATE FUNCTION detach_orphaned_schema_origin() RETURNS TRIGGER AS $$
+                 BEGIN
+                   {}
+                   RETURN OLD;
+                 END;
+                 $$ LANGUAGE plpgsql SECURITY DEFINER;",
+                detach_body("now()")
+            ),
         )
         .await?;
 
@@ -768,18 +806,21 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // SQLite has no separate CREATE FUNCTION/CREATE TRIGGER split, but it can express the same guarantee directly: an AFTER DELETE trigger (BEFORE would still see the row on both engines, but SQLite's OLD is only valid inside the trigger body regardless of timing, and AFTER avoids racing the row's own deletion) that detaches any schema whose origin_template_id pointed at the deleted template.
+        // SQLite has no separate CREATE FUNCTION/CREATE TRIGGER split, but it can express
+        // the same guarantee directly: an AFTER DELETE trigger (BEFORE would still see the
+        // row on both engines, but SQLite's OLD is only valid inside the trigger body
+        // regardless of timing, and AFTER avoids racing the row's own deletion).
         helpers::sqlite_only(
             manager,
-            "CREATE TRIGGER templates_detach_schema_origins
-             AFTER DELETE ON identity_templates
-             FOR EACH ROW
-             BEGIN
-               UPDATE content_schemas
-                  SET origin_status = 'detached'
-                WHERE origin_template_id = OLD.id
-                  AND origin_status = 'linked';
-             END;",
+            &format!(
+                "CREATE TRIGGER templates_detach_schema_origins
+                 AFTER DELETE ON identity_templates
+                 FOR EACH ROW
+                 BEGIN
+                   {}
+                 END;",
+                detach_body("CURRENT_TIMESTAMP")
+            ),
         )
         .await?;
 
@@ -1467,15 +1508,17 @@ impl MigrationTrait for Migration {
         let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
 
         // Field names, in display order.
-        // sea_query's ColumnDef has no default-expression-plus-json_binary combination that reads well here, so the DEFAULT goes on as a follow-up ALTER COLUMN on Postgres.
-        // SQLite has no ALTER COLUMN at all (only rename/add/drop-column), so the default is set inline in the CREATE TABLE there instead; `'[]'::jsonb` is Postgres cast syntax with no SQLite equivalent, so the SQLite default is the bare JSON literal.
-        let mut columns_col = ColumnDef::new(Alias::new("columns"))
+        // `'[]'::jsonb` is Postgres cast syntax with no SQLite equivalent, so the
+        // default is backend-specific: inline for both, with different literals.
+        let columns_col = ColumnDef::new(Alias::new("columns"))
             .json_binary()
             .not_null()
+            .default(if sqlite {
+                Expr::cust("'[]'")
+            } else {
+                Expr::cust("'[]'::jsonb")
+            })
             .to_owned();
-        if sqlite {
-            columns_col.default(Expr::cust("'[]'"));
-        }
 
         let table = Table::create()
             .table(Alias::new("content_entity_column_preferences"))
@@ -1522,14 +1565,6 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No-op on SQLite: the default is already inline in the CREATE TABLE above.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE content_entity_column_preferences \
-             ALTER COLUMN columns SET DEFAULT '[]'::jsonb;",
-        )
-        .await?;
-
         // Lenient: the control-plane pool also reaches this table over a connection that has not named a workspace, and must match nothing rather than raise.
         helpers::enable_rls_with_policy(
             manager,
@@ -1551,12 +1586,6 @@ impl MigrationTrait for Migration {
         // identity_api_key_audit_log
         // Independent of `scope`, deliberately: `scope` stays the four-way ordered read/write/schema/migration ladder (`ApiKeyScope`'s derived `Ord`), and folding audit into that ladder above `migration` would let an audit-reading key also run a batch migration and flip maintenance mode, which nobody asked for.
         // A separate boolean composes with any scope instead: a key is `scope=read, audit=true` to read the log without write access, or any other scope plus audit, entirely independent of where that scope sits in the ladder.
-        manager
-            .get_connection()
-            .execute_unprepared(
-                "ALTER TABLE identity_api_keys ADD COLUMN audit boolean NOT NULL DEFAULT false;",
-            )
-            .await?;
 
         // identity_api_key_audit_log
         let table = Table::create()
@@ -1752,6 +1781,19 @@ impl MigrationTrait for Migration {
 
         // identity_workspace_worker_classes
         let [created_at, updated_at] = helpers::timestamps();
+
+        // `worker_class` CHECK constraint.
+        // Its siblings carry this constraint (`identity_tenant_memberships.role`,
+        // `identity_api_keys.scope`, the audit log's `action`), for the reason `action`'s own
+        // migration states: a CHECK is what stops a typo'd value from silently becoming a
+        // fourth thing nothing filters on.
+        //
+        // **PostgreSQL only.** SQLite's `ALTER TABLE` cannot add a CHECK to an existing
+        // table, and the only way to gain it there is to rebuild the table and copy every
+        // row.  That is a large, risky migration to close a gap on the tier documented as
+        // "trying Yorishiro out or personal use" (`docs/sqlite.md`), so it is not done
+        // there: on SQLite this column still accepts any string.
+
         manager
             .create_table(
                 Table::create()
@@ -1779,120 +1821,12 @@ impl MigrationTrait for Migration {
                             .to(Alias::new("identity_workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
+                    .check(Expr::cust(
+                        "worker_class IN ('tenant_private', 'official', 'shared')",
+                    ))
                     .to_owned(),
             )
             .await?;
-
-        // No RLS and no GRANT, deliberately, matching identity_workspace_embedding_keys/
-        // identity_workspace_llm_keys: yorishiro_app never reaches this table. Reads and writes go
-        // through the migration-role pool (ctx.db), keeping which compute a workspace's jobs run on
-        // off the RLS-scoped request connection entirely rather than relying on a policy being right.
-
-        // 1. `identity_workspace_worker_classes.worker_class` accepted any string.
-        //
-        // Its siblings carry this constraint (`identity_tenant_memberships.role`, `identity_api_keys.scope`, the audit log's `action`), for the reason `action`'s own migration states: a CHECK is what stops a typo'd value from silently becoming a fourth thing nothing filters on.
-        // A serde round-trip guarantees only that *this* writer emits a valid value: a manual UPDATE, a data-fix script, or a future code path reaching the column directly are all outside that guarantee, and this column decides which worker process dequeues a job.
-        // The three values are `WorkerClass::as_db_str`'s own output, so a variant added there without adding it here fails closed at the database rather than routing jobs to a queue nothing reads.
-        //
-        // **PostgreSQL only, and SQLite is left without this constraint.** SQLite's `ALTER TABLE` cannot add one to an existing table, and the only way to gain it there is to rebuild the table and copy every row.
-        // That is a large, risky migration to close a gap on the tier documented as "trying Yorishiro out or personal use" (`docs/sqlite.md`), so it is not done here: on SQLite this column still accepts any string, and a deployment that needs the constraint needs PostgreSQL.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_workspace_worker_classes \
-             ADD CONSTRAINT identity_workspace_worker_classes_worker_class_check \
-             CHECK (worker_class IN ('tenant_private', 'official', 'shared'))",
-        )
-        .await?;
-
-        // 2. `identity_templates.created_by` defaults to NO ON DELETE, which would prevent deleting a user who authored a template.
-        //
-        // SET NULL, matching `fork_of` on this same table: the column is nullable, a template outlives the account that wrote it, and the alternatives are both wrong here.
-        // CASCADE would delete a tenant's templates because an author closed their account, destroying data belonging to the tenant rather than to the user.
-        // RESTRICT requires deleting or re-authoring every template a user ever wrote before the user can be deleted.
-        // Losing the authorship attribution is the acceptable half of that trade; losing the template is not.
-        //
-        // **PostgreSQL only.** `identity_templates` exists on SQLite too: it is created unconditionally above, and the `pg_only`/`sqlite_only` calls cover the `tags` column's type and a GIN index, not the table itself.
-        // SQLite cannot alter a foreign key's action in place, so `created_by` keeps NO ACTION there and deleting a user who authored a template still fails with `FOREIGN KEY constraint failed` (measured directly against a SQLite file, not inferred).
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_templates \
-             DROP CONSTRAINT fk_identity_templates_created_by",
-        )
-        .await?;
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_templates \
-             ADD CONSTRAINT fk_identity_templates_created_by \
-             FOREIGN KEY (created_by) REFERENCES identity_users(id) ON DELETE SET NULL",
-        )
-        .await?;
-
-        // 3. `content_schemas` had no `updated_at`, while every other mutable table here does.
-        //
-        // The table is not append-only: the `detach_orphaned_schema_origin` trigger created alongside it rewrites `origin_status` in place when an upstream template is deleted, so a row could change with nothing recording when.
-        //
-        // Added through the schema builder rather than raw SQL because this table exists on SQLite too, and that backend's `ALTER TABLE` cannot do `ALTER COLUMN ... SET NOT NULL`.
-        // Nullable for the same reason, and because SQLite refuses a non-constant default on `ADD COLUMN` outright (measured: `Cannot add a column with non-constant default`), so an existing table cannot be given a `now()` default there.
-        //
-        // `None` therefore means exactly one thing: the row has not been written by any path since this column was added.
-        // Every write path stamps it from here on (both triggers below, `content_schemas::create_schema`, and that module's archival `update_many`), so `None` is purely historical and its population only shrinks; it is not a state a new or modified row can enter.
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(Alias::new("content_schemas"))
-                    .add_column(
-                        ColumnDef::new(Alias::new("updated_at"))
-                            .timestamp_with_time_zone()
-                            .null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        // PostgreSQL can carry a default; SQLite cannot, per the measurement above.
-        // Which is why the stamping is not left to the column on either backend: the guarantee has to hold where the weaker engine is, so every write path stamps explicitly and this default is belt-and-braces for Postgres rather than the mechanism.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE content_schemas ALTER COLUMN updated_at SET DEFAULT now()",
-        )
-        .await?;
-
-        // The triggers are recreated so they stamp `updated_at` on the same in-place rewrite this column exists to record.
-        // A trigger that detaches a schema without stamping `updated_at` would leave the column recording every change except the one its own justification names.
-        helpers::pg_only(
-            manager,
-            &format!(
-                "CREATE OR REPLACE FUNCTION detach_orphaned_schema_origin() RETURNS TRIGGER AS $$
-                 BEGIN
-                   {}
-                   RETURN OLD;
-                 END;
-                 $$ LANGUAGE plpgsql SECURITY DEFINER;",
-                detach_body("now()")
-            ),
-        )
-        .await?;
-
-        // SQLite has no CREATE OR REPLACE for triggers, so the existing one is dropped first.
-        // `AFTER DELETE` rather than `BEFORE`: SQLite's `OLD` is valid inside the trigger body either way, and `AFTER` avoids racing the row's own deletion.
-        helpers::sqlite_only(
-            manager,
-            "DROP TRIGGER IF EXISTS templates_detach_schema_origins",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            &format!(
-                "CREATE TRIGGER templates_detach_schema_origins
-                 AFTER DELETE ON identity_templates
-                 FOR EACH ROW
-                 BEGIN
-                   {}
-                 END;",
-                detach_body("CURRENT_TIMESTAMP")
-            ),
-        )
-        .await?;
 
         Ok(())
     }
