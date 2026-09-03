@@ -23,30 +23,30 @@ default-run = "yorishiro"
 # `worker_redis` is enabled: `queue.kind` (config/{development,production}.yaml) is now environment-switchable, and `Redis`/Valkey is one of the three values it accepts, so the queue provider needs to be compiled in regardless of which one an operator picks at boot, not only the `kind: Postgres` this deployment happens to default to.
 # Without this feature, booting with `kind: Redis` set fails at startup with "No queue provider feature was selected and compiled".
 # It is not loco-rs's own default (unlike `worker`), and pulls in the `redis` crate plus five more transitive dependencies (combine, num-bigint, arcstr, sha1_smol, xxhash-rust; Cargo.lock grew from 1154 to 1181 lines when this was first measured).
-loco-rs = { version = "1.1", features = ["worker_redis"] }
-anyhow = { version = "1" }
-async-trait = { version = "0.1" }
-axum = { version = "0.8" }
-chrono = { version = "0.4" }
-rand = { version = "0.10" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1" }
+loco-rs = { version = "1.1.0", features = ["worker_redis"] }
+anyhow = { version = "1.0.104" }
+async-trait = { version = "0.1.92" }
+axum = { version = "0.8.9" }
+chrono = { version = "0.4.45" }
+rand = { version = "0.10.2" }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151" }
 serial_test = { version = "4.0.1" }
-sha2 = { version = "0.11" }
-sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
-tokio = { version = "1.45", default-features = false, features = ["rt-multi-thread"] }
-tracing = { version = "0.1" }
+sha2 = { version = "0.11.0" }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+tokio = { version = "1.53.1", default-features = false, features = ["rt-multi-thread"] }
+tracing = { version = "0.1.44" }
 # sea-orm and uuid take different feature sets on each side (root needs sqlx-sqlite/postgres-vector and uuid's v7 that ee/ does not use directly), so the table carries the union of what either side needs rather than the root's own narrower requirement.
 # This does not cost ee/ anything at build time: Cargo resolves one crate's features as the union across the whole workspace regardless of which member's manifest declares which subset, so ee/'s build already carried this same union before this table existed; only the declaration was split across two files, not the resolved set.
-sea-orm = { version = "2.0", features = [
+sea-orm = { version = "2.0.2", features = [
   "sqlx-sqlite",
   "sqlx-postgres",
   "runtime-tokio-rustls",
   "macros",
   "postgres-vector",
 ] }
-uuid = { version = "1.6", features = ["v4", "v7"] }
+uuid = { version = "1.26.0", features = ["v4", "v7"] }
 
 [dependencies]
 loco-rs = { workspace = true }
@@ -56,9 +56,9 @@ tokio.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-regex = { version = "1.11" }
-sea-orm-migration = { version = "2.0", features = [
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+regex = { version = "1.13.1" }
+sea-orm-migration = { version = "2.0.2", features = [
   "runtime-tokio-rustls",
   "sqlx-postgres",
   "sqlx-sqlite",
@@ -69,20 +69,20 @@ uuid.workspace = true
 # ts-rs derives the TypeScript bindings for the `dtos` (the typed JSON API
 # contract). Present for every db app; the SPA frontend consumes the exports,
 # and a headless app can still emit them for external consumers.
-ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
-include_dir = { version = "0.7" }
+ts-rs = { version = "12.0.1", features = ["chrono-impl", "serde-compat"] }
+include_dir = { version = "0.7.4" }
 # Raw pool for RLS session-state handling: Loco's own ConnectOptions has no after_connect/
 # after_release hook, so this stays a hand-built sqlx pool beside SeaORM's DatabaseConnection.
 # See https://github.com/yorishiro-ai/yorishiro/issues/221.
 sqlx.workspace = true
-thiserror = { version = "2" }
+thiserror = { version = "2.0.20" }
 anyhow.workspace = true
 rand.workspace = true
 sha2.workspace = true
-sea-query = { version = "1.0" }
-jsonschema = { version = "0.52" }
-rmcp = { version = "3.0.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
-schemars = { version = "1", features = ["uuid1"] }
+sea-query = { version = "1.0.2" }
+jsonschema = { version = "0.52.1" }
+rmcp = { version = "3.2.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars = { version = "1.2.2", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
 # vLLM/real OpenAI over HTTP.
 reqwest.workspace = true
@@ -90,19 +90,19 @@ reqwest.workspace = true
 # from safetensors weights. candle-core/candle-nn/candle-transformers build a fully static binary
 # (no openssl-sys, no libstdc++ link), unlike the `ort` crate this replaced, which needed a
 # prebuilt onnxruntime binary with no musl target at all.
-candle-core = { version = "0.11" }
-candle-nn = { version = "0.11" }
-candle-transformers = { version = "0.11" }
-tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+candle-core = { version = "0.11.0" }
+candle-nn = { version = "0.11.0" }
+candle-transformers = { version = "0.11.0" }
+tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
 # `pgvector::Vector` itself already comes transitively via sea-orm's postgres-vector feature (re-exported as `sea_orm::entity::prelude::PgVector`); this direct dependency is only so `pgvector::Vector::from(..)` can be named explicitly when binding a raw query parameter (search.rs, sync.rs), without pinning a second, possibly-mismatched version.
-pgvector = { version = "0.4", default-features = false }
+pgvector = { version = "0.4.2", default-features = false }
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }  # licence key verification (ee/services/licence.rs)
-serde_yaml_ng = { version = "0.10" } # licence key from a config file (ee/services/licence.rs)
-hmac = { version = "0.13" }          # Stripe webhook signature (ee/controllers/stripe.rs)
-base64 = { version = "0.23" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
-url = { version = "2.5" }            # OIDC discovery (ee/services/oauth.rs)
+jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }  # licence key verification (ee/services/licence.rs)
+serde_yaml_ng = { version = "0.10.0" } # licence key from a config file (ee/services/licence.rs)
+hmac = { version = "0.13.0" }          # Stripe webhook signature (ee/controllers/stripe.rs)
+base64 = { version = "0.23.1" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
+url = { version = "2.5.8" }            # OIDC discovery (ee/services/oauth.rs)
 
 [[bin]]
 name = "yorishiro"
@@ -112,11 +112,11 @@ required-features = []
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
-rstest = { version = "0.26" }
-insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
+rstest = { version = "0.26.1" }
+insta = { version = "1.48.0", features = ["redactions", "yaml", "filters"] }
 # Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
-tempfile = { version = "3" }
+tempfile = { version = "3.27.0" }
 # Used by the ee/ request tests folded into tests/requests/.
-axum-test = { version = "17.3" }
+axum-test = { version = "17.3.0" }
 # Used by tests/migration/ for migration test harness.
 tokio = { workspace = true, features = ["macros"] }
