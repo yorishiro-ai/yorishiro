@@ -38,7 +38,7 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
     }
 }
 
-/// Generates an embedding vector from an entity's `x-embed` fields and updates the `content_entities.embedding` column.
+/// Generates an embedding vector from an entity's `x-embed` fields and updates the `content_entity_embeddings` table.
 /// Returns `Ok(())` without doing anything if the schema has no `x-embed` fields or none have values: embedding is an auxiliary feature and must never block the entity write it follows.
 ///
 /// Checks the workspace's stamp against the provider's model and dimensions before writing.
@@ -60,7 +60,7 @@ pub async fn sync_embedding(
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
-    // `content_entities.embedding` is `vector(768)` at the SQL type level, so a wrong-width write is already rejected by Postgres itself, not silently accepted: `pgvector` errors with "expected 768 dimensions, not N".
+    // `content_entity_embeddings.embedding` is `vector(768)` at the SQL type level, so a wrong-width write is already rejected by Postgres itself, not silently accepted: `pgvector` errors with "expected 768 dimensions, not N".
     // That error names neither the workspace nor the write that produced it, so this check exists to turn that into an operator-readable message (which workspace, which width was expected, what to do about it), not to prevent data corruption the database wasn't already preventing.
     let chain = resolve_embedding_chain(conn, workspace_id).await?;
     // Three-tier inheritance: workspace stamp → tenant default → deployment default.
@@ -292,7 +292,7 @@ enum ReindexStep {
 /// The reindex loop's per-entity step: composes the embedding text, embeds it, and writes it via [`embed_and_write`], bypassing both of [`sync_embedding`]'s checks (model stamp and dimension) for the reason documented on [`embed_and_write`] itself.
 /// Otherwise identical to [`sync_embedding_for_record`]: same schema resolution, same no-op on an entity_type with no `x-embed` fields.
 ///
-/// Skipping the dimension check specifically is harmless today only because `content_entities.embedding` is `vector(768)` at the SQL type level: Postgres itself still refuses a wrong-width write, `pgvector` erroring with "expected 768 dimensions, not N".
+/// Skipping the dimension check specifically is harmless today only because `content_entity_embeddings.embedding` is `vector(768)` at the SQL type level: Postgres itself still refuses a wrong-width write, `pgvector` erroring with "expected 768 dimensions, not N".
 /// The day a differently-sized model is added and this deployment's column type changes to match, that raw Postgres error, naming neither the workspace nor the entity, becomes the first thing a reindex against the new model hits, rather than the readable message [`sync_embedding`]'s own dimension check would have given.
 async fn reindex_embedding_for_record(
     conn: &impl ConnectionTrait,

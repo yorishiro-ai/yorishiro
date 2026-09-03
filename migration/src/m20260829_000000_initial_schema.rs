@@ -53,6 +53,11 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
+        // Tenant-level embedding defaults support the three-tier inheritance chain:
+        // system → tenant → workspace.  A tenant without its own assignment returns
+        // NULL for both columns, so workspaces under it fall back to the deployment
+        // default.  A tenant with an explicit default makes that the fallback for all
+        // its workspaces unless a workspace overrides it.
         manager
             .create_table(
                 Table::create()
@@ -62,6 +67,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(ColumnDef::new(Alias::new("max_workspaces")).integer())
                     .col(helpers::created_at())
+                    .col(ColumnDef::new(Alias::new("embedding_model")).text())
+                    .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
                     .to_owned(),
             )
             .await?;
@@ -75,36 +82,6 @@ impl MigrationTrait for Migration {
             "id",
             "app.current_tenant",
             false,
-        )
-        .await?;
-
-        // Tenant-level embedding defaults support the three-tier inheritance chain:
-        // system → tenant → workspace.  A tenant without its own assignment returns
-        // NULL for both columns, so workspaces under it fall back to the deployment
-        // default.  A tenant with an explicit default makes that the fallback for all
-        // its workspaces unless a workspace overrides it.
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_tenants ADD COLUMN embedding_model TEXT, \
-             ADD COLUMN embedding_dimensions INTEGER",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            "ALTER TABLE identity_tenants ADD COLUMN embedding_model TEXT; \
-             ALTER TABLE identity_tenants ADD COLUMN embedding_dimensions INTEGER",
-        )
-        .await?;
-        // Clear the 'unconfigured' sentinel: existing databases have
-        // `identity_workspaces.embedding_model = 'unconfigured'` from when no
-        // embedding provider was configured at creation time.  Leaving those rows
-        // would cause write-time model checks to fail for every subsequent embed.
-        // Reset them to NULL so the first real embed stamps the correct model.
-        helpers::pg_only(
-            manager,
-            "UPDATE identity_workspaces \
-             SET embedding_model = NULL, embedding_dimensions = NULL \
-             WHERE embedding_model = 'unconfigured'",
         )
         .await?;
 
@@ -883,31 +860,26 @@ impl MigrationTrait for Migration {
         // 2. The `content_entities` model no longer carries `PgVector`, eliminating
         //    every Postgres/SQLite branching in `content_entities` that existed
         //    around `select_record_columns` / `insert_and_fetch` / `update_and_fetch`.
-        // 3. SQLite can use sqlite-vec's vec0 operators on that table.
         //
-        // PostgreSQL path: create the embeddings table, copy existing vectors from
-        // `content_entities.embedding`, drop the old column, build an HNSW index,
-        // then declare the width as `vector(768)` permanently so the index is
-        // reproducible by tools like REINDEX or pg_dump/restore.
+        // Fresh database: content_entities has no `embedding` column at all.
+        // content_entity_embeddings(entity_id UUID, embedding vector(768)) holds
+        // the vectors, with an HNSW index for KNN search on PostgreSQL.
         helpers::pg_only(
             manager,
-            "ALTER TABLE content_entities ADD COLUMN embedding vector(768); \
-             CREATE TABLE content_entity_embeddings (\
+            "CREATE TABLE content_entity_embeddings (\
                  entity_id UUID PRIMARY KEY REFERENCES content_entities(id) ON DELETE CASCADE,\
                  embedding vector(768)\
              ); \
-             INSERT INTO content_entity_embeddings(entity_id, embedding) \
-             SELECT id, embedding FROM content_entities WHERE embedding IS NOT NULL; \
              CREATE INDEX entities_embedding_hnsw ON content_entity_embeddings \
-             USING hnsw (embedding vector_cosine_ops); \
-             ALTER TABLE content_entities DROP COLUMN embedding; \
-             ALTER TABLE content_entities ALTER COLUMN embedding TYPE vector(768)",
+             USING hnsw (embedding vector_cosine_ops)",
         )
         .await?;
 
         // SQLite path: `content_entity_embeddings` stores vectors as opaque BLOBs.
         // entity_id is the join key (not implicit rowid): VACUUM may renumber
         // implicit rowids, so we must never join on them (see sqlite.org/lang_vacuum.html).
+        // KNN search uses plain table scan with `vec_distance_cosine` rather than
+        // vec0 virtual tables — no MATCH/k= syntax needed.
         // SQLite never had an `embedding` column on `content_entities` — vectors are
         // stored exclusively in this table.
         manager
@@ -963,31 +935,20 @@ impl MigrationTrait for Migration {
         .await?;
 
         // FTS5 virtual table for text search fallback on SQLite.
-        // SQLite has no pg_trgm, so full-text search uses FTS5 with an external content
-        // table. `content_entities` is a normal rowid table (its PK `id` is TEXT/UUID,
-        // not an INTEGER AUTOINCREMENT column), so it has an implicit rowid.
-        // `entity_id UNINDEXED` stores the UUID join key without building an inverted
-        // index on it (it is never MATCHed — only used for the `e.id = fts.entity_id`
-        // join). `workspace_id` is declared as an FTS5 column so it can be filtered
-        // without MATCH (UNINDEXED is implicit for declared columns).
-        //
-        // We also need to repopulate the FTS5 index from the content table.
-        // This must run after the virtual table exists but before any real data is inserted.
+        // SQLite has no pg_trgm, so full-text search uses FTS5 with stored content:
+        // the triggers below explicitly INSERT/DELETE rows in the FTS5 table,
+        // so the virtual table doesn't need a `content=` mapping to a backing table.
+        // This avoids the problem that `content_entities` has no `entity_id` column
+        // (vectors live in `content_entity_embeddings`), while still storing the
+        // UUID join key in the FTS5 index for `e.id = fts.entity_id` lookups.
         helpers::sqlite_only(
             manager,
             "CREATE VIRTUAL TABLE fts_content_entities USING fts5(\
                 data,\
                 workspace_id,\
                 entity_id UNINDEXED,\
-                content=content_entities\
+                content=''\
             )",
-        )
-        .await?;
-        // Repopulate the FTS5 index from the content table.
-        // This must run after the virtual table exists but before any real data is inserted.
-        helpers::sqlite_only(
-            manager,
-            "INSERT INTO fts_content_entities(fts_content_entities) VALUES('rebuild')",
         )
         .await?;
         // Triggers keep the FTS5 virtual table in sync with the backing table.

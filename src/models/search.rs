@@ -255,7 +255,7 @@ pub async fn search_by_vector(
             fts_values.extend(scope_values);
 
             let fts_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Sqlite,
+                conn.get_database_backend(),
                 &fts_sql,
                 fts_values,
             ))
@@ -283,7 +283,7 @@ pub async fn search_by_vector(
             trigram_values.extend(scope_values);
 
             let trigram_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
+                conn.get_database_backend(),
                 &trigram_sql,
                 trigram_values,
             ))

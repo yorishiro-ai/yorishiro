@@ -19,7 +19,6 @@ pub struct Model {
     pub updated_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
-    pub embedding: Option<PgVector>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
