@@ -8,15 +8,15 @@
 //! Both tests are `#[serial]` because each gets its own database but they share a cluster, and `up()` creates the `yorishiro_app` **role**, which is a cluster-wide object.
 //! Run in parallel against a cluster where that role does not exist yet, both reach `CREATE ROLE` at once and one fails with `duplicate key value violates unique constraint "pg_authid_rolname_index"` — the migration's own `EXCEPTION WHEN duplicate_object` catches a role that already existed, not two transactions creating it simultaneously.
 //! This passed locally and failed in CI for exactly that reason: the local cluster already had the role from earlier runs, so the race had nothing to lose.
-use crate::migration::{Migrator, MigratorTrait};
-use sea_orm_migration::sea_orm::{ConnectionTrait, Database};
+use migration::{Migrator, MigratorTrait};
+use sea_orm::{ConnectionTrait, Database};
 use serial_test::serial;
 
 /// A throwaway database, dropped and recreated so each run starts from nothing.
 ///
 /// Returns `None` only when `DATABASE_URL` is unset or names something other than PostgreSQL, which is how these tests skip on a machine with no database.
 /// A `DATABASE_URL` that is present but unusable panics rather than returning `None`: skipping there would report success for tests that never ran, which is the failure this file exists to prevent elsewhere.
-async fn scratch_db(name: &str) -> Option<sea_orm_migration::sea_orm::DatabaseConnection> {
+async fn scratch_db(name: &str) -> Option<sea_orm::DatabaseConnection> {
     let base = std::env::var("DATABASE_URL").ok()?;
     if !base.starts_with("postgres://") {
         return None;

@@ -215,7 +215,7 @@ async fn embed_and_write(
             if backend == sea_orm::DatabaseBackend::Postgres {
                 vec![
                     entity_id.into(),
-                    pgvector::Vector::from(vector).into(),
+                    sea_orm::entity::prelude::PgVector::from(vector).into(),
                     workspace_id.into(),
                     snapshot_updated_at.into(),
                 ]

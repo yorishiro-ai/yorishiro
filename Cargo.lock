@@ -3566,6 +3566,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a86d3146ed3995b5913c414f6664344b9617457320782e64f0bb44afd49d74"
 
 [[package]]
+name = "migration"
+version = "0.1.0"
+dependencies = [
+ "loco-rs",
+ "sea-orm-migration",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7651,6 +7659,7 @@ dependencies = [
  "jsonwebtoken 11.0.0",
  "libsqlite3-sys",
  "loco-rs",
+ "migration",
  "pgvector",
  "rand 0.10.2",
  "regex",

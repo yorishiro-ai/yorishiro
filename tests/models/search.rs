@@ -25,7 +25,10 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
         sea_orm::DatabaseBackend::Postgres,
         "INSERT INTO content_entity_embeddings (entity_id, embedding) VALUES ($1, $2)\
          ON CONFLICT(entity_id) DO UPDATE SET embedding = $2",
-        [entity_id.into(), pgvector::Vector::from(vector).into()],
+        [
+            entity_id.into(),
+            sea_orm::entity::prelude::PgVector::from(vector).into(),
+        ],
     ))
     .await
     .expect("set embedding");
@@ -729,14 +732,14 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         };
 
         // Verify every entity's embedding matches the winning provider's vector.
-        // `pgvector::Vector::data()` returns the raw `Vec<f32>` bytes.
+        // `PgVector::data()` returns the raw `Vec<f32>` bytes.
         // The float comparison is safe: `*b as f32 / 255.0` round-trips exactly through
         // PostgreSQL `real` (32-bit float), so `assert_eq!` is valid.
         for entity_id in &candidate_ids {
-            let stored_vector: Option<pgvector::Vector> = {
+            let stored_vector: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<pgvector::Vector>,
+                    embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
@@ -846,10 +849,10 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // Verify the old vectors are stored.
         let old_v1 = old_provider.vector();
         for entity_id in [e1.id, e2.id] {
-            let stored: Option<pgvector::Vector> = {
+            let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<pgvector::Vector>,
+                    embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
@@ -920,10 +923,10 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // Both halves are required: assert_ne alone passes on a zeroed or corrupted row,
         // assert_eq alone passes if the row already held the new value.
         for entity_id in [e1.id, e2.id] {
-            let stored: Option<pgvector::Vector> = {
+            let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<pgvector::Vector>,
+                    embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,

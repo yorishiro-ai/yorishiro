@@ -1,6 +1,6 @@
+use migration::{Migrator, MigratorTrait};
 /// SQLite-specific tests for content_entities: CRUD operations and snapshot undo.
 use sea_orm::{ConnectionTrait, Database, Statement};
-use yorishiro::migration::{Migrator, MigratorTrait};
 use yorishiro::models::content_entities::{self, CreateEntityInput, ListEntitiesQuery};
 
 /// A fresh in-memory SQLite database, migrated, with one tenant/workspace/schema seeded via raw SQL (not through `tenancy`/`content_schemas`, to keep this test focused on `content_entities` itself).

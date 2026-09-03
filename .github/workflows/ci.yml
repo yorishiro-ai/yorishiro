@@ -94,6 +94,9 @@ jobs:
       - name: Build yorishiro binary
         run: cargo build --locked -p yorishiro --bin yorishiro
 
+      - name: Install sea-orm-cli with postgres-vector feature
+        run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector
+
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
         run: |
@@ -106,6 +109,7 @@ jobs:
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           LOCO_ENV: test_postgres
+          DB_CONNECT_TIMEOUT: "5000"
         run: ./target/debug/yorishiro db migrate
 
       - name: Run migrations (sqlite)
@@ -120,9 +124,19 @@ jobs:
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           LOCO_ENV: test_postgres
+          DB_CONNECT_TIMEOUT: "5000"
         run: |
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
+          # Self-diagnostic: confirm sea-orm-cli was actually available and generated files
+          which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
+          count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
+          if [ "$count" -lt 10 ]; then
+            echo "ERROR: Expected 20+ entity files, got $count. db entities did not generate files."
+            echo "sea-orm-cli must be installed with --features postgres-vector for vector column support."
+            exit 1
+          fi
+          echo "Generated $count entity files"
           git diff --exit-code src/models/_entities/
 
       - name: Run tests

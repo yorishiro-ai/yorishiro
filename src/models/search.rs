@@ -147,7 +147,8 @@ impl VectorKnn {
              ORDER BY ee.embedding <=> $1 \
              LIMIT {limit}"
         );
-        let mut values: Vec<sea_orm::Value> = vec![pgvector::Vector::from(vector).into()];
+        let mut values: Vec<sea_orm::Value> =
+            vec![sea_orm::entity::prelude::PgVector::from(vector).into()];
         values.extend(scope_values);
         Self { sql, values }
     }
