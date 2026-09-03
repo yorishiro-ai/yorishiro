@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use loco_rs::testing::prelude::*;
-use sea_orm::{FromQueryResult, Statement};
+use sea_orm::FromQueryResult;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
@@ -74,7 +74,7 @@ async fn stamped_model(ctx: &loco_rs::app::AppContext, workspace_id: uuid::Uuid)
     struct Row {
         embedding_model: Option<String>,
     }
-    Row::find_by_statement(Statement::from_sql_and_values(
+    Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT embedding_model FROM identity_workspaces WHERE id = $1",
         [workspace_id.into()],
@@ -90,7 +90,7 @@ async fn embedding_is_set(ctx: &loco_rs::app::AppContext, entity_id: uuid::Uuid)
     struct Row {
         has_embedding: bool,
     }
-    Row::find_by_statement(Statement::from_sql_and_values(
+    Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
         [entity_id.into()],

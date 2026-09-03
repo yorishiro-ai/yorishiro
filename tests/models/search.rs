@@ -558,11 +558,6 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 /// Without the lock (the gate check: comment out the lock acquisition in
 /// `src/tasks/reindex_embeddings.rs`), the two concurrent calls race and the final stamp does
 /// not match the vectors actually stored, causing this assertion to fail.
-// This test spawns concurrent tasks that each detach a connection from the pool
-// via `acquire_workspace_reindex_lock`. Detached connections never return to the
-// pool, and `close_app_pools` cannot close them — they accumulate and exhaust
-// the pool across test runs, causing CI to hang. Skip in CI; run manually to
-// exercise the lock serialization path.
 #[tokio::test]
 #[serial]
 #[ignore = "flaky in CI: detached connections from advisory lock exhaust pool"]
@@ -1031,5 +1026,229 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 
         crate::requests::close_app_pools(&ctx).await;
     })
+    .await;
+}
+
+/// The FTS5 fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text` via the
+/// FTS5 virtual table, when the entity has no embedding; an entity with neither an embedding nor
+/// an FTS5 match must not appear.
+///
+/// On SQLite, `content_entities` has no `embedding` column, so the search function's trigram half
+/// is replaced by an FTS5 MATCH query against the `fts_content_entities` virtual table created in
+/// the migration. This test boots against a SQLite file database to confirm the FTS5 path works
+/// end to end, including schema creation and entity insertion (which triggers FTS5 auto-sync).
+#[tokio::test]
+#[serial]
+async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir
+        .path()
+        .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
+    let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
+    crate::requests::request_with_create_sqlite::<App, _, _>(
+        db_path.clone(),
+        |_request, ctx| async move {
+            let tenant = identity_tenants::ActiveModel {
+                name: sea_orm::ActiveValue::Set("fts5-test".into()),
+                ..Default::default()
+            };
+            let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+                .await
+                .expect("insert tenant");
+
+            let workspace = identity_workspaces::ActiveModel {
+                tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+                name: sea_orm::ActiveValue::Set("main".into()),
+                status: sea_orm::ActiveValue::Set(
+                    yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
+                ),
+                ..Default::default()
+            };
+            let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+                .await
+                .expect("insert workspace");
+
+            let def = serde_json::from_value(note_definition()).expect("parse definition");
+            content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+                .await
+                .expect("create schema");
+
+            // Create an entity whose title contains the search phrase.
+            let matching = content_entities::create(
+                &ctx.db,
+                workspace.id,
+                content_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({ "title": "quarterly roadmap review" }),
+                },
+                None,
+            )
+            .await
+            .expect("create matching entity");
+
+            // Create an entity whose title does not match.
+            content_entities::create(
+                &ctx.db,
+                workspace.id,
+                content_entities::CreateEntityInput {
+                    schema_name: "note".into(),
+                    entity_type: "note".into(),
+                    data: serde_json::json!({ "title": "completely unrelated grocery list" }),
+                },
+                None,
+            )
+            .await
+            .expect("create unrelated entity");
+
+            // Neither entity has an embedding (SQLite has no embedding column), so both rely on
+            // the FTS5 fallback path.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly roadmap",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector");
+
+            assert_eq!(hits.len(), 1, "hits: {hits:?}");
+            assert_eq!(hits[0].entity.id, matching.id);
+            assert!(hits[0].distance.is_none(), "fts5-only hit has no distance");
+
+            // Test the FTS5 UPDATE trigger: modify the entity's data so the old search
+            // phrase no longer matches, then confirm a search for the new phrase finds it.
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            use yorishiro::models::_entities::content_entities::Column;
+
+            // Fetch using raw SQL (Entity::find_by_id selects embedding which doesn't
+            // exist on SQLite). EntityRecord is a FromQueryResult type with the same
+            // columns but no embedding field.
+            use yorishiro::models::content_entities::EntityRecord;
+            let rec = EntityRecord::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
+                 created_at, updated_at, created_by, updated_by \
+                 FROM content_entities WHERE id = $1",
+                [matching.id.into()],
+            ))
+            .one(&ctx.db)
+            .await
+            .expect("fetch entity for update")
+            .expect("entity exists");
+
+            // Build an ActiveModel with the fetched fields and update.
+            // On SQLite, `ActiveModelTrait::update` tries to decode the return value
+            // as a `content_entities::Model` which includes `embedding` — doesn't exist
+            // on SQLite. Use `update_without_returning` (same pattern as the production
+            // `update_and_fetch` function).
+            let active = content_entities::ActiveModel {
+                id: sea_orm::ActiveValue::Set(rec.id),
+                workspace_id: sea_orm::ActiveValue::Set(rec.workspace_id),
+                schema_id: sea_orm::ActiveValue::Set(rec.schema_id),
+                schema_version: sea_orm::ActiveValue::Set(rec.schema_version),
+                entity_type: sea_orm::ActiveValue::Set(rec.entity_type),
+                data: sea_orm::ActiveValue::Set(serde_json::json!({
+                    "title": "quarterly board meeting notes"
+                })),
+                created_at: sea_orm::ActiveValue::Set(rec.created_at.into()),
+                updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
+                created_by: sea_orm::ActiveValue::Set(rec.created_by),
+                updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
+                embedding: Default::default(),
+            };
+            active
+                .update_without_returning(&ctx.db)
+                .await
+                .expect("update entity");
+
+            // Old phrase should no longer match.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly roadmap",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector after update");
+            assert_eq!(
+                hits.len(),
+                0,
+                "old phrase must not match after update: {hits:?}"
+            );
+
+            // New phrase should find it.
+            let hits = search::search_by_vector(
+                &ctx.db,
+                workspace.id,
+                vec![0.0_f32; 768],
+                "quarterly board meeting",
+                search::SearchQuery::default(),
+            )
+            .await
+            .expect("search_by_vector after update");
+            assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
+            assert_eq!(hits[0].entity.id, matching.id);
+
+            // Test the FTS5 DELETE trigger: delete the entity and verify the FTS5 side is actually
+            // cleaned up (a bare search-by-vector assertion would be true even if the FTS5 row
+            // lingered, because the join against content_entities would already find no match).
+            content_entities::Entity::delete_many()
+                .filter(Column::Id.eq(matching.id))
+                .exec(&ctx.db)
+                .await
+                .expect("delete entity");
+
+            let fts_count: Option<i64> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    cnt: i64,
+                }
+                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE rowid = $1",
+                    [matching.id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("fts count")
+                .map(|r| r.cnt)
+            };
+            assert_eq!(
+                fts_count,
+                Some(0),
+                "fts_content_entities must not contain the deleted row after trigger"
+            );
+            // match (which would be true even if the FTS5 row lingered).
+            let fts_count: Option<i64> = {
+                #[derive(sea_orm::FromQueryResult)]
+                struct Row {
+                    cnt: i64,
+                }
+                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE rowid = $1",
+                    [matching.id.into()],
+                ))
+                .one(&ctx.db)
+                .await
+                .expect("fts count")
+                .map(|r| r.cnt)
+            };
+            assert_eq!(
+                fts_count,
+                Some(0),
+                "fts_content_entities must not contain the deleted row after trigger"
+            );
+
+            crate::requests::close_app_pools_sqlite(&ctx, &db_path).await;
+        },
+    )
     .await;
 }

@@ -112,13 +112,17 @@ impl MigrationTrait for Migration {
 
         // The subject id ("sub" claim) is only unique within its provider, so the uniqueness key is the pair, not either column alone.
         // Partial (WHERE oauth_provider IS NOT NULL) so password-only rows, which leave both columns NULL, never collide on the unique index.
-        // SQLite supports partial indexes with the same WHERE syntax, so this raw statement runs unchanged on both backends.
+        // SQLite supports partial indexes with the same WHERE syntax, so this builder path produces valid SQL on both backends.
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE UNIQUE INDEX users_oauth_identity_idx \
-             ON identity_users (oauth_provider, oauth_subject_id) \
-             WHERE oauth_provider IS NOT NULL;",
+            .create_index(
+                Index::create()
+                    .name("users_oauth_identity_idx")
+                    .unique()
+                    .table(Alias::new("identity_users"))
+                    .col(Alias::new("oauth_provider"))
+                    .col(Alias::new("oauth_subject_id"))
+                    .and_where(Expr::col(Alias::new("oauth_provider")).is_not_null())
+                    .to_owned(),
             )
             .await?;
 
@@ -595,6 +599,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         // The single seed row: `read_only` sheds writes, `full_lock` sheds everything but the health probes, and this row is what every request checks to decide which applies.
+        // The migration crate has no generated entity types, so this uses raw SQL.
         manager
             .get_connection()
             .execute_unprepared("INSERT INTO identity_maintenance (id) VALUES (TRUE);")
@@ -721,14 +726,15 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Partial index: create_index has no WHERE-clause support, so this uses raw SQL.
-        // SQLite supports the same WHERE syntax on CREATE INDEX, so this runs unchanged on both backends.
+        // Partial index: SeaORM's `and_where` builder produces the same WHERE clause on both backends.
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE INDEX schemas_origin_template_idx \
-             ON content_schemas (origin_template_id) \
-             WHERE origin_template_id IS NOT NULL;",
+            .create_index(
+                Index::create()
+                    .name("schemas_origin_template_idx")
+                    .table(Alias::new("content_schemas"))
+                    .col(Alias::new("origin_template_id"))
+                    .and_where(Expr::col(Alias::new("origin_template_id")).is_not_null())
+                    .to_owned(),
             )
             .await?;
 
@@ -846,22 +852,29 @@ impl MigrationTrait for Migration {
         // The width is declared here only so the HNSW index below can be built against it: an unconstrained `vector` column cannot carry an HNSW index.
         // The width is dropped again after the index exists, and PostgreSQL keeps the index across that type change, so one index suffices because a workspace's vectors are all one width.
         //
-        // No-op on SQLite: there is no pgvector/sqlite-vec column here yet, so this backend has no `embedding` column at all until vector search is ported (see docs/sqlite.md).
+        // No-op on SQLite: there is no pgvector/sqlite-vec column here yet, so this backend has no `embedding` column at all until vector search is ported.
         helpers::pg_only(
             manager,
             "ALTER TABLE content_entities ADD COLUMN embedding vector(768)",
         )
         .await?;
 
-        // None of these are expressible through create_index: a multi-column composite, a GIN index with jsonb_path_ops, an HNSW index, and a trigram index over an expression.
+        // The multi-column composite is expressible through `create_index`; the GIN/HNSW/trigram
+        // indexes that follow are not.
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE INDEX entities_workspace_type_idx ON content_entities (workspace_id, entity_type, created_at)",
+            .create_index(
+                Index::create()
+                    .name("entities_workspace_type_idx")
+                    .table(Alias::new("content_entities"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("entity_type"))
+                    .col(Alias::new("created_at"))
+                    .to_owned(),
             )
             .await?;
 
-        // GIN/HNSW/trigram indexes: Postgres-only (pgvector, pg_trgm), no-ops on SQLite until sqlite-vec/FTS5 land (see docs/sqlite.md).
+        // GIN/HNSW/trigram indexes: Postgres-only (pgvector, pg_trgm), no-ops on SQLite.
+        // Vector search is not ported to SQLite yet.
         helpers::pg_only(
             manager,
             "CREATE INDEX entities_data_gin ON content_entities USING GIN (data jsonb_path_ops)",
@@ -875,6 +888,69 @@ impl MigrationTrait for Migration {
         helpers::pg_only(
             manager,
             "CREATE INDEX entities_data_trgm_idx ON content_entities USING gin ((data::text) gin_trgm_ops)",
+        )
+        .await?;
+
+        // FTS5 virtual table for text search fallback on SQLite.
+        // SQLite has no pg_trgm, so full-text search uses FTS5 with an external content
+        // table. `content_entities` is a normal rowid table (its PK `id` is TEXT/UUID,
+        // not an INTEGER AUTOINCREMENT column), so it has an implicit rowid.
+        // The virtual table defaults to using that implicit rowid (no `content_rowid=`
+        // override) because SQLite only accepts integers as rowid — a UUID TEXT fails
+        // with "datatype mismatch" on trigger execution.
+        // `workspace_id` is declared as an FTS5 column so it can be filtered without
+        // MATCH.
+        //
+        // We also need to repopulate the FTS5 index from the content table.
+        // This must run after the virtual table exists but before any real data is inserted.
+        helpers::sqlite_only(
+            manager,
+            "CREATE VIRTUAL TABLE fts_content_entities USING fts5(\
+                data,\
+                workspace_id,\
+                content=content_entities\
+            )",
+        )
+        .await?;
+        // Repopulate the FTS5 index from the content table.
+        // This must run after the virtual table exists but before any real data is inserted.
+        helpers::sqlite_only(
+            manager,
+            "INSERT INTO fts_content_entities(fts_content_entities) VALUES('rebuild')",
+        )
+        .await?;
+        // Triggers keep the FTS5 virtual table in sync with the backing table.
+        // The FTS5 table uses the content table's implicit rowid (not the UUID `id`),
+        // so triggers must reference `NEW.rowid` / `OLD.rowid`, not `NEW.id` / `OLD.id`.
+        // The `rowid` column is omitted from INSERT so SQLite assigns it automatically
+        // by looking up the content table's implicit rowid.
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
+             BEGIN \
+                INSERT INTO fts_content_entities(rowid, data, workspace_id) \
+                VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
+             END",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
+             BEGIN \
+                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id) \
+                VALUES('delete', OLD.rowid, OLD.data, OLD.workspace_id); \
+                INSERT INTO fts_content_entities(rowid, data, workspace_id) \
+                VALUES(NEW.rowid, NEW.data, NEW.workspace_id); \
+             END",
+        )
+        .await?;
+        helpers::sqlite_only(
+            manager,
+            "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
+             BEGIN \
+                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id) \
+                VALUES('delete', OLD.rowid, OLD.data, OLD.workspace_id); \
+             END",
         )
         .await?;
 
@@ -979,16 +1055,29 @@ impl MigrationTrait for Migration {
         .await?;
 
         // `status` is in both indexes because every traversal filters on it.
-        // Three-column composite indexes: execute_unprepared is used for both since create_index's builder offers nothing over the raw form here.
-        let db = manager.get_connection();
-        db.execute_unprepared(
-            "CREATE INDEX relations_source_idx ON content_relations (workspace_id, source_id, status);",
-        )
-        .await?;
-        db.execute_unprepared(
-            "CREATE INDEX relations_target_idx ON content_relations (workspace_id, target_id, status);",
-        )
-        .await?;
+        // Three-column composite indexes: SeaORM builder expresses these directly.
+        manager
+            .create_index(
+                Index::create()
+                    .name("relations_source_idx")
+                    .table(Alias::new("content_relations"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("source_id"))
+                    .col(Alias::new("status"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("relations_target_idx")
+                    .table(Alias::new("content_relations"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("target_id"))
+                    .col(Alias::new("status"))
+                    .to_owned(),
+            )
+            .await?;
 
         // Strict, not lenient: `yorishiro_app` sets both GUCs on every connection, so reaching this table without a workspace set is a bug, and raising surfaces it where matching zero rows would look like an empty workspace.
         helpers::enable_rls_with_policy(
@@ -1056,14 +1145,18 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        let db = manager.get_connection();
-
-        // DESC ordering on created_at: create_index has no per-column sort-direction support, so this uses raw SQL.
-        db.execute_unprepared(
-            "CREATE INDEX entity_snapshots_entity_idx \
-             ON content_entity_snapshots (workspace_id, entity_id, created_at DESC);",
-        )
-        .await?;
+        // DESC ordering on created_at: sea_query's Index::create supports per-column sort direction.
+        manager
+            .create_index(
+                Index::create()
+                    .name("entity_snapshots_entity_idx")
+                    .table(Alias::new("content_entity_snapshots"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("entity_id"))
+                    .col((Alias::new("created_at"), IndexOrder::Desc))
+                    .to_owned(),
+            )
+            .await?;
 
         // Lenient: grouped with content.schemas and content.fill_proposals in the old DDL's strict/lenient split, since the control-plane pool also reaches this table over a connection that has not named a workspace, and must match nothing rather than raise.
         helpers::enable_rls_with_policy(
@@ -1818,6 +1911,7 @@ impl MigrationTrait for Migration {
             "content_relations",
             "content_entity_snapshots",
             "content_entity_column_preferences",
+            "fts_content_entities",
             "content_entities",
             "content_schemas",
             "identity_api_key_audit_log",

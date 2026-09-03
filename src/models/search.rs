@@ -109,6 +109,34 @@ fn scope_clause(
     (sql, values)
 }
 
+/// SQLite-aware variant of scope_clause: omits the JSONB containment filter
+/// because SQLite has no `data @> filter` operator.
+/// Callers must check `query.filter.is_some()` before calling on SQLite
+/// and return `BackendUnsupported`; see `search_by_vector` for the check.
+fn scope_clause_sqlite(
+    workspace_id: Uuid,
+    query: &SearchQuery,
+    next_param: usize,
+    is_sqlite: bool,
+) -> (String, Vec<sea_orm::Value>) {
+    let mut sql = format!(" AND e.workspace_id = ${next_param}");
+    let mut values: Vec<sea_orm::Value> = vec![workspace_id.into()];
+    let mut n = next_param + 1;
+
+    if let Some(entity_type) = &query.entity_type {
+        sql.push_str(&format!(" AND e.entity_type = ${n}"));
+        values.push(entity_type.clone().into());
+        n += 1;
+    }
+    // JSONB containment (`data @> filter`) is PostgreSQL-only; skip on SQLite.
+    if let (false, Some(filter)) = (is_sqlite, &query.filter) {
+        sql.push_str(&format!(" AND e.data @> ${n}"));
+        values.push(filter.clone().into());
+    }
+
+    (sql, values)
+}
+
 const HIT_COLUMNS: &str = "e.id, e.workspace_id, e.schema_id, e.schema_version, e.entity_type, \
      e.data, e.created_at, e.updated_at, e.created_by, e.updated_by";
 
@@ -123,51 +151,112 @@ pub async fn search_by_vector(
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
     let limit = query.limit.clamp(1, 200);
+    let is_sqlite = conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
 
-    let (scope_sql, scope_values) = scope_clause(workspace_id, &query, 2);
-    let vector_sql = format!(
-        "SELECT {HIT_COLUMNS}, (e.embedding <=> $1) AS distance \
-         FROM content_entities e \
-         WHERE e.embedding IS NOT NULL{scope_sql} \
-         ORDER BY e.embedding <=> $1 \
-         LIMIT {limit}"
-    );
-    let mut vector_values: Vec<sea_orm::Value> = vec![pgvector::Vector::from(vector).into()];
-    vector_values.extend(scope_values);
+    let mut rows: Vec<SearchRow> = vec![];
 
-    let mut rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        &vector_sql,
-        vector_values,
-    ))
-    .all(conn)
-    .await
-    .internal()?;
-
-    // Trigram half, for what the vector half cannot reach: entities with no embedding at all.
-    // Only run when there is room left: a full page of vector hits already outranks every trigram-only match.
-    if (rows.len() as i64) < limit {
-        let remaining = limit - rows.len() as i64;
-        let (scope_sql, mut scope_values) = scope_clause(workspace_id, &query, 2);
-        let trigram_sql = format!(
-            "SELECT {HIT_COLUMNS}, NULL::float8 AS distance \
+    // Vector half: only runs on PostgreSQL (SQLite has no embedding column).
+    if !is_sqlite {
+        let (scope_sql, scope_values) = scope_clause(workspace_id, &query, 2);
+        let vector_sql = format!(
+            "SELECT {HIT_COLUMNS}, (e.embedding <=> $1) AS distance \
              FROM content_entities e \
-             WHERE e.embedding IS NULL{scope_sql} AND (e.data::text) % $1 \
-             ORDER BY similarity(e.data::text, $1) DESC \
-             LIMIT {remaining}"
+             WHERE e.embedding IS NOT NULL{scope_sql} \
+             ORDER BY e.embedding <=> $1 \
+             LIMIT {limit}"
         );
-        let mut trigram_values: Vec<sea_orm::Value> = vec![query_text.into()];
-        trigram_values.append(&mut scope_values);
+        let mut vector_values: Vec<sea_orm::Value> = vec![pgvector::Vector::from(vector).into()];
+        vector_values.extend(scope_values);
 
-        let trigram_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
+        rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            &trigram_sql,
-            trigram_values,
+            &vector_sql,
+            vector_values,
         ))
         .all(conn)
         .await
         .internal()?;
-        rows.extend(trigram_rows);
+    }
+
+    // Trigram/FTS5 half, for what the vector half cannot reach: entities with no embedding at all.
+    // Only run when there is room left: a full page of vector hits already outranks every trigram-only match.
+    if (rows.len() as i64) < limit {
+        let remaining = limit - rows.len() as i64;
+
+        // SQLite has no JSONB containment operator to replace `data @> filter`.
+        if is_sqlite && query.filter.is_some() {
+            return Err(YorishiroError::BackendUnsupported {
+                message: "content filtering is not supported on SQLite (no JSONB @> operator)"
+                    .to_string(),
+            });
+        }
+
+        let (scope_sql, scope_values) = scope_clause_sqlite(workspace_id, &query, 2, is_sqlite);
+
+        if is_sqlite {
+            // SQLite has no pg_trgm, so full-text search uses the FTS5 virtual table
+            // created in the migration. The FTS5 table mirrors `content_entities` and is
+            // kept in sync via triggers. `workspace_id` is stored as an FTS5 column for
+            // filtering without MATCH. SQLite FTS5 has no built-in similarity function,
+            // so we skip ordering by rank and return matches in document-order (which is
+            // insertion order).
+            //
+            // `content_entities` is a normal rowid table (its PK `id` is UUID TEXT, not
+            // INTEGER), so the implicit rowid is the join key. The FTS5 virtual table
+            // uses that implicit rowid (no `content_rowid=` override).
+            // FTS5 MATCH inside a join uses the unaliased virtual table name because
+            // `MATCH` is a keyword-like operator that does not resolve against the
+            // join alias on all SQLite/FTS5 versions.
+            // FTS5 MATCH parses the bound value as its own query language (FTS5 boolean operators,
+            // quoted phrases, `-word` exclusions). We must not pass raw user input there: a `"` or
+            // `NOT` or `-word` in an entity title would be interpreted as FTS5 syntax, causing
+            // syntax errors or silently altering the query. Wrap the text in FTS5 phrase-quotes
+            // (`"..."`) and escape internal `"` as `""` so the input is treated as a literal phrase.
+            let query_phrase = format!("\"{}\"", query_text.replace('"', "\"\""));
+
+            let fts_sql = format!(
+                "SELECT {HIT_COLUMNS}, NULL AS distance \
+                 FROM content_entities e, fts_content_entities \
+                 WHERE e.rowid = fts_content_entities.rowid{scope_sql} \
+                 AND fts_content_entities.data MATCH $1 \
+                 LIMIT {remaining}"
+            );
+            let mut fts_values: Vec<sea_orm::Value> = vec![query_phrase.into()];
+            fts_values.extend(scope_values);
+
+            rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                &fts_sql,
+                fts_values,
+            ))
+            .all(conn)
+            .await
+            .internal()?;
+        } else {
+            // PostgreSQL uses pg_trgm for fuzzy text matching.
+            // `data::text` casts the JSONB column to text for trigram comparison.
+            // `similarity()` returns a float between 0 and 1 for ranking.
+            let trigram_sql = format!(
+                "SELECT {HIT_COLUMNS}, NULL::float8 AS distance \
+                 FROM content_entities e \
+                 WHERE e.embedding IS NULL{scope_sql} AND (e.data::text) % $1 \
+                 ORDER BY similarity(e.data::text, $1) DESC \
+                 LIMIT {remaining}"
+            );
+            let mut trigram_values: Vec<sea_orm::Value> = vec![query_text.into()];
+            trigram_values.extend(scope_values);
+
+            let trigram_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                &trigram_sql,
+                trigram_values,
+            ))
+            .all(conn)
+            .await
+            .internal()?;
+
+            rows.extend(trigram_rows);
+        }
     }
 
     Ok(rows.into_iter().map(SearchRow::into_hit).collect())

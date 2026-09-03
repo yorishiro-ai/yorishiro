@@ -34,11 +34,6 @@ pub struct ReindexArgs {
     pub worker_class: WorkerClass,
 }
 
-#[derive(FromQueryResult)]
-struct ReindexCandidateId {
-    id: Uuid,
-}
-
 /// Shared implementation of the reindex worker's `perform` body: builds the provider,
 /// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
 ///
@@ -55,8 +50,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
 
     // Fetch all entity IDs for this workspace.
-    let candidates = fetch_candidates(&ctx.db, args.workspace_id).await?;
-    let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
+    let candidate_ids = fetch_candidates(&ctx.db, args.workspace_id).await?;
 
     // Acquire the session-scoped lock and run the reindex.
     let db_handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
@@ -92,8 +86,12 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
 async fn fetch_candidates(
     db: &DatabaseConnection,
     workspace_id: Uuid,
-) -> loco_rs::Result<Vec<ReindexCandidateId>> {
-    let candidates: Vec<_> = ReindexCandidateId::find_by_statement(Statement::from_sql_and_values(
+) -> loco_rs::Result<Vec<Uuid>> {
+    #[derive(FromQueryResult)]
+    struct CandidateId {
+        id: Uuid,
+    }
+    let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT id FROM content_entities WHERE workspace_id = $1",
         [workspace_id.into()],
@@ -101,7 +99,7 @@ async fn fetch_candidates(
     .all(db)
     .await
     .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
-    Ok(candidates)
+    Ok(candidates.into_iter().map(|c| c.id).collect())
 }
 
 /// Declares one `WorkerClass`'s reindex worker type: a thin struct giving `tags()` a fixed single tag,
