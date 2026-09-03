@@ -1161,7 +1161,6 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
                 created_by: sea_orm::ActiveValue::Set(rec.created_by),
                 updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
-                embedding: Default::default(),
             };
             active
                 .update_without_returning(&ctx.db)
