@@ -48,7 +48,7 @@ workers:
 # non-SQLite queue), matching this file's own no-silent-fallback convention.
 queue:
   kind: Sqlite
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>
+  uri: '<%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>'
   dangerously_flush: false
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper:
@@ -64,7 +64,7 @@ mailer:
     secure: false
 
 database:
-  uri: <%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>
+  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: 500
   idle_timeout: 500
