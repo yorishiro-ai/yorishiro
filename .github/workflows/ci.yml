@@ -77,10 +77,6 @@ jobs:
           POSTGRES_USER: yorishiro
           POSTGRES_PASSWORD: yorishiro
           POSTGRES_DB: yorishiro
-        volumes:
-          # Runs once, only against an empty data directory.
-          # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
-          - ${{ github.workspace }}/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
         ports:
           - 5432:5432
         options: >-
@@ -103,7 +99,13 @@ jobs:
 
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
-        run: docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro
+        run: |
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
+            -c '\c template1' \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
 
       - name: Run migrations (postgres)
         if: matrix.backend == 'postgres'
