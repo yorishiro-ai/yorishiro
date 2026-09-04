@@ -65,9 +65,9 @@ fetch:
 entities: build
 	docker compose up -d testdb
 	@sleep 10
-	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15433/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db migrate
+	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15432/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
-	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15433/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db entities
+	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15432/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db entities
 	docker compose down -v testdb
 
 # Convenience alias: check + fmt + clippy (CI check job).
