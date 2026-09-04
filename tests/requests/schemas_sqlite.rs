@@ -77,7 +77,6 @@ async fn create_schema_from_a_builtin_template_sqlite() {
             "body: {body}"
         );
 
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }

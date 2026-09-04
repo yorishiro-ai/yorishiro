@@ -51,7 +51,6 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
                 response.text()
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -113,7 +112,6 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 with_header.text()
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })

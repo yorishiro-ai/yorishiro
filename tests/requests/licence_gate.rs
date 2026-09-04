@@ -40,7 +40,6 @@ use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 
-use super::close_app_pools;
 
 /// Overwrites the `LicenceState::from_env()` the test process booted with.
 ///
@@ -128,7 +127,6 @@ async fn gated_routes_are_absent_without_a_licence() {
             );
         }
 
-        close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -160,7 +158,6 @@ async fn gated_routes_are_served_with_a_licence() {
             );
         }
 
-        close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -198,7 +195,6 @@ async fn an_expired_licence_closes_the_gate_again() {
             "an expired licence must close the gate again without a restart; got {expired}"
         );
 
-        close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -228,7 +224,6 @@ async fn stripe_webhook_is_gated() {
              of a configured secret; got {licensed}"
         );
 
-        close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -261,7 +256,6 @@ async fn oauth_login_is_gated() {
              not OAuth is configured; got {licensed}"
         );
 
-        close_app_pools(&ctx).await;
     })
     .await;
 }

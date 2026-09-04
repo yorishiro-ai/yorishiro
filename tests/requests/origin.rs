@@ -116,7 +116,6 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             .await;
         assert_eq!(preview.status_code(), 422, "response: {:?}", preview.text());
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -239,7 +238,6 @@ async fn upstream_changes_preview_and_merge_round_trip() {
         );
         assert_eq!(merge_body["schema"]["version"], 3);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -298,7 +296,6 @@ async fn merging_a_conflicting_field_is_refused() {
             .await;
         assert_eq!(merge.status_code(), 422, "response: {:?}", merge.text());
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

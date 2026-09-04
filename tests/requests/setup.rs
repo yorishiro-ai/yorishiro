@@ -33,7 +33,6 @@ async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -92,7 +91,6 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                 .await;
             assert_eq!(second.status_code(), 409, "response: {:?}", second.text());
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })

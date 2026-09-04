@@ -85,7 +85,6 @@ async fn signup_then_login_round_trip() {
             .await;
         assert_eq!(bad_password_response.status_code(), 401);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -129,7 +128,6 @@ async fn signup_without_invite_creates_its_own_tenant() {
             login_response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -154,7 +152,6 @@ async fn signup_rejects_email_alongside_invite_token() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -177,7 +174,6 @@ async fn signup_rejects_neither_invite_token_nor_email() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -206,7 +202,6 @@ async fn signup_without_invite_respects_the_tenant_cap() {
                 .await;
             assert_eq!(second.status_code(), 409, "response: {:?}", second.text());
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -267,7 +262,6 @@ async fn create_tenant_serializes_on_its_advisory_lock() {
                 assert!(result.is_ok(), "result: {result:?}");
                 txn.commit().await.unwrap();
 
-                super::close_app_pools(&ctx).await;
             })
             .await;
         })

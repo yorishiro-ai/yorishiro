@@ -118,7 +118,6 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .await;
         assert!(after_reset.json::<Vec<serde_json::Value>>().is_empty());
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -168,7 +167,6 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
             "neither refused save should have left a row"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -199,7 +197,6 @@ async fn an_empty_selection_is_stored_as_a_choice() {
         );
         assert!(stored[0]["columns"].as_array().unwrap().is_empty());
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

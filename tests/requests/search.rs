@@ -69,7 +69,6 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -83,7 +82,6 @@ async fn search_requires_authentication() {
         let response = request.get("/api/search?query_text=hello").await;
         assert_eq!(response.status_code(), 401);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

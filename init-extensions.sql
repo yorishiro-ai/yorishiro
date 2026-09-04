@@ -7,6 +7,12 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+-- Grant CREATEDB to yorishiro so loco's request-test harness (request_with_create_db)
+-- can CREATE DATABASE throwaway test databases. Without this, every request test fails
+-- with PoolTimedOut during boot.
+\c postgres
+ALTER ROLE yorishiro CREATEDB;
+
 -- Also into template1: Loco's request-test harness (loco_rs::testing::request_with_create_db)
 -- creates each throwaway test database with CREATE DATABASE, which copies template1, not the
 -- POSTGRES_DB this script otherwise runs against. Without this, converge fails on

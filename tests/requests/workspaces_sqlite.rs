@@ -118,7 +118,6 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .await;
         assert_eq!(response.status_code(), 404);
 
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }
@@ -139,7 +138,6 @@ async fn workspaces_endpoints_require_authentication_sqlite() {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
 
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }

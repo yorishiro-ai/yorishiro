@@ -153,7 +153,6 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             "no cross-workspace leakage: {hits:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -247,7 +246,6 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             "the refused write must not have created an embedding row: {stored:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -376,7 +374,6 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             "the refused write must not have created an embedding row: {stored:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -482,7 +479,6 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             "result: {result2:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -548,7 +544,6 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
             "error message must name the expected dimension count 1024"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -759,7 +754,6 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             );
         }
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -951,7 +945,6 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             );
         }
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -1025,7 +1018,6 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             "trigram-only hit has no distance"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -1226,7 +1218,6 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 "fts_content_entities must not contain the deleted row after trigger"
             );
 
-            crate::requests::close_app_pools_sqlite(&ctx, &db_path).await;
         },
     )
     .await;

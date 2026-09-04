@@ -147,7 +147,6 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
         assert_eq!(restored.data["title"], "before");
         assert_eq!(restored.schema_version, 1);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -170,7 +169,6 @@ async fn undo_an_unknown_job_is_refused() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

@@ -83,7 +83,6 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             "the tenant must never hold more than max_workspaces"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

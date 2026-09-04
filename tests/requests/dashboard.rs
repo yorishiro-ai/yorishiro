@@ -55,7 +55,6 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
             assert_eq!(body["members"][0]["email"], "owner@example.com");
             assert_eq!(body["members"][0]["role"], "owner");
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -75,7 +74,6 @@ async fn tenant_overview_requires_authentication() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

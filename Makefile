@@ -5,7 +5,7 @@
 # Default database URL for PostgreSQL tests.
 # Override with: make test DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
-DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 LOCO_ENV ?= test_postgres
 ENVIRONMENT ?= development
 
@@ -29,7 +29,7 @@ fmt-check:
 test:
 	DATABASE_URL='$(DATABASE_URL)' \
 	LOCO_ENV='$(LOCO_ENV)' \
-	cargo test --locked --workspace $(ARGS)
+	cargo test --locked --workspace -- --test-threads=1 $(ARGS)
 
 test-postgres:
 	$(MAKE) test DATABASE_URL='$(DATABASE_URL)'
@@ -62,8 +62,6 @@ fetch:
 # Generate SeaORM entity structs from the current schema.
 # Starts a disposable pgvector/pgvector:pg18 container on port 15433,
 # runs migrations, generates entities, tears everything down.
-# No DATABASE_URL needed — no risk of pointing at SQLite or a stale database.
-# --rm on the container means stopping it also removes it; no leftover.
 entities: build
 	docker compose up -d testdb
 	@sleep 10

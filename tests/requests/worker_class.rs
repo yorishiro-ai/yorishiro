@@ -94,7 +94,6 @@ async fn worker_class_set_get_and_clear_round_trip() {
             .await;
         assert_eq!(after_delete.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -130,7 +129,6 @@ async fn setting_a_new_class_replaces_the_old_one() {
             "the second PUT must replace the first, not add a second row"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -181,7 +179,6 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "one workspace's assignment must not leak to another"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

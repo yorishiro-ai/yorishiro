@@ -109,7 +109,6 @@ async fn embedding_key_set_get_and_clear_round_trip() {
             .await;
         assert_eq!(after_delete.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -144,7 +143,6 @@ async fn a_non_http_base_url_is_refused() {
             );
         }
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -190,7 +188,6 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
             .await;
         assert_eq!(get.status_code(), 404, "response: {:?}", get.text());
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -247,7 +244,6 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "one workspace's assignment must not leak to another"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

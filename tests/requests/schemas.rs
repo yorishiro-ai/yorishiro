@@ -69,7 +69,6 @@ async fn create_schema_from_a_builtin_template() {
             "body: {body}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -92,7 +91,6 @@ async fn create_schema_rejects_an_unknown_template_id() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -125,7 +123,6 @@ async fn list_templates_and_get_template_over_rest() {
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "task-management");
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -177,7 +174,6 @@ async fn create_schema_from_a_library_template_links_the_origin() {
             "body: {body}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -249,7 +245,6 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
         );
         assert_eq!(body["schema"]["origin_status"], "linked");
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

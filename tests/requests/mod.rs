@@ -1,85 +1,31 @@
 mod audit_log;
 mod auth;
 mod auth_sqlite;
+mod dashboard;
+mod ee_setup;
+mod embedding;
 mod entities;
+mod entity_columns;
 mod import;
+mod inference;
+mod licence_gate;
+mod marketplace;
 mod members;
+mod oauth;
+mod official_templates;
+mod origin;
 mod queue;
 mod schemas;
 mod schemas_sqlite;
 mod search;
 mod setup;
+mod stripe;
 mod system;
 mod template_library;
-mod workspaces;
-mod workspaces_sqlite;
-
-// The enterprise edition's own request suites are declared here because one crate has one
-// integration-test binary.
-// `ee_setup` is `ee/`'s own setup suite under a non-colliding name: base's `setup` is
-// already declared above, and two modules of that name cannot coexist here.
-mod dashboard;
-mod ee_setup;
-mod embedding;
-mod entity_columns;
-mod inference;
-mod licence_gate;
-mod marketplace;
-mod oauth;
-mod official_templates;
-mod origin;
-mod stripe;
 mod tenant_auth;
 mod worker_class;
-
-/// `after_context` opens two pools Loco's own request-test harness knows nothing about: the identity pool and the tenant pool.
-/// Leaving either open means a session survives on the throwaway test database, and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
-/// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
-/// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
-/// `config/test.yaml` has no `queue:` block, so it is `None` for every test that boots through `request_with_create_db`.
-/// `queue.rs` is the exception, supplying its own SQLite queue config: that provider opens its own `sqlx::SqlitePool` against a file in a `TempDir` rather than a connection to the throwaway database, so it cannot hold the session that would fail `DROP DATABASE`, and the file goes with the `TempDir`.
-///
-/// `spawn_startup_reindex` spawns a background task that holds a connection from `ctx.db` for its entire lifetime.
-/// Without shutdown-and-await, that task would still hold a session when pools are closed,
-/// causing `DROP DATABASE` to panic with "being accessed by other users".
-/// `close_app_pools` signals shutdown and awaits the task *before* closing pools.
-///
-/// Every request test that runs through `request_with_create_db` must call this before its closure returns.
-pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
-    // Signal shutdown to the startup reindex background task and await its actual
-    // completion before closing pools. This structurally closes the race: if the task
-    // is mid-await when signaled, we wait for that await to return (at which point it
-    // sees the flag and exits) rather than closing pools while the task still holds a
-    // ctx.db connection.
-    if let Some(handle) = ctx
-        .shared_store
-        .remove::<yorishiro::app::StartupReindexHandle>()
-    {
-        handle.shutdown_and_wait().await;
-    }
-    if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
-        db.identity.close().await;
-        db.tenant.pool().close().await;
-    }
-    ctx.db.get_postgres_connection_pool().close().await;
-}
-
-/// SQLite variant of `close_app_pools`.
-/// On SQLite `after_context` builds no `DbHandle` (no RLS, no second tenant),
-/// so there is only `ctx.db` to close.
-/// `queue:` is active in `config/test_sqlite.yaml` (the queue provider uses its own
-/// pool, so it never holds the session that would fail `DROP DATABASE`);
-/// `config/test_sqlite.yaml` has no `queue:` block, so it is `None` for every test that boots
-/// through `request_with_create_db`.
-/// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
-pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
-    ctx.db.get_sqlite_connection_pool().close().await;
-    // Clean up the temp SQLite file and its journaling siblings.
-    let _ = std::fs::remove_file(db_path);
-    let _ = std::fs::remove_file(format!("{db_path}-wal"));
-    let _ = std::fs::remove_file(format!("{db_path}-shm"));
-    let _ = std::fs::remove_file(format!("{db_path}-journal"));
-}
+mod workspaces;
+mod workspaces_sqlite;
 
 /// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there before.
 pub(crate) async fn with_max_tenants<T>(
@@ -101,16 +47,6 @@ pub(crate) async fn with_max_tenants<T>(
     result
 }
 
-/// SQLite variant of loco's `request_with_create_db`.
-///
-/// Instead of `CREATE DATABASE` (which SQLite has no equivalent for), this generates a
-/// unique temp file path, sets `YORISHIRO_TEST_CONFIG=test_sqlite`, overrides the database
-/// URI to the generated file, then boots via `H::boot(StartMode::ServerOnly, ...)` — the
-/// same path loco's own `boot_test_with_create_db` takes (load config, override URI, boot).
-///
-/// Cleanup closes `ctx.db` via `get_sqlite_connection_pool().close()`, removes the temp file
-/// plus its `-wal`/`-shm`/`-journal` siblings, and restores any env vars set during the test.
-/// Every test must call `close_app_pools_sqlite(&ctx, &db_path)` before its closure returns.
 use axum_test::TestServer;
 use std::net::SocketAddr;
 
@@ -121,9 +57,6 @@ use std::net::SocketAddr;
 /// URI to the generated file, then boots via `H::boot(StartMode::ServerOnly, ...)` — the
 /// same path loco's own `boot_test_with_create_db` takes (load config, override URI, boot).
 ///
-/// Cleanup closes `ctx.db` via `get_sqlite_connection_pool().close()`, removes the temp file
-/// plus its `-wal`/`-shm`/`-journal` siblings, and restores any env vars set during the test.
-/// Every test must call `close_app_pools_sqlite(&ctx, &db_path)` before its closure returns.
 #[allow(clippy::future_not_send)]
 pub(crate) async fn request_with_create_sqlite<H: loco_rs::app::Hooks, F, Fut>(
     db_path: String,

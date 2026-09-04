@@ -126,7 +126,6 @@ async fn llm_key_set_get_and_clear_round_trip() {
             .await;
         assert_eq!(after_delete.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -160,7 +159,6 @@ async fn a_non_http_base_url_is_refused() {
             );
         }
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -196,7 +194,6 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             .await;
         assert_eq!(infer.status_code(), 422, "response: {:?}", infer.text());
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -218,7 +215,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
         assert_eq!(with_key.status_code(), without_key.status_code());
         assert_eq!(with_key.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -345,7 +341,6 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
             "undo must restore the pre-inference state: {fetched_after_undo:?}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -394,7 +389,6 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
         assert_eq!(remaining, 0, "a rejected write must not leave a snapshot");
 
         txn.rollback().await.expect("rollback txn");
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -482,7 +476,6 @@ async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error()
             "the old code's masked failure mode must not reappear: {message}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -504,7 +497,6 @@ async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
             "the old code's masked failure mode must not reappear: {message}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

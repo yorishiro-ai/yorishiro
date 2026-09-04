@@ -70,7 +70,6 @@ where
     test(boot.app_context.clone(), pool.clone()).await;
 
     pool.close().await;
-    super::close_app_pools(&boot.app_context).await;
     test_db.cleanup_db();
 }
 

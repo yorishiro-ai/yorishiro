@@ -106,7 +106,6 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .await;
         assert_eq!(response.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -130,7 +129,6 @@ async fn cannot_delete_a_tenants_only_workspace() {
             .await;
         assert_eq!(response.status_code(), 409);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -168,7 +166,6 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .await;
         assert_eq!(response.status_code(), 200);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -180,7 +177,6 @@ async fn workspaces_endpoints_require_authentication() {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -213,7 +209,6 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
             .await;
         assert_eq!(response.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

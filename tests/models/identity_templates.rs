@@ -109,7 +109,6 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             "another tenant's private template must 404, got {denied:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

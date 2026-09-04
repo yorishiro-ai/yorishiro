@@ -100,7 +100,6 @@ async fn signup_then_login_round_trip_sqlite() {
             .await;
         assert_eq!(bad_password_response.status_code(), 401);
 
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }
@@ -153,7 +152,6 @@ async fn signup_without_invite_creates_its_own_tenant_sqlite() {
             login_response.text()
         );
 
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }

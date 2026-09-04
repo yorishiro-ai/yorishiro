@@ -152,7 +152,6 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
             "mid must keep its shortest hop_distance, not the diamond's longer one"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -250,7 +249,6 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
             "non-x-embed field must be stripped by shallow_copy: {bob_data:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

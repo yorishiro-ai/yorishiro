@@ -74,8 +74,8 @@ database:
   min_connections: 1
   max_connections: 10
   auto_migrate: true
-  dangerously_truncate: false
-  dangerously_recreate: false
+  dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
+  dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
 
 auth:
   jwt:

@@ -89,7 +89,6 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
         })
         .await;
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -117,7 +116,6 @@ async fn status_errors_loudly_when_partially_configured() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -144,7 +142,6 @@ async fn authorize_and_callback_404_when_unconfigured() {
             callback.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -165,7 +162,6 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
                 response.text()
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -202,7 +198,6 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
                 "the CSRF cookie must be cleared on this path too"
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -230,7 +225,6 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
                 "/#/login?error=oauth_failed"
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -250,7 +244,6 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 
             assert_eq!(response.status_code(), 401, "response: {:?}", response.text());
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -278,7 +271,6 @@ async fn callback_rejects_an_expired_state() {
                 response.text()
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -334,7 +326,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             ),
         }
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -385,7 +376,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             .expect("the linked schema must exist");
         assert_eq!(schema.name, "general-notes");
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

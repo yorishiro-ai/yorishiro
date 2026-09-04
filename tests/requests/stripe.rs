@@ -152,7 +152,6 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 "the duplicate must not have re-applied the plan change"
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -210,7 +209,6 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 "a cancelled tenant must drop to Free's workspace cap, not keep the paid one"
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -236,7 +234,6 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -266,7 +263,6 @@ async fn a_tampered_payload_is_rejected() {
                 response.text()
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })

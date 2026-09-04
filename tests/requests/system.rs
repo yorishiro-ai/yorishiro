@@ -116,7 +116,6 @@ async fn maintenance_is_readable_and_settable_over_rest() {
             .json(&serde_json::json!({ "mode": "off" }))
             .await;
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -163,7 +162,6 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
             .await;
         assert_eq!(served.status_code(), 200, "and the deployment is back");
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -189,7 +187,6 @@ async fn a_member_key_cannot_touch_maintenance() {
             .await;
         assert_eq!(response.status_code(), 403);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -217,7 +214,6 @@ async fn an_unknown_mode_is_refused() {
             "the hint must spell the modes: {body}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -239,7 +235,6 @@ async fn auth_endpoints_are_rate_limited() {
             "YORISHIRO_AUTH_RATE_LIMIT_MAX defaults to 10 per window; 15 attempts must exhaust it"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

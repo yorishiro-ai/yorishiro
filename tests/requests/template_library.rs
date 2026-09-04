@@ -139,7 +139,6 @@ async fn owner_can_create_update_and_delete_a_template() {
             .await;
         assert_eq!(response.status_code(), 404);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -160,7 +159,6 @@ async fn member_role_cannot_manage_the_template_library() {
             .await;
         assert_eq!(response.status_code(), 403);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -220,7 +218,6 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
             .await;
         assert_eq!(response.status_code(), 200);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -270,7 +267,6 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
             .await;
         assert_eq!(response.status_code(), 200);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

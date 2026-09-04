@@ -85,9 +85,9 @@ database:
   # Run migration up when application loaded
   auto_migrate: true
   # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_truncate: false
+  dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_recreate: false
+  dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
 
 # Authentication Configuration
 auth:

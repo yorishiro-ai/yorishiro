@@ -111,7 +111,6 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
         assert_eq!(body[1]["detail"]["mode"], "read_only");
         assert_eq!(body[1]["detail"]["reason"], "audit-log test");
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -187,7 +186,6 @@ async fn undo_migration_job_is_recorded() {
         assert_eq!(body[0]["detail"]["job_id"], job_id.to_string());
         assert_eq!(body[0]["detail"]["restored"], 1);
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -213,7 +211,6 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
             response.text()
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -268,7 +265,6 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
             "tenant b must not see tenant a's audit trail: {tenant_b_body:?}"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

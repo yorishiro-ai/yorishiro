@@ -136,7 +136,6 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             "both entities imported against the cached schema lookup, not just the first"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

@@ -153,7 +153,12 @@ impl Hooks for App {
         // were embedded with a model that differs from the current provider.
         // If so, enqueue a non-blocking reindex so the server stays responsive
         // while vectors are updated.
-        spawn_startup_reindex(result.app_context.clone());
+        // Skip in test environments — the background task holds a `ctx.db`
+        // connection that survives the test callback and races with loco's
+        // `BootResultWrapper::drop` which tries `DROP DATABASE`.
+        if !matches!(environment, Environment::Test) {
+            spawn_startup_reindex(result.app_context.clone());
+        }
 
         Ok(result)
     }

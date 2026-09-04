@@ -54,7 +54,6 @@ async fn setup_still_works_after_hooks_seed_has_run() {
                 response.text()
             );
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })

@@ -152,7 +152,7 @@ jobs:
           DB_MAX_CONNECTIONS: "100"
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace -- --test-threads=1
 
       - name: Show sccache stats
         run: sccache --show-stats
