@@ -197,11 +197,25 @@ async fn embed_and_write(
         Vec::new()
     };
 
+    // Both the plain INSERT and the ON CONFLICT DO UPDATE share the same
+    // `updated_at` guard: if the entity was modified between the batch fetch
+    // and this write landing, we must not record a stale vector regardless of
+    // whether the conflict path is exercised (new embeddings have no row to
+    // conflict against, so the guard must also gate the INSERT).
+    //
+    // We use INSERT … SELECT WHERE EXISTS instead of INSERT … VALUES so the
+    // guard is evaluated for the initial insert as well as the conflict.
     let rows_affected = conn
         .execute_raw(Statement::from_sql_and_values(
             backend,
             "INSERT INTO content_entity_embeddings (entity_id, embedding) \
-             VALUES ($1, $2) \
+             SELECT $1, $2 \
+             WHERE EXISTS ( \
+               SELECT 1 FROM content_entities \
+               WHERE content_entities.id = $1 \
+                 AND content_entities.workspace_id = $3 \
+                 AND content_entities.updated_at = $4 \
+             ) \
              ON CONFLICT(entity_id) \
              DO UPDATE SET embedding = $2 \
                WHERE content_entity_embeddings.entity_id = $1 \

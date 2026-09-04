@@ -370,4 +370,3 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
     })
     .await;
 }
-

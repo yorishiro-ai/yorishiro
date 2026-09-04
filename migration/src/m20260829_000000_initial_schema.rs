@@ -1829,34 +1829,63 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Initial schema: down() drops tables in reverse dependency order, so no table drop
-        // references a table that has not yet been dropped.
-        // Functions created by up() are left behind; they are not referenced by any table
-        // constraint, so their leftover state does not affect a clean rollback.
+        // Initial schema: down() drops tables in topological order, breaking the
+        // circular FK between `identity_workspaces.schema_id → content_schemas.id`
+        // (`fk_identity_workspaces_schema_id`, added via ALTER TABLE in up()) and
+        // `content_schemas.workspace_id → identity_workspaces.id`
+        // (`fk_content_schemas_workspace_id`).
+        //
+        // Step 1: drop the circular FK so the remaining tables can be dropped
+        // in a clean dependency order (up() added it with pg_only, so down()
+        // uses the same to be a no-op on SQLite).
+        helpers::pg_only(
+            manager,
+            "ALTER TABLE identity_workspaces DROP CONSTRAINT IF EXISTS fk_identity_workspaces_schema_id;",
+        )
+        .await?;
+
+        // Step 2: drop the trigger and functions created in up(), before any
+        // table drops (the trigger references the function, and leaving either
+        // behind would cause `CREATE FUNCTION` to fail on a subsequent up()).
+        // `authenticate_api_key` has two overloads, both must be dropped.
+        helpers::pg_only(
+            manager,
+            "DROP TRIGGER IF EXISTS templates_detach_schema_origins ON identity_templates;
+             DROP FUNCTION IF EXISTS detach_orphaned_schema_origin();
+             DROP FUNCTION IF EXISTS authenticate_api_key(bytea);
+             DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid);",
+        )
+        .await?;
+
+        // Step 3: drop tables by dependency (referencing tables first, then
+        // referenced tables).  The role outlives the schema on purpose: it is
+        // created idempotently by up(), other databases in the same cluster may
+        // still be using it, and dropping a role that owns objects elsewhere
+        // fails anyway.
         for table in [
-            "content_entity_embeddings",
-            "content_relations",
-            "content_entity_snapshots",
-            "content_entity_column_preferences",
-            "fts_content_entities",
-            "content_entities",
-            "content_schemas",
-            "identity_api_key_audit_log",
-            "identity_api_keys",
-            "identity_invites",
-            "identity_template_reviews",
-            "identity_template_versions",
-            "identity_templates",
-            "identity_workspace_worker_classes",
-            "identity_workspace_embedding_keys",
-            "identity_workspace_llm_keys",
-            "identity_stripe_processed_events",
-            "identity_tenant_billing",
-            "identity_maintenance",
-            "identity_workspaces",
-            "identity_tenant_memberships",
-            "identity_users",
-            "identity_tenants",
+            "content_entity_embeddings",         // → content_entities
+            "content_relations",                 // → identity_workspaces, content_entities ×2
+            "content_entity_snapshots",          // → identity_workspaces
+            "content_entity_column_preferences", // → identity_workspaces
+            "fts_content_entities",              // virtual table, no FK deps
+            "content_entities", // → identity_workspaces, content_schemas, identity_users
+            "content_schemas",  // → identity_tenants, identity_workspaces, identity_templates
+            "identity_api_key_audit_log", // → identity_workspaces, identity_tenants, identity_users
+            "identity_api_keys", // → identity_workspaces, identity_tenants, identity_users
+            "identity_invites", // → identity_tenants
+            "identity_template_reviews", // → identity_templates, identity_tenants, identity_users
+            "identity_template_versions", // → identity_templates, identity_users
+            "identity_templates", // → identity_tenants, identity_templates(self-ref), identity_users
+            "identity_workspace_worker_classes", // → identity_workspaces
+            "identity_workspace_embedding_keys", // → identity_workspaces
+            "identity_workspace_llm_keys", // → identity_workspaces
+            "identity_stripe_processed_events", // no FK deps
+            "identity_tenant_billing", // → identity_tenants
+            "identity_maintenance", // no FK deps
+            "identity_tenant_memberships", // → identity_tenants, identity_users
+            "identity_users",     // no FK deps
+            "identity_workspaces", // → identity_tenants (after circular FK dropped above)
+            "identity_tenants",   // no FK deps
         ] {
             manager
                 .drop_table(

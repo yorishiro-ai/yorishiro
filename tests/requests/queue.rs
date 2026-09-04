@@ -14,6 +14,7 @@
 //! It is inert with respect to what is asserted rather than merely tolerated: the queue provider opens its own `sqlx::SqlitePool` against its own URI (`bgworker/mod.rs`) and has no view of `ctx.db` at all, which is the same independence that lets the database and queue share one file in `config/development.yaml`.
 //! Booting the whole application on SQLite instead would be more faithful and would bring the entire `tests/`-is-PostgreSQL-only question with it, which is a much larger surface than two assertions justify.
 
+use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::bgworker::sqlt;
 use loco_rs::boot::{self, BootResult};
@@ -24,6 +25,8 @@ use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
+
+use crate::requests::close_app_pools;
 
 /// Boots the app against a throwaway PostgreSQL database with `BackgroundQueue` and a SQLite queue file, and hands the test both the context and a pool onto that same queue file.
 ///
@@ -38,39 +41,77 @@ where
     let queue_path = dir.path().join("queue.sqlite3");
     let queue_uri = format!("sqlite://{}?mode=rwc", queue_path.display());
 
-    let mut config = App::load_config(&Environment::Test)
-        .await
-        .expect("load test config");
-    let test_db =
-        loco_rs::testing::db::init_test_db_creation(&config.database.uri).expect("init test db");
-    test_db.init_db().await;
-    config.database.uri = test_db.get_connection_str().to_string();
-    config.workers.mode = WorkerMode::BackgroundQueue;
-    config.queue = Some(QueueConfig::Sqlite(SqliteQueueConfig {
-        uri: queue_uri.clone(),
-        dangerously_flush: false,
-        enable_logging: false,
-        max_connections: 2,
-        min_connections: 1,
-        connect_timeout: 5000,
-        idle_timeout: 5000,
-        poll_interval_sec: 1,
-        num_workers: 1,
-        reaper: None,
-    }));
+    // Use Option so we can explicitly clean up even on panic.
+    let mut test_db: Option<Box<dyn loco_rs::testing::db::TestSupport>> = None;
+    let mut boot: Option<BootResult> = None;
 
-    let boot: BootResult = App::boot(boot::StartMode::ServerOnly, &Environment::Test, config)
-        .await
-        .expect("boot with a sqlite queue");
+    let result = std::panic::AssertUnwindSafe(async {
+        let mut config = App::load_config(&Environment::Test)
+            .await
+            .expect("load test config");
+        // The queue provider's workers need PG connections during boot, so the
+        // pool must be large enough.  Bump the connect timeout so the queue
+        // workers don't block the migration phase.
+        config.database.connect_timeout = 30_000;
+        let mut db = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
+            .expect("init test db");
+        db.init_db().await;
+        config.database.uri = db.get_connection_str().to_string();
+        config.workers.mode = WorkerMode::BackgroundQueue;
+        config.queue = Some(QueueConfig::Sqlite(SqliteQueueConfig {
+            uri: queue_uri.clone(),
+            dangerously_flush: false,
+            enable_logging: false,
+            max_connections: 2,
+            min_connections: 1,
+            connect_timeout: 5000,
+            idle_timeout: 5000,
+            poll_interval_sec: 1,
+            num_workers: 0,
+            reaper: None,
+        }));
 
-    let pool = sqlx::SqlitePool::connect(&queue_uri)
-        .await
-        .expect("connect to the queue file");
+        let boot_res = App::boot(boot::StartMode::ServerOnly, &Environment::Test, config)
+            .await
+            .expect("boot with a sqlite queue");
 
-    test(boot.app_context.clone(), pool.clone()).await;
+        let pool = sqlx::SqlitePool::connect(&queue_uri)
+            .await
+            .expect("connect to the queue file");
 
-    pool.close().await;
-    test_db.cleanup_db();
+        // Run the test.
+        test(boot_res.app_context.clone(), pool.clone()).await;
+
+        // Shut down the queue provider first so its worker threads release their
+        // PostgreSQL connections, then close pools — all inside the catch_unwind
+        // block so this runs even when the test panics.
+        if let Some(ref qp) = boot_res.app_context.queue_provider {
+            let _ = qp.shutdown();
+        }
+        // Use close_app_pools which closes identity, tenant, and ctx.db pools
+        // so DROP DATABASE does not fail on teardown.
+        close_app_pools(&boot_res.app_context).await;
+        pool.close().await;
+
+        // Store for post-panic cleanup.
+        test_db = Some(db);
+        boot = Some(boot_res);
+    })
+    .catch_unwind()
+    .await;
+
+    // Post-panic cleanup: close app pools and drop the test DB.
+    if let Some(b) = &boot {
+        // close_app_pools closes identity, tenant, and ctx.db pools so
+        // DROP DATABASE does not fail on teardown.
+        close_app_pools(&b.app_context).await;
+    }
+    if let Some(d) = test_db.take() {
+        d.cleanup_db();
+    }
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 fn args_for(class: WorkerClass) -> EmbeddingSyncArgs {

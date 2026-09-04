@@ -150,12 +150,15 @@ where
         async move {
             match result.await {
                 Ok(()) => {}
-                Err(panic) => std::panic::resume_unwind(panic),
+                Err(panic) => {
+                    close_app_pools_sqlite(&ctx, &db_path).await;
+                    std::panic::resume_unwind(panic);
+                }
             }
+            close_app_pools_sqlite(&ctx, &db_path).await;
         }
     })
     .await;
-    close_app_pools_sqlite(&ctx, &db_path).await;
 }
 
 /// SQLite variant of loco's `request_with_create_db`.
