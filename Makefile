@@ -65,18 +65,12 @@ fetch:
 # No DATABASE_URL needed — no risk of pointing at SQLite or a stale database.
 # --rm on the container means stopping it also removes it; no leftover.
 entities: build
-	docker run --rm -d --name yorishiro-entities-pg \
-		-e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=yorishiro -e POSTGRES_DB=yorishiro \
-		-p 15433:5432 pgvector/pgvector:pg18
-	@until docker exec yorishiro-entities-pg pg_isready -U yorishiro > /dev/null 2>&1; do sleep 1; done
-	@sleep 2
-	docker exec yorishiro-entities-pg psql -U yorishiro -d yorishiro \
-		-c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-		-c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+	docker compose up -d testdb
+	@sleep 10
 	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15433/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
 	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15433/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db entities
-	docker stop yorishiro-entities-pg
+	docker compose down -v testdb
 
 # Convenience alias: check + fmt + clippy (CI check job).
 check-all: fmt-check check clippy

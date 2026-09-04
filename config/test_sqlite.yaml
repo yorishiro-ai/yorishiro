@@ -67,7 +67,7 @@ mailer:
     secure: false
 
 database:
-  uri: <%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>
+  uri: <%= get_env(name="DATABASE_URL") %>
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: 500
   idle_timeout: 500

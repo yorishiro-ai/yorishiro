@@ -69,7 +69,7 @@ jobs:
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           - backend: sqlite
             loco_env: test_sqlite
-            database_url: sqlite://yorishiro-test.sqlite3?mode=rwc
+            database_url: sqlite://yorishiro.sqlite3?mode=rwc
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -77,6 +77,10 @@ jobs:
           POSTGRES_USER: yorishiro
           POSTGRES_PASSWORD: yorishiro
           POSTGRES_DB: yorishiro
+        volumes:
+          # Runs once, only against an empty data directory.
+          # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
+          - ../../init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
         ports:
           - 5432:5432
         options: >-
@@ -99,24 +103,21 @@ jobs:
 
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
-        run: |
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+        run: docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro
 
       - name: Run migrations (postgres)
         if: matrix.backend == 'postgres'
         env:
-          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          LOCO_ENV: test_postgres
+          DATABASE_URL: matrix.database_url
+          LOCO_ENV: matrix.loco_env
           DB_CONNECT_TIMEOUT: "5000"
         run: ./target/debug/yorishiro db migrate
 
       - name: Run migrations (sqlite)
         if: matrix.backend == 'sqlite'
         env:
-          DATABASE_URL: sqlite://yorishiro-test.sqlite3?mode=rwc
-          LOCO_ENV: test_sqlite
+          DATABASE_URL: matrix.database_url
+          LOCO_ENV: matrix.loco_env
         run: ./target/debug/yorishiro db migrate
 
       - name: Verify _entities/ matches a fresh regen
@@ -149,7 +150,7 @@ jobs:
           DB_MAX_CONNECTIONS: "100"
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
-        run: cargo test --locked --workspace -- --test-threads=1
+        run: cargo test --locked --workspace
 
       - name: Show sccache stats
         run: sccache --show-stats
