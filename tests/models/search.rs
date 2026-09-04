@@ -1,5 +1,5 @@
+use crate::requests::boot_request;
 use async_trait::async_trait;
-use loco_rs::testing::prelude::*;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serial_test::serial;
 use yorishiro::app::App;
@@ -38,7 +38,7 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
 #[tokio::test]
 #[serial]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("search-test".into()),
             ..Default::default()
@@ -178,7 +178,7 @@ impl EmbeddingProvider for FixedWidthProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("dimension-mismatch-test".into()),
             ..Default::default()
@@ -300,7 +300,7 @@ impl EmbeddingProvider for FixedModelProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("model-mismatch-test".into()),
             ..Default::default()
@@ -382,7 +382,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
@@ -489,7 +489,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_dimension_tier() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-dimension-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
@@ -556,7 +556,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 #[tokio::test]
 #[serial]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("concurrent-reindex-test".into()),
             ..Default::default()
@@ -767,7 +767,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 #[tokio::test]
 #[serial]
 async fn reindex_overwrites_existing_entity_embeddings() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("reindex-overwrite-test".into()),
             ..Default::default()
@@ -949,7 +949,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 #[tokio::test]
 #[serial]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("trigram-test".into()),
             ..Default::default()
@@ -1037,7 +1037,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
-    crate::requests::request_with_create_sqlite::<App, _, _>(
+    crate::requests::boot_request_sqlite::<App, _, _>(
         db_path.clone(),
         |_request, ctx| async move {
             let tenant = identity_tenants::ActiveModel {

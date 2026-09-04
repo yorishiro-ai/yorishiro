@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 
@@ -24,7 +24,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[serial]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {
     with_max_tenants("1", async move {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
             let setup = request
                 .post("/setup")
                 .json(&serde_json::json!({
@@ -64,7 +64,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
 #[tokio::test]
 #[serial]
 async fn tenant_overview_requires_authentication() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/tenant/overview").await;
         assert_eq!(
             response.status_code(),

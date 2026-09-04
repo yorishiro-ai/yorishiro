@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -50,7 +50,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn set_get_and_reset_round_trip_in_display_order() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let before = request
@@ -126,7 +126,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 #[tokio::test]
 #[serial]
 async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let duplicate = request
@@ -173,7 +173,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
 #[tokio::test]
 #[serial]
 async fn an_empty_selection_is_stored_as_a_choice() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let put = request

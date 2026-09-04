@@ -22,7 +22,7 @@ async fn signup_then_login_round_trip_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
-    super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
+    super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("request-test-tenant".into()),
             ..Default::default()
@@ -117,7 +117,7 @@ async fn signup_without_invite_creates_its_own_tenant_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
-    super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
+    super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, _ctx| async move {
         let signup_response = request
             .post("/auth/signup")
             .json(&serde_json::json!({

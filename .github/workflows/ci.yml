@@ -49,6 +49,15 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check test harness usage
+        run: |
+          # Only tests/requests/mod.rs may call the raw loco helpers directly.
+          # All other test files must use boot_request/boot_request_sqlite instead.
+          if git grep -l 'request_with_create_db::<\|request_with_create_sqlite::<' tests/ | grep -v 'tests/requests/mod.rs'; then
+            echo "ERROR: call boot_request/boot_request_sqlite instead of the raw loco helper directly"
+            exit 1
+          fi
+
       - name: Check
         run: cargo check --locked --workspace
 
@@ -91,8 +100,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Build yorishiro binary
-        run: cargo build --locked -p yorishiro --bin yorishiro
+      - name: Build workspace
+        run: cargo build --locked --workspace
 
       - name: Install sea-orm-cli with postgres-vector feature
         run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector,sqlx-postgres,sqlx-sqlite
@@ -149,7 +158,8 @@ jobs:
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
-          DB_MAX_CONNECTIONS: "100"
+          DB_MAX_CONNECTIONS: 100
+          DB_CONNECT_TIMEOUT: 5000
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
         run: cargo test --locked --workspace -- --test-threads=1

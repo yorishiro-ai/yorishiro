@@ -1,7 +1,7 @@
 //! `seed_official_templates` has no HTTP surface (it is a Loco task, `cargo loco task seed_official_templates`), so this calls the service function directly against `ctx.db`, matching how `tests/requests/stripe.rs` calls `billing::` functions directly alongside HTTP requests in the same suite.
 
+use super::boot_request;
 use loco_rs::app::Hooks;
-use loco_rs::testing::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serial_test::serial;
 use yorishiro::app::App;
@@ -12,7 +12,7 @@ use yorishiro::models::_entities::identity_tenants;
 #[tokio::test]
 #[serial]
 async fn seeding_is_idempotent_and_creates_the_official_tenant() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let built_in_count = yorishiro::templates::list_templates().len();
 
         let first = official_templates::seed_official_templates(&ctx)
@@ -50,7 +50,7 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
 #[tokio::test]
 #[serial]
 async fn hooks_seed_creates_the_official_tenant_without_publishing_templates() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         App::seed(&ctx, std::path::Path::new("does-not-need-to-exist"))
             .await
             .expect("Hooks::seed");

@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -80,7 +80,7 @@ async fn member_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
 #[tokio::test]
 #[serial]
 async fn maintenance_is_readable_and_settable_over_rest() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let key = owner_key(&ctx, "acme").await;
 
         let response = request
@@ -124,7 +124,7 @@ async fn maintenance_is_readable_and_settable_over_rest() {
 #[tokio::test]
 #[serial]
 async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let key = owner_key(&ctx, "acme").await;
 
         let response = request
@@ -169,7 +169,7 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
 #[tokio::test]
 #[serial]
 async fn a_member_key_cannot_touch_maintenance() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let key = member_key(&ctx, "beta").await;
 
         let response = request
@@ -193,7 +193,7 @@ async fn a_member_key_cannot_touch_maintenance() {
 #[tokio::test]
 #[serial]
 async fn an_unknown_mode_is_refused() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let key = owner_key(&ctx, "acme").await;
 
         let response = request
@@ -217,7 +217,7 @@ async fn an_unknown_mode_is_refused() {
 #[tokio::test]
 #[serial]
 async fn auth_endpoints_are_rate_limited() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, _ctx| async move {
         let mut last_status = 200;
         for _ in 0..15 {
             let response = request

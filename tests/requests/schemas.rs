@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -53,7 +53,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn create_schema_from_a_builtin_template() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
 
         let response = request
@@ -75,7 +75,7 @@ async fn create_schema_from_a_builtin_template() {
 #[tokio::test]
 #[serial]
 async fn create_schema_rejects_an_unknown_template_id() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
 
         let response = request
@@ -96,7 +96,7 @@ async fn create_schema_rejects_an_unknown_template_id() {
 #[tokio::test]
 #[serial]
 async fn list_templates_and_get_template_over_rest() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
 
         let response = request
@@ -128,7 +128,7 @@ async fn list_templates_and_get_template_over_rest() {
 #[tokio::test]
 #[serial]
 async fn create_schema_from_a_library_template_links_the_origin() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { tenant_id, key } = setup(&ctx).await;
 
         let template = yorishiro::models::_entities::identity_templates::ActiveModel {
@@ -178,7 +178,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
 #[tokio::test]
 #[serial]
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { tenant_id, key } = setup(&ctx).await;
 
         let template = yorishiro::models::_entities::identity_templates::ActiveModel {

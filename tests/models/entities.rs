@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
@@ -11,7 +11,7 @@ use yorishiro::models::{content_entities, content_schemas};
 #[tokio::test]
 #[serial]
 async fn drift_and_migration_dry_run_see_a_second_version() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("drift-test".into()),
             ..Default::default()

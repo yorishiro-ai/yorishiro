@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
@@ -26,7 +26,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[serial]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     with_max_tenants("1", async move {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
             let setup = request
                 .post("/setup")
                 .json(&serde_json::json!({
@@ -61,7 +61,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
 #[serial]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
     with_max_tenants("1", async move {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             let setup = request
                 .post("/setup")
                 .json(&serde_json::json!({

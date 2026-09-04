@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
@@ -79,7 +79,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
 #[tokio::test]
 #[serial]
 async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
         let set = request
@@ -118,7 +118,7 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
 #[tokio::test]
 #[serial]
 async fn undo_migration_job_is_recorded() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
         let definition = serde_json::from_value(serde_json::json!({
@@ -195,7 +195,7 @@ async fn undo_migration_job_is_recorded() {
 #[tokio::test]
 #[serial]
 async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
         let response = request
@@ -219,7 +219,7 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
 #[tokio::test]
 #[serial]
 async fn an_audit_key_cannot_read_another_tenants_audit_log() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let tenant_a = setup(&ctx, "acme").await;
         let tenant_b = setup(&ctx, "beta").await;
 

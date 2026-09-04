@@ -6,10 +6,8 @@
 # Override with: make test DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
-LOCO_ENV ?= test_postgres
-ENVIRONMENT ?= development
 
-.PHONY: check clippy fmt fmt-check test test-postgres test-sqlite build task doctor fetch entities
+.PHONY: check clippy fmt fmt-check test-postgres test-sqlite build task doctor fetch entities
 
 check:
 	cargo check --locked --workspace
@@ -24,35 +22,25 @@ fmt-check:
 	cargo fmt --all -- --check
 
 # Run the full suite against the selected backend (postgres by default).
-# SQLite tests are gated by require_sqlite_backend() which checks the
-# DATABASE_URL scheme; set DATABASE_URL to an SQLite URL to run them.
-test:
-	DATABASE_URL='$(DATABASE_URL)' \
-	LOCO_ENV='$(LOCO_ENV)' \
-	cargo test --locked --workspace -- --test-threads=1 $(ARGS)
+test-postgres: build
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace -- --test-threads=1
 
-test-postgres:
-	$(MAKE) test DATABASE_URL='$(DATABASE_URL)'
-
-test-sqlite:
-	$(MAKE) test DATABASE_URL='sqlite://:memory:'
+test-sqlite: build
+	DATABASE_URL='sqlite://:memory:' LOCO_ENV=test_sqlite cargo test --locked --workspace -- --test-threads=1
 
 build:
-	cargo build --locked -p yorishiro --bin yorishiro
+	cargo build --locked --workspace
 
 # make task NAME=seed_official_templates [ARGS="key:value"]
 task: build
-	DATABASE_URL=$(DATABASE_URL) \
-	LOCO_ENV=$(LOCO_ENV) \
-	./target/debug/yorishiro task $(NAME) $(ARGS)
+	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=$test_postgres ./target/debug/yorishiro task $(NAME) $(ARGS)
 
-# make doctor ENVIRONMENT=production DATABASE_URL=postgres://...
+# make doctor DATABASE_URL=postgres://...
 doctor: build
 ifndef DATABASE_URL
 	$(error DATABASE_URL is required for doctor: set it explicitly)
 endif
-	DATABASE_URL='$(DATABASE_URL)' \
-	./target/debug/yorishiro doctor -e $(ENVIRONMENT)
+	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro doctor
 
 # Warm the cargo registry cache without building.
 # Useful after clearing ~/.cargo/registry so the next check/build does not steal download time.
@@ -65,9 +53,9 @@ fetch:
 entities: build
 	docker compose up -d testdb
 	@sleep 10
-	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15432/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db migrate
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
-	DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15432/yorishiro DB_CONNECT_TIMEOUT=5000 ./target/debug/yorishiro db entities
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db entities
 	docker compose down -v testdb
 
 # Convenience alias: check + fmt + clippy (CI check job).

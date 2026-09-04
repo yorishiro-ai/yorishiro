@@ -48,7 +48,115 @@ pub(crate) async fn with_max_tenants<T>(
 }
 
 use axum_test::TestServer;
+use futures::FutureExt;
+use loco_rs::app::Hooks;
+use loco_rs::testing::prelude::*;
 use std::net::SocketAddr;
+use yorishiro::app::App;
+
+/// Close every connection pool this app opens on a PostgreSQL test database.
+///
+/// `after_context` opens two pools Loco's own request-test harness knows nothing about:
+/// the identity pool (eager) and the tenant pool (lazy).
+/// Leaving either open means a session survives on the throwaway test database,
+/// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
+/// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
+///
+/// `spawn_startup_reindex` spawns a background task that holds a connection from `ctx.db` for its entire lifetime.
+/// Without shutdown-and-await, that task would still hold a session when pools are closed,
+/// causing `DROP DATABASE` to panic with "being accessed by other users".
+/// `close_app_pools` signals shutdown and awaits the task *before* closing pools.
+///
+/// Every request test that runs through `request_with_create_db` must call this before its closure returns.
+pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
+    // Signal shutdown to the startup reindex background task and await its actual
+    // completion before closing pools. This structurally closes the race: if the task
+    // is mid-await when signaled, we wait for that await to return (at which point it
+    // sees the flag and exits) rather than closing pools while the task still holds a
+    // ctx.db connection.
+    if let Some(handle) = ctx
+        .shared_store
+        .remove::<yorishiro::app::StartupReindexHandle>()
+    {
+        handle.shutdown_and_wait().await;
+    }
+    if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
+        db.identity.close().await;
+        db.tenant.pool().close().await;
+    }
+    ctx.db.get_postgres_connection_pool().close().await;
+}
+
+/// SQLite variant of `close_app_pools`.
+/// On SQLite `after_context` builds no `DbHandle` (no RLS, no second tenant),
+/// so there is only `ctx.db` to close.
+/// `queue:` is active in `config/test_sqlite.yaml` (the queue provider uses its own
+/// pool, so it never holds the session that would fail `DROP DATABASE`);
+/// `config/test_sqlite.yaml` has no `queue:` block, so it is `None` for every test that boots
+/// through `request_with_create_db`.
+/// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
+pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
+    ctx.db.get_sqlite_connection_pool().close().await;
+    // Clean up the temp SQLite file and its journaling siblings.
+    let _ = std::fs::remove_file(db_path);
+    let _ = std::fs::remove_file(format!("{db_path}-wal"));
+    let _ = std::fs::remove_file(format!("{db_path}-shm"));
+    let _ = std::fs::remove_file(format!("{db_path}-journal"));
+}
+
+/// Unified entry point for all PostgreSQL-backed request tests.
+///
+/// Boots the app through `request_with_create_db`, then wraps the callback in
+/// `catch_unwind` so that `close_app_pools` always runs — even if the callback panics.
+/// The original panic (assertion failure, etc.) is re-thrown afterward so the test
+/// reports the real failure message, not a wrapper artifact.
+///
+/// All test files must use this instead of calling `request_with_create_db` directly.
+#[allow(clippy::future_not_send)]
+pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
+where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    request_with_create_db::<App, _, _>(|request, ctx| {
+        let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
+        async move {
+            match result.await {
+                Ok(()) => {}
+                Err(panic) => {
+                    close_app_pools(&ctx).await;
+                    std::panic::resume_unwind(panic);
+                }
+            }
+            close_app_pools(&ctx).await;
+        }
+    })
+    .await;
+}
+
+/// SQLite variant of `boot_request`.
+///
+/// Boots the app through `request_with_create_sqlite`, then wraps the callback in
+/// `catch_unwind` so that `close_app_pools_sqlite` always runs.
+/// Re-throws the original panic afterward so the test reports the real failure message.
+#[allow(clippy::future_not_send)]
+pub(crate) async fn boot_request_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
+where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| {
+        let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
+        async move {
+            match result.await {
+                Ok(()) => {}
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        }
+    })
+    .await;
+    close_app_pools_sqlite(&ctx, &db_path).await;
+}
 
 /// SQLite variant of loco's `request_with_create_db`.
 ///
@@ -58,10 +166,8 @@ use std::net::SocketAddr;
 /// same path loco's own `boot_test_with_create_db` takes (load config, override URI, boot).
 ///
 #[allow(clippy::future_not_send)]
-pub(crate) async fn request_with_create_sqlite<H: loco_rs::app::Hooks, F, Fut>(
-    db_path: String,
-    callback: F,
-) where
+pub(crate) async fn request_with_create_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
+where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {

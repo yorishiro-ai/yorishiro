@@ -1,7 +1,7 @@
-use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use yorishiro::app::App;
 
+use super::boot_request;
 use super::with_max_tenants;
 
 /// With no cap set, both endpoints must answer as if setup does not exist, rather than leaking whether a tenant exists on a deployment that never opted into the wizard at all.
@@ -13,7 +13,7 @@ use super::with_max_tenants;
 #[tokio::test]
 #[serial]
 async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), 200);
         let body: serde_json::Value = status.json();
@@ -42,7 +42,7 @@ async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
 #[serial]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
     with_max_tenants("1", async move {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, _ctx| async move {
             let status = request.get("/setup/status").await;
             assert_eq!(status.status_code(), 200);
             let body: serde_json::Value = status.json();

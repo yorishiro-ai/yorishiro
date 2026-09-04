@@ -113,3 +113,5 @@ insta = { version = "1.48.0", features = ["redactions", "yaml", "filters"] }
 tempfile = { version = "3.27.0" }
 # Used by the ee/ request tests folded into tests/requests/.
 axum-test = { version = "17.3.0" }
+# Required for catch_unwind on non-Send futures in boot_request wrapper.
+futures = "0.3.34"

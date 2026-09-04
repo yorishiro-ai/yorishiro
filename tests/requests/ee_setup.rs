@@ -1,7 +1,7 @@
 //! Verifies `App::seed`'s official-templates publisher tenant does not make base's `/setup` wizard read as already set up.
 
+use super::boot_request;
 use loco_rs::app::Hooks;
-use loco_rs::testing::prelude::*;
 use serial_test::serial;
 use yorishiro::app::App;
 
@@ -26,7 +26,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[serial]
 async fn setup_still_works_after_hooks_seed_has_run() {
     with_max_tenants("1", async move {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             App::seed(&ctx, std::path::Path::new("does-not-need-to-exist"))
                 .await
                 .expect("Hooks::seed");

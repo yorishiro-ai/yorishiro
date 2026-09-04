@@ -7652,6 +7652,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "chrono",
+ "futures",
  "hmac 0.13.0",
  "include_dir",
  "insta",

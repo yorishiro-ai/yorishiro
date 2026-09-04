@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
@@ -85,7 +85,7 @@ fn note_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let create = request
@@ -123,7 +123,7 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
 #[tokio::test]
 #[serial]
 async fn upstream_changes_preview_and_merge_round_trip() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let template = insert_template(&ctx, setup.tenant_id, note_definition()).await;
 
@@ -244,7 +244,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
 #[tokio::test]
 #[serial]
 async fn merging_a_conflicting_field_is_refused() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let base_def = json!({
             "name": "library-note",

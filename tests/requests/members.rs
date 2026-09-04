@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -49,7 +49,7 @@ async fn issue_key_for(
 #[tokio::test]
 #[serial]
 async fn owner_can_list_and_add_members() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
@@ -99,7 +99,7 @@ async fn owner_can_list_and_add_members() {
 #[tokio::test]
 #[serial]
 async fn add_member_rejects_an_email_with_no_account() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
@@ -126,7 +126,7 @@ async fn add_member_rejects_an_email_with_no_account() {
 #[tokio::test]
 #[serial]
 async fn member_role_cannot_manage_members() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
         let member = tenancy::create_user(&ctx.db, "member@example.com", "hunter2-hunter2", None)
@@ -149,7 +149,7 @@ async fn member_role_cannot_manage_members() {
 #[tokio::test]
 #[serial]
 async fn members_endpoints_require_authentication() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/members").await;
         assert_eq!(response.status_code(), 401);
     })

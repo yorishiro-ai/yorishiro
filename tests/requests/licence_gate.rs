@@ -35,7 +35,7 @@
 //! this code can produce, it guards the change that widens where the layer is applied. Without it,
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
@@ -91,7 +91,7 @@ const UNGATED: &[&str] = &[
 #[tokio::test]
 #[serial]
 async fn gated_routes_are_absent_without_a_licence() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, _ctx| async move {
         // No licence installed: the process booted with whatever `from_env` found, which in a test
         // environment is nothing.
         for path in GATED {
@@ -132,7 +132,7 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 #[serial]
 async fn gated_routes_are_served_with_a_licence() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         install_licence(&ctx, 60 * 60);
 
         for path in GATED {
@@ -164,7 +164,7 @@ async fn gated_routes_are_served_with_a_licence() {
 #[tokio::test]
 #[serial]
 async fn an_expired_licence_closes_the_gate_again() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         // Unlicensed first, so the 404 below is known to be reachable on this path at all. Without
         // this the test would pass against a gate that never opens.
         let unlicensed = request.get(GATED[0]).await.status_code();
@@ -205,7 +205,7 @@ async fn an_expired_licence_closes_the_gate_again() {
 #[tokio::test]
 #[serial]
 async fn stripe_webhook_is_gated() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let unlicensed = request.post("/api/stripe/webhook").await.status_code();
         assert_eq!(
             unlicensed, 404,
@@ -236,7 +236,7 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 #[serial]
 async fn oauth_login_is_gated() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         let unlicensed = request.get("/auth/oauth/status").await.status_code();
         assert_eq!(
             unlicensed, 404,

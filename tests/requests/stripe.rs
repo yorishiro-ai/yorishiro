@@ -1,6 +1,6 @@
+use super::boot_request;
 use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
-use loco_rs::testing::prelude::*;
 use sea_orm::ActiveValue;
 use serde_json::json;
 use serial_test::serial;
@@ -104,7 +104,7 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 #[serial]
 async fn a_duplicate_event_id_is_not_reapplied() {
     with_stripe_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             billing::link_stripe_customer(&ctx.db, tenant_id, "cus_1")
@@ -162,7 +162,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 #[serial]
 async fn a_cancellation_returns_the_tenant_to_free() {
     with_stripe_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
@@ -217,7 +217,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[tokio::test]
 #[serial]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
         let response = request
@@ -240,7 +240,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 #[serial]
 async fn a_tampered_payload_is_rejected() {
     with_stripe_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let body = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_t");
             let now = Utc::now().timestamp();
