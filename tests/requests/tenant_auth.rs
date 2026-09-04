@@ -50,7 +50,6 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
                 "response: {:?}",
                 response.text()
             );
-
         })
         .await;
     })
@@ -111,7 +110,6 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 "response: {:?}",
                 with_header.text()
             );
-
         })
         .await;
     })

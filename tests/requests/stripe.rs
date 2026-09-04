@@ -151,7 +151,6 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 Some("free"),
                 "the duplicate must not have re-applied the plan change"
             );
-
         })
         .await;
     })
@@ -208,7 +207,6 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 Some(1),
                 "a cancelled tenant must drop to Free's workspace cap, not keep the paid one"
             );
-
         })
         .await;
     })
@@ -233,7 +231,6 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
             "an unconfigured webhook must refuse, never accept an unverifiable request: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -262,7 +259,6 @@ async fn a_tampered_payload_is_rejected() {
                 "response: {:?}",
                 response.text()
             );
-
         })
         .await;
     })

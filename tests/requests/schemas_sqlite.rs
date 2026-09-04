@@ -76,7 +76,6 @@ async fn create_schema_from_a_builtin_template_sqlite() {
             body["schema"]["definition"]["entity_types"]["task"].is_object(),
             "body: {body}"
         );
-
     })
     .await;
 }

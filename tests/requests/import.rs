@@ -135,7 +135,6 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             std::collections::BTreeSet::from(["first", "second"]),
             "both entities imported against the cached schema lookup, not just the first"
         );
-
     })
     .await;
 }

@@ -248,7 +248,6 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
             bob_data.get("ssn").is_none(),
             "non-x-embed field must be stripped by shallow_copy: {bob_data:?}"
         );
-
     })
     .await;
 }

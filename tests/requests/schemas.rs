@@ -68,7 +68,6 @@ async fn create_schema_from_a_builtin_template() {
             body["schema"]["definition"]["entity_types"]["task"].is_object(),
             "body: {body}"
         );
-
     })
     .await;
 }
@@ -90,7 +89,6 @@ async fn create_schema_rejects_an_unknown_template_id() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -122,7 +120,6 @@ async fn list_templates_and_get_template_over_rest() {
         assert_eq!(response.status_code(), 200);
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "task-management");
-
     })
     .await;
 }
@@ -173,7 +170,6 @@ async fn create_schema_from_a_library_template_links_the_origin() {
             body["schema"]["origin_snapshot"].is_object(),
             "body: {body}"
         );
-
     })
     .await;
 }
@@ -244,7 +240,6 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
             "the link to the library template must survive an edit with no explicit origin: {body}"
         );
         assert_eq!(body["schema"]["origin_status"], "linked");
-
     })
     .await;
 }

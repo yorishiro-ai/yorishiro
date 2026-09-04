@@ -108,7 +108,6 @@ async fn embedding_key_set_get_and_clear_round_trip() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
-
     })
     .await;
 }
@@ -142,7 +141,6 @@ async fn a_non_http_base_url_is_refused() {
                 put.text()
             );
         }
-
     })
     .await;
 }
@@ -187,7 +185,6 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(get.status_code(), 404, "response: {:?}", get.text());
-
     })
     .await;
 }

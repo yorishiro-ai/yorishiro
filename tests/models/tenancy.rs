@@ -82,7 +82,6 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             total, 2,
             "the tenant must never hold more than max_workspaces"
         );
-
     })
     .await;
 }

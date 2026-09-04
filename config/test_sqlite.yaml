@@ -40,23 +40,37 @@ workers:
 
 # Queue Configuration
 #
-# `kind: Sqlite` shares `DATABASE_URL`'s file rather than taking one of its own.
-# Both providers open independent connection pools regardless of whether they name the same file,
-# so sharing costs nothing beyond the lock contention already measured above.
-# `QUEUE_URL` still points the queue somewhere else for anyone who wants them separate.
-# The fallback is guarded on DATABASE_URL naming SQLite: this environment defaults to a SQLite database but an operator can point DATABASE_URL at PostgreSQL, and an unguarded fallback would hand that URI to the SQLite queue provider and fail boot.
+# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
+# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
+# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
+# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
+# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
+# non-SQLite queue), matching this file's own no-silent-fallback convention.
 queue:
   kind: Sqlite
-<% if get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first == "sqlite" %>
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite://yorishiro-sqlite.sqlite3?mode=rwc")) %>
-<% else %>
-  uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro-sqlite.sqlite3?mode=rwc") %>
-<% endif %>
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>
   dangerously_flush: false
-  num_workers: 2
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper:
-    age_minutes: 10
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+
+  # Postgres connection URI. Commonly the same value as DATABASE_URL.
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
+  # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
+  dangerously_flush: false
+
+  # Workers dequeuing in parallel, tunable per deployment.
+  # Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism, and a `--worker` process on another host adds more.
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+
+  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
+  # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.
+  # `age_minutes` must exceed the longest a healthy job can legitimately take, or the reaper requeues work still in progress.
+  reaper:
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
+    interval_seconds: 60
+<% endif %>
 
 mailer:
   stub: true

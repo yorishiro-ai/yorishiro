@@ -115,7 +115,6 @@ async fn maintenance_is_readable_and_settable_over_rest() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "mode": "off" }))
             .await;
-
     })
     .await;
 }
@@ -161,7 +160,6 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
         assert_eq!(served.status_code(), 200, "and the deployment is back");
-
     })
     .await;
 }
@@ -186,7 +184,6 @@ async fn a_member_key_cannot_touch_maintenance() {
             .json(&serde_json::json!({ "mode": "full-lock" }))
             .await;
         assert_eq!(response.status_code(), 403);
-
     })
     .await;
 }
@@ -213,7 +210,6 @@ async fn an_unknown_mode_is_refused() {
                 .contains("read-only"),
             "the hint must spell the modes: {body}"
         );
-
     })
     .await;
 }
@@ -234,7 +230,6 @@ async fn auth_endpoints_are_rate_limited() {
             last_status, 429,
             "YORISHIRO_AUTH_RATE_LIMIT_MAX defaults to 10 per window; 15 attempts must exhaust it"
         );
-
     })
     .await;
 }

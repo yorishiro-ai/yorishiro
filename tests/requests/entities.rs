@@ -146,7 +146,6 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .expect("read back survivor");
         assert_eq!(restored.data["title"], "before");
         assert_eq!(restored.schema_version, 1);
-
     })
     .await;
 }
@@ -168,7 +167,6 @@ async fn undo_an_unknown_job_is_refused() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }

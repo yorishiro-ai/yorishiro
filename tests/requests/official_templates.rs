@@ -42,7 +42,6 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
         );
         assert_eq!(second.updated.len(), 0);
         assert_eq!(second.unchanged.len(), built_in_count);
-
     })
     .await;
 }
@@ -65,7 +64,6 @@ async fn hooks_seed_creates_the_official_tenant_without_publishing_templates() {
             tenant.is_some(),
             "Hooks::seed must create the official tenant on its own"
         );
-
     })
     .await;
 }

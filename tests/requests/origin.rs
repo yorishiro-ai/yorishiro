@@ -115,7 +115,6 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(preview.status_code(), 422, "response: {:?}", preview.text());
-
     })
     .await;
 }
@@ -237,7 +236,6 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "the workspace's own field must survive: {merged_fields:?}"
         );
         assert_eq!(merge_body["schema"]["version"], 3);
-
     })
     .await;
 }
@@ -295,7 +293,6 @@ async fn merging_a_conflicting_field_is_refused() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(merge.status_code(), 422, "response: {:?}", merge.text());
-
     })
     .await;
 }

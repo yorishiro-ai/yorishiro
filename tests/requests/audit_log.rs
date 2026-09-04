@@ -110,7 +110,6 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
         assert_eq!(body[1]["action"], "set_maintenance");
         assert_eq!(body[1]["detail"]["mode"], "read_only");
         assert_eq!(body[1]["detail"]["reason"], "audit-log test");
-
     })
     .await;
 }
@@ -185,7 +184,6 @@ async fn undo_migration_job_is_recorded() {
         assert_eq!(body[0]["action"], "undo_migration_job");
         assert_eq!(body[0]["detail"]["job_id"], job_id.to_string());
         assert_eq!(body[0]["detail"]["restored"], 1);
-
     })
     .await;
 }
@@ -210,7 +208,6 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
             "a Migration-scoped key with no audit grant must be refused: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -264,7 +261,6 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
             tenant_b_body.is_empty(),
             "tenant b must not see tenant a's audit trail: {tenant_b_body:?}"
         );
-
     })
     .await;
 }

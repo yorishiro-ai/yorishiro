@@ -54,7 +54,6 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
             assert_eq!(body["members"].as_array().unwrap().len(), 1);
             assert_eq!(body["members"][0]["email"], "owner@example.com");
             assert_eq!(body["members"][0]["role"], "owner");
-
         })
         .await;
     })
@@ -73,7 +72,6 @@ async fn tenant_overview_requires_authentication() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }

@@ -108,7 +108,6 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             denied.is_err(),
             "another tenant's private template must 404, got {denied:?}"
         );
-
     })
     .await;
 }

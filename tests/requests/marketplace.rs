@@ -99,7 +99,6 @@ async fn without_a_licence_the_marketplace_is_not_served() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -119,7 +118,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -141,7 +139,6 @@ async fn a_licence_does_not_replace_authentication() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -316,7 +313,6 @@ async fn publish_list_fork_and_review_round_trip() {
              {:?}",
             fork_after_takedown.text()
         );
-
     })
     .await;
 }
@@ -364,7 +360,6 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
             "response: {:?}",
             steal_publish.text()
         );
-
     })
     .await;
 }
@@ -410,7 +405,6 @@ async fn a_rating_outside_the_range_is_rejected() {
             "response: {:?}",
             bad_review.text()
         );
-
     })
     .await;
 }

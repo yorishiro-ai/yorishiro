@@ -66,7 +66,6 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
             keys.iter().all(|k| k.workspace_id == Some(workspace_id)),
             "no cross-workspace leakage: {keys:?}"
         );
-
     })
     .await;
 }
@@ -103,7 +102,6 @@ async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
             ),
             "result: {result:?}"
         );
-
     })
     .await;
 }

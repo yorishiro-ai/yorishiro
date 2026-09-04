@@ -53,7 +53,6 @@ async fn setup_still_works_after_hooks_seed_has_run() {
                 "response: {:?}",
                 response.text()
             );
-
         })
         .await;
     })

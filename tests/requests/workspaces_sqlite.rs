@@ -117,7 +117,6 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
     })
     .await;
 }
@@ -137,7 +136,6 @@ async fn workspaces_endpoints_require_authentication_sqlite() {
     super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
-
     })
     .await;
 }

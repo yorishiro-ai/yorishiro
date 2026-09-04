@@ -152,7 +152,6 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             hits.iter().all(|h| h.entity.workspace_id == workspace.id),
             "no cross-workspace leakage: {hits:?}"
         );
-
     })
     .await;
 }
@@ -543,7 +542,6 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
             result.unwrap_err().to_string().contains("1024"),
             "error message must name the expected dimension count 1024"
         );
-
     })
     .await;
 }
@@ -753,7 +751,6 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 "entity {entity_id} embedding must match winner {final_model:?}"
             );
         }
-
     })
     .await;
 }
@@ -944,7 +941,6 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 "entity {entity_id} embedding must match new model {final_model:?}"
             );
         }
-
     })
     .await;
 }
@@ -1017,7 +1013,6 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             hits[0].distance.is_none(),
             "trigram-only hit has no distance"
         );
-
     })
     .await;
 }
@@ -1217,7 +1212,6 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 Some(0),
                 "fts_content_entities must not contain the deleted row after trigger"
             );
-
         },
     )
     .await;

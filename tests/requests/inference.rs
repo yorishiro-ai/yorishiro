@@ -125,7 +125,6 @@ async fn llm_key_set_get_and_clear_round_trip() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
-
     })
     .await;
 }
@@ -158,7 +157,6 @@ async fn a_non_http_base_url_is_refused() {
                 put.text()
             );
         }
-
     })
     .await;
 }
@@ -193,7 +191,6 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(infer.status_code(), 422, "response: {:?}", infer.text());
-
     })
     .await;
 }
@@ -214,7 +211,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 
         assert_eq!(with_key.status_code(), without_key.status_code());
         assert_eq!(with_key.status_code(), 404);
-
     })
     .await;
 }
@@ -340,7 +336,6 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
             fetched_after_undo["data"].get("summary").is_none(),
             "undo must restore the pre-inference state: {fetched_after_undo:?}"
         );
-
     })
     .await;
 }
@@ -475,7 +470,6 @@ async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error()
             !message.contains("transaction is aborted"),
             "the old code's masked failure mode must not reappear: {message}"
         );
-
     })
     .await;
 }
@@ -496,7 +490,6 @@ async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
             !message.contains("transaction is aborted"),
             "the old code's masked failure mode must not reappear: {message}"
         );
-
     })
     .await;
 }

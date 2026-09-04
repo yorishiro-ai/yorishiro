@@ -40,7 +40,6 @@ use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 
-
 /// Overwrites the `LicenceState::from_env()` the test process booted with.
 ///
 /// `shared_store.insert` is keyed by `TypeId`, so the later insert wins, and the gate reads the
@@ -126,7 +125,6 @@ async fn gated_routes_are_absent_without_a_licence() {
                  stay reachable without a licence"
             );
         }
-
     })
     .await;
 }
@@ -157,7 +155,6 @@ async fn gated_routes_are_served_with_a_licence() {
                 "{path} must stay reachable with a licence too"
             );
         }
-
     })
     .await;
 }
@@ -194,7 +191,6 @@ async fn an_expired_licence_closes_the_gate_again() {
             expired, 404,
             "an expired licence must close the gate again without a restart; got {expired}"
         );
-
     })
     .await;
 }
@@ -223,7 +219,6 @@ async fn stripe_webhook_is_gated() {
             "an active licence must let the request reach the handler, which then refuses for want \
              of a configured secret; got {licensed}"
         );
-
     })
     .await;
 }
@@ -255,7 +250,6 @@ async fn oauth_login_is_gated() {
             "an active licence must let the request reach `status`, which answers 200 whether or \
              not OAuth is configured; got {licensed}"
         );
-
     })
     .await;
 }

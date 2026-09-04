@@ -92,7 +92,6 @@ async fn owner_can_list_and_add_members() {
             .collect();
         assert!(emails.contains(&"owner@example.com"));
         assert!(emails.contains(&"invitee@example.com"));
-
     })
     .await;
 }
@@ -120,7 +119,6 @@ async fn add_member_rejects_an_email_with_no_account() {
             }))
             .await;
         assert_eq!(response.status_code(), 404);
-
     })
     .await;
 }
@@ -144,7 +142,6 @@ async fn member_role_cannot_manage_members() {
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
         assert_eq!(response.status_code(), 403);
-
     })
     .await;
 }
@@ -155,7 +152,6 @@ async fn members_endpoints_require_authentication() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let response = request.get("/api/members").await;
         assert_eq!(response.status_code(), 401);
-
     })
     .await;
 }

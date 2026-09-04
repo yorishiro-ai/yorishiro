@@ -88,7 +88,6 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
             );
         })
         .await;
-
     })
     .await;
 }
@@ -115,7 +114,6 @@ async fn status_errors_loudly_when_partially_configured() {
              disabled: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -141,7 +139,6 @@ async fn authorize_and_callback_404_when_unconfigured() {
             "response: {:?}",
             callback.text()
         );
-
     })
     .await;
 }
@@ -161,7 +158,6 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
                 "an unreachable issuer must fail loudly, never redirect: {:?}",
                 response.text()
             );
-
         })
         .await;
     })
@@ -197,7 +193,6 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
                     .contains("Max-Age=0"),
                 "the CSRF cookie must be cleared on this path too"
             );
-
         })
         .await;
     })
@@ -224,7 +219,6 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
                 missing_code.header(header::LOCATION),
                 "/#/login?error=oauth_failed"
             );
-
         })
         .await;
     })
@@ -270,7 +264,6 @@ async fn callback_rejects_an_expired_state() {
                 "response: {:?}",
                 response.text()
             );
-
         })
         .await;
     })
@@ -325,7 +318,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
                  tenant limit, got: {other:?}"
             ),
         }
-
     })
     .await;
 }
@@ -375,7 +367,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             .unwrap()
             .expect("the linked schema must exist");
         assert_eq!(schema.name, "general-notes");
-
     })
     .await;
 }

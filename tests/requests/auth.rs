@@ -84,7 +84,6 @@ async fn signup_then_login_round_trip() {
             }))
             .await;
         assert_eq!(bad_password_response.status_code(), 401);
-
     })
     .await;
 }
@@ -127,7 +126,6 @@ async fn signup_without_invite_creates_its_own_tenant() {
             "response: {:?}",
             login_response.text()
         );
-
     })
     .await;
 }
@@ -151,7 +149,6 @@ async fn signup_rejects_email_alongside_invite_token() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -173,7 +170,6 @@ async fn signup_rejects_neither_invite_token_nor_email() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -201,7 +197,6 @@ async fn signup_without_invite_respects_the_tenant_cap() {
                 }))
                 .await;
             assert_eq!(second.status_code(), 409, "response: {:?}", second.text());
-
         })
         .await;
     })

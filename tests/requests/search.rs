@@ -68,7 +68,6 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
             "response: {:?}",
             response.text()
         );
-
     })
     .await;
 }
@@ -81,7 +80,6 @@ async fn search_requires_authentication() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let response = request.get("/api/search?query_text=hello").await;
         assert_eq!(response.status_code(), 401);
-
     })
     .await;
 }

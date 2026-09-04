@@ -217,7 +217,6 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
             Some("nomic-ai/nomic-embed-text-v1.5".into()),
             "a partial failure must not touch the workspace's stamp"
         );
-
     })
     .await;
 }
@@ -291,7 +290,6 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
             Some("nomic-ai/nomic-embed-text-v1.5".into()),
             "a concurrently modified entity must block the restamp exactly like any other failure"
         );
-
     })
     .await;
 }

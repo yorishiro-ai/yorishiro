@@ -99,7 +99,6 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
         assert_eq!(by_type.behind, 1);
         assert_eq!(by_type.needs_values, 1);
         assert_eq!(by_type.missing_required, vec!["body".to_string()]);
-
     })
     .await;
 }

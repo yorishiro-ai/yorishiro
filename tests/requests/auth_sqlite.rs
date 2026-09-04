@@ -99,7 +99,6 @@ async fn signup_then_login_round_trip_sqlite() {
             }))
             .await;
         assert_eq!(bad_password_response.status_code(), 401);
-
     })
     .await;
 }
@@ -151,7 +150,6 @@ async fn signup_without_invite_creates_its_own_tenant_sqlite() {
             "response: {:?}",
             login_response.text()
         );
-
     })
     .await;
 }

@@ -105,7 +105,6 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
     })
     .await;
 }
@@ -128,7 +127,6 @@ async fn cannot_delete_a_tenants_only_workspace() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 409);
-
     })
     .await;
 }
@@ -165,7 +163,6 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
         assert_eq!(response.status_code(), 200);
-
     })
     .await;
 }
@@ -176,7 +173,6 @@ async fn workspaces_endpoints_require_authentication() {
     request_with_create_db::<App, _, _>(|request, ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
-
     })
     .await;
 }
@@ -208,7 +204,6 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
             .add_header("Authorization", format!("Bearer {owner_a_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
     })
     .await;
 }

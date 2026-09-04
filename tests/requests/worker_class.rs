@@ -93,7 +93,6 @@ async fn worker_class_set_get_and_clear_round_trip() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
-
     })
     .await;
 }
@@ -128,7 +127,6 @@ async fn setting_a_new_class_replaces_the_old_one() {
             body["worker_class"], "official",
             "the second PUT must replace the first, not add a second row"
         );
-
     })
     .await;
 }
