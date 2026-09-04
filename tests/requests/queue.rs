@@ -53,7 +53,7 @@ where
         // pool must be large enough.  Bump the connect timeout so the queue
         // workers don't block the migration phase.
         config.database.connect_timeout = 30_000;
-        let mut db = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
+        let db = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
             .expect("init test db");
         db.init_db().await;
         config.database.uri = db.get_connection_str().to_string();

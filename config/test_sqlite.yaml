@@ -55,23 +55,6 @@ queue:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
 
-  # Postgres connection URI. Commonly the same value as DATABASE_URL.
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
-  # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_flush: false
-
-  # Workers dequeuing in parallel, tunable per deployment.
-  # Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism, and a `--worker` process on another host adds more.
-  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
-
-  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
-  # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.
-  # `age_minutes` must exceed the longest a healthy job can legitimately take, or the reaper requeues work still in progress.
-  reaper:
-    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
-    interval_seconds: 60
-<% endif %>
-
 mailer:
   stub: true
   smtp:
@@ -81,7 +64,7 @@ mailer:
     secure: false
 
 database:
-  uri: <%= get_env(name="DATABASE_URL") %>
+  uri: <%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: 500
   idle_timeout: 500

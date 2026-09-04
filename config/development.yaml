@@ -13,7 +13,7 @@ logger:
   # `RUST_LOG` overrides everything here when set: loco tries `EnvFilter::try_from_default_env()`
   # before reading this file at all (`logger.rs:193`), so a platform that injects `RUST_LOG` silences
   # this application unless that variable names it too.
-  level: <%= get_env(name="LOG_LEVEL", default="debug") %>
+  level: <%= get_env(name="LOG_LEVEL", default="info") %>
   # Define the logging format. options: compact, pretty or json
   format: compact
 
