@@ -80,7 +80,7 @@ jobs:
         volumes:
           # Runs once, only against an empty data directory.
           # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
-          - ../../init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+          - ${{ github.workspace }}/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
         ports:
           - 5432:5432
         options: >-
