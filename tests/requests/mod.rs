@@ -113,6 +113,7 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
 ///
 /// All test files must use this instead of calling `request_with_create_db` directly.
 #[allow(clippy::future_not_send)]
+#[allow(clippy::extra_unused_type_parameters)]
 pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
@@ -140,6 +141,7 @@ where
 /// `catch_unwind` so that `close_app_pools_sqlite` always runs.
 /// Re-throws the original panic afterward so the test reports the real failure message.
 #[allow(clippy::future_not_send)]
+#[allow(clippy::extra_unused_type_parameters)]
 pub(crate) async fn boot_request_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
 where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
