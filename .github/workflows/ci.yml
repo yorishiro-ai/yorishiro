@@ -110,16 +110,16 @@ jobs:
       - name: Run migrations (postgres)
         if: matrix.backend == 'postgres'
         env:
-          DATABASE_URL: matrix.database_url
-          LOCO_ENV: matrix.loco_env
+          DATABASE_URL: ${{ matrix.database_url }}
+          LOCO_ENV: ${{ matrix.loco_env }}
           DB_CONNECT_TIMEOUT: "5000"
         run: ./target/debug/yorishiro db migrate
 
       - name: Run migrations (sqlite)
         if: matrix.backend == 'sqlite'
         env:
-          DATABASE_URL: matrix.database_url
-          LOCO_ENV: matrix.loco_env
+          DATABASE_URL: ${{ matrix.database_url }}
+          LOCO_ENV: ${{ matrix.loco_env }}
         run: ./target/debug/yorishiro db migrate
 
       - name: Verify _entities/ matches a fresh regen
