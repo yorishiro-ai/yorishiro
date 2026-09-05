@@ -66,6 +66,46 @@ impl From<Model> for EntityRecord {
     }
 }
 
+/// SQLite variant of `EntityRecord` that accepts UUIDs as hex strings.
+/// SQLite stores UUIDs as TEXT (36 chars) rather than BLOB (16 bytes),
+/// and SeaORM's `FromQueryResult` expects BLOB for `Uuid` columns.
+#[derive(sea_orm::FromQueryResult)]
+pub struct EntityRecordStr {
+    pub id: String,
+    pub workspace_id: String,
+    pub schema_id: String,
+    pub schema_version: i32,
+    pub entity_type: String,
+    pub data: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
+}
+
+impl EntityRecordStr {
+    /// Converts the hex-string UUIDs into `EntityRecord` with parsed `Uuid` values.
+    pub fn into_record(self) -> EntityRecord {
+        EntityRecord {
+            id: uuid::Uuid::parse_str(&self.id).expect("id is a valid UUID"),
+            workspace_id: uuid::Uuid::parse_str(&self.workspace_id)
+                .expect("workspace_id is a valid UUID"),
+            schema_id: uuid::Uuid::parse_str(&self.schema_id).expect("schema_id is a valid UUID"),
+            schema_version: self.schema_version,
+            entity_type: self.entity_type,
+            data: self.data,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            created_by: self.created_by.map(|s| {
+                uuid::Uuid::parse_str(&s).expect("created_by is a valid UUID")
+            }),
+            updated_by: self.updated_by.map(|s| {
+                uuid::Uuid::parse_str(&s).expect("updated_by is a valid UUID")
+            }),
+        }
+    }
+}
+
 pub struct CreateEntityInput {
     pub schema_name: String,
     pub entity_type: String,

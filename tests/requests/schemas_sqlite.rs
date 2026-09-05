@@ -9,6 +9,20 @@ use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::services::auth::ApiKeyScope;
 
+fn dump_db(db_path: &str, label: &str) {
+    let output = std::process::Command::new("sqlite3")
+        .args(["-header", "-column", db_path,
+            "SELECT 'content_schemas' as tbl, COUNT(*) as cnt FROM content_schemas \
+             UNION ALL SELECT 'identity_workspaces', COUNT(*) FROM identity_workspaces;"])
+        .output()
+        .ok();
+    if let Some(out) = output {
+        eprintln!("{}: {}", label, String::from_utf8_lossy(&out.stdout));
+    } else {
+        eprintln!("{} [could not run sqlite3]", label);
+    }
+}
+
 struct Setup {
     key: String,
 }
@@ -61,8 +75,12 @@ async fn create_schema_from_a_builtin_template_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
+    eprintln!("DB_PATH: {}", db_path);
     super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let Setup { key } = setup(&ctx).await;
+
+        // Dump DB state before the API call
+        dump_db(&db_path, "[BEFORE]");
 
         let response = request
             .post("/api/schemas")

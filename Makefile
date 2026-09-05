@@ -7,7 +7,7 @@
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 
-.PHONY: check clippy fmt fmt-check test-postgres test-sqlite build task doctor fetch entities
+.PHONY: check clippy fmt fmt-check test-postgres test-sqlite build task doctor entities
 
 check:
 	cargo check --locked --workspace
@@ -41,11 +41,6 @@ ifndef DATABASE_URL
 	$(error DATABASE_URL is required for doctor: set it explicitly)
 endif
 	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro doctor
-
-# Warm the cargo registry cache without building.
-# Useful after clearing ~/.cargo/registry so the next check/build does not steal download time.
-fetch:
-	cargo fetch --locked
 
 # Generate SeaORM entity structs from the current schema.
 # Starts a disposable pgvector/pgvector:pg18 container on port 15433,

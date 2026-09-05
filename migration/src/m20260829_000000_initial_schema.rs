@@ -953,35 +953,27 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // FTS5 virtual table for text search fallback on SQLite.
-        // SQLite has no pg_trgm, so full-text search uses FTS5 with stored content:
-        // the triggers below explicitly INSERT/DELETE rows in the FTS5 table,
-        // so the virtual table doesn't need a `content=` mapping to a backing table.
-        // This avoids the problem that `content_entities` has no `entity_id` column
-        // (vectors live in `content_entity_embeddings`), while still storing the
-        // UUID join key in the FTS5 index for `e.id = fts.entity_id` lookups.
+        // FTS-like fallback for text search on SQLite.
+        // SQLite has no pg_trgm, so we use a regular table mirroring `content_entities`
+        // text columns and kept in sync via triggers. The search query uses LIKE on the
+        // stored data column, with a JOIN on entity_id (TEXT) which works reliably.
         helpers::sqlite_only(
             manager,
-            "CREATE VIRTUAL TABLE fts_content_entities USING fts5(\
-                data,\
-                workspace_id,\
-                entity_id UNINDEXED,\
-                content=''\
+            "CREATE TABLE fts_content_entities (\
+                entity_id TEXT PRIMARY KEY,\
+                workspace_id TEXT NOT NULL,\
+                data TEXT NOT NULL\
             )",
         )
         .await?;
-        // Triggers keep the FTS5 virtual table in sync with the backing table.
-        // `entity_id` is written as `NEW.id` / `OLD.id` (not rowid) so the FTS5
-        // join in `search.rs` (`e.id = fts.entity_id`) works regardless of VACUUM
-        // or any other renumbering. The `rowid` is still needed by FTS5 internally.
-        // FTS5's `rowid` must be integer; omit it so FTS5 auto-assigns (since
-        // `content=''`), and keep `entity_id` for UUID lookups.
+        // Triggers keep the table in sync with content_entities.
+        // Unlike FTS5, this is a regular table so entity_id JOINs work with UUID hex-strings.
         helpers::sqlite_only(
             manager,
             "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(data, workspace_id, entity_id) \
-                VALUES(NEW.data, NEW.workspace_id, NEW.id); \
+                INSERT INTO fts_content_entities(entity_id, workspace_id, data) \
+                VALUES(NEW.id, NEW.workspace_id, NEW.data); \
              END",
         )
         .await?;
@@ -989,10 +981,8 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(fts_content_entities, data, workspace_id, entity_id) \
-                VALUES('delete', OLD.data, OLD.workspace_id, OLD.id); \
-                INSERT INTO fts_content_entities(data, workspace_id, entity_id) \
-                VALUES(NEW.data, NEW.workspace_id, NEW.id); \
+                UPDATE fts_content_entities SET data = NEW.data, workspace_id = NEW.workspace_id \
+                WHERE entity_id = OLD.id; \
              END",
         )
         .await?;
@@ -1000,8 +990,7 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(fts_content_entities, data, workspace_id, entity_id) \
-                VALUES('delete', OLD.data, OLD.workspace_id, OLD.id); \
+                DELETE FROM fts_content_entities WHERE entity_id = OLD.id; \
              END",
         )
         .await?;
@@ -1835,7 +1824,7 @@ impl MigrationTrait for Migration {
             "content_relations",                 // → identity_workspaces, content_entities ×2
             "content_entity_snapshots",          // → identity_workspaces
             "content_entity_column_preferences", // → identity_workspaces
-            "fts_content_entities",              // virtual table, no FK deps
+            "fts_content_entities",              // regular table mirroring content_entities, no FK deps
             "content_entities", // → identity_workspaces, content_schemas, identity_users
             "content_schemas",  // → identity_tenants, identity_workspaces, identity_templates
             "identity_api_key_audit_log", // → identity_workspaces, identity_tenants, identity_users

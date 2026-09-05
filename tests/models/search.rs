@@ -1124,7 +1124,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             .expect("create unrelated entity");
 
             // Neither entity has an embedding (SQLite has no embedding column), so both rely on
-            // the FTS5 fallback path.
+            // the FTS fallback path.
             let hits = search::search_by_vector(
                 &ctx.db,
                 workspace_id,
@@ -1145,20 +1145,23 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             use yorishiro::models::_entities::content_entities::Column;
 
             // Fetch using raw SQL (Entity::find_by_id selects embedding which doesn't
-            // exist on SQLite). EntityRecord is a FromQueryResult type with the same
-            // columns but no embedding field.
-            use yorishiro::models::content_entities::EntityRecord;
-            let rec = EntityRecord::find_by_statement(sea_orm::Statement::from_sql_and_values(
+            // exist on SQLite). EntityRecordStr accepts UUIDs as hex strings because
+            // SQLite stores them as TEXT (36 chars) rather than BLOB (16 bytes).
+            use yorishiro::models::content_entities::EntityRecordStr;
+            // On SQLite, `id` is stored as TEXT (hex string), not BLOB, so we must pass
+            // the UUID as a string literal rather than letting `into()` serialize it as BLOB.
+            let rec = EntityRecordStr::find_by_statement(sea_orm::Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
                 "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
                  created_at, updated_at, created_by, updated_by \
                  FROM content_entities WHERE id = ?",
-                [matching.id.into()],
+                [matching.id.to_string().into()],
             ))
             .one(&ctx.db)
             .await
-            .expect("fetch entity for update")
-            .expect("entity exists");
+            .expect("fetch entity for update");
+            let rec = rec.expect("entity exists (is it stored as TEXT UUID?)");
+            let rec = rec.into_record();
 
             // Build an ActiveModel with the fetched fields and update.
             // On SQLite, `ActiveModelTrait::update` tries to decode the return value
@@ -1179,10 +1182,22 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 created_by: sea_orm::ActiveValue::Set(rec.created_by),
                 updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
             };
-            active
-                .update_without_returning(&ctx.db)
-                .await
-                .expect("update entity");
+            // On SQLite, `id` is TEXT but `ActiveValue::Set(rec.id)` serializes it as
+            // BLOB, so the UPDATE WHERE clause never matches.  Run raw SQL instead.
+            use sea_orm::ConnectionTrait;
+            ctx.db.execute_raw(
+                sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "UPDATE content_entities SET data = ?, updated_at = ? WHERE id = ?",
+                    [
+                        serde_json::json!({ "title": "quarterly board meeting notes" }).to_string().into(),
+                        chrono::Utc::now().to_rfc3339().into(),
+                        rec.id.to_string().into(),
+                    ],
+                ),
+            )
+            .await
+            .expect("update entity");
 
             // Old phrase should no longer match.
             let hits = search::search_by_vector(

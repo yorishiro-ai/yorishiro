@@ -116,6 +116,12 @@ pub async fn get_active_schema(
     }
 }
 
+/// SQLite-format UUID: hex string without dashes, matching how SeaORM serialises
+/// Uuid columns for TEXT storage.
+fn uuid_hex(u: Uuid) -> String {
+    u.simple().to_string()
+}
+
 /// SQLite variant of `get_active_schema`: UUIDs are stored as hex strings in TEXT columns.
 /// SeaORM's `try_get::<Uuid>` always expects 16-byte binary regardless of column type, so we
 /// read UUID columns as hex strings and parse them manually.
@@ -191,8 +197,10 @@ async fn create_schema_sqlite(
     use sea_orm::{DatabaseBackend, Statement};
 
     validate_definition(&definition)?;
+    tracing::debug!("create_schema_sqlite: validation OK, name={}", definition.name);
 
     let name = definition.name.clone();
+    tracing::debug!("create_schema_sqlite: ws_hex={}, tenant_hex={}", uuid_hex(workspace_id), uuid_hex(tenant_id));
 
     crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
         .await
@@ -593,8 +601,10 @@ pub async fn create_schema(
     use super::_entities::content_schemas::Column;
 
     validate_definition(&definition)?;
+    tracing::debug!("create_schema_sqlite: validation OK");
 
     let name = definition.name.clone();
+    tracing::debug!("create_schema_sqlite: name={}, ws={}, tenant={}", name, workspace_id, tenant_id);
 
     crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
         .await
