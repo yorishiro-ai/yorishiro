@@ -1041,17 +1041,17 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
     .await;
 }
 
-/// The FTS5 fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text` via the
-/// FTS5 virtual table, when the entity has no embedding; an entity with neither an embedding nor
-/// an FTS5 match must not appear.
+/// The LIKE fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text`, when
+/// the entity has no embedding; an entity with neither an embedding nor a LIKE match must not
+/// appear.
 ///
-/// On SQLite, `content_entities` has no `embedding` column, so the search function's trigram half
-/// is replaced by an FTS5 MATCH query against the `fts_content_entities` virtual table created in
-/// the migration. This test boots against a SQLite file database to confirm the FTS5 path works
-/// end to end, including schema creation and entity insertion (which triggers FTS5 auto-sync).
+/// On SQLite, the search function's trigram half (pg_trgm on PostgreSQL) is replaced by a LIKE
+/// query directly against `content_entities.data`. This test boots against a SQLite file
+/// database to confirm the LIKE path works end to end, including schema creation and entity
+/// insertion.
 #[tokio::test]
 #[serial]
-async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
+async fn search_by_vector_falls_back_to_like_on_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;
     }
@@ -1065,7 +1065,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
         db_path.clone(),
         |_request, ctx| async move {
             let tenant = identity_tenants::ActiveModel {
-                name: sea_orm::ActiveValue::Set("fts5-test".into()),
+                name: sea_orm::ActiveValue::Set("like-fallback-test".into()),
                 ..Default::default()
             };
             let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
@@ -1131,10 +1131,10 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 
             assert_eq!(hits.len(), 1, "hits: {hits:?}");
             assert_eq!(hits[0].entity.id, matching.id);
-            assert!(hits[0].distance.is_none(), "fts5-only hit has no distance");
+            assert!(hits[0].distance.is_none(), "LIKE-only hit has no distance");
 
-            // Test the FTS5 UPDATE trigger: modify the entity's data so the old search
-            // phrase no longer matches, then confirm a search for the new phrase finds it.
+            // Modify the entity's data so the old search phrase no longer matches, then
+            // confirm a search for the new phrase finds it.
             let rec = content_entities::get(&ctx.db, workspace_id, matching.id)
                 .await
                 .expect("fetch entity for update");

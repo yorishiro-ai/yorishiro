@@ -93,7 +93,7 @@ pub async fn embed_query(
 }
 
 /// The `WHERE` fragment (and its bound values) both halves of the search apply, appended
-/// after `$2` (vector half) / no vector (trigram/FTS5 half) so callers pass in the params
+/// after `$2` (vector half) / no vector (trigram/LIKE half) so callers pass in the params
 /// that come before it and get back the ones to append.
 fn scope_clause(
     workspace_id: Uuid,
@@ -183,7 +183,7 @@ impl VectorKnn {
 /// Returns entities ordered by cosine distance between the given embedding vector and the
 /// stored embedding, closest first.
 /// As an auxiliary path, entities with no embedding are also included when `query_text` is
-/// a pg_trgm / FTS5 fuzzy match against their data.
+/// a pg_trgm fuzzy match (PostgreSQL) or LIKE match (SQLite) against their data.
 /// Vector matches are always ranked ahead of trigram-only matches; trigram-only matches are
 /// ordered by similarity.
 pub async fn search_by_vector(
