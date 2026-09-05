@@ -58,10 +58,6 @@ pub async fn mark_active(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return mark_active_sqlite(conn, workspace_id, schema_id).await;
-    }
-
     conn.execute_raw(Statement::from_sql_and_values(
         conn.get_database_backend(),
         "UPDATE identity_workspaces \
@@ -75,25 +71,5 @@ pub async fn mark_active(
     ))
     .await
     .internal()?;
-    Ok(())
-}
-
-/// SQLite variant of `mark_active`: uses raw SQL with hex-string UUIDs.
-async fn mark_active_sqlite(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    schema_id: Uuid,
-) -> Result<(), YorishiroError> {
-    use sea_orm::{DatabaseBackend, Statement};
-
-    let sql = format!(
-        "UPDATE identity_workspaces \
-         SET status = 'active', schema_id = COALESCE(schema_id, '{}') \
-         WHERE id = '{}'",
-        schema_id, workspace_id
-    );
-    conn.execute_raw(Statement::from_string(DatabaseBackend::Sqlite, sql))
-        .await
-        .internal()?;
     Ok(())
 }

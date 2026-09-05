@@ -5,8 +5,8 @@
 //! joins `content_entities e` to that table when searching by vector.
 //!
 //! Two queries run for each backend: vector search first, then a trigram (PostgreSQL) or
-//! FTS5 (SQLite) fallback for entities with no embedding at all.  The two halves are
-//! merged in Rust.
+//! LIKE (SQLite) fallback for entities with no embedding at all.
+//! The two halves are merged in Rust.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use serde::Serialize;
@@ -61,24 +61,6 @@ struct SearchRow {
     distance: Option<f64>,
 }
 
-/// SQLite variant of `SearchRow` that accepts UUIDs as hex strings.
-/// SQLite stores UUIDs as TEXT (36 chars) rather than BLOB (16 bytes),
-/// and SeaORM's `FromQueryResult` expects BLOB for `Uuid` columns.
-#[derive(FromQueryResult)]
-struct SearchRowStr {
-    id: String,
-    workspace_id: String,
-    schema_id: String,
-    schema_version: i32,
-    entity_type: String,
-    data: Value,
-    created_at: chrono::DateTime<chrono::FixedOffset>,
-    updated_at: chrono::DateTime<chrono::FixedOffset>,
-    created_by: Option<String>,
-    updated_by: Option<String>,
-    distance: Option<f64>,
-}
-
 impl SearchRow {
     fn into_hit(self) -> SearchHit {
         SearchHit {
@@ -93,26 +75,6 @@ impl SearchRow {
                 updated_at: self.updated_at.into(),
                 created_by: self.created_by,
                 updated_by: self.updated_by,
-            },
-            distance: self.distance,
-        }
-    }
-}
-
-impl SearchRowStr {
-    fn into_hit(self) -> SearchHit {
-        SearchHit {
-            entity: EntityRecord {
-                id: Uuid::parse_str(&self.id).expect("id is a valid UUID"),
-                workspace_id: Uuid::parse_str(&self.workspace_id).expect("workspace_id is a valid UUID"),
-                schema_id: Uuid::parse_str(&self.schema_id).expect("schema_id is a valid UUID"),
-                schema_version: self.schema_version,
-                entity_type: self.entity_type,
-                data: self.data,
-                created_at: self.created_at.into(),
-                updated_at: self.updated_at.into(),
-                created_by: self.created_by.map(|s| Uuid::parse_str(&s).expect("created_by is a valid UUID")),
-                updated_by: self.updated_by.map(|s| Uuid::parse_str(&s).expect("updated_by is a valid UUID")),
             },
             distance: self.distance,
         }
@@ -241,7 +203,6 @@ pub async fn search_by_vector(
         });
     }
 
-    // ----------------------------------------------------------------------- Vector half
     let knn = match conn.get_database_backend() {
         sea_orm::DatabaseBackend::Postgres => {
             VectorKnn::postgres(vector, workspace_id, &query, limit)
@@ -255,10 +216,8 @@ pub async fn search_by_vector(
         }
     };
 
-    // PostgreSQL vector search returns UUIDs as BLOB; SearchRow decodes them directly.
-    // SQLite vector search also uses SearchRow because its vector query does NOT go
-    // through the FTS table — UUIDs come from content_entities directly where SeaORM
-    // can still decode the TEXT→BLOB mapping via `Statement::from_sql_and_values`.
+    // Both backends store UUIDs as BLOB (SQLite) or native uuid (PostgreSQL);
+    // SearchRow decodes them directly on both.
     let mut hits: Vec<SearchHit> = SearchRow::find_by_statement(Statement::from_sql_and_values(
         conn.get_database_backend(),
         &knn.sql,
@@ -271,7 +230,6 @@ pub async fn search_by_vector(
     .map(SearchRow::into_hit)
     .collect();
 
-    // ------------------------------------------------------------------ Trigram / FTS fallback half
     // Only run when there is room left: a full page of vector hits already outranks
     // every trigram-only match.
     if (hits.len() as i64) < limit {
@@ -279,47 +237,32 @@ pub async fn search_by_vector(
         let (scope_sql, scope_values) = scope_clause(workspace_id, &query, 2);
 
         if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            // SQLite has no pg_trgm, so text search uses a regular `fts_content_entities`
-            // table mirroring `content_entities` (data, workspace_id, entity_id as TEXT),
-            // kept in sync via triggers.  The search uses LIKE on the stored data column,
-            // with a JOIN on entity_id which works reliably with UUID hex-strings.
-            //
-            // workspace_id is inlined as hex-string because the fts table stores it as TEXT.
-            let mut scope_sql = format!(" AND e.workspace_id = '{}'", workspace_id);
-            let mut scope_values: Vec<sea_orm::Value> = Vec::new();
+            let like_pattern = query_text.replace('%', r"\%").replace('_', r"\_");
+            let mut sql = format!(
+                "SELECT {HIT_COLUMNS}, NULL AS distance \
+                 FROM content_entities e \
+                 LEFT JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+                 WHERE ee.embedding IS NULL AND e.workspace_id = ? \
+                   AND e.data LIKE ? ESCAPE '\\' \
+                 LIMIT {remaining}"
+            );
+            let like_value = format!("%{like_pattern}%");
+            let mut values: Vec<sea_orm::Value> = vec![workspace_id.into(), like_value.into()];
             if let Some(entity_type) = &query.entity_type {
-                scope_sql.push_str(" AND e.entity_type = ?");
-                scope_values.push(entity_type.clone().into());
+                sql = sql.replace("LIMIT", "AND e.entity_type = ? LIMIT");
+                values.insert(2, entity_type.clone().into());
             }
 
-            // Escape LIKE wildcards so literal `%` and `_` in search text are treated as-is.
-            // SQLite stores UUIDs as TEXT (36 chars, e.g. "550e8400-e29b-...")
-            // but SearchRow expects BLOB (16 bytes).  Use SearchRowStr instead,
-            // which accepts UUIDs as hex strings and parses them in Rust.
-            let like_pattern = query_text.replace('%', r"\%").replace('_', r"\_");
-            let fts_sql = format!(
-                "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
-                 e.entity_type, e.data, e.created_at, e.updated_at, \
-                 e.created_by, e.updated_by, \
-                 NULL AS distance \
-                 FROM content_entities e, fts_content_entities \
-                 WHERE e.id = fts_content_entities.entity_id{scope_sql} \
-                   AND fts_content_entities.data LIKE '%{}%' ESCAPE '\\'\
-                 LIMIT {remaining}",
-                like_pattern.replace('\'', "''")
-            );
-            let fts_values = scope_values;
-
-            let fts_rows = SearchRowStr::find_by_statement(Statement::from_sql_and_values(
+            let rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
                 conn.get_database_backend(),
-                &fts_sql,
-                fts_values,
+                &sql,
+                values,
             ))
             .all(conn)
             .await
             .internal()?;
 
-            hits.extend(fts_rows.into_iter().map(SearchRowStr::into_hit).collect::<Vec<_>>());
+            hits.extend(rows.into_iter().map(SearchRow::into_hit));
         } else {
             // PostgreSQL uses pg_trgm for fuzzy text matching.
             // `data::text` casts the JSONB column to text for trigram comparison.
@@ -347,7 +290,12 @@ pub async fn search_by_vector(
             .await
             .internal()?;
 
-            hits.extend(trigram_rows.into_iter().map(SearchRow::into_hit).collect::<Vec<_>>());
+            hits.extend(
+                trigram_rows
+                    .into_iter()
+                    .map(SearchRow::into_hit)
+                    .collect::<Vec<_>>(),
+            );
         }
     }
 

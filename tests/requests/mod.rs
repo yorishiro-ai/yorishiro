@@ -199,11 +199,8 @@ where
         .router
         .clone()
         .expect("app must have routes after boot");
-    let server = TestServer::new_with_config(
-        routes.into_make_service_with_connect_info::<SocketAddr>(),
-        loco_rs::testing::prelude::RequestConfig::default(),
-    )
-    .expect("build TestServer");
+    let server = TestServer::new(routes.into_make_service_with_connect_info::<SocketAddr>())
+        .expect("build TestServer");
 
     callback(server, boot.app_context.clone()).await;
 }

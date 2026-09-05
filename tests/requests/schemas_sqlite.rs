@@ -11,9 +11,13 @@ use yorishiro::services::auth::ApiKeyScope;
 
 fn dump_db(db_path: &str, label: &str) {
     let output = std::process::Command::new("sqlite3")
-        .args(["-header", "-column", db_path,
+        .args([
+            "-header",
+            "-column",
+            db_path,
             "SELECT 'content_schemas' as tbl, COUNT(*) as cnt FROM content_schemas \
-             UNION ALL SELECT 'identity_workspaces', COUNT(*) FROM identity_workspaces;"])
+             UNION ALL SELECT 'identity_workspaces', COUNT(*) FROM identity_workspaces;",
+        ])
         .output()
         .ok();
     if let Some(out) = output {

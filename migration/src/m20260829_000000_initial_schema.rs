@@ -953,48 +953,6 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // FTS-like fallback for text search on SQLite.
-        // SQLite has no pg_trgm, so we use a regular table mirroring `content_entities`
-        // text columns and kept in sync via triggers. The search query uses LIKE on the
-        // stored data column, with a JOIN on entity_id (TEXT) which works reliably.
-        helpers::sqlite_only(
-            manager,
-            "CREATE TABLE fts_content_entities (\
-                entity_id TEXT PRIMARY KEY,\
-                workspace_id TEXT NOT NULL,\
-                data TEXT NOT NULL\
-            )",
-        )
-        .await?;
-        // Triggers keep the table in sync with content_entities.
-        // Unlike FTS5, this is a regular table so entity_id JOINs work with UUID hex-strings.
-        helpers::sqlite_only(
-            manager,
-            "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
-             BEGIN \
-                INSERT INTO fts_content_entities(entity_id, workspace_id, data) \
-                VALUES(NEW.id, NEW.workspace_id, NEW.data); \
-             END",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
-             BEGIN \
-                UPDATE fts_content_entities SET data = NEW.data, workspace_id = NEW.workspace_id \
-                WHERE entity_id = OLD.id; \
-             END",
-        )
-        .await?;
-        helpers::sqlite_only(
-            manager,
-            "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
-             BEGIN \
-                DELETE FROM fts_content_entities WHERE entity_id = OLD.id; \
-             END",
-        )
-        .await?;
-
         // Strict form, on purpose: yorishiro_app sets both app.current_tenant and app.current_workspace, so reaching this table without a workspace set is a bug.
         // Raising surfaces that bug; a lenient policy would instead read it as an empty workspace and hide it.
         helpers::enable_rls_with_policy(
@@ -1824,7 +1782,6 @@ impl MigrationTrait for Migration {
             "content_relations",                 // → identity_workspaces, content_entities ×2
             "content_entity_snapshots",          // → identity_workspaces
             "content_entity_column_preferences", // → identity_workspaces
-            "fts_content_entities",              // regular table mirroring content_entities, no FK deps
             "content_entities", // → identity_workspaces, content_schemas, identity_users
             "content_schemas",  // → identity_tenants, identity_workspaces, identity_templates
             "identity_api_key_audit_log", // → identity_workspaces, identity_tenants, identity_users

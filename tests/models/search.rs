@@ -1064,31 +1064,25 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     crate::requests::boot_request_sqlite::<App, _, _>(
         db_path.clone(),
         |_request, ctx| async move {
-            // Seed tenant/workspace with hex-string UUIDs so FK constraints match
-            // the hex-string UUIDs written by `create_schema_sqlite` / `create_sqlite`.
-            use sea_orm::Statement;
-            let tenant_id = uuid::Uuid::now_v7();
-            let workspace_id = uuid::Uuid::now_v7();
-            ctx.db
-                .execute_raw(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "INSERT INTO identity_tenants (id, name) VALUES (?1, 'fts5-test')",
-                    [sea_orm::Value::String(Some(tenant_id.to_string()))],
-                ))
+            let tenant = identity_tenants::ActiveModel {
+                name: sea_orm::ActiveValue::Set("fts5-test".into()),
+                ..Default::default()
+            };
+            let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
                 .await
                 .expect("insert tenant");
-            ctx.db
-                .execute_raw(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "INSERT INTO identity_workspaces (id, tenant_id, name, status, max_entities) \
-                     VALUES (?1, ?2, 'main', 'active', NULL)",
-                    [
-                        sea_orm::Value::String(Some(workspace_id.to_string())),
-                        sea_orm::Value::String(Some(tenant_id.to_string())),
-                    ],
-                ))
+            let tenant_id = tenant.id;
+
+            let workspace = identity_workspaces::ActiveModel {
+                tenant_id: sea_orm::ActiveValue::Set(tenant_id),
+                name: sea_orm::ActiveValue::Set("main".into()),
+                status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+                ..Default::default()
+            };
+            let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
                 .await
                 .expect("insert workspace");
+            let workspace_id = workspace.id;
 
             let def = serde_json::from_value(note_definition()).expect("parse definition");
             content_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
@@ -1141,60 +1135,16 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 
             // Test the FTS5 UPDATE trigger: modify the entity's data so the old search
             // phrase no longer matches, then confirm a search for the new phrase finds it.
-            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            use yorishiro::models::_entities::content_entities::Column;
+            let rec = content_entities::get(&ctx.db, workspace_id, matching.id)
+                .await
+                .expect("fetch entity for update");
 
-            // Fetch using raw SQL (Entity::find_by_id selects embedding which doesn't
-            // exist on SQLite). EntityRecordStr accepts UUIDs as hex strings because
-            // SQLite stores them as TEXT (36 chars) rather than BLOB (16 bytes).
-            use yorishiro::models::content_entities::EntityRecordStr;
-            // On SQLite, `id` is stored as TEXT (hex string), not BLOB, so we must pass
-            // the UUID as a string literal rather than letting `into()` serialize it as BLOB.
-            let rec = EntityRecordStr::find_by_statement(sea_orm::Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
-                 created_at, updated_at, created_by, updated_by \
-                 FROM content_entities WHERE id = ?",
-                [matching.id.to_string().into()],
-            ))
-            .one(&ctx.db)
-            .await
-            .expect("fetch entity for update");
-            let rec = rec.expect("entity exists (is it stored as TEXT UUID?)");
-            let rec = rec.into_record();
-
-            // Build an ActiveModel with the fetched fields and update.
-            // On SQLite, `ActiveModelTrait::update` tries to decode the return value
-            // as a `content_entities::Model` which includes `embedding` — doesn't exist
-            // on SQLite. Use `update_without_returning` (same pattern as the production
-            // `update_and_fetch` function).
-            let active = content_entities::ActiveModel {
-                id: sea_orm::ActiveValue::Set(rec.id),
-                workspace_id: sea_orm::ActiveValue::Set(rec.workspace_id),
-                schema_id: sea_orm::ActiveValue::Set(rec.schema_id),
-                schema_version: sea_orm::ActiveValue::Set(rec.schema_version),
-                entity_type: sea_orm::ActiveValue::Set(rec.entity_type),
-                data: sea_orm::ActiveValue::Set(serde_json::json!({
-                    "title": "quarterly board meeting notes"
-                })),
-                created_at: sea_orm::ActiveValue::Set(rec.created_at.into()),
-                updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
-                created_by: sea_orm::ActiveValue::Set(rec.created_by),
-                updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
-            };
-            // On SQLite, `id` is TEXT but `ActiveValue::Set(rec.id)` serializes it as
-            // BLOB, so the UPDATE WHERE clause never matches.  Run raw SQL instead.
-            use sea_orm::ConnectionTrait;
-            ctx.db.execute_raw(
-                sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "UPDATE content_entities SET data = ?, updated_at = ? WHERE id = ?",
-                    [
-                        serde_json::json!({ "title": "quarterly board meeting notes" }).to_string().into(),
-                        chrono::Utc::now().to_rfc3339().into(),
-                        rec.id.to_string().into(),
-                    ],
-                ),
+            content_entities::update(
+                &ctx.db,
+                workspace_id,
+                rec.id,
+                serde_json::json!({ "title": "quarterly board meeting notes" }),
+                None,
             )
             .await
             .expect("update entity");
@@ -1228,35 +1178,12 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
             assert_eq!(hits[0].entity.id, matching.id);
 
-            // Test the FTS5 DELETE trigger: delete the entity and verify the FTS5 side is actually
-            // cleaned up (a bare search-by-vector assertion would be true even if the FTS5 row
-            // lingered, because the join against content_entities would already find no match).
-            content_entities::Entity::delete_many()
-                .filter(Column::Id.eq(matching.id))
-                .exec(&ctx.db)
+            content_entities::delete(&ctx.db, workspace_id, matching.id)
                 .await
                 .expect("delete entity");
 
-            let fts_count: Option<i64> = {
-                #[derive(sea_orm::FromQueryResult)]
-                struct Row {
-                    cnt: i64,
-                }
-                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE entity_id = ?",
-                    [matching.id.into()],
-                ))
-                .one(&ctx.db)
-                .await
-                .expect("fts count")
-                .map(|r| r.cnt)
-            };
-            assert_eq!(
-                fts_count,
-                Some(0),
-                "fts_content_entities must not contain the deleted row after trigger"
-            );
+            let after_delete = content_entities::get(&ctx.db, workspace_id, matching.id).await;
+            assert!(after_delete.is_err(), "deleted entity must not be found");
         },
     )
     .await;

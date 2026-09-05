@@ -20,19 +20,16 @@ pub fn use_transaction() -> Option<bool> {
     Some(true)
 }
 
-/// `id TEXT PRIMARY KEY DEFAULT uuidv7()`.
+/// `id UUID PRIMARY KEY DEFAULT uuidv7()` on Postgres, `id BLOB PRIMARY KEY` on SQLite.
 ///
-/// On SQLite the column is `TEXT` (SeaORM serialises UUIDs as blobs and SQLite
-/// rejects blobs against the custom `uuid_text` type as `datatype mismatch`).
-/// SQLite has no `uuidv7()` to default to, so on that backend the column carries
-/// no default at all: every insert must supply its own id.
-/// This matches how the application already has to generate ids client-side there
-/// (SeaORM's `ActiveModel` defaults run in the client, not the database), so an
-/// omitted default is simply never exercised rather than silently wrong.
+/// SQLite has no `uuidv7()` default, so every insert must supply its own id.
+/// SeaORM serializes `Uuid` as 16-byte BLOB; storing the column as BLOB lets
+/// the entity API's `.filter(Column::Id.eq(uuid))` match on SQLite without
+/// the hex-string workaround that TEXT columns required.
 pub fn uuidv7_pk(manager: &SchemaManager<'_>) -> ColumnDef {
     let mut col = ColumnDef::new(Alias::new("id"));
     if manager.get_database_backend() == DbBackend::Sqlite {
-        col.text().not_null().primary_key();
+        col.blob().not_null().primary_key();
     } else {
         col.uuid()
             .not_null()
@@ -177,16 +174,14 @@ pub async fn sqlite_only(manager: &SchemaManager<'_>, sql: &str) -> Result<(), D
     Ok(())
 }
 
-/// A UUID column: `TEXT` on SQLite, `UUID` on PostgreSQL.
+/// A UUID column: `BLOB` on SQLite, `UUID` on PostgreSQL.
 ///
-/// `sea-query`'s `.uuid()` generates `uuid_text` for SQLite, but SQLite does not
-/// recognize `uuid_text` as a text affinity type.  SeaORM serializes UUIDs as blobs,
-/// so inserting a blob into a `uuid_text` column throws `datatype mismatch`.
-/// Storing UUIDs as hex text works on both backends.
+/// SeaORM serializes `Uuid` as 16-byte BLOB.
+/// Storing UUID columns as BLOB on SQLite aligns the column affinity with the bind format, so FK comparisons and `.filter()` work without hex-string conversion.
 pub fn uuid_col(manager: &SchemaManager<'_>, name: Alias) -> ColumnDef {
     let mut col = ColumnDef::new(name);
     if manager.get_database_backend() == DbBackend::Sqlite {
-        col.text();
+        col.blob();
     } else {
         col.uuid();
     }

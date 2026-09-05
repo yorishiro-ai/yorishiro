@@ -94,9 +94,6 @@ pub async fn get_active_schema(
 ) -> Result<SchemaRecord, YorishiroError> {
     // SQLite serializes UUIDs as binary in SeaORM queries, but the migration stores them as
     // hex strings in TEXT columns. Convert to hex for the filter so the comparison works.
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return get_active_schema_sqlite(conn, workspace_id, name).await;
-    }
     use super::_entities::content_schemas::Column;
 
     let row = Entity::find()
@@ -114,281 +111,6 @@ pub async fn get_active_schema(
             "no active schema named '{name}'"
         ))),
     }
-}
-
-/// SQLite-format UUID: hex string without dashes, matching how SeaORM serialises
-/// Uuid columns for TEXT storage.
-fn uuid_hex(u: Uuid) -> String {
-    u.simple().to_string()
-}
-
-/// SQLite variant of `get_active_schema`: UUIDs are stored as hex strings in TEXT columns.
-/// SeaORM's `try_get::<Uuid>` always expects 16-byte binary regardless of column type, so we
-/// read UUID columns as hex strings and parse them manually.
-async fn get_active_schema_sqlite(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    name: &str,
-) -> Result<SchemaRecord, YorishiroError> {
-    use sea_orm::{DatabaseBackend, Statement};
-
-    let sql = format!(
-        "SELECT id, tenant_id, workspace_id, name, version, definition, status, \
-         origin_template_id, origin_status, origin_snapshot, created_at \
-         FROM content_schemas \
-         WHERE workspace_id = '{}' AND name = '{}' AND status = 'active' \
-         ORDER BY version DESC LIMIT 1",
-        workspace_id,
-        name.replace('\'', "''")
-    );
-    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
-    let rows = conn.query_all_raw(stmt).await.internal()?;
-    let row = rows
-        .first()
-        .ok_or_else(|| YorishiroError::not_found(format!("no active schema named '{name}'")))?;
-
-    let id = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
-    let tenant_id =
-        Uuid::parse_str(&row.try_get::<String>("", "tenant_id").internal()?).internal()?;
-    let workspace_id_out =
-        Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
-    let schema_name: String = row.try_get("", "name").internal()?;
-    let version: i32 = row.try_get("", "version").internal()?;
-    let definition: serde_json::Value = row.try_get("", "definition").internal()?;
-    let status: String = row.try_get("", "status").internal()?;
-    let origin_template_id: Option<Uuid> = row
-        .try_get::<Option<String>>("", "origin_template_id")
-        .ok()
-        .flatten()
-        .map(|s| Uuid::parse_str(&s).internal())
-        .transpose()?;
-    let origin_status: String = row.try_get("", "origin_status").internal()?;
-    let origin_snapshot: Option<serde_json::Value> =
-        row.try_get("", "origin_snapshot").ok().flatten();
-    let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
-
-    Ok(SchemaRecord {
-        id,
-        tenant_id,
-        workspace_id: workspace_id_out,
-        name: schema_name,
-        version,
-        definition: serde_json::from_value(definition).internal()?,
-        status,
-        origin_template_id,
-        origin_status,
-        origin_snapshot: origin_snapshot
-            .map(|v| serde_json::from_value(v).internal())
-            .transpose()?,
-        created_at,
-    })
-}
-
-/// SQLite variant of `create_schema`: inserts the row directly with hex-string UUIDs so FK
-/// constraints (which compare against hex-string TEXT columns) evaluate correctly.
-async fn create_schema_sqlite(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-    definition: MetaSchemaDefinition,
-    origin_template_id: Option<Uuid>,
-    origin_snapshot: Option<MetaSchemaDefinition>,
-) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
-    use sea_orm::{DatabaseBackend, Statement};
-
-    validate_definition(&definition)?;
-    tracing::debug!("create_schema_sqlite: validation OK, name={}", definition.name);
-
-    let name = definition.name.clone();
-    tracing::debug!("create_schema_sqlite: ws_hex={}, tenant_hex={}", uuid_hex(workspace_id), uuid_hex(tenant_id));
-
-    crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
-        .await
-        .internal()?;
-
-    // Find previous active schema version
-    let sql = format!(
-        "SELECT id, tenant_id, workspace_id, name, version, definition, status, \
-         origin_template_id, origin_status, origin_snapshot, created_at \
-         FROM content_schemas \
-         WHERE workspace_id = '{}' AND name = '{}' AND status = 'active' \
-         ORDER BY version DESC LIMIT 1",
-        workspace_id,
-        name.replace('\'', "''")
-    );
-    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
-    let rows = conn.query_all_raw(stmt).await.internal()?;
-
-    let previous: Option<SchemaRecord> = if let Some(row) = rows.first() {
-        let id = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
-        let tenant_id =
-            Uuid::parse_str(&row.try_get::<String>("", "tenant_id").internal()?).internal()?;
-        let workspace_id_out =
-            Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
-        let schema_name: String = row.try_get("", "name").internal()?;
-        let version: i32 = row.try_get("", "version").internal()?;
-        let definition: serde_json::Value = row.try_get("", "definition").internal()?;
-        let status: String = row.try_get("", "status").internal()?;
-        let origin_template_id: Option<Uuid> = row
-            .try_get::<Option<String>>("", "origin_template_id")
-            .ok()
-            .flatten()
-            .map(|s| Uuid::parse_str(&s).internal())
-            .transpose()
-            .internal()?;
-        let origin_status: String = row.try_get("", "origin_status").internal()?;
-        let origin_snapshot: Option<serde_json::Value> =
-            row.try_get("", "origin_snapshot").ok().flatten();
-        let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
-        Some(SchemaRecord {
-            id,
-            tenant_id,
-            workspace_id: workspace_id_out,
-            name: schema_name,
-            version,
-            definition: serde_json::from_value(definition).internal()?,
-            status,
-            origin_template_id,
-            origin_status,
-            origin_snapshot: origin_snapshot
-                .map(|v| serde_json::from_value(v).internal())
-                .transpose()
-                .internal()?,
-            created_at,
-        })
-    } else {
-        None
-    };
-
-    // Only the first version of a name mints an origin from what the caller passed.
-    let (origin_template_id, origin_snapshot) = match &previous {
-        Some(previous) if origin_template_id.is_none() => (
-            previous.origin_template_id,
-            previous.origin_snapshot.clone(),
-        ),
-        _ => (origin_template_id, origin_snapshot),
-    };
-
-    let (next_version, diff) = match &previous {
-        Some(previous) => {
-            let diff = metaschema::diff(&previous.definition, &definition);
-            (previous.version + 1, diff)
-        }
-        None => (
-            1,
-            VersioningDiff {
-                is_breaking: false,
-                reasons: Vec::new(),
-            },
-        ),
-    };
-
-    if previous.is_some() {
-        // Archive previous active schemas
-        let archive_sql = format!(
-            "UPDATE content_schemas SET status = 'archived', updated_at = '{}' \
-             WHERE workspace_id = '{}' AND name = '{}' AND status = 'active'",
-            chrono::Utc::now().to_rfc3339(),
-            workspace_id,
-            name.replace('\'', "''")
-        );
-        conn.execute_raw(Statement::from_string(DatabaseBackend::Sqlite, archive_sql))
-            .await
-            .internal()?;
-    }
-
-    let definition_json = serde_json::to_value(&definition).internal()?;
-    let origin_snapshot_json = origin_snapshot
-        .map(|snapshot| serde_json::to_value(&snapshot))
-        .transpose()
-        .internal()?;
-    let origin_status = if origin_template_id.is_some() {
-        ORIGIN_STATUS_LINKED
-    } else {
-        ORIGIN_STATUS_DETACHED
-    };
-
-    let now = chrono::Utc::now().to_rfc3339();
-    let insert_sql = format!(
-        "INSERT INTO content_schemas (id, tenant_id, workspace_id, name, version, definition, status, origin_template_id, origin_status, origin_snapshot, created_at) \
-         VALUES ('{}', '{}', '{}', '{}', {}, '{}', '{}', {}, '{}', '{}', '{}')",
-        Uuid::now_v7(),
-        tenant_id,
-        workspace_id,
-        name,
-        next_version,
-        definition_json.to_string().replace('\'', "''"),
-        "active",
-        origin_template_id
-            .map(|u| format!("'{}'", u))
-            .unwrap_or("NULL".to_string()),
-        origin_status,
-        origin_snapshot_json
-            .map(|v| format!("'{}'", v.to_string().replace('\'', "''")))
-            .unwrap_or("NULL".to_string()),
-        now
-    );
-
-    conn.execute_raw(Statement::from_string(DatabaseBackend::Sqlite, insert_sql))
-        .await
-        .internal()?;
-
-    // Fetch the inserted row
-    let select_sql = format!(
-        "SELECT id, tenant_id, workspace_id, name, version, definition, status, \
-         origin_template_id, origin_status, origin_snapshot, created_at \
-         FROM content_schemas \
-         WHERE workspace_id = '{}' AND name = '{}' AND status = 'active' \
-         ORDER BY version DESC LIMIT 1",
-        workspace_id,
-        name.replace('\'', "''")
-    );
-    let stmt = Statement::from_string(DatabaseBackend::Sqlite, select_sql);
-    let rows = conn.query_all_raw(stmt).await.internal()?;
-    let row = rows.first().ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!("schema not found after insert"))
-    })?;
-
-    let id = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
-    let tenant_id =
-        Uuid::parse_str(&row.try_get::<String>("", "tenant_id").internal()?).internal()?;
-    let workspace_id_out =
-        Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
-    let schema_name: String = row.try_get("", "name").internal()?;
-    let version: i32 = row.try_get("", "version").internal()?;
-    let definition: serde_json::Value = row.try_get("", "definition").internal()?;
-    let status: String = row.try_get("", "status").internal()?;
-    let origin_template_id: Option<Uuid> = row
-        .try_get::<Option<String>>("", "origin_template_id")
-        .ok()
-        .flatten()
-        .map(|s| Uuid::parse_str(&s).internal())
-        .transpose()?;
-    let origin_status: String = row.try_get("", "origin_status").internal()?;
-    let origin_snapshot: Option<serde_json::Value> =
-        row.try_get("", "origin_snapshot").ok().flatten();
-    let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
-
-    let record = SchemaRecord {
-        id,
-        tenant_id,
-        workspace_id: workspace_id_out,
-        name: schema_name,
-        version,
-        definition: serde_json::from_value(definition).internal()?,
-        status,
-        origin_template_id,
-        origin_status,
-        origin_snapshot: origin_snapshot
-            .map(|v| serde_json::from_value(v).internal())
-            .transpose()?,
-        created_at,
-    };
-
-    // Mark workspace active
-    crate::models::identity_workspaces::mark_active(conn, workspace_id, id).await?;
-
-    Ok((record, diff))
 }
 
 /// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
@@ -437,9 +159,6 @@ pub async fn get_by_id(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return get_by_id_sqlite(conn, workspace_id, schema_id).await;
-    }
     use super::_entities::content_schemas::Column;
 
     let row = Entity::find()
@@ -455,64 +174,6 @@ pub async fn get_by_id(
             "schema '{schema_id}' was not found"
         ))),
     }
-}
-
-/// SQLite variant of `get_by_id`: uses raw SQL with hex-string UUIDs in the WHERE clause.
-async fn get_by_id_sqlite(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    schema_id: Uuid,
-) -> Result<SchemaRecord, YorishiroError> {
-    use sea_orm::{DatabaseBackend, Statement};
-
-    let sql = format!(
-        "SELECT id, tenant_id, workspace_id, name, version, definition, status, \
-         origin_template_id, origin_status, origin_snapshot, created_at \
-         FROM content_schemas \
-         WHERE id = '{}' AND workspace_id = '{}'",
-        schema_id, workspace_id
-    );
-    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
-    let rows = conn.query_all_raw(stmt).await.internal()?;
-    let row = rows
-        .first()
-        .ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?;
-
-    let id = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
-    let tenant_id =
-        Uuid::parse_str(&row.try_get::<String>("", "tenant_id").internal()?).internal()?;
-    let workspace_id_out =
-        Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
-    let schema_name: String = row.try_get("", "name").internal()?;
-    let version: i32 = row.try_get("", "version").internal()?;
-    let definition: serde_json::Value = row.try_get("", "definition").internal()?;
-    let status: String = row.try_get("", "status").internal()?;
-    let origin_template_id: Option<Uuid> = row
-        .try_get::<Option<String>>("", "origin_template_id")
-        .ok()
-        .flatten()
-        .map(|s| Uuid::parse_str(&s).internal())
-        .transpose()?;
-    let origin_status: String = row.try_get("", "origin_status").internal()?;
-    let origin_snapshot: Option<serde_json::Value> =
-        row.try_get("", "origin_snapshot").ok().flatten();
-    let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
-
-    Ok(SchemaRecord {
-        id,
-        tenant_id,
-        workspace_id: workspace_id_out,
-        name: schema_name,
-        version,
-        definition: serde_json::from_value(definition).internal()?,
-        status,
-        origin_template_id,
-        origin_status,
-        origin_snapshot: origin_snapshot
-            .map(|v| serde_json::from_value(v).internal())
-            .transpose()?,
-        created_at,
-    })
 }
 
 /// A schema whose origin template has been edited since the copy was taken.
@@ -586,25 +247,18 @@ pub async fn create_schema(
     origin_template_id: Option<Uuid>,
     origin_snapshot: Option<MetaSchemaDefinition>,
 ) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return create_schema_sqlite(
-            conn,
-            tenant_id,
-            workspace_id,
-            definition,
-            origin_template_id,
-            origin_snapshot,
-        )
-        .await;
-    }
-
     use super::_entities::content_schemas::Column;
 
     validate_definition(&definition)?;
-    tracing::debug!("create_schema_sqlite: validation OK");
+    tracing::debug!("create_schema: validation OK");
 
     let name = definition.name.clone();
-    tracing::debug!("create_schema_sqlite: name={}, ws={}, tenant={}", name, workspace_id, tenant_id);
+    tracing::debug!(
+        "create_schema: name={}, ws={}, tenant={}",
+        name,
+        workspace_id,
+        tenant_id
+    );
 
     crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
         .await
