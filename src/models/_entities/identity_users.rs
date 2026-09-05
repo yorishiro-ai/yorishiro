@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_users")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(column_type = "Text", unique)]
     pub email: String,

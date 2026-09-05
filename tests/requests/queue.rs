@@ -128,6 +128,9 @@ fn args_for(class: WorkerClass) -> EmbeddingSyncArgs {
 #[tokio::test]
 #[serial]
 async fn enqueue_for_class_puts_a_row_in_the_queue() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_sqlite_queue(|ctx, pool| async move {
         embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Shared))
             .await
@@ -147,6 +150,9 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 #[tokio::test]
 #[serial]
 async fn each_worker_class_carries_its_own_tag() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_sqlite_queue(|ctx, pool| async move {
         for class in [
             WorkerClass::Shared,

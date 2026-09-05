@@ -55,6 +55,9 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
     // provider-missing path, not on the local provider succeeding.
     unsafe { std::env::set_var("YORISHIRO_EMBEDDING_PROVIDER", "none") };
 
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { read_key } = setup(&ctx).await;
 
@@ -77,6 +80,9 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
 #[tokio::test]
 #[serial]
 async fn search_requires_authentication() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/search?query_text=hello").await;
         assert_eq!(response.status_code(), 401);

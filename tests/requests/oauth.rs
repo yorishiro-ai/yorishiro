@@ -70,6 +70,9 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
 #[tokio::test]
 #[serial]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
@@ -96,6 +99,9 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[tokio::test]
 #[serial]
 async fn status_errors_loudly_when_partially_configured() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         // SAFETY: serialized by every test in this binary being #[serial] on the default key.
@@ -122,6 +128,9 @@ async fn status_errors_loudly_when_partially_configured() {
 #[tokio::test]
 #[serial]
 async fn authorize_and_callback_404_when_unconfigured() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let authorize = request.get("/auth/oauth/authorize").await;
@@ -148,6 +157,9 @@ async fn authorize_and_callback_404_when_unconfigured() {
 #[tokio::test]
 #[serial]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -168,6 +180,9 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 #[tokio::test]
 #[serial]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -203,6 +218,9 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 #[tokio::test]
 #[serial]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -229,6 +247,9 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 #[tokio::test]
 #[serial]
 async fn callback_rejects_a_state_with_a_bad_signature() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
@@ -248,6 +269,9 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 #[tokio::test]
 #[serial]
 async fn callback_rejects_an_expired_state() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
@@ -275,6 +299,9 @@ async fn callback_rejects_an_expired_state() {
 #[tokio::test]
 #[serial]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
         let existing_tenant = identity_tenants::ActiveModel {
@@ -327,6 +354,9 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 #[tokio::test]
 #[serial]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.

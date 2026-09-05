@@ -177,6 +177,9 @@ async fn check_entity_quota(
 
 /// Counts how many entities a workspace holds, for quota enforcement and workspace-detail summaries.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return count_sqlite(conn, workspace_id).await;
+    }
     use super::_entities::content_entities::Column;
 
     Entity::find()
@@ -185,6 +188,26 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
         .await
         .internal()
         .map(|n| n as i64)
+}
+
+/// SQLite variant of `count`: uses raw SQL with hex-string UUIDs.
+async fn count_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<i64, YorishiroError> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let sql = format!(
+        "SELECT count(*) FROM content_entities WHERE workspace_id = '{}'",
+        workspace_id
+    );
+    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
+    let rows = conn.query_all_raw(stmt).await.internal()?;
+    let row = rows
+        .first()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("no result from count")))?;
+    let count: i64 = row.try_get("", "count(*)").internal()?;
+    Ok(count)
 }
 
 /// Creates a new entity: resolves the schema name to its currently active schema, checks that the entity_type exists in that version, validates `data`, and persists the result.
@@ -232,7 +255,143 @@ pub async fn create(
         created_by: ActiveValue::Set(created_by),
         ..Default::default()
     };
+
+    // On SQLite, UUID columns are stored as hex strings in TEXT columns.
+    // SeaORM serializes `Uuid` as 16-byte binary, which FK checks cannot
+    // match against the hex-string FK targets. Convert to hex for the
+    // insert so the FK constraints evaluate correctly.
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        let id = match active.id {
+            sea_orm::ActiveValue::NotSet => Uuid::now_v7(),
+            sea_orm::ActiveValue::Set(id) | sea_orm::ActiveValue::Unchanged(id) => id,
+        };
+        let mut active = active;
+        active.id = ActiveValue::Set(id);
+        return create_sqlite(conn, active).await.internal();
+    }
+
     active.insert(conn).await.internal().map(EntityRecord::from)
+}
+
+/// SQLite variant of `create`: inserts the row directly with hex-string UUIDs so FK
+/// constraints (which compare against hex-string TEXT columns) evaluate correctly.
+async fn create_sqlite(
+    conn: &impl ConnectionTrait,
+    active: ActiveModel,
+) -> Result<EntityRecord, DbErr> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let entity_id = match active.id {
+        sea_orm::ActiveValue::Set(id) | sea_orm::ActiveValue::Unchanged(id) => id,
+        _ => return Err(DbErr::Custom("id is not set".into())),
+    };
+    let workspace_id = match active.workspace_id {
+        sea_orm::ActiveValue::Set(id) | sea_orm::ActiveValue::Unchanged(id) => id,
+        _ => return Err(DbErr::Custom("workspace_id is not set".into())),
+    };
+    let schema_id = match active.schema_id {
+        sea_orm::ActiveValue::Set(id) | sea_orm::ActiveValue::Unchanged(id) => id,
+        _ => return Err(DbErr::Custom("schema_id is not set".into())),
+    };
+    let schema_version: i32 = match active.schema_version {
+        sea_orm::ActiveValue::Set(v) | sea_orm::ActiveValue::Unchanged(v) => v,
+        _ => return Err(DbErr::Custom("schema_version is not set".into())),
+    };
+    let entity_type: String = match active.entity_type {
+        sea_orm::ActiveValue::Set(v) | sea_orm::ActiveValue::Unchanged(v) => v,
+        _ => return Err(DbErr::Custom("entity_type is not set".into())),
+    };
+    let data: serde_json::Value = match active.data {
+        sea_orm::ActiveValue::Set(v) | sea_orm::ActiveValue::Unchanged(v) => v,
+        _ => return Err(DbErr::Custom("data is not set".into())),
+    };
+    let created_by = match active.created_by {
+        sea_orm::ActiveValue::Set(Some(id)) | sea_orm::ActiveValue::Unchanged(Some(id)) => Some(id),
+        _ => None,
+    };
+    let updated_by = match active.updated_by {
+        sea_orm::ActiveValue::Set(Some(id)) | sea_orm::ActiveValue::Unchanged(Some(id)) => Some(id),
+        _ => None,
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Build INSERT with hex-string UUIDs (TEXT columns)
+    let insert_sql = format!(
+        "INSERT INTO content_entities (id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at) \
+         VALUES ('{}', '{}', '{}', {}, '{}', '{}', {}, {}, '{}', '{}')",
+        entity_id,
+        workspace_id,
+        schema_id,
+        schema_version,
+        entity_type,
+        data.to_string().replace('\'', "''"),
+        created_by
+            .map(|u| format!("'{}'", u))
+            .unwrap_or("NULL".to_string()),
+        updated_by
+            .map(|u| format!("'{}'", u))
+            .unwrap_or("NULL".to_string()),
+        now,
+        now
+    );
+
+    conn.execute_raw(Statement::from_string(DatabaseBackend::Sqlite, insert_sql))
+        .await?;
+
+    // Fetch the inserted row using raw SQL to avoid SeaORM's binary UUID decoding issue
+    let select_sql = format!(
+        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at FROM content_entities WHERE id = '{}'",
+        entity_id
+    );
+    let rows = conn
+        .query_all_raw(Statement::from_string(DatabaseBackend::Sqlite, select_sql))
+        .await?;
+    let row = rows.first().ok_or(DbErr::RecordNotFound(
+        "entity not found after insert".to_string(),
+    ))?;
+
+    // Decode UUIDs manually since try_get::<Uuid> expects 16-byte binary
+    let id = Uuid::parse_str(&row.try_get::<String>("", "id")?)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    let workspace_id_out = Uuid::parse_str(&row.try_get::<String>("", "workspace_id")?)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    let schema_id_out = Uuid::parse_str(&row.try_get::<String>("", "schema_id")?)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    let entity_type_out: String = row.try_get("", "entity_type")?;
+    let schema_version_out: i32 = row.try_get("", "schema_version")?;
+    let data_raw: serde_json::Value = row.try_get("", "data")?;
+    let created_by_out: Option<Uuid> = row
+        .try_get::<Option<String>>("", "created_by")
+        .ok()
+        .flatten()
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .map_err(|e: uuid::Error| DbErr::Custom(e.to_string()))?;
+    let updated_by_out: Option<Uuid> = row
+        .try_get::<Option<String>>("", "updated_by")
+        .ok()
+        .flatten()
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .map_err(|e: uuid::Error| DbErr::Custom(e.to_string()))?;
+    let created_at: chrono::DateTime<chrono::Utc> = row.try_get("", "created_at")?;
+    let updated_at: chrono::DateTime<chrono::Utc> = row
+        .try_get("", "updated_at")
+        .ok()
+        .unwrap_or_else(chrono::Utc::now);
+
+    Ok(EntityRecord {
+        id,
+        workspace_id: workspace_id_out,
+        schema_id: schema_id_out,
+        schema_version: schema_version_out,
+        entity_type: entity_type_out,
+        data: data_raw,
+        created_by: created_by_out,
+        updated_by: updated_by_out,
+        created_at,
+        updated_at,
+    })
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
@@ -241,6 +400,9 @@ pub async fn get(
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<EntityRecord, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return get_sqlite(conn, workspace_id, id).await;
+    }
     use super::_entities::content_entities::Column;
 
     Entity::find()
@@ -253,6 +415,65 @@ pub async fn get(
         .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))
 }
 
+/// SQLite variant of `get`: uses raw SQL with hex-string UUIDs in the WHERE clause.
+async fn get_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<EntityRecord, YorishiroError> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let sql = format!(
+        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at FROM content_entities WHERE id = '{}' AND workspace_id = '{}'",
+        id, workspace_id
+    );
+    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
+    let rows = conn.query_all_raw(stmt).await.internal()?;
+    let row = rows
+        .first()
+        .ok_or_else(|| YorishiroError::not_found(format!("entity '{id}' was not found")))?;
+
+    let id_out = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
+    let workspace_id_out =
+        Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
+    let schema_id =
+        Uuid::parse_str(&row.try_get::<String>("", "schema_id").internal()?).internal()?;
+    let schema_version: i32 = row.try_get("", "schema_version").internal()?;
+    let entity_type: String = row.try_get("", "entity_type").internal()?;
+    let data_raw: serde_json::Value = row.try_get("", "data").internal()?;
+    let created_by = row
+        .try_get::<Option<String>>("", "created_by")
+        .ok()
+        .flatten()
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .ok()
+        .flatten();
+    let updated_by = row
+        .try_get::<Option<String>>("", "updated_by")
+        .ok()
+        .flatten()
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .ok()
+        .flatten();
+    let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
+    let updated_at: DateTime<Utc> = row.try_get("", "updated_at").internal()?;
+
+    Ok(EntityRecord {
+        id: id_out,
+        workspace_id: workspace_id_out,
+        schema_id,
+        schema_version,
+        entity_type,
+        data: data_raw,
+        created_by,
+        updated_by,
+        created_at,
+        updated_at,
+    })
+}
+
 /// [`get`], batched: one query for every id instead of one query per id.
 /// An id with no matching row (deleted, or belonging to another workspace) is simply absent from
 /// the returned map, mirroring `content_relations::neighbors_batch`'s own no-match-is-no-entry
@@ -262,6 +483,9 @@ pub async fn get_batch(
     workspace_id: Uuid,
     ids: &[Uuid],
 ) -> Result<std::collections::HashMap<Uuid, EntityRecord>, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return get_batch_sqlite(conn, workspace_id, ids).await;
+    }
     use super::_entities::content_entities::Column;
 
     if ids.is_empty() {
@@ -277,6 +501,82 @@ pub async fn get_batch(
         .internal()?;
 
     Ok(rows.into_iter().map(|row| (row.id, row)).collect())
+}
+
+/// SQLite variant of `get_batch`: uses raw SQL with hex-string UUIDs.
+async fn get_batch_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, EntityRecord>, YorishiroError> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let hex_ids: Vec<String> = ids.iter().map(|u| u.to_string()).collect();
+    let placeholders = hex_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at \
+         FROM content_entities WHERE workspace_id = '{}' AND id IN ({})",
+        workspace_id, placeholders
+    );
+
+    let values: Vec<sea_orm::Value> = hex_ids
+        .iter()
+        .map(|s| sea_orm::Value::String(Some(s.clone())))
+        .collect();
+    let stmt = Statement::from_sql_and_values(DatabaseBackend::Sqlite, &sql, values);
+    let rows = conn.query_all_raw(stmt).await.internal()?;
+
+    let mut map = std::collections::HashMap::new();
+    for row in rows {
+        let id_out = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
+        let ws =
+            Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
+        let schema_id =
+            Uuid::parse_str(&row.try_get::<String>("", "schema_id").internal()?).internal()?;
+        let schema_version: i32 = row.try_get("", "schema_version").internal()?;
+        let entity_type: String = row.try_get("", "entity_type").internal()?;
+        let data_raw: serde_json::Value = row.try_get("", "data").internal()?;
+        let created_by = row
+            .try_get::<Option<String>>("", "created_by")
+            .ok()
+            .flatten()
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .ok()
+            .flatten();
+        let updated_by = row
+            .try_get::<Option<String>>("", "updated_by")
+            .ok()
+            .flatten()
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .ok()
+            .flatten();
+        let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
+        let updated_at: DateTime<Utc> = row.try_get("", "updated_at").internal()?;
+
+        map.insert(
+            id_out,
+            EntityRecord {
+                id: id_out,
+                workspace_id: ws,
+                schema_id,
+                schema_version,
+                entity_type,
+                data: data_raw,
+                created_by,
+                updated_by,
+                created_at,
+                updated_at,
+            },
+        );
+    }
+
+    Ok(map)
 }
 
 /// Fully replaces an existing entity's `data`.
@@ -295,6 +595,12 @@ pub async fn update(
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
     validate_data(entity_type_def, &data)?;
 
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return update_sqlite(conn, workspace_id, id, data, updated_by)
+            .await
+            .internal();
+    }
+
     let active = ActiveModel {
         id: ActiveValue::Unchanged(id),
         data: ActiveValue::Set(data),
@@ -304,12 +610,102 @@ pub async fn update(
     active.update(conn).await.internal().map(EntityRecord::from)
 }
 
+/// SQLite variant of `update`: uses raw SQL with hex-string UUIDs so FK constraints
+/// (which compare against hex-string TEXT columns) evaluate correctly.
+async fn update_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+    data: serde_json::Value,
+    updated_by: Option<Uuid>,
+) -> Result<EntityRecord, DbErr> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Build UPDATE with hex-string UUIDs in WHERE clause
+    let update_sql = format!(
+        "UPDATE content_entities SET data = '{}', updated_by = {}, updated_at = '{}' \
+         WHERE id = '{}' AND workspace_id = '{}'",
+        data.to_string().replace('\'', "''"),
+        updated_by
+            .map(|u| format!("'{}'", u))
+            .unwrap_or("NULL".to_string()),
+        now,
+        id,
+        workspace_id
+    );
+
+    let result = conn
+        .execute_raw(Statement::from_string(DatabaseBackend::Sqlite, update_sql))
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(DbErr::Custom("None of the records are updated".into()));
+    }
+
+    // Fetch the updated row
+    let select_sql = format!(
+        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at FROM content_entities WHERE id = '{}'",
+        id
+    );
+    let rows = conn
+        .query_all_raw(Statement::from_string(DatabaseBackend::Sqlite, select_sql))
+        .await?;
+    let row = rows.first().ok_or(DbErr::RecordNotFound(
+        "entity not found after update".to_string(),
+    ))?;
+
+    let id_out = Uuid::parse_str(&row.try_get::<String>("", "id")?)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    let workspace_id_out = Uuid::parse_str(&row.try_get::<String>("", "workspace_id")?)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    let schema_id = Uuid::parse_str(&row.try_get::<String>("", "schema_id")?)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    let schema_version: i32 = row.try_get("", "schema_version")?;
+    let entity_type: String = row.try_get("", "entity_type")?;
+    let data_raw: serde_json::Value = row.try_get("", "data")?;
+    let created_by: Option<Uuid> = row
+        .try_get::<Option<String>>("", "created_by")
+        .ok()
+        .flatten()
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .map_err(|e: uuid::Error| DbErr::Custom(e.to_string()))?;
+    let updated_by_out: Option<Uuid> = row
+        .try_get::<Option<String>>("", "updated_by")
+        .ok()
+        .flatten()
+        .map(|s| Uuid::parse_str(&s))
+        .transpose()
+        .map_err(|e: uuid::Error| DbErr::Custom(e.to_string()))?;
+    let created_at: chrono::DateTime<chrono::Utc> = row.try_get("", "created_at")?;
+    let updated_at: chrono::DateTime<chrono::Utc> = row.try_get("", "updated_at")?;
+
+    Ok(EntityRecord {
+        id: id_out,
+        workspace_id: workspace_id_out,
+        schema_id,
+        schema_version,
+        entity_type,
+        data: data_raw,
+        created_by,
+        updated_by: updated_by_out,
+        created_at,
+        updated_at,
+    })
+}
+
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
 pub async fn delete(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<(), YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return delete_sqlite(conn, workspace_id, id).await.internal();
+    }
+
     use super::_entities::content_entities::Column;
 
     let result = Entity::delete_many()
@@ -328,12 +724,39 @@ pub async fn delete(
     }
 }
 
+/// SQLite variant of `delete`: uses raw SQL with hex-string UUIDs so FK constraints
+/// (which compare against hex-string TEXT columns) evaluate correctly.
+async fn delete_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<(), DbErr> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let sql = format!(
+        "DELETE FROM content_entities WHERE id = '{}' AND workspace_id = '{}'",
+        id, workspace_id
+    );
+    let result = conn
+        .execute_raw(Statement::from_string(DatabaseBackend::Sqlite, sql))
+        .await?;
+
+    if result.rows_affected() == 0 {
+        Err(DbErr::Custom("None of the records are updated".into()))
+    } else {
+        Ok(())
+    }
+}
+
 /// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's added as a raw `Expr::cust_with_values` condition instead.
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return list_sqlite(conn, workspace_id, query).await;
+    }
     use super::_entities::content_entities::Column;
 
     let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
@@ -359,6 +782,99 @@ pub async fn list(
         .internal()
 }
 
+/// SQLite variant of `list`: uses raw SQL with hex-string UUIDs in the WHERE clause.
+async fn list_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    query: ListEntitiesQuery,
+) -> Result<Vec<EntityRecord>, YorishiroError> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    // Build SQL with hex-string UUIDs — all values are inline, no placeholders.
+    let mut conditions = vec![format!("workspace_id = '{}'", workspace_id)];
+
+    if let Some(entity_type) = query.entity_type {
+        conditions.push(format!(
+            "entity_type = '{}'",
+            entity_type.replace('\'', "''")
+        ));
+    }
+    if let Some(filter) = query.filter {
+        // On SQLite, JSON is stored as TEXT; use LIKE on the serialized data column.
+        conditions.push(format!(
+            "data LIKE '%{}%'",
+            serde_json::to_string(&filter)
+                .internal()?
+                .replace('\'', "''")
+        ));
+    }
+    if let Some(schema_version) = query.schema_version {
+        conditions.push(format!("schema_version = {}", schema_version));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at FROM content_entities{} \
+         ORDER BY created_at DESC LIMIT {} OFFSET {}",
+        where_clause,
+        query.page.limit(),
+        query.page.offset()
+    );
+
+    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
+    let rows = conn.query_all_raw(stmt).await.internal()?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let id_out = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
+        let ws =
+            Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
+        let schema_id =
+            Uuid::parse_str(&row.try_get::<String>("", "schema_id").internal()?).internal()?;
+        let schema_version: i32 = row.try_get("", "schema_version").internal()?;
+        let entity_type: String = row.try_get("", "entity_type").internal()?;
+        let data_raw: serde_json::Value = row.try_get("", "data").internal()?;
+        let created_by = row
+            .try_get::<Option<String>>("", "created_by")
+            .ok()
+            .flatten()
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .ok()
+            .flatten();
+        let updated_by = row
+            .try_get::<Option<String>>("", "updated_by")
+            .ok()
+            .flatten()
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .ok()
+            .flatten();
+        let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
+        let updated_at: DateTime<Utc> = row.try_get("", "updated_at").internal()?;
+
+        result.push(EntityRecord {
+            id: id_out,
+            workspace_id: ws,
+            schema_id,
+            schema_version,
+            entity_type,
+            data: data_raw,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at,
+        });
+    }
+
+    Ok(result)
+}
+
 /// Fetches every entity for the workspace, with no pagination limit, for a full-workspace data export.
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
@@ -366,6 +882,9 @@ pub async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return export_all_sqlite(conn, workspace_id).await;
+    }
     use super::_entities::content_entities::Column;
 
     Entity::find()
@@ -375,6 +894,66 @@ pub async fn export_all(
         .all(conn)
         .await
         .internal()
+}
+
+/// SQLite variant of `export_all`: uses raw SQL with hex-string UUIDs.
+async fn export_all_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<EntityRecord>, YorishiroError> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let sql = format!(
+        "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, created_by, updated_by, created_at, updated_at FROM content_entities WHERE workspace_id = '{}' ORDER BY created_at ASC",
+        workspace_id
+    );
+    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
+    let rows = conn.query_all_raw(stmt).await.internal()?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let id_out = Uuid::parse_str(&row.try_get::<String>("", "id").internal()?).internal()?;
+        let ws =
+            Uuid::parse_str(&row.try_get::<String>("", "workspace_id").internal()?).internal()?;
+        let schema_id =
+            Uuid::parse_str(&row.try_get::<String>("", "schema_id").internal()?).internal()?;
+        let schema_version: i32 = row.try_get("", "schema_version").internal()?;
+        let entity_type: String = row.try_get("", "entity_type").internal()?;
+        let data_raw: serde_json::Value = row.try_get("", "data").internal()?;
+        let created_by = row
+            .try_get::<Option<String>>("", "created_by")
+            .ok()
+            .flatten()
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .ok()
+            .flatten();
+        let updated_by = row
+            .try_get::<Option<String>>("", "updated_by")
+            .ok()
+            .flatten()
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .ok()
+            .flatten();
+        let created_at: DateTime<Utc> = row.try_get("", "created_at").internal()?;
+        let updated_at: DateTime<Utc> = row.try_get("", "updated_at").internal()?;
+
+        result.push(EntityRecord {
+            id: id_out,
+            workspace_id: ws,
+            schema_id,
+            schema_version,
+            entity_type,
+            data: data_raw,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at,
+        });
+    }
+
+    Ok(result)
 }
 
 /// How one entity stands relative to the active version of its schema.
@@ -682,6 +1261,10 @@ pub async fn undo_job(
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<UndoReport, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return undo_job_sqlite(conn, workspace_id, job_id).await;
+    }
+
     use super::_entities::content_entity_snapshots;
 
     let snapshots: Vec<EntitySnapshot> = content_entity_snapshots::Entity::find()
@@ -723,6 +1306,74 @@ pub async fn undo_job(
             Ok(()) => restored += 1,
             Err(DbErr::RecordNotUpdated) => missing += 1,
             Err(err) => return Err(err).internal(),
+        }
+    }
+
+    Ok(UndoReport {
+        job_id,
+        restored,
+        missing,
+    })
+}
+
+/// SQLite variant of `undo_job`: queries snapshots with hex-string UUIDs so SeaORM's
+/// `EntitySnapshot` model can decode them (UUID columns stored as hex in TEXT on SQLite).
+async fn undo_job_sqlite(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<UndoReport, YorishiroError> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    // Fetch snapshots using hex-string UUIDs in WHERE clause
+    let sql = format!(
+        "SELECT id, job_id, workspace_id, entity_id, schema_id, schema_version, data, created_at \
+         FROM content_entity_snapshots \
+         WHERE workspace_id = '{}' AND job_id = '{}' \
+         ORDER BY created_at ASC, id ASC",
+        workspace_id, job_id
+    );
+    let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
+    let rows = conn.query_all_raw(stmt).await.internal()?;
+
+    if rows.is_empty() {
+        return Err(YorishiroError::not_found(format!(
+            "no snapshots for job '{job_id}'"
+        )));
+    }
+
+    let mut restored = 0i64;
+    let mut missing = 0i64;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    for row in &rows {
+        let entity_id =
+            Uuid::parse_str(&row.try_get::<String>("", "entity_id").internal()?).internal()?;
+        let schema_id =
+            Uuid::parse_str(&row.try_get::<String>("", "schema_id").internal()?).internal()?;
+        let schema_version: i32 = row.try_get("", "schema_version").internal()?;
+        let data: serde_json::Value = row.try_get("", "data").internal()?;
+
+        // Build UPDATE with hex-string UUIDs in WHERE clause
+        let update_sql = format!(
+            "UPDATE content_entities SET data = '{}', schema_id = '{}', schema_version = {}, updated_at = '{}' \
+             WHERE id = '{}' AND workspace_id = '{}'",
+            data.to_string().replace('\'', "''"),
+            schema_id,
+            schema_version,
+            now,
+            entity_id,
+            workspace_id
+        );
+
+        let result = conn
+            .execute_raw(Statement::from_string(DatabaseBackend::Sqlite, update_sql))
+            .await
+            .internal()?;
+        if result.rows_affected() == 0 {
+            missing += 1;
+        } else {
+            restored += 1;
         }
     }
 

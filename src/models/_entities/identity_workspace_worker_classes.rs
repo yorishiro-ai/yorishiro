@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_workspace_worker_classes")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub workspace_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub worker_class: String,

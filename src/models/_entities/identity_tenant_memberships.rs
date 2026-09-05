@@ -7,10 +7,13 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_tenant_memberships")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(unique_key = "uq_tenant_memberships_tenant_id_user_id")]
+    #[sea_orm(column_type = "Text")]
     pub tenant_id: Uuid,
     #[sea_orm(unique_key = "uq_tenant_memberships_tenant_id_user_id")]
+    #[sea_orm(column_type = "Text")]
     pub user_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub role: String,

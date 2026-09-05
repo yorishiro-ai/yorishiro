@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "content_entity_column_preferences")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(unique_key = "entity_column_preferences_workspace_entity_type_key")]
+    #[sea_orm(column_type = "Text")]
     pub workspace_id: Uuid,
     #[sea_orm(
         column_type = "Text",

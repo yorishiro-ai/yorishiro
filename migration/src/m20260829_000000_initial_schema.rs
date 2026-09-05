@@ -63,7 +63,7 @@ impl MigrationTrait for Migration {
                     .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(ColumnDef::new(Alias::new("max_workspaces")).integer())
-                    .col(helpers::created_at())
+                    .col(helpers::created_at(manager))
                     .col(ColumnDef::new(Alias::new("embedding_model")).text())
                     .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
                     .to_owned(),
@@ -98,7 +98,7 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Alias::new("display_name")).text())
             .col(ColumnDef::new(Alias::new("oauth_provider")).text())
             .col(ColumnDef::new(Alias::new("oauth_subject_id")).text())
-            .col(helpers::created_at())
+            .col(helpers::created_at(manager))
             .to_owned();
 
         // Every row is either password-authenticated (password_hash set, oauth_* both NULL) or OAuth-provisioned (oauth_provider + oauth_subject_id set, password_hash may be NULL), never a mix and never neither.
@@ -137,10 +137,10 @@ impl MigrationTrait for Migration {
             .table(Alias::new("identity_tenant_memberships"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
-            .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
-            .col(ColumnDef::new(Alias::new("user_id")).uuid().not_null())
+            .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
+            .col(helpers::uuid_col(manager, Alias::new("user_id")).not_null())
             .col(ColumnDef::new(Alias::new("role")).text().not_null())
-            .col(helpers::created_at())
+            .col(helpers::created_at(manager))
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_tenant_memberships_tenant_id")
@@ -206,7 +206,7 @@ impl MigrationTrait for Migration {
             .table(Alias::new("identity_workspaces"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
-            .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+            .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
             .col(ColumnDef::new(Alias::new("name")).text().not_null())
             .col(ColumnDef::new(Alias::new("max_entities")).integer())
             // A workspace exists before its schema does: `admin create-workspace` leaves it pending, and creating the schema marks it active.
@@ -222,8 +222,8 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Alias::new("embedding_dimensions")).integer())
             // Circular reference: a schema also names its workspace.
             // No foreign_key constraint here on Postgres since content_schemas may not exist yet when this migration runs; that FK is added further down, once that table exists.
-            .col(ColumnDef::new(Alias::new("schema_id")).uuid())
-            .col(helpers::created_at())
+            .col(helpers::uuid_col(manager, Alias::new("schema_id")))
+            .col(helpers::created_at(manager))
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_workspaces_tenant_id")
@@ -304,7 +304,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     // Nullable: a tenant-scoped key (one that spans every workspace in its tenant) carries no workspace_id at all.
-                    .col(ColumnDef::new(Alias::new("workspace_id")).uuid())
+                    .col(helpers::uuid_col(manager, Alias::new("workspace_id")))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_api_keys_workspace_id")
@@ -312,7 +312,7 @@ impl MigrationTrait for Migration {
                             .to(Alias::new("identity_workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
-                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_api_keys_tenant_id")
@@ -320,7 +320,7 @@ impl MigrationTrait for Migration {
                             .to(Alias::new("identity_tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
-                    .col(ColumnDef::new(Alias::new("user_id")).uuid())
+                    .col(helpers::uuid_col(manager, Alias::new("user_id")))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_api_keys_user_id")
@@ -344,8 +344,8 @@ impl MigrationTrait for Migration {
                                 "scope IN ('read', 'write', 'schema', 'migration')",
                             )),
                     )
-                    .col(helpers::created_at())
-                    .col(ColumnDef::new(Alias::new("last_used_at")).timestamp_with_time_zone())
+                    .col(helpers::created_at(manager))
+                    .col(helpers::ts_tz_col(manager, Alias::new("last_used_at")))
                     // audit: independent of scope.  A key is `scope=read, audit=true` to
                     // read the audit log without write access.
                     .col(
@@ -402,7 +402,7 @@ impl MigrationTrait for Migration {
             .table(Alias::new("identity_invites"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
-            .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+            .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
             .col(ColumnDef::new(Alias::new("email")).text().not_null())
             .col(ColumnDef::new(Alias::new("role")).text().not_null())
             .col(
@@ -411,13 +411,9 @@ impl MigrationTrait for Migration {
                     .not_null()
                     .unique_key(),
             )
-            .col(
-                ColumnDef::new(Alias::new("expires_at"))
-                    .timestamp_with_time_zone()
-                    .not_null(),
-            )
-            .col(ColumnDef::new(Alias::new("used_at")).timestamp_with_time_zone())
-            .col(helpers::created_at())
+            .col(helpers::ts_tz_col(manager, Alias::new("expires_at")).not_null())
+            .col(helpers::ts_tz_col(manager, Alias::new("used_at")))
+            .col(helpers::created_at(manager))
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_invites_tenant_id")
@@ -463,21 +459,17 @@ impl MigrationTrait for Migration {
         // The admin CLI creates invites as the schema owner during provisioning, before any request-scoped role needs to touch this table.
 
         // identity_templates
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
                     .table(Alias::new("identity_templates"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
-                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(ColumnDef::new(Alias::new("description")).text())
-                    .col(
-                        ColumnDef::new(Alias::new("definition"))
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .col(helpers::json_col(manager, Alias::new("definition")).not_null())
                     .col(ColumnDef::new(Alias::new("locale")).text())
                     .col(
                         ColumnDef::new(Alias::new("visibility"))
@@ -486,8 +478,8 @@ impl MigrationTrait for Migration {
                             .default("tenant"),
                     )
                     .col(ColumnDef::new(Alias::new("author")).text())
-                    .col(ColumnDef::new(Alias::new("fork_of")).uuid())
-                    .col(ColumnDef::new(Alias::new("created_by")).uuid())
+                    .col(helpers::uuid_col(manager, Alias::new("fork_of")))
+                    .col(helpers::uuid_col(manager, Alias::new("created_by")))
                     .col(created_at)
                     .col(updated_at)
                     .check(Expr::cust("visibility IN ('tenant', 'community')"))
@@ -598,8 +590,7 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Alias::new("reason")).text())
             // No `created_at`: this is a singleton row that exists from migration time, not a created record.
             .col(
-                ColumnDef::new(Alias::new("updated_at"))
-                    .timestamp_with_time_zone()
+                helpers::ts_tz_col(manager, Alias::new("updated_at"))
                     .not_null()
                     .default(Expr::current_timestamp()),
             )
@@ -641,10 +632,10 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("content_schemas"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
-                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                     // Schemas are scoped to a workspace, not a tenant: each workspace holds its own copy of a template, and editing one must not reach its siblings.
                     // `tenant_id` stays for the cross-tenant reads (community-visible templates, export).
-                    .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
                     .col(
                         ColumnDef::new(Alias::new("version"))
@@ -652,11 +643,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(1),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("definition"))
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .col(helpers::json_col(manager, Alias::new("definition")).not_null())
                     .col(
                         ColumnDef::new(Alias::new("status"))
                             .text()
@@ -666,22 +653,21 @@ impl MigrationTrait for Migration {
                     // Where this schema came from, and whether it still follows it.
                     // A hand-written schema is `detached` and has never been linked, told apart from an orphan by `origin_template_id` having never been set.
                     // `origin_snapshot` is the definition as copied, which is what a three-way comparison needs as its base.
-                    .col(ColumnDef::new(Alias::new("origin_template_id")).uuid())
+                    .col(helpers::uuid_col(manager, Alias::new("origin_template_id")))
                     .col(
                         ColumnDef::new(Alias::new("origin_status"))
                             .text()
                             .not_null()
                             .default("detached"),
                     )
-                    .col(ColumnDef::new(Alias::new("origin_snapshot")).json_binary())
-                    .col(helpers::created_at())
+                    .col(helpers::json_col(manager, Alias::new("origin_snapshot")))
+                    .col(helpers::created_at(manager))
                     // `updated_at` on every mutable table, including this one: the
                     // `detach_orphaned_schema_origin` trigger rewrites `origin_status`
                     // in place when a parent template is deleted, so a row could change
                     // with nothing recording when.
                     .col(
-                        ColumnDef::new(Alias::new("updated_at"))
-                            .timestamp_with_time_zone()
+                        helpers::ts_tz_col(manager, Alias::new("updated_at"))
                             .null()
                             .default(Expr::current_timestamp()),
                     )
@@ -837,7 +823,7 @@ impl MigrationTrait for Migration {
         helpers::grant(manager, "SELECT, INSERT, UPDATE, DELETE", "content_schemas").await?;
 
         // content_entities
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
 
         manager
             .create_table(
@@ -845,17 +831,17 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("content_entities"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
-                    .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("schema_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("schema_id")).not_null())
                     .col(
                         ColumnDef::new(Alias::new("schema_version"))
                             .integer()
                             .not_null(),
                     )
                     .col(ColumnDef::new(Alias::new("entity_type")).text().not_null())
-                    .col(ColumnDef::new(Alias::new("data")).json_binary().not_null())
-                    .col(ColumnDef::new(Alias::new("created_by")).uuid())
-                    .col(ColumnDef::new(Alias::new("updated_by")).uuid())
+                    .col(helpers::json_col(manager, Alias::new("data")).not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("created_by")))
+                    .col(helpers::uuid_col(manager, Alias::new("updated_by")))
                     .col(created_at)
                     .col(updated_at)
                     .foreign_key(
@@ -922,8 +908,7 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("content_entity_embeddings"))
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Alias::new("entity_id"))
-                            .uuid()
+                        helpers::uuid_col(manager, Alias::new("entity_id"))
                             .not_null()
                             .primary_key(),
                     )
@@ -989,12 +974,14 @@ impl MigrationTrait for Migration {
         // `entity_id` is written as `NEW.id` / `OLD.id` (not rowid) so the FTS5
         // join in `search.rs` (`e.id = fts.entity_id`) works regardless of VACUUM
         // or any other renumbering. The `rowid` is still needed by FTS5 internally.
+        // FTS5's `rowid` must be integer; omit it so FTS5 auto-assigns (since
+        // `content=''`), and keep `entity_id` for UUID lookups.
         helpers::sqlite_only(
             manager,
             "CREATE TRIGGER fts_content_entities_insert AFTER INSERT ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(rowid, data, workspace_id, entity_id) \
-                VALUES(NEW.id, NEW.data, NEW.workspace_id, NEW.id); \
+                INSERT INTO fts_content_entities(data, workspace_id, entity_id) \
+                VALUES(NEW.data, NEW.workspace_id, NEW.id); \
              END",
         )
         .await?;
@@ -1002,10 +989,10 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_update AFTER UPDATE ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id, entity_id) \
-                VALUES('delete', OLD.id, OLD.data, OLD.workspace_id, OLD.id); \
-                INSERT INTO fts_content_entities(rowid, data, workspace_id, entity_id) \
-                VALUES(NEW.id, NEW.data, NEW.workspace_id, NEW.id); \
+                INSERT INTO fts_content_entities(fts_content_entities, data, workspace_id, entity_id) \
+                VALUES('delete', OLD.data, OLD.workspace_id, OLD.id); \
+                INSERT INTO fts_content_entities(data, workspace_id, entity_id) \
+                VALUES(NEW.data, NEW.workspace_id, NEW.id); \
              END",
         )
         .await?;
@@ -1013,8 +1000,8 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE TRIGGER fts_content_entities_delete AFTER DELETE ON content_entities \
              BEGIN \
-                INSERT INTO fts_content_entities(fts_content_entities, rowid, data, workspace_id, entity_id) \
-                VALUES('delete', OLD.id, OLD.data, OLD.workspace_id, OLD.id); \
+                INSERT INTO fts_content_entities(fts_content_entities, data, workspace_id, entity_id) \
+                VALUES('delete', OLD.data, OLD.workspace_id, OLD.id); \
              END",
         )
         .await?;
@@ -1045,17 +1032,16 @@ impl MigrationTrait for Migration {
             .table(Alias::new("content_relations"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
-            .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
-            .col(ColumnDef::new(Alias::new("source_id")).uuid().not_null())
-            .col(ColumnDef::new(Alias::new("target_id")).uuid().not_null())
+            .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+            .col(helpers::uuid_col(manager, Alias::new("source_id")).not_null())
+            .col(helpers::uuid_col(manager, Alias::new("target_id")).not_null())
             .col(
                 ColumnDef::new(Alias::new("relation_type"))
                     .text()
                     .not_null(),
             )
             .col(
-                ColumnDef::new(Alias::new("properties"))
-                    .json_binary()
+                helpers::json_col(manager, Alias::new("properties"))
                     .not_null()
                     .default(Expr::cust("'{}'")),
             )
@@ -1065,7 +1051,7 @@ impl MigrationTrait for Migration {
                     .not_null()
                     .default("active"),
             )
-            .col(helpers::created_at())
+            .col(helpers::created_at(manager))
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_content_relations_workspace_id")
@@ -1163,20 +1149,20 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     // Batch job identifier, not a row reference: no REFERENCES clause in the old DDL, so no foreign key here either.
-                    .col(ColumnDef::new(Alias::new("job_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("job_id")).not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
                     // The entity a snapshot was taken of.
                     // No foreign key: an entity can be deleted while a snapshot of it remains, per the old DDL having no REFERENCES clause on this column.
-                    .col(ColumnDef::new(Alias::new("entity_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("entity_id")).not_null())
                     // No foreign key in the old DDL either.
-                    .col(ColumnDef::new(Alias::new("schema_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("schema_id")).not_null())
                     .col(
                         ColumnDef::new(Alias::new("schema_version"))
                             .integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Alias::new("data")).json_binary().not_null())
-                    .col(helpers::created_at())
+                    .col(helpers::json_col(manager, Alias::new("data")).not_null())
+                    .col(helpers::created_at(manager))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_content_entity_snapshots_workspace_id")
@@ -1235,15 +1221,14 @@ impl MigrationTrait for Migration {
         .await?;
 
         // identity_tenant_billing
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
                     .table(Alias::new("identity_tenant_billing"))
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
+                        helpers::uuid_col(manager, Alias::new("tenant_id"))
                             .not_null()
                             .primary_key(),
                     )
@@ -1294,12 +1279,8 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Alias::new("event_type")).text().not_null())
                     .col(ColumnDef::new(Alias::new("customer_id")).text())
-                    .col(
-                        ColumnDef::new(Alias::new("stripe_created"))
-                            .timestamp_with_time_zone()
-                            .not_null(),
-                    )
-                    .col(helpers::created_at())
+                    .col(helpers::ts_tz_col(manager, Alias::new("stripe_created")).not_null())
+                    .col(helpers::created_at(manager))
                     .to_owned(),
             )
             .await?;
@@ -1326,13 +1307,9 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("identity_template_versions"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
-                    .col(ColumnDef::new(Alias::new("template_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("template_id")).not_null())
                     .col(ColumnDef::new(Alias::new("version")).integer().not_null())
-                    .col(
-                        ColumnDef::new(Alias::new("definition"))
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .col(helpers::json_col(manager, Alias::new("definition")).not_null())
                     .col(ColumnDef::new(Alias::new("changelog")).text())
                     // draft: visible only to the owning tenant.
                     // pre: published but announced as unstable.
@@ -1343,8 +1320,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("draft"),
                     )
-                    .col(ColumnDef::new(Alias::new("created_by")).uuid())
-                    .col(helpers::created_at())
+                    .col(helpers::uuid_col(manager, Alias::new("created_by")))
+                    .col(helpers::created_at(manager))
                     .check(Expr::cust("status IN ('draft', 'pre', 'stable')"))
                     .index(
                         Index::create()
@@ -1395,19 +1372,18 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("identity_template_reviews"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
-                    .col(ColumnDef::new(Alias::new("template_id")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("template_id")).not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                     .col(
                         ColumnDef::new(Alias::new("rating"))
                             .small_integer()
                             .not_null(),
                     )
                     .col(ColumnDef::new(Alias::new("comment")).text())
-                    .col(ColumnDef::new(Alias::new("created_by")).uuid())
-                    .col(helpers::created_at())
+                    .col(helpers::uuid_col(manager, Alias::new("created_by")))
+                    .col(helpers::created_at(manager))
                     .col(
-                        ColumnDef::new(Alias::new("updated_at"))
-                            .timestamp_with_time_zone()
+                        helpers::ts_tz_col(manager, Alias::new("updated_at"))
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
@@ -1466,15 +1442,14 @@ impl MigrationTrait for Migration {
         // No RLS, no GRANT to yorishiro_app on either table, matching identity_templates itself: both are read in exactly the same paths (the repository layer, as the owner role, scoping by tenant in the query) and are never reached through the tenant pool.
 
         // identity_workspace_llm_keys
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
                     .table(Alias::new("identity_workspace_llm_keys"))
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Alias::new("workspace_id"))
-                            .uuid()
+                        helpers::uuid_col(manager, Alias::new("workspace_id"))
                             .not_null()
                             .primary_key(),
                     )
@@ -1501,14 +1476,13 @@ impl MigrationTrait for Migration {
         // Reads and writes go through the migration-role pool (ctx.db), which is what keeps a workspace's credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
         // columns
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
         let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
 
         // Field names, in display order.
         // `'[]'::jsonb` is Postgres cast syntax with no SQLite equivalent, so the
         // default is backend-specific: inline for both, with different literals.
-        let columns_col = ColumnDef::new(Alias::new("columns"))
-            .json_binary()
+        let columns_col = helpers::json_col(manager, Alias::new("columns"))
             .not_null()
             .default(if sqlite {
                 Expr::cust("'[]'")
@@ -1521,7 +1495,7 @@ impl MigrationTrait for Migration {
             .table(Alias::new("content_entity_column_preferences"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
-            .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
+            .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
             .col(ColumnDef::new(Alias::new("entity_type")).text().not_null())
             .col(columns_col)
             .col(created_at)
@@ -1589,22 +1563,18 @@ impl MigrationTrait for Migration {
             .table(Alias::new("identity_api_key_audit_log"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
-            .col(ColumnDef::new(Alias::new("workspace_id")).uuid().not_null())
-            .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+            .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+            .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
             // No foreign_key(): identity_api_keys::revoke deletes the key row outright (see its own doc comment), and a hard FK, even ON DELETE SET NULL, would still require the referenced row to exist at insert time and would touch this table on every revoke.
             // Recorded as a plain UUID so "which key" survives the key's own deletion; a caller resolves it against identity_api_keys and reads a miss as "since revoked".
-            .col(ColumnDef::new(Alias::new("api_key_id")).uuid())
-            .col(ColumnDef::new(Alias::new("user_id")).uuid())
+            .col(helpers::uuid_col(manager, Alias::new("api_key_id")))
+            .col(helpers::uuid_col(manager, Alias::new("user_id")))
             // A closed set, matching the as_db_str()/from_db_str() pattern every other stored-string enum in this codebase uses (MaintenanceMode, MembershipRole, ApiKeyScope): the CHECK constraint below is what stops a typo'd action from silently becoming a fourth value nothing filters on.
             .col(ColumnDef::new(Alias::new("action")).text().not_null())
             // Free-form context for the action (e.g. the migration job id an undo reverted, the maintenance mode a switch moved to and from).
             // Not part of the closed action set: this is detail a reader inspects, not something the database branches on.
-            .col(
-                ColumnDef::new(Alias::new("detail"))
-                    .json_binary()
-                    .not_null(),
-            )
-            .col(helpers::created_at())
+            .col(helpers::json_col(manager, Alias::new("detail")).not_null())
+            .col(helpers::created_at(manager))
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_api_key_audit_log_workspace_id")
@@ -1731,15 +1701,14 @@ impl MigrationTrait for Migration {
         .await?;
 
         // identity_workspace_embedding_keys
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
                     .table(Alias::new("identity_workspace_embedding_keys"))
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Alias::new("workspace_id"))
-                            .uuid()
+                        helpers::uuid_col(manager, Alias::new("workspace_id"))
                             .not_null()
                             .primary_key(),
                     )
@@ -1777,7 +1746,7 @@ impl MigrationTrait for Migration {
         // Reads and writes go through the migration-role pool (ctx.db), which keeps a workspace's embedding credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
         // identity_workspace_worker_classes
-        let [created_at, updated_at] = helpers::timestamps();
+        let [created_at, updated_at] = helpers::timestamps(manager);
 
         // `worker_class` CHECK constraint.
         // Its siblings carry this constraint (`identity_tenant_memberships.role`,
@@ -1797,8 +1766,7 @@ impl MigrationTrait for Migration {
                     .table(Alias::new("identity_workspace_worker_classes"))
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Alias::new("workspace_id"))
-                            .uuid()
+                        helpers::uuid_col(manager, Alias::new("workspace_id"))
                             .not_null()
                             .primary_key(),
                     )

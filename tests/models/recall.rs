@@ -21,6 +21,9 @@ fn chain_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-test".into()),
@@ -160,6 +163,9 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
 #[tokio::test]
 #[serial]
 async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-shallow-test".into()),

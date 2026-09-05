@@ -7,10 +7,15 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "content_entity_snapshots")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub job_id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub workspace_id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub entity_id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub schema_id: Uuid,
     pub schema_version: i32,
     #[sea_orm(column_type = "JsonBinary")]

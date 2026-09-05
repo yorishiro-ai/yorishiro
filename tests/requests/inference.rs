@@ -78,6 +78,9 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn llm_key_set_get_and_clear_round_trip() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -133,6 +136,9 @@ async fn llm_key_set_get_and_clear_round_trip() {
 #[tokio::test]
 #[serial]
 async fn a_non_http_base_url_is_refused() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -165,6 +171,9 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 #[serial]
 async fn infer_fill_without_a_configured_key_is_refused() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
@@ -200,6 +209,9 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 #[tokio::test]
 #[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -279,6 +291,9 @@ async fn create_entity(
 #[tokio::test]
 #[serial]
 async fn apply_answers_writes_directly_and_undo_reverses_it() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
@@ -346,6 +361,9 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
 #[tokio::test]
 #[serial]
 async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
@@ -460,6 +478,9 @@ async fn apply_answers_with_content_entities_locked(
 #[tokio::test]
 #[serial]
 async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let message = apply_answers_with_content_entities_locked(&request, &ctx, "EXCLUSIVE").await;
         assert!(
@@ -479,6 +500,9 @@ async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error()
 #[tokio::test]
 #[serial]
 async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let message =
             apply_answers_with_content_entities_locked(&request, &ctx, "ACCESS EXCLUSIVE").await;

@@ -159,18 +159,23 @@ impl VectorKnn {
             unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
         // Plain table, not vec0 virtual table: no MATCH/k = operators.
         // Full scan ordered by cosine distance — fine at current scale.
-        let (scope_sql, scope_values) = scope_clause(workspace_id, query, 2);
-        let sql = format!(
+        // SQLite's Statement::from_sql_and_values only supports plain `?` placeholders.
+        let mut sql = format!(
             "SELECT {HIT_COLUMNS}, \
-             vec_distance_cosine(ee.embedding, $1) AS distance \
+             vec_distance_cosine(ee.embedding, ?) AS distance \
              FROM content_entities e \
              JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
-             WHERE ee.embedding IS NOT NULL{scope_sql} \
-             ORDER BY distance \
-             LIMIT {limit}"
+             WHERE ee.embedding IS NOT NULL AND e.workspace_id = ?"
         );
-        let mut values: Vec<sea_orm::Value> = vec![sea_orm::Value::from(blob_bytes.to_vec())];
-        values.extend(scope_values);
+        let mut values: Vec<sea_orm::Value> = vec![
+            sea_orm::Value::from(blob_bytes.to_vec()),
+            workspace_id.into(),
+        ];
+        if let Some(entity_type) = &query.entity_type {
+            sql.push_str(" AND e.entity_type = ?");
+            values.push(entity_type.clone().into());
+        }
+        let sql = format!("{sql} ORDER BY distance LIMIT {limit}");
         Self { sql, values }
     }
 }
@@ -243,17 +248,39 @@ pub async fn search_by_vector(
             // interpreted as FTS5 syntax, causing syntax errors or silently altering the
             // query.  Wrap the text in FTS5 phrase-quotes (`"..."`) and escape internal
             // `"` as `""` so the input is treated as a literal phrase.
+            // FTS5 half: use ? placeholders (SQLite does not support ?N).
+            let mut scope_sql = " AND e.workspace_id = ?".to_string();
+            let mut scope_values: Vec<sea_orm::Value> = vec![workspace_id.into()];
+            if let Some(entity_type) = &query.entity_type {
+                scope_sql.push_str(" AND e.entity_type = ?");
+                scope_values.push(entity_type.clone().into());
+            }
             let query_phrase = format!("\"{}\"", query_text.replace('"', "\"\""));
+            // Debug: check FTS5 table contents
+            let fts_check_sql = format!(
+                "SELECT entity_id, workspace_id, substr(data, 1, 50) FROM fts_content_entities WHERE workspace_id = '{}'",
+                workspace_id
+            );
+            let fts_rows_check = conn
+                .query_all_raw(Statement::from_string(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    fts_check_sql,
+                ))
+                .await
+                .internal();
+            eprintln!("FTS5 check: {:?}", fts_rows_check);
 
             let fts_sql = format!(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
                  FROM content_entities e, fts_content_entities \
                  WHERE e.id = fts_content_entities.entity_id{scope_sql} \
-                 AND fts_content_entities.data MATCH $1 \
+                 AND fts_content_entities.data MATCH '{query_phrase}' \
                  LIMIT {remaining}"
             );
-            let mut fts_values: Vec<sea_orm::Value> = vec![query_phrase.into()];
-            fts_values.extend(scope_values);
+            let fts_values = scope_values;
+            // Debug: log the FTS5 query
+            eprintln!("FTS5 SQL: {}", fts_sql);
+            eprintln!("FTS5 values: {:?}", fts_values);
 
             let fts_rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
                 conn.get_database_backend(),

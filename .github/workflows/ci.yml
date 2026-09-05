@@ -78,7 +78,7 @@ jobs:
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           - backend: sqlite
             loco_env: test_sqlite
-            database_url: sqlite://yorishiro.sqlite3?mode=rwc
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
     services:
       db:
         image: pgvector/pgvector:pg18

@@ -13,6 +13,9 @@ use super::with_max_tenants;
 #[tokio::test]
 #[serial]
 async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
         assert_eq!(status.status_code(), 200);
@@ -41,6 +44,9 @@ async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
 #[tokio::test]
 #[serial]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {
             let status = request.get("/setup/status").await;

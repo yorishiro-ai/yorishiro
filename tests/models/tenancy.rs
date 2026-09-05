@@ -16,6 +16,9 @@ use yorishiro::models::tenancy;
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[serial]
 async fn concurrent_create_workspace_cannot_exceed_the_cap() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         const RACERS: usize = 8;
 

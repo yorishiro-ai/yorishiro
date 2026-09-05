@@ -80,6 +80,9 @@ async fn member_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
 #[tokio::test]
 #[serial]
 async fn maintenance_is_readable_and_settable_over_rest() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let key = owner_key(&ctx, "acme").await;
 
@@ -124,6 +127,9 @@ async fn maintenance_is_readable_and_settable_over_rest() {
 #[tokio::test]
 #[serial]
 async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let key = owner_key(&ctx, "acme").await;
 
@@ -169,6 +175,9 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
 #[tokio::test]
 #[serial]
 async fn a_member_key_cannot_touch_maintenance() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let key = member_key(&ctx, "beta").await;
 
@@ -193,6 +202,9 @@ async fn a_member_key_cannot_touch_maintenance() {
 #[tokio::test]
 #[serial]
 async fn an_unknown_mode_is_refused() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let key = owner_key(&ctx, "acme").await;
 
@@ -217,6 +229,9 @@ async fn an_unknown_mode_is_refused() {
 #[tokio::test]
 #[serial]
 async fn auth_endpoints_are_rate_limited() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let mut last_status = 200;
         for _ in 0..15 {

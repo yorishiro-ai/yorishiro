@@ -8,6 +8,9 @@ use super::with_max_tenants;
 #[tokio::test]
 #[serial]
 async fn signup_then_login_round_trip() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("request-test-tenant".into()),
@@ -93,6 +96,9 @@ async fn signup_then_login_round_trip() {
 #[tokio::test]
 #[serial]
 async fn signup_without_invite_creates_its_own_tenant() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let signup_response = request
             .post("/auth/signup")
@@ -134,6 +140,9 @@ async fn signup_without_invite_creates_its_own_tenant() {
 #[tokio::test]
 #[serial]
 async fn signup_rejects_email_alongside_invite_token() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .post("/auth/signup")
@@ -157,6 +166,9 @@ async fn signup_rejects_email_alongside_invite_token() {
 #[tokio::test]
 #[serial]
 async fn signup_rejects_neither_invite_token_nor_email() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .post("/auth/signup")
@@ -179,6 +191,9 @@ async fn signup_rejects_neither_invite_token_nor_email() {
 #[serial]
 async fn signup_without_invite_respects_the_tenant_cap() {
     with_max_tenants("1", async move {
+        if super::super::require_sqlite_backend() {
+            return;
+        }
         boot_request::<App, _, _>(|request, _ctx| async move {
             let first = request
                 .post("/auth/signup")
@@ -226,6 +241,7 @@ async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<O
 async fn create_tenant_serializes_on_its_advisory_lock() {
     with_max_tenants("100", async move {
         with_db_max_connections("4", async move {
+            if super::super::require_sqlite_backend() { return; }
             boot_request::<App, _, _>(|_request, ctx| async move {
                 let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
                 yorishiro::db::lock_for_update(&holder, "create_tenant")

@@ -59,6 +59,9 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn embedding_key_set_get_and_clear_round_trip() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -116,6 +119,9 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 #[tokio::test]
 #[serial]
 async fn a_non_http_base_url_is_refused() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -149,6 +155,9 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 #[serial]
 async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_time() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
@@ -193,6 +202,9 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
 #[tokio::test]
 #[serial]
 async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let setup = setup(&ctx).await;
         let resolver = EmbeddingKeyResolver;

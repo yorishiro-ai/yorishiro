@@ -55,6 +55,9 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key } = setup(&ctx).await;
         let auth = format!("Bearer {key}");

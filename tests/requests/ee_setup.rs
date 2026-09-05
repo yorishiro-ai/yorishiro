@@ -25,6 +25,9 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[tokio::test]
 #[serial]
 async fn setup_still_works_after_hooks_seed_has_run() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, ctx| async move {
             App::seed(&ctx, std::path::Path::new("does-not-need-to-exist"))

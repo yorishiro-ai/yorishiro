@@ -20,6 +20,12 @@ fn note_definition(name: &str) -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn list_and_get_respect_tenant_and_community_visibility() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant_a = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-a".into()),

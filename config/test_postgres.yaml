@@ -73,23 +73,23 @@ queue:
 # Database Configuration
 database:
   # Database connection URI
-  uri: <%= get_env(name="DATABASE_URL") %>
+  uri: '<%= get_env(name="DATABASE_URL") %>'
   # When enabled, the sql query will be logged.
   enable_logging: true
   # Set the timeout duration when acquiring a connection.
-  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  connect_timeout: '<%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>'
   # Set the idle duration before closing a connection.
-  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  idle_timeout: '<%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>'
   # Minimum number of connections for a pool.
-  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+  min_connections: '<%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>'
   # Maximum number of connections for a pool.
-  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
+  max_connections: '<%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>'
   # Run migration up when application loaded
   auto_migrate: true
   # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
+  dangerously_truncate: '<%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>'
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
+  dangerously_recreate: '<%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>'
 
 # Authentication Configuration
 auth:

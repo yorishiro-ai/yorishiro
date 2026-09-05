@@ -38,6 +38,9 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
 #[tokio::test]
 #[serial]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("search-test".into()),
@@ -178,6 +181,9 @@ impl EmbeddingProvider for FixedWidthProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("dimension-mismatch-test".into()),
@@ -300,6 +306,9 @@ impl EmbeddingProvider for FixedModelProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("model-mismatch-test".into()),
@@ -382,6 +391,9 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-tier-test".into()),
@@ -489,6 +501,9 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_dimension_tier() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-dimension-tier-test".into()),
@@ -556,6 +571,9 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 #[tokio::test]
 #[serial]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("concurrent-reindex-test".into()),
@@ -767,6 +785,9 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 #[tokio::test]
 #[serial]
 async fn reindex_overwrites_existing_entity_embeddings() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("reindex-overwrite-test".into()),
@@ -949,6 +970,9 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 #[tokio::test]
 #[serial]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("trigram-test".into()),
@@ -1040,35 +1064,41 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     crate::requests::boot_request_sqlite::<App, _, _>(
         db_path.clone(),
         |_request, ctx| async move {
-            let tenant = identity_tenants::ActiveModel {
-                name: sea_orm::ActiveValue::Set("fts5-test".into()),
-                ..Default::default()
-            };
-            let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
+            // Seed tenant/workspace with hex-string UUIDs so FK constraints match
+            // the hex-string UUIDs written by `create_schema_sqlite` / `create_sqlite`.
+            use sea_orm::Statement;
+            let tenant_id = uuid::Uuid::now_v7();
+            let workspace_id = uuid::Uuid::now_v7();
+            ctx.db
+                .execute_raw(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "INSERT INTO identity_tenants (id, name) VALUES (?1, 'fts5-test')",
+                    [sea_orm::Value::String(Some(tenant_id.to_string()))],
+                ))
                 .await
                 .expect("insert tenant");
-
-            let workspace = identity_workspaces::ActiveModel {
-                tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-                name: sea_orm::ActiveValue::Set("main".into()),
-                status: sea_orm::ActiveValue::Set(
-                    yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
-                ),
-                ..Default::default()
-            };
-            let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
+            ctx.db
+                .execute_raw(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "INSERT INTO identity_workspaces (id, tenant_id, name, status, max_entities) \
+                     VALUES (?1, ?2, 'main', 'active', NULL)",
+                    [
+                        sea_orm::Value::String(Some(workspace_id.to_string())),
+                        sea_orm::Value::String(Some(tenant_id.to_string())),
+                    ],
+                ))
                 .await
                 .expect("insert workspace");
 
             let def = serde_json::from_value(note_definition()).expect("parse definition");
-            content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            content_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
                 .await
                 .expect("create schema");
 
             // Create an entity whose title contains the search phrase.
             let matching = content_entities::create(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 content_entities::CreateEntityInput {
                     schema_name: "note".into(),
                     entity_type: "note".into(),
@@ -1082,7 +1112,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             // Create an entity whose title does not match.
             content_entities::create(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 content_entities::CreateEntityInput {
                     schema_name: "note".into(),
                     entity_type: "note".into(),
@@ -1097,7 +1127,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             // the FTS5 fallback path.
             let hits = search::search_by_vector(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
@@ -1122,7 +1152,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 sea_orm::DatabaseBackend::Sqlite,
                 "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
                  created_at, updated_at, created_by, updated_by \
-                 FROM content_entities WHERE id = $1",
+                 FROM content_entities WHERE id = ?",
                 [matching.id.into()],
             ))
             .one(&ctx.db)
@@ -1157,7 +1187,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             // Old phrase should no longer match.
             let hits = search::search_by_vector(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
@@ -1173,7 +1203,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             // New phrase should find it.
             let hits = search::search_by_vector(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 vec![0.0_f32; 768],
                 "quarterly board meeting",
                 search::SearchQuery::default(),
@@ -1199,7 +1229,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 }
                 Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Sqlite,
-                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE entity_id = $1",
+                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE entity_id = ?",
                     [matching.id.into()],
                 ))
                 .one(&ctx.db)

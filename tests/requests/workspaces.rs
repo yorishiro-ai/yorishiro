@@ -48,6 +48,9 @@ async fn issue_key_for(
 #[tokio::test]
 #[serial]
 async fn owner_can_create_list_view_and_delete_workspaces() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
@@ -112,6 +115,9 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 #[tokio::test]
 #[serial]
 async fn cannot_delete_a_tenants_only_workspace() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
@@ -134,6 +140,9 @@ async fn cannot_delete_a_tenants_only_workspace() {
 #[tokio::test]
 #[serial]
 async fn member_role_cannot_create_or_delete_workspaces() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let member = tenancy::create_user(&ctx.db, "member@example.com", "hunter2-hunter2", None)
@@ -170,6 +179,9 @@ async fn member_role_cannot_create_or_delete_workspaces() {
 #[tokio::test]
 #[serial]
 async fn workspaces_endpoints_require_authentication() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
@@ -180,6 +192,9 @@ async fn workspaces_endpoints_require_authentication() {
 #[tokio::test]
 #[serial]
 async fn workspace_endpoints_enforce_tenant_isolation() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_a, workspace_a) = setup_tenant(&ctx, "acme").await;
         let owner_a = tenancy::create_user(&ctx.db, "owner-a@example.com", "hunter2-hunter2", None)

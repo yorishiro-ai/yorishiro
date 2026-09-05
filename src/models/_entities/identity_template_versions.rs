@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_template_versions")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(unique_key = "template_versions_template_id_version_key")]
+    #[sea_orm(column_type = "Text")]
     pub template_id: Uuid,
     #[sea_orm(unique_key = "template_versions_template_id_version_key")]
     pub version: i32,
@@ -18,6 +20,7 @@ pub struct Model {
     pub changelog: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub status: String,
+    #[sea_orm(column_type = "Text", nullable)]
     pub created_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
 }

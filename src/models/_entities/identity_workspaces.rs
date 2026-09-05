@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_workspaces")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(unique_key = "identity_workspaces_tenant_id_name_key")]
+    #[sea_orm(column_type = "Text")]
     pub tenant_id: Uuid,
     #[sea_orm(
         column_type = "Text",
@@ -21,6 +23,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<i32>,
+    #[sea_orm(column_type = "Text", nullable)]
     pub schema_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
 }

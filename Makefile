@@ -26,7 +26,7 @@ test-postgres: build
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace -- --test-threads=1
 
 test-sqlite: build
-	DATABASE_URL='sqlite://:memory:' LOCO_ENV=test_sqlite cargo test --locked --workspace -- --test-threads=1
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' LOCO_ENV=test_sqlite cargo test --locked --workspace -- --test-threads=1
 
 build:
 	cargo build --locked --workspace

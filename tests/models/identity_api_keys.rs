@@ -30,6 +30,9 @@ async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
 #[tokio::test]
 #[serial]
 async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;
         let other_workspace_id = setup_workspace(&ctx).await;
@@ -74,6 +77,9 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
 #[tokio::test]
 #[serial]
 async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;
         let created =

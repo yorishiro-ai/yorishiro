@@ -116,7 +116,7 @@ impl Hooks for App {
                 let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
                     "postgres://loco:loco@localhost:5432/yorishiro_test".into()
                 });
-                let backend = if url.starts_with("sqlite://") {
+                let backend = if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
                     "test_sqlite"
                 } else {
                     "test_postgres"

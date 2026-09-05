@@ -7,14 +7,18 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_template_reviews")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(unique_key = "template_reviews_template_id_tenant_id_key")]
+    #[sea_orm(column_type = "Text")]
     pub template_id: Uuid,
     #[sea_orm(unique_key = "template_reviews_template_id_tenant_id_key")]
+    #[sea_orm(column_type = "Text")]
     pub tenant_id: Uuid,
     pub rating: i16,
     #[sea_orm(column_type = "Text", nullable)]
     pub comment: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
     pub created_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

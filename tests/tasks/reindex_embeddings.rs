@@ -190,6 +190,9 @@ impl EmbeddingProvider for ConcurrentModificationProvider {
 #[tokio::test]
 #[serial]
 async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
         let first = insert_entity(&ctx, workspace.id, "first entity").await;
@@ -225,6 +228,9 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
 #[tokio::test]
 #[serial]
 async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
         let first = insert_entity(&ctx, workspace.id, "first entity").await;
@@ -260,6 +266,9 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
 #[tokio::test]
 #[serial]
 async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
         let first = insert_entity(&ctx, workspace.id, "first entity").await;

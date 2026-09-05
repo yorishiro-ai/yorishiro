@@ -11,6 +11,9 @@ use yorishiro::models::{content_entities, content_schemas};
 #[tokio::test]
 #[serial]
 async fn drift_and_migration_dry_run_see_a_second_version() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("drift-test".into()),

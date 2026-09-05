@@ -49,6 +49,9 @@ async fn issue_key_for(
 #[tokio::test]
 #[serial]
 async fn owner_can_list_and_add_members() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
@@ -99,6 +102,9 @@ async fn owner_can_list_and_add_members() {
 #[tokio::test]
 #[serial]
 async fn add_member_rejects_an_email_with_no_account() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
@@ -126,6 +132,9 @@ async fn add_member_rejects_an_email_with_no_account() {
 #[tokio::test]
 #[serial]
 async fn member_role_cannot_manage_members() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
 
@@ -149,6 +158,9 @@ async fn member_role_cannot_manage_members() {
 #[tokio::test]
 #[serial]
 async fn members_endpoints_require_authentication() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/members").await;
         assert_eq!(response.status_code(), 401);

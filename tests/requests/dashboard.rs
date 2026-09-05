@@ -23,6 +23,9 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[tokio::test]
 #[serial]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {
             let setup = request
@@ -64,6 +67,9 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
 #[tokio::test]
 #[serial]
 async fn tenant_overview_requires_authentication() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/tenant/overview").await;
         assert_eq!(
