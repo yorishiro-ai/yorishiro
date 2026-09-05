@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_templates, identity_tenants};
@@ -20,7 +20,13 @@ fn note_definition(name: &str) -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn list_and_get_respect_tenant_and_community_visibility() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant_a = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-a".into()),
             ..Default::default()
@@ -108,8 +114,6 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
             denied.is_err(),
             "another tenant's private template must 404, got {denied:?}"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

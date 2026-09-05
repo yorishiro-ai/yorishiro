@@ -1,4 +1,3 @@
-use crate::migration::Migrator;
 use async_trait::async_trait;
 use loco_rs::{
     Result,
@@ -10,6 +9,7 @@ use loco_rs::{
     environment::Environment,
     task::Tasks,
 };
+use migration::Migrator;
 use std::path::Path;
 use tokio::task::spawn;
 
@@ -116,7 +116,7 @@ impl Hooks for App {
                 let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
                     "postgres://loco:loco@localhost:5432/yorishiro_test".into()
                 });
-                let backend = if url.starts_with("sqlite://") {
+                let backend = if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
                     "test_sqlite"
                 } else {
                     "test_postgres"
@@ -143,13 +143,22 @@ impl Hooks for App {
         environment: &Environment,
         config: Config,
     ) -> Result<BootResult> {
+        // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
+        // The call site in main.rs already covers all CLI subcommands.
+        crate::db::register_sqlite_extensions();
+
         let result = create_app::<Self, Migrator>(mode, environment, config).await?;
 
         // Startup reindex detection: check if any workspace's stored vectors
         // were embedded with a model that differs from the current provider.
         // If so, enqueue a non-blocking reindex so the server stays responsive
         // while vectors are updated.
-        spawn_startup_reindex(result.app_context.clone());
+        // Skip in test environments — the background task holds a `ctx.db`
+        // connection that survives the test callback and races with loco's
+        // `BootResultWrapper::drop` which tries `DROP DATABASE`.
+        if !matches!(environment, Environment::Test) {
+            spawn_startup_reindex(result.app_context.clone());
+        }
 
         Ok(result)
     }
@@ -219,17 +228,16 @@ impl Hooks for App {
             .insert(crate::ee::services::licence::LicenceState::from_env());
 
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            // The three features named here are `ee::models::origin::list_with_upstream_changes`,
-            // `ee::models::marketplace::list_marketplace` and `insert_next_version`, each of which
-            // hardcodes `DatabaseBackend::Postgres` and would otherwise fail at execution time
+            // The three ee/ features named here use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, or correlated subqueries with advisory locks) and would otherwise fail at execution time
             // naming a query rather than the configuration behind it. Nothing else reports the
             // enterprise edition's state at boot here, since `TenantScopedAuthenticator` below is
             // not installed.
+            // Vector search works on this backend via sqlite-vec; JSONB filtering does not.
             tracing::warn!(
                 "some enterprise features are unavailable on SQLite: browsing the marketplace, publishing \
                  a template version, and listing template-origin updates each run a PostgreSQL-only \
                  query and will fail when reached. Point DATABASE_URL at PostgreSQL to use them; \
-                 everything else works on this backend"
+                 vector search and everything else works on this backend"
             );
         } else {
             // Replaces the default authenticator inserted above (`Arc<dyn Authenticator>` is keyed

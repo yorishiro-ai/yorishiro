@@ -1,9 +1,9 @@
 //! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `billing::` functions directly alongside HTTP requests).
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
+use super::boot_request;
 use axum::http::header;
 use hmac::{Hmac, KeyInit, Mac};
-use loco_rs::testing::prelude::*;
 use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;
 use sha2::Sha256;
@@ -70,7 +70,10 @@ async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
 #[tokio::test]
 #[serial]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
         assert_eq!(disabled.status_code(), 200);
@@ -88,8 +91,6 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
             );
         })
         .await;
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -98,7 +99,10 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 #[tokio::test]
 #[serial]
 async fn status_errors_loudly_when_partially_configured() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         // SAFETY: serialized by every test in this binary being #[serial] on the default key.
         unsafe {
@@ -116,8 +120,6 @@ async fn status_errors_loudly_when_partially_configured() {
              disabled: {:?}",
             response.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -126,7 +128,10 @@ async fn status_errors_loudly_when_partially_configured() {
 #[tokio::test]
 #[serial]
 async fn authorize_and_callback_404_when_unconfigured() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let authorize = request.get("/auth/oauth/authorize").await;
         assert_eq!(
@@ -143,8 +148,6 @@ async fn authorize_and_callback_404_when_unconfigured() {
             "response: {:?}",
             callback.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -154,8 +157,11 @@ async fn authorize_and_callback_404_when_unconfigured() {
 #[tokio::test]
 #[serial]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let response = request.get("/auth/oauth/authorize").await;
             assert_eq!(
@@ -164,8 +170,6 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
                 "an unreachable issuer must fail loudly, never redirect: {:?}",
                 response.text()
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -176,8 +180,11 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 #[tokio::test]
 #[serial]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let response = request
                 .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
@@ -201,8 +208,6 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
                     .contains("Max-Age=0"),
                 "the CSRF cookie must be cleared on this path too"
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -213,8 +218,11 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 #[tokio::test]
 #[serial]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let missing_state = request.get("/auth/oauth/callback?code=abc").await;
             assert_eq!(missing_state.status_code(), 302);
@@ -229,8 +237,6 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
                 missing_code.header(header::LOCATION),
                 "/#/login?error=oauth_failed"
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -241,8 +247,11 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 #[tokio::test]
 #[serial]
 async fn callback_rejects_a_state_with_a_bad_signature() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
             let response = request
                 .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
@@ -250,7 +259,6 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 
             assert_eq!(response.status_code(), 401, "response: {:?}", response.text());
 
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -261,8 +269,11 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 #[tokio::test]
 #[serial]
 async fn callback_rejects_an_expired_state() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_oauth_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
             let state = sign_state(&format!("{issued_at}.deadbeef.verifier"));
@@ -277,8 +288,6 @@ async fn callback_rejects_an_expired_state() {
                 "response: {:?}",
                 response.text()
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -290,7 +299,10 @@ async fn callback_rejects_an_expired_state() {
 #[tokio::test]
 #[serial]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
         let existing_tenant = identity_tenants::ActiveModel {
             name: ActiveValue::Set("existing".into()),
@@ -333,8 +345,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
                  tenant limit, got: {other:?}"
             ),
         }
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -344,7 +354,10 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 #[tokio::test]
 #[serial]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
@@ -384,8 +397,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             .unwrap()
             .expect("the linked schema must exist");
         assert_eq!(schema.name, "general-notes");
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

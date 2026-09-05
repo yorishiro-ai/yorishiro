@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -93,7 +93,10 @@ fn note_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn owner_can_create_update_and_delete_a_template() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { owner_key, .. } = setup(&ctx, "acme").await;
 
         let response = request
@@ -138,8 +141,6 @@ async fn owner_can_create_update_and_delete_a_template() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -147,7 +148,10 @@ async fn owner_can_create_update_and_delete_a_template() {
 #[tokio::test]
 #[serial]
 async fn member_role_cannot_manage_the_template_library() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { member_key, .. } = setup(&ctx, "acme").await;
 
         let response = request
@@ -159,8 +163,6 @@ async fn member_role_cannot_manage_the_template_library() {
             }))
             .await;
         assert_eq!(response.status_code(), 403);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -169,7 +171,10 @@ async fn member_role_cannot_manage_the_template_library() {
 #[tokio::test]
 #[serial]
 async fn another_tenant_cannot_update_or_delete_a_community_template() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
 
@@ -219,8 +224,6 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
             .json(&serde_json::json!({ "description": "edited by the owner" }))
             .await;
         assert_eq!(response.status_code(), 200);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -228,7 +231,10 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
 #[tokio::test]
 #[serial]
 async fn fork_copies_a_community_template_into_the_forking_tenants_own_library() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
 
@@ -269,8 +275,6 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
             .json(&serde_json::json!({ "description": "tenant b's own copy" }))
             .await;
         assert_eq!(response.status_code(), 200);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

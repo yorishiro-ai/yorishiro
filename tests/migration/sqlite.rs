@@ -2,9 +2,8 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use sea_orm_migration::sea_orm::Database;
-
-use crate::migration::{Migrator, MigratorTrait};
+use migration::{Migrator, MigratorTrait};
+use sea_orm::Database;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 

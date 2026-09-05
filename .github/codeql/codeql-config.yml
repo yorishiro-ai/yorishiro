@@ -1,31 +1,23 @@
 # Excludes rust/hard-coded-cryptographic-value repository-wide.
 #
-# That query fired on 23 open alerts, all a single fixed test password ("hunter2-hunter2") passed as a direct literal argument in tests/ request fixtures (see PR #232's own CodeQL-known-failure note for the first instance of this).
-# It does not fire on the same literal when it appears inside a serde_json::json!{...} call instead of a direct typed argument, which is why the alert count (23) never matched the literal's actual occurrence count (30): the query's Rust sink recognition does not trace through that macro's expansion.
-#
-# Two remediations were tried and rejected before this one:
-# - Extracting the literal into a single shared const (PR #235, closed unmerged) does not clear the alert; CodeQL just relocates it to the const's own declaration line, so the 23 call-site alerts would collapse into 1 declaration-site alert rather than 0.
-#   Confirmed empirically by diffing ref-scoped code-scanning API results before/after.
-# - Inline suppression (`// codeql[...]`) does not exist for Rust yet (github/codeql#21637 is open, unresolved as of this file's writing).
-#   Every other language CodeQL supports (C++, C#, Go, Java, Python, Ruby, Swift) has this and Rust does not, so there is no per-call-site "accept this one" option to reach for here.
-#
-# The cost of this exclusion: real hardcoded keys/passwords/IVs/salts in src/ or ee/ production code would no longer be caught by this rule either, repository-wide, not just in tests/.
-# No other built-in CodeQL Rust query covers the same ground (rust/cleartext-storage-database and rust/cleartext-transmission detect sensitive-value dataflow into storage or over the network, not a literal assigned as a credential; rust/cleartext-logging did the same for logs and is itself excluded below), and no secret-scanning tool (gitleaks, trufflehog, etc.) runs in this repository's CI as of this file's writing.
+# All 23 alerts were the same test password ("hunter2-hunter2") passed as a direct literal in tests/ request fixtures.
+# The query does not fire on the same literal when it appears inside a serde_json::json!{...} call,
+# which is why the alert count (23) never matched the literal's actual occurrence count (30).
+# Inline suppression (`// codeql[...]`) does not exist for Rust: every other language CodeQL supports has it, but Rust does not.
+# The cost of this exclusion: real hardcoded keys/passwords/IVs/salts in src/ or ee/ production code would no longer be caught by this rule either, repository-wide.
+# No other built-in CodeQL Rust query covers the same ground (rust/cleartext-storage-database and rust/cleartext-transmission detect sensitive-value dataflow into storage or over the network, not a literal assigned as a credential), and no secret-scanning tool runs in this repository's CI.
 # That gap is accepted here, not solved by it.
 #
-# Revisit this exclusion if github/codeql#21637 ships inline suppression for Rust: per-call-site suppression comments in the 23 test fixtures would let this rule stay active for src/ and ee/ without re-litigating the same 23 false positives every time a new test file is added.
 # Excludes rust/cleartext-logging repository-wide.
 #
-# It fired on three sites and each one is correct, because none of them is a log.
+# It fired on three sites and each one is correct: none of them is a log.
 # src/tasks/list_members.rs prints a member table to the terminal of the operator who ran `admin list-members`, and the email address is the answer to the question that command exists to answer.
 # src/tasks/add_member.rs prints the confirmation of the membership the operator just created.
 # tests/requests/oauth.rs interpolates a value into a `panic!` message in a test assertion.
 # The query detects sensitive data reaching an output sink and cannot distinguish a log shipped somewhere from stdout read by the person who asked for it.
+# The one fix draft for list_members.rs masked `user_id` as well as the email, leaving `admin list-members` printing a table identifying nobody, and its `mask_email` sliced with `&local[..1]`, a byte offset into a `&str` that splits a multi-byte character: compiled as proposed, it panics on an address like `тест@example.com`.
 #
-# GitHub's autofix drafts for all three (#244, #245, #246) were read and closed rather than merged.
-# The one for list_members.rs masked `user_id` as well as the email, which would have left `admin list-members` printing a table identifying nobody, and its `mask_email` sliced with `&local[..1]`, a byte offset into a `&str` that splits a multi-byte character: compiled as proposed, it panics on an address like `тест@example.com`.
-#
-# The cost of this exclusion: a genuine cleartext log of sensitive data anywhere in src/ or ee/ would no longer be caught by this rule either, repository-wide, not just at these three sites.
+# The cost of this exclusion: a genuine cleartext log of sensitive data anywhere in src/ or ee/ would no longer be caught by this rule either, repository-wide.
 # No other built-in CodeQL Rust query covers logging as a sink, so nothing else would catch it.
 # That gap is accepted here, not solved by it, the same way the exclusion above accepts its own.
 query-filters:

@@ -8,9 +8,49 @@ use async_trait::async_trait;
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
+use sqlite_vec::sqlite3_vec_init;
+use sqlx::Connection;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
+
+/// Registers SQLite extensions (sqlite-vec) so every connection opened on a SQLite URL
+/// auto-loads them.
+///
+/// Called from two places — `src/bin/main.rs` (covers all CLI subcommands) and
+/// `App::boot` (covers the test harness, which never runs `main.rs`) — each guarded by
+/// `std::sync::Once::call_once` so the C-level registration is atomic and idempotent.
+///
+/// The registration must happen **before** any SQLite connection opens: `loco-rs 1.1.0`'s
+/// `cli::main` calls `create_context::<H>` unconditionally at line 777, before the
+/// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
+/// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method
+/// runs.
+/// Public entry point for `main.rs` and `App::boot` to call.
+pub fn register_sqlite_extensions() {
+    use std::mem::transmute;
+
+    // `libsqlite3-sys` is a direct dependency (pinned to the same version that
+    // `sqlx-sqlite 0.9.0` resolves) so we can call `sqlite3_auto_extension`
+    // without fighting an E0432 FFI mismatch.
+    use libsqlite3_sys::sqlite3_auto_extension;
+
+    // The target type is `sqlite3_auto_extension_callback` — a C function pointer
+    // that clippy's transmute-checker wants spelled out literally; it is a foreign
+    // type with opaque internals so we suppress the lint instead of duplicating
+    // libsqlite3-sys's bindgen output.
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    #[allow(clippy::missing_transmute_annotations)]
+    REGISTER.call_once(|| unsafe {
+        // `sqlite3_vec_init` is declared in `sqlite-vec` as a bare C function
+        // pointer; `sqlite3_auto_extension` expects a function pointer matching
+        // `void(*)(sqlite3*, char**, const sqlite3_api_routines*)`, which is the
+        // same signature (cast to *const () is safe because both are FFI-safe).
+        sqlite3_auto_extension(Some(transmute::<*const (), _>(
+            sqlite3_vec_init as *const (),
+        )));
+    });
+}
 
 /// Where the deployment's data lives, for tenant-scoped request handling.
 #[async_trait]
@@ -232,29 +272,60 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
 
 /// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
 ///
-/// A detached connection whose session-end releases the lock. `conn` is detached so dropping
-/// the guard ends the session, which is when PostgreSQL releases session-level advisory locks.
-/// Using `detach` instead of returning the connection to the pool is necessary: pool return
-/// keeps the session alive, so the lock would persist and cause the next reindex to re-enter
-/// (advisory locks are per-session, not per-connection).
+/// `conn` is detached so returning it to the pool does not release the lock.
+/// `release().await` closes the connection asynchronously, sends PostgreSQL the `Terminate`
+/// message, ends the session, and releases the lock.
+///
+/// `Drop` is only a panic-unwind backstop: it tries to spawn `conn.close()` on the current
+/// runtime, which may or may not succeed depending on the runtime state, but is better
+/// than leaving the connection open with no cleanup attempt at all.
 pub struct WorkspaceReindexLockGuard {
-    #[expect(dead_code)]
-    conn: sqlx::PgConnection,
+    conn: Option<sqlx::PgConnection>,
+}
+
+impl WorkspaceReindexLockGuard {
+    /// Closes the detached connection and releases the advisory lock.
+    ///
+    /// Returns `Ok(())` on success. If the connection was already released
+    /// (double-`release` is a no-op), returns `Ok(())` without error.
+    /// Also logs any close failure for diagnostics.
+    pub async fn release(mut self) -> Result<(), sqlx::Error> {
+        if let Some(conn) = self.conn.take() {
+            let result = conn.close().await;
+            if let Err(ref e) = result {
+                tracing::error!(error = %e, "failed to close reindex lock connection");
+            }
+            result
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Drop for WorkspaceReindexLockGuard {
     fn drop(&mut self) {
-        // Detached connection drop ends the session; PostgreSQL releases
-        // session-level advisory locks at session end.
+        // This path runs only if the caller forgot to call `release()` — a
+        // logic error.  Try to close the connection asynchronously; the
+        // explicit `release().await` is the intended path.
+        if let Some(conn) = self.conn.take()
+            && let Ok(handle) = tokio::runtime::Handle::try_current()
+        {
+            handle.spawn(async move {
+                let _ = conn.close().await;
+            });
+        }
+        // If we cannot get a runtime handle (no current runtime, or a
+        // different runtime), we have no way to close the connection
+        // asynchronously. The client socket closes when the process exits.
     }
 }
 
 /// Acquires a session-scoped advisory lock on a workspace for reindex serialization.
 ///
 /// Acquires `pg_advisory_lock` on a bare pooled connection and detaches it. The lock is held
-/// until the guard is dropped, which ends the detached session and releases the lock. Pool
-/// return keeps the session alive, so the lock would persist and cause the next reindex to
-/// re-enter (advisory locks are per-session, not per-connection).
+/// until `WorkspaceReindexLockGuard::release()` is called, which closes the connection and
+/// ends the session. Pool return keeps the session alive, so the lock would persist and cause
+/// the next reindex to re-enter (advisory locks are per-session, not per-connection).
 ///
 /// Does not time out: a legitimate reindex over a large workspace can block for a long time,
 /// and imposing a bound would risk killing a run that is just busy. The `tracing::info!`
@@ -275,12 +346,13 @@ pub async fn acquire_workspace_reindex_lock(
 
     tracing::info!(%key, "acquired workspace reindex lock");
 
-    // Detach the connection so dropping the guard ends the session.
-    // Session end is when PostgreSQL releases session-level advisory locks;
-    // returning to the pool would keep the session (and the lock) alive.
+    // Detach the connection: returning it to the pool would keep the session (and the lock)
+    // alive. `release()` on the guard closes the connection, ending the session.
     let detached = conn.detach();
 
-    Ok(WorkspaceReindexLockGuard { conn: detached })
+    Ok(WorkspaceReindexLockGuard {
+        conn: Some(detached),
+    })
 }
 
 /// Acquires the session-scoped advisory lock and runs a reindex under it, returning the outcome.
@@ -308,7 +380,10 @@ pub async fn reindex_workspace_with_lock(
         candidate_ids,
         provider,
     )
-    .await?;
-    drop(lock);
-    Ok(outcome)
+    .await;
+    let _ = lock.release().await;
+    match outcome {
+        Ok(ok) => Ok(ok),
+        Err(err) => Err(err),
+    }
 }

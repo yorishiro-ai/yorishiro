@@ -3,7 +3,7 @@
 # Application logging configuration
 logger:
   # Enable or disable logging.
-  enable: false
+  enable: true
   # Enable pretty backtrace (sets RUST_BACKTRACE=1)
   pretty_backtrace: true
   # Log level, options: trace, debug, info, warn or error.
@@ -33,33 +33,35 @@ workers:
   #   - BackgroundQueue - Workers operate asynchronously in the background, processing queued. Requires queue: below (Loco's own register_workers errors with QueueProviderMissing otherwise).
   #   - ForegroundBlocking - Workers operate in the foreground and block until tasks are completed.
   #   - BackgroundAsync - Workers operate asynchronously in the background, processing tasks with async capabilities.
-  mode: ForegroundBlocking
+  mode: BackgroundQueue
 
 
 # Queue Configuration
 #
-# Omitted (falls back to Queue::empty(), a no-op) in this environment specifically, even though development.yaml/production.yaml configure the Postgres-backed queue for EmbeddingSyncWorker: that provider's shutdown() only cancels its polling loop, not its own PgPool, with no method that does close it, and a test's close_app_pools has nothing to close it with.
-# See CLAUDE.md's Tests section.
-#
-# `mode: ForegroundBlocking` below is what makes this safe rather than a silent behavior change: with no queue provider, `EmbeddingSyncWorker::perform_later` under BackgroundQueue mode would log an error and skip the sync entirely (see BackgroundWorker::perform_later_with_priority in loco-rs).
-# ForegroundBlocking instead runs `perform` synchronously in the calling task, so a test asserting on `embedding IS NOT NULL` after creating an entity sees the real, awaited result.
+# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
+# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
+# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
+# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
+# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
+# non-SQLite queue), matching this file's own no-silent-fallback convention.
+queue:
+  kind: Postgres
 
-# Mailer Configuration.
-mailer:
-  stub: true
-  # SMTP mailer configuration.
-  smtp:
-    # Enable/Disable smtp mailer.
-    enable: true
-    # SMTP server host. e.x localhost, smtp.gmail.com
-    host: <%= get_env(name="MAILER_HOST", default="localhost") %>
-    # SMTP server port
-    port: 1025
-    # Use secure connection (SSL/TLS).
-    secure: false
-    # auth:
-    #   user:
-    #   password:
+  # Postgres connection URI. Commonly the same value as DATABASE_URL.
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
+  # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
+  dangerously_flush: false
+
+  # Workers dequeuing in parallel, tunable per deployment.
+  # Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism, and a `--worker` process on another host adds more.
+  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+
+  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
+  # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.
+  # `age_minutes` must exceed the longest a healthy job can legitimately take, or the reaper requeues work still in progress.
+  reaper:
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
+    interval_seconds: 60
 
 # Initializers Configuration
 # initializers:
@@ -71,9 +73,9 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/yorishiro_test") %>
+  uri: <%= get_env(name="DATABASE_URL") %>
   # When enabled, the sql query will be logged.
-  enable_logging: false
+  enable_logging: true
   # Set the timeout duration when acquiring a connection.
   connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
   # Set the idle duration before closing a connection.
@@ -85,9 +87,9 @@ database:
   # Run migration up when application loaded
   auto_migrate: true
   # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_truncate: true
+  dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
-  dangerously_recreate: true
+  dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
 
 # Authentication Configuration
 auth:

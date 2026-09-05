@@ -33,10 +33,8 @@ impl ActiveModel {}
 impl Entity {}
 
 /// The RLS-scoped request path's view of a `content_entities` row.
-/// Distinct from the generated `Model` because `Model` carries `embedding` (`Option<PgVector>`), which this API never returns: the search/embedding pipeline manages that column separately.
+/// Distinct from the generated `Model` because it excludes `embedding` (stored separately in `content_entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
 /// `created_by`/`updated_by` are `None` for entities touched by an unattributed API key.
-///
-/// `FromQueryResult` lets this also be built directly by [`select_record_columns`]'s SQLite path, which selects every column except `embedding` (a column that doesn't exist on that backend's `content_entities` table) rather than going through `Model`.
 #[derive(Clone, Debug, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct EntityRecord {
     pub id: Uuid,
@@ -132,112 +130,6 @@ pub fn validate_data(
     }
 }
 
-/// Restricts a `content_entities` query to every column `EntityRecord` needs, excluding `embedding`, on SQLite.
-/// A no-op on PostgreSQL: that backend's `content_entities` table genuinely has an `embedding` column, so the ordinary `Model`-shaped query stays unrestricted there.
-///
-/// SQLite's `content_entities` table has no `embedding` column at all (see `migration/src/m20260829_000000_initial_schema.rs`'s `helpers::pg_only` around that column), so any query built from the generated `Entity`/`Model` unconditionally references it and fails with `no such column: content_entities.embedding` on that backend, whether or not the caller ever reads the field.
-/// Every caller of `content_entities`'s query functions gets the same `EntityRecord` either way; only the column list sent to the database differs.
-fn select_record_columns(conn: &impl ConnectionTrait, select: Select<Entity>) -> Select<Entity> {
-    use super::_entities::content_entities::Column;
-
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        select.select_only().columns([
-            Column::Id,
-            Column::WorkspaceId,
-            Column::SchemaId,
-            Column::SchemaVersion,
-            Column::EntityType,
-            Column::Data,
-            Column::CreatedBy,
-            Column::UpdatedBy,
-            Column::CreatedAt,
-            Column::UpdatedAt,
-        ])
-    } else {
-        select
-    }
-}
-
-/// Inserts `active` and returns the persisted row as an `EntityRecord`.
-///
-/// `ActiveModelTrait::insert` builds its return value by decoding a `content_entities::Model`, and SeaORM's `pgvector::Vector` `TryGetable` impl unconditionally errors on a SQLite row (`Vector unsupported by sqlx-sqlite`) regardless of whether the column has a value, so that path can never succeed on SQLite even though the insert itself would.
-/// `Entity::insert(active).exec_without_returning` sidesteps the `Model` decode entirely; `select_record_columns`'s follow-up read (which already excludes `embedding`) then fetches the row `EntityRecord` actually needs.
-///
-/// `sqlite_generated_id` is called explicitly rather than relying on `ActiveModel`'s `before_save` hook: `Entity::insert(...).exec_without_returning(...)` doesn't call `ActiveModelBehavior::before_save` at all (only `ActiveModelTrait::insert`/`update` do), the same reason `tenancy::add_member` calls it directly for its own `on_conflict` insert.
-async fn insert_and_fetch(
-    conn: &impl ConnectionTrait,
-    mut active: ActiveModel,
-) -> Result<EntityRecord, YorishiroError> {
-    use super::_entities::content_entities::Column;
-
-    active.id = crate::db::sqlite_generated_id(conn, active.id);
-
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        let ActiveValue::Set(id) = active.id else {
-            return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "content_entities insert on SQLite has no id to fetch back"
-            )));
-        };
-        Entity::insert(active)
-            .exec_without_returning(conn)
-            .await
-            .internal()?;
-        select_record_columns(conn, Entity::find().filter(Column::Id.eq(id)))
-            .into_model::<EntityRecord>()
-            .one(conn)
-            .await
-            .internal()?
-            .ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!(
-                    "content_entities row '{id}' was inserted but could not be read back"
-                ))
-            })
-    } else {
-        active.insert(conn).await.internal().map(EntityRecord::from)
-    }
-}
-
-/// [`insert_and_fetch`]'s counterpart for an update: same reasoning (`ActiveModelTrait::update`
-/// decodes the return value as a `content_entities::Model`, which fails on SQLite the same way
-/// insert's does), same fix (route around the `Model` decode, re-fetch through
-/// `select_record_columns`).
-///
-/// `active.id` must already name an existing row: unlike `insert_and_fetch`, this never generates one.
-///
-/// `ActiveModelTrait::update_without_returning` rather than the `Entity::update(...)` builder, because only the former still calls `before_save` (confirmed against `sea-orm` 2.0.2's source), so `updated_at` is stamped instead of silently staying stale.
-/// The insert side has no such trait method, which is why `insert_and_fetch` calls `sqlite_generated_id` itself.
-/// Raises `DbErr::RecordNotUpdated` on no match, exactly as `ActiveModelTrait::update` does, so `undo_job`'s match needs no change.
-async fn update_and_fetch(
-    conn: &impl ConnectionTrait,
-    active: ActiveModel,
-) -> Result<EntityRecord, YorishiroError> {
-    use super::_entities::content_entities::Column;
-
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        let id = match &active.id {
-            ActiveValue::Unchanged(id) | ActiveValue::Set(id) => *id,
-            ActiveValue::NotSet => {
-                return Err(YorishiroError::Internal(anyhow::anyhow!(
-                    "content_entities update on SQLite has no id to fetch back"
-                )));
-            }
-        };
-        active.update_without_returning(conn).await.internal()?;
-        select_record_columns(conn, Entity::find().filter(Column::Id.eq(id)))
-            .into_model::<EntityRecord>()
-            .one(conn)
-            .await
-            .internal()?
-            .ok_or_else(|| {
-                YorishiroError::Internal(anyhow::anyhow!(
-                    "content_entities row '{id}' was updated but could not be read back"
-                ))
-            })
-    } else {
-        active.update(conn).await.internal().map(EntityRecord::from)
-    }
-}
-
 fn resolve_entity_type<'a>(
     definition: &'a metaschema::MetaSchemaDefinition,
     entity_type: &str,
@@ -284,14 +176,11 @@ async fn check_entity_quota(
 }
 
 /// Counts how many entities a workspace holds, for quota enforcement and workspace-detail summaries.
-///
-/// `select_record_columns` isn't used here: `PaginatorTrait::count` builds its own `SELECT COUNT(*)` wrapping the query rather than projecting `Model`'s columns, but SeaORM still resolves that inner query against every column `Entity::find()` names, `embedding` included, which is what fails on SQLite.
-/// Excluding `embedding` from the column list sidesteps that the same way the other functions in this file do.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
     use super::_entities::content_entities::Column;
 
-    let select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
-    select_record_columns(conn, select)
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
         .count(conn)
         .await
         .internal()
@@ -343,7 +232,8 @@ pub async fn create(
         created_by: ActiveValue::Set(created_by),
         ..Default::default()
     };
-    insert_and_fetch(conn, active).await
+
+    active.insert(conn).await.internal().map(EntityRecord::from)
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
@@ -354,11 +244,9 @@ pub async fn get(
 ) -> Result<EntityRecord, YorishiroError> {
     use super::_entities::content_entities::Column;
 
-    let select = Entity::find()
+    Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
-        .filter(Column::Id.eq(id));
-
-    select_record_columns(conn, select)
+        .filter(Column::Id.eq(id))
         .into_model::<EntityRecord>()
         .one(conn)
         .await
@@ -381,11 +269,9 @@ pub async fn get_batch(
         return Ok(std::collections::HashMap::new());
     }
 
-    let select = Entity::find()
+    let rows = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
-        .filter(Column::Id.is_in(ids.iter().copied()));
-
-    let rows = select_record_columns(conn, select)
+        .filter(Column::Id.is_in(ids.iter().copied()))
         .into_model::<EntityRecord>()
         .all(conn)
         .await
@@ -416,7 +302,7 @@ pub async fn update(
         updated_by: ActiveValue::Set(updated_by),
         ..Default::default()
     };
-    update_and_fetch(conn, active).await
+    active.update(conn).await.internal().map(EntityRecord::from)
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
@@ -467,7 +353,7 @@ pub async fn list(
         .limit(query.page.limit() as u64)
         .offset(query.page.offset() as u64);
 
-    select_record_columns(conn, select)
+    select
         .into_model::<EntityRecord>()
         .all(conn)
         .await
@@ -483,11 +369,9 @@ pub async fn export_all(
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
     use super::_entities::content_entities::Column;
 
-    let select = Entity::find()
+    Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(Column::CreatedAt);
-
-    select_record_columns(conn, select)
+        .order_by_asc(Column::CreatedAt)
         .into_model::<EntityRecord>()
         .all(conn)
         .await
@@ -581,7 +465,7 @@ pub struct MigrationDryRun {
     /// On an older version, but missing no field the active version requires: they validate as they stand and only their version marker is behind.
     pub behind_but_valid: i64,
     /// On an older version and missing at least one field the active version requires.
-    /// These are what a migration has to fill in.
+    /// These are what a batch migration has to fill in.
     pub needs_values: i64,
     /// Per entity type, so an operator can see whether the work is spread or concentrated.
     pub by_entity_type: Vec<DryRunByType>,
@@ -749,7 +633,7 @@ pub async fn snapshot(
 ) -> Result<(), YorishiroError> {
     let result = conn
         .execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
+            conn.get_database_backend(),
             "INSERT INTO content_entity_snapshots \
                 (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
              SELECT $1, workspace_id, id, schema_id, schema_version, data \
@@ -822,8 +706,6 @@ pub async fn undo_job(
     let mut restored = 0i64;
     let mut missing = 0i64;
 
-    let is_sqlite = conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
-
     for snap in &snapshots {
         // `snap.entity_id` is already workspace-scoped by the query above, so no extra filter is needed on the write.
         let active = ActiveModel {
@@ -833,15 +715,11 @@ pub async fn undo_job(
             schema_version: ActiveValue::Set(snap.schema_version),
             ..Default::default()
         };
-        // `update_without_returning` for the reason `update_and_fetch` documents: `active.update`
-        // decodes a full `Model`, which cannot succeed on SQLite. No read-back here, since this
-        // only needs the `Ok`/`RecordNotUpdated` outcome rather than the row.
-        // It still calls `before_save` (unlike the raw `Entity::update(...)` builder, which skips it and would leave `updated_at` stale), and still raises `DbErr::RecordNotUpdated` when no row matches, so the `match` below needs no branch of its own.
-        let result = if is_sqlite {
-            active.update_without_returning(conn).await.map(|_| ())
-        } else {
-            active.update(conn).await.map(|_| ())
-        };
+        // `update_without_returning` rather than `active.update`: it still calls
+        // `before_save` (unlike the raw `Entity::update(...)` builder) and raises
+        // `DbErr::RecordNotUpdated` on no match, but decodes no `Model` on return
+        // — the `Ok`/`RecordNotUpdated` outcome is all the caller needs.
+        let result = active.update_without_returning(conn).await.map(|_| ());
         match result {
             Ok(()) => restored += 1,
             Err(DbErr::RecordNotUpdated) => missing += 1,

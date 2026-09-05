@@ -6,6 +6,7 @@ use rmcp::model::CallToolResult;
 use rmcp::tool;
 use rmcp::tool_router;
 use schemars::JsonSchema;
+use sea_orm::TransactionTrait;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -79,27 +80,28 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        // Vector search uses `content_entities.embedding` which does not exist on SQLite.
-        if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            return Ok(err_to_tool_result(YorishiroError::BackendUnsupported {
-                message: "vector search requires PostgreSQL; point DATABASE_URL at a PostgreSQL instance to use this feature".into(),
-            }));
-        }
-
         let workspace_id = auth_ctx.workspace_id;
-        let db = match db_handle(&self.ctx).map_err(|err| err.0) {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+
         // A read-only transaction, same as `Authorized`'s: dropped without committing when this returns, which is a no-op since nothing was written.
-        let txn = match db
-            .tenant
-            .begin_for_workspace(auth_ctx.tenant_id, workspace_id)
-            .await
-            .map_err(|err| crate::error::YorishiroError::Internal(err.into()))
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
+        let txn = if self.ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            match self.ctx.db.begin().await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(YorishiroError::Internal(err.into()))),
+            }
+        } else {
+            let db = match db_handle(&self.ctx).map_err(|err| err.0) {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
+            match db
+                .tenant
+                .begin_for_workspace(auth_ctx.tenant_id, workspace_id)
+                .await
+                .map_err(|err| crate::error::YorishiroError::Internal(err.into()))
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            }
         };
 
         let hits =

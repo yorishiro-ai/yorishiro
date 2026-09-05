@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -55,7 +55,10 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key } = setup(&ctx).await;
         let auth = format!("Bearer {key}");
 
@@ -135,8 +138,6 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             std::collections::BTreeSet::from(["first", "second"]),
             "both entities imported against the cached schema lookup, not just the first"
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

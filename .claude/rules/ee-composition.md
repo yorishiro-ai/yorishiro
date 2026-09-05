@@ -2,7 +2,7 @@
 
 **`ee/` is a module of the application crate, not a package of its own.**
 `src/lib.rs` declares it with `#[path = "../ee/mod.rs"]`, so the files stay at the repository root where `ee/LICENSE` scopes them ("everything under the `ee/` directory") while compiling into the same crate as everything in `src/`.
-The root `Cargo.toml`'s `[workspace] members` lists `"."` and `"migration"`; there is one binary, `yorishiro`.
+The root `Cargo.toml`'s `[workspace] members` lists `"."` only; there is one binary, `yorishiro`.
 
 One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module whitelist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
 

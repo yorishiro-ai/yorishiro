@@ -49,6 +49,15 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check test harness usage
+        run: |
+          # Only tests/requests/mod.rs may call the raw loco helpers directly.
+          # All other test files must use boot_request/boot_request_sqlite instead.
+          if git grep -l 'request_with_create_db::<\|request_with_create_sqlite::<' tests/ | grep -v 'tests/requests/mod.rs'; then
+            echo "ERROR: call boot_request/boot_request_sqlite instead of the raw loco helper directly"
+            exit 1
+          fi
+
       - name: Check
         run: cargo check --locked --workspace
 
@@ -61,14 +70,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - backend: postgres
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          # - backend: sqlite
-          #   loco_env: test_sqlite
-          #   database_url: sqlite:///yorishiro-test.sqlite3?mode=rwc
+          - backend: sqlite
+            loco_env: test_sqlite
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -90,18 +100,66 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install pgvector and pg_trgm into template1
+      - name: Build workspace
+        run: cargo build --locked --workspace
+
+      - name: Install sea-orm-cli with postgres-vector feature
+        run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector,sqlx-postgres,sqlx-sqlite
+
+      - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'
         run: |
-          docker exec ${{ job.services.db.id }} psql -U yorishiro -d template1 \
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
+            -c '\c template1' \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+
+      - name: Run migrations (postgres)
+        if: matrix.backend == 'postgres'
+        env:
+          DATABASE_URL: ${{ matrix.database_url }}
+          LOCO_ENV: ${{ matrix.loco_env }}
+          DB_CONNECT_TIMEOUT: "5000"
+        run: ./target/debug/yorishiro db migrate
+
+      - name: Run migrations (sqlite)
+        if: matrix.backend == 'sqlite'
+        env:
+          DATABASE_URL: ${{ matrix.database_url }}
+          LOCO_ENV: ${{ matrix.loco_env }}
+        run: ./target/debug/yorishiro db migrate
+
+      - name: Verify _entities/ matches a fresh regen
+        if: matrix.backend == 'postgres'
+        env:
+          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          LOCO_ENV: test_postgres
+          DB_CONNECT_TIMEOUT: "5000"
+        run: |
+          # Diagnose: confirm the migration-created tables actually exist.
+          # This is the branching point if db entities ever produces 0 files again.
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro -c '\dt' || true
+          # Run db entities (the determinism check).
+          count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
+          rm -f src/models/_entities/*.rs
+          ./target/debug/yorishiro db entities
+          which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
+          count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
+          if [ "$count" -lt 10 ]; then
+            echo "ERROR: Expected 20+ entity files, got $count after db entities."
+            exit 1
+          fi
+          echo "Generated $count entity files (had $count_before before)"
+          git diff --exit-code src/models/_entities/
 
       - name: Run tests
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
-          DB_MAX_CONNECTIONS: "100"
+          DB_MAX_CONNECTIONS: 100
+          DB_CONNECT_TIMEOUT: 5000
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
         run: cargo test --locked --workspace -- --test-threads=1

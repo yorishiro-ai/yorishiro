@@ -5,7 +5,7 @@
 It just calls `TenantDb::connect(url, max_connections)` against a real test database the same way `Hooks::after_context` does.
 `config/test_postgres.yaml`'s `database.uri` already reads `DATABASE_URL` with `auto_migrate: true`, so `cargo test` against a scratch Postgres runs converge and gets a role-and-RLS-correct connection with no bridge, no `#[path]`, no `autotests = false`.
 `TenantDb::new(pool)` still exists (it bypasses `after_connect`, so it skips `SET ROLE`) but nothing calls it and nothing should: `connect` is the only path a test needs.
-**Test layout**: the integration tests are one binary rooted at `tests/mod.rs`, which declares the submodules (`mod requests;`, `mod models;`, `mod tasks;`).
+**Test layout**: the integration tests are one binary rooted at `tests/mod.rs`, which declares the submodules (`mod licence;`, `mod metaschema;`, `mod migration;`, `mod models;`, `mod requests;`, `mod services;`, `mod tasks;`).
 Shared helpers live in the submodule that owns them and are reached by path: `close_app_pools` sits in `tests/requests/mod.rs` and `tests/models/*` calls it as `crate::requests::close_app_pools`.
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`, in either crate; a previous version of this rule described both, and neither has ever existed here.
 
@@ -22,7 +22,8 @@ Check this at its own layer (`psql -d template1 -c '\dx'`), not assumed: a fresh
 **A request test that boots through `request_with_create_db` must call `close_app_pools` before its closure returns, or teardown panics even on a passing test.**
 `after_context` opens two pools Loco's harness doesn't know about (identity, eager; tenant, lazy), and `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open on `ctx.db` itself; none of the three close on their own when the closure returns.
 `close_app_pools` in `tests/requests/mod.rs` is the pattern every request test copies.
-The Postgres queue provider (`config/test_postgres.yaml`'s `queue:` block) is a fourth pool this same way, and it has no public close path at all (`shutdown()` only cancels its polling loop), so `queue:` is **omitted entirely from `config/test_postgres.yaml`**: nothing in this codebase enqueues a job yet (`connect_workers` is a no-op), so no test needs one, and there is no fix on the closing side for a pool with no closing method.
+`config/test_postgres.yaml`'s `queue:` block uses the same pool-closing pattern: the fourth pool has no public close path at all (`shutdown()` only cancels its polling loop), so `queue:` is **omitted from `config/test_postgres.yaml`** for that reason.
+`tests/requests/queue.rs` tests enqueueing directly against a real database, confirming that `connect_workers` now registers four worker types rather than being a no-op.
 
 **A gate is not a gate until a deliberate violation makes it fire.**
 `redeem_invite`'s race-safety claim (two concurrent redemptions of the same token can't both succeed) needs two racing redemption calls behind a barrier to actually test the race; a sequential replay-rejection test only proves the upfront `SELECT` filters correctly, not that the `UPDATE ... WHERE used_at IS NULL` guard is race-safe.
@@ -31,5 +32,5 @@ The same shape applies to any advisory-lock gate (a quota lock, a version-serial
 **A fresh database needs its role created before any migration's `helpers::grant` runs.**
 Every migration file's `grant` helper assumes `yorishiro_app` already exists; verify this by migrating a fresh volume as a non-superuser role and confirming `SET ROLE yorishiro_app` succeeds without escalation, since a superuser migrating role can `SET ROLE` regardless of grant membership and would mask a missing grant.
 
-**Adding or removing an MCP tool breaks the tool-count assertion and whatever test builds dummy arguments per tool name.**
-Both need updating in the same change as the tool list.
+**Adding or removing an MCP tool changes the tool list that callers build from.**
+Tests that enumerate tools or build dummy arguments per tool name need updating alongside any tool addition or removal.

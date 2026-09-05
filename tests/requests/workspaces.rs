@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
@@ -48,7 +48,10 @@ async fn issue_key_for(
 #[tokio::test]
 #[serial]
 async fn owner_can_create_list_view_and_delete_workspaces() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
             .await
@@ -105,8 +108,6 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -114,7 +115,10 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 #[tokio::test]
 #[serial]
 async fn cannot_delete_a_tenants_only_workspace() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
             .await
@@ -129,8 +133,6 @@ async fn cannot_delete_a_tenants_only_workspace() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 409);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -138,7 +140,10 @@ async fn cannot_delete_a_tenants_only_workspace() {
 #[tokio::test]
 #[serial]
 async fn member_role_cannot_create_or_delete_workspaces() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let member = tenancy::create_user(&ctx.db, "member@example.com", "hunter2-hunter2", None)
             .await
@@ -167,8 +172,6 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
         assert_eq!(response.status_code(), 200);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -176,11 +179,12 @@ async fn member_role_cannot_create_or_delete_workspaces() {
 #[tokio::test]
 #[serial]
 async fn workspaces_endpoints_require_authentication() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -188,7 +192,10 @@ async fn workspaces_endpoints_require_authentication() {
 #[tokio::test]
 #[serial]
 async fn workspace_endpoints_enforce_tenant_isolation() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_a, workspace_a) = setup_tenant(&ctx, "acme").await;
         let owner_a = tenancy::create_user(&ctx.db, "owner-a@example.com", "hunter2-hunter2", None)
             .await
@@ -212,8 +219,6 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
             .add_header("Authorization", format!("Bearer {owner_a_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

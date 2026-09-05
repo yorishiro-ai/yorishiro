@@ -1,5 +1,5 @@
+use crate::requests::boot_request;
 use async_trait::async_trait;
-use loco_rs::testing::prelude::*;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serial_test::serial;
 use yorishiro::app::App;
@@ -19,12 +19,16 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
-/// Writes a raw vector directly onto an entity's `embedding` column, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
+/// Writes a raw vector directly into `content_entity_embeddings`, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
 async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vector: Vec<f32>) {
     conn.execute_raw(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "UPDATE content_entities SET embedding = $1 WHERE id = $2",
-        [pgvector::Vector::from(vector).into(), entity_id.into()],
+        "INSERT INTO content_entity_embeddings (entity_id, embedding) VALUES ($1, $2)\
+         ON CONFLICT(entity_id) DO UPDATE SET embedding = $2",
+        [
+            entity_id.into(),
+            sea_orm::entity::prelude::PgVector::from(vector).into(),
+        ],
     ))
     .await
     .expect("set embedding");
@@ -34,7 +38,10 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
 #[tokio::test]
 #[serial]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("search-test".into()),
             ..Default::default()
@@ -148,8 +155,6 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             hits.iter().all(|h| h.entity.workspace_id == workspace.id),
             "no cross-workspace leakage: {hits:?}"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -176,7 +181,10 @@ impl EmbeddingProvider for FixedWidthProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("dimension-mismatch-test".into()),
             ..Default::default()
@@ -230,7 +238,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -238,13 +246,11 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             .expect("query embedding")
             .map(|r| r.has_embedding)
         };
-        assert_eq!(
-            stored,
-            Some(false),
-            "the refused write must not have touched the embedding column"
+        assert!(
+            stored != Some(true),
+            "the refused write must not have created an embedding row: {stored:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -300,7 +306,10 @@ impl EmbeddingProvider for FixedModelProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("model-mismatch-test".into()),
             ..Default::default()
@@ -360,7 +369,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -368,13 +377,11 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             .expect("query embedding")
             .map(|r| r.has_embedding)
         };
-        assert_eq!(
-            stored,
-            Some(false),
-            "the refused write must not have touched the embedding column"
+        assert!(
+            stored != Some(true),
+            "the refused write must not have created an embedding row: {stored:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -384,7 +391,10 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
@@ -443,7 +453,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -480,7 +490,6 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             "result: {result2:?}"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -492,7 +501,10 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_dimension_tier() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-dimension-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
@@ -545,8 +557,6 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
             result.unwrap_err().to_string().contains("1024"),
             "error message must name the expected dimension count 1024"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -560,9 +570,11 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 /// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
 #[serial]
-#[ignore = "flaky in CI: detached connections from advisory lock exhaust pool"]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("concurrent-reindex-test".into()),
             ..Default::default()
@@ -731,18 +743,18 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         };
 
         // Verify every entity's embedding matches the winning provider's vector.
-        // `pgvector::Vector::data()` returns the raw `Vec<f32>` bytes.
+        // `PgVector::data()` returns the raw `Vec<f32>` bytes.
         // The float comparison is safe: `*b as f32 / 255.0` round-trips exactly through
         // PostgreSQL `real` (32-bit float), so `assert_eq!` is valid.
         for entity_id in &candidate_ids {
-            let stored_vector: Option<pgvector::Vector> = {
+            let stored_vector: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<pgvector::Vector>,
+                    embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entities WHERE id = $1",
+                    "SELECT embedding FROM content_entity_embeddings WHERE entity_id = $1",
                     [(*entity_id).into()],
                 ))
                 .one(&ctx.db)
@@ -757,8 +769,6 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 "entity {entity_id} embedding must match winner {final_model:?}"
             );
         }
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -775,7 +785,10 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 #[tokio::test]
 #[serial]
 async fn reindex_overwrites_existing_entity_embeddings() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("reindex-overwrite-test".into()),
             ..Default::default()
@@ -848,14 +861,14 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // Verify the old vectors are stored.
         let old_v1 = old_provider.vector();
         for entity_id in [e1.id, e2.id] {
-            let stored: Option<pgvector::Vector> = {
+            let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<pgvector::Vector>,
+                    embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entities WHERE id = $1",
+                    "SELECT embedding FROM content_entity_embeddings WHERE entity_id = $1",
                     [entity_id.into()],
                 ))
                 .one(&ctx.db)
@@ -922,14 +935,14 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // Both halves are required: assert_ne alone passes on a zeroed or corrupted row,
         // assert_eq alone passes if the row already held the new value.
         for entity_id in [e1.id, e2.id] {
-            let stored: Option<pgvector::Vector> = {
+            let stored: Option<sea_orm::entity::prelude::PgVector> = {
                 #[derive(sea_orm::FromQueryResult)]
                 struct Row {
-                    embedding: Option<pgvector::Vector>,
+                    embedding: Option<sea_orm::entity::prelude::PgVector>,
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entities WHERE id = $1",
+                    "SELECT embedding FROM content_entity_embeddings WHERE entity_id = $1",
                     [entity_id.into()],
                 ))
                 .one(&ctx.db)
@@ -949,8 +962,6 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 "entity {entity_id} embedding must match new model {final_model:?}"
             );
         }
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -959,7 +970,10 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 #[tokio::test]
 #[serial]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("trigram-test".into()),
             ..Default::default()
@@ -1023,23 +1037,21 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             hits[0].distance.is_none(),
             "trigram-only hit has no distance"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
 
-/// The FTS5 fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text` via the
-/// FTS5 virtual table, when the entity has no embedding; an entity with neither an embedding nor
-/// an FTS5 match must not appear.
+/// The LIKE fallback on SQLite surfaces an entity whose `data` fuzzy-matches `query_text`, when
+/// the entity has no embedding; an entity with neither an embedding nor a LIKE match must not
+/// appear.
 ///
-/// On SQLite, `content_entities` has no `embedding` column, so the search function's trigram half
-/// is replaced by an FTS5 MATCH query against the `fts_content_entities` virtual table created in
-/// the migration. This test boots against a SQLite file database to confirm the FTS5 path works
-/// end to end, including schema creation and entity insertion (which triggers FTS5 auto-sync).
+/// On SQLite, the search function's trigram half (pg_trgm on PostgreSQL) is replaced by a LIKE
+/// query directly against `content_entities.data`. This test boots against a SQLite file
+/// database to confirm the LIKE path works end to end, including schema creation and entity
+/// insertion.
 #[tokio::test]
 #[serial]
-async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
+async fn search_by_vector_falls_back_to_like_on_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;
     }
@@ -1049,38 +1061,38 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
-    crate::requests::request_with_create_sqlite::<App, _, _>(
+    crate::requests::boot_request_sqlite::<App, _, _>(
         db_path.clone(),
         |_request, ctx| async move {
             let tenant = identity_tenants::ActiveModel {
-                name: sea_orm::ActiveValue::Set("fts5-test".into()),
+                name: sea_orm::ActiveValue::Set("like-fallback-test".into()),
                 ..Default::default()
             };
             let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
                 .await
                 .expect("insert tenant");
+            let tenant_id = tenant.id;
 
             let workspace = identity_workspaces::ActiveModel {
-                tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+                tenant_id: sea_orm::ActiveValue::Set(tenant_id),
                 name: sea_orm::ActiveValue::Set("main".into()),
-                status: sea_orm::ActiveValue::Set(
-                    yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
-                ),
+                status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
                 ..Default::default()
             };
             let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
                 .await
                 .expect("insert workspace");
+            let workspace_id = workspace.id;
 
             let def = serde_json::from_value(note_definition()).expect("parse definition");
-            content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+            content_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
                 .await
                 .expect("create schema");
 
             // Create an entity whose title contains the search phrase.
             let matching = content_entities::create(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 content_entities::CreateEntityInput {
                     schema_name: "note".into(),
                     entity_type: "note".into(),
@@ -1094,7 +1106,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             // Create an entity whose title does not match.
             content_entities::create(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 content_entities::CreateEntityInput {
                     schema_name: "note".into(),
                     entity_type: "note".into(),
@@ -1106,10 +1118,10 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             .expect("create unrelated entity");
 
             // Neither entity has an embedding (SQLite has no embedding column), so both rely on
-            // the FTS5 fallback path.
+            // the FTS fallback path.
             let hits = search::search_by_vector(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
@@ -1119,58 +1131,28 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 
             assert_eq!(hits.len(), 1, "hits: {hits:?}");
             assert_eq!(hits[0].entity.id, matching.id);
-            assert!(hits[0].distance.is_none(), "fts5-only hit has no distance");
+            assert!(hits[0].distance.is_none(), "LIKE-only hit has no distance");
 
-            // Test the FTS5 UPDATE trigger: modify the entity's data so the old search
-            // phrase no longer matches, then confirm a search for the new phrase finds it.
-            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            use yorishiro::models::_entities::content_entities::Column;
-
-            // Fetch using raw SQL (Entity::find_by_id selects embedding which doesn't
-            // exist on SQLite). EntityRecord is a FromQueryResult type with the same
-            // columns but no embedding field.
-            use yorishiro::models::content_entities::EntityRecord;
-            let rec = EntityRecord::find_by_statement(sea_orm::Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT id, workspace_id, schema_id, schema_version, entity_type, data, \
-                 created_at, updated_at, created_by, updated_by \
-                 FROM content_entities WHERE id = $1",
-                [matching.id.into()],
-            ))
-            .one(&ctx.db)
-            .await
-            .expect("fetch entity for update")
-            .expect("entity exists");
-
-            // Build an ActiveModel with the fetched fields and update.
-            // On SQLite, `ActiveModelTrait::update` tries to decode the return value
-            // as a `content_entities::Model` which includes `embedding` — doesn't exist
-            // on SQLite. Use `update_without_returning` (same pattern as the production
-            // `update_and_fetch` function).
-            let active = content_entities::ActiveModel {
-                id: sea_orm::ActiveValue::Set(rec.id),
-                workspace_id: sea_orm::ActiveValue::Set(rec.workspace_id),
-                schema_id: sea_orm::ActiveValue::Set(rec.schema_id),
-                schema_version: sea_orm::ActiveValue::Set(rec.schema_version),
-                entity_type: sea_orm::ActiveValue::Set(rec.entity_type),
-                data: sea_orm::ActiveValue::Set(serde_json::json!({
-                    "title": "quarterly board meeting notes"
-                })),
-                created_at: sea_orm::ActiveValue::Set(rec.created_at.into()),
-                updated_at: sea_orm::ActiveValue::NotSet, // before_save stamps this
-                created_by: sea_orm::ActiveValue::Set(rec.created_by),
-                updated_by: sea_orm::ActiveValue::Set(rec.updated_by),
-                embedding: Default::default(),
-            };
-            active
-                .update_without_returning(&ctx.db)
+            // Modify the entity's data so the old search phrase no longer matches, then
+            // confirm a search for the new phrase finds it.
+            let rec = content_entities::get(&ctx.db, workspace_id, matching.id)
                 .await
-                .expect("update entity");
+                .expect("fetch entity for update");
+
+            content_entities::update(
+                &ctx.db,
+                workspace_id,
+                rec.id,
+                serde_json::json!({ "title": "quarterly board meeting notes" }),
+                None,
+            )
+            .await
+            .expect("update entity");
 
             // Old phrase should no longer match.
             let hits = search::search_by_vector(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
@@ -1186,7 +1168,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             // New phrase should find it.
             let hits = search::search_by_vector(
                 &ctx.db,
-                workspace.id,
+                workspace_id,
                 vec![0.0_f32; 768],
                 "quarterly board meeting",
                 search::SearchQuery::default(),
@@ -1196,58 +1178,12 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
             assert_eq!(hits[0].entity.id, matching.id);
 
-            // Test the FTS5 DELETE trigger: delete the entity and verify the FTS5 side is actually
-            // cleaned up (a bare search-by-vector assertion would be true even if the FTS5 row
-            // lingered, because the join against content_entities would already find no match).
-            content_entities::Entity::delete_many()
-                .filter(Column::Id.eq(matching.id))
-                .exec(&ctx.db)
+            content_entities::delete(&ctx.db, workspace_id, matching.id)
                 .await
                 .expect("delete entity");
 
-            let fts_count: Option<i64> = {
-                #[derive(sea_orm::FromQueryResult)]
-                struct Row {
-                    cnt: i64,
-                }
-                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE rowid = $1",
-                    [matching.id.into()],
-                ))
-                .one(&ctx.db)
-                .await
-                .expect("fts count")
-                .map(|r| r.cnt)
-            };
-            assert_eq!(
-                fts_count,
-                Some(0),
-                "fts_content_entities must not contain the deleted row after trigger"
-            );
-            // match (which would be true even if the FTS5 row lingered).
-            let fts_count: Option<i64> = {
-                #[derive(sea_orm::FromQueryResult)]
-                struct Row {
-                    cnt: i64,
-                }
-                Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "SELECT COUNT(*) AS cnt FROM fts_content_entities WHERE rowid = $1",
-                    [matching.id.into()],
-                ))
-                .one(&ctx.db)
-                .await
-                .expect("fts count")
-                .map(|r| r.cnt)
-            };
-            assert_eq!(
-                fts_count,
-                Some(0),
-                "fts_content_entities must not contain the deleted row after trigger"
-            );
-
-            crate::requests::close_app_pools_sqlite(&ctx, &db_path).await;
+            let after_delete = content_entities::get(&ctx.db, workspace_id, matching.id).await;
+            assert!(after_delete.is_err(), "deleted entity must not be found");
         },
     )
     .await;

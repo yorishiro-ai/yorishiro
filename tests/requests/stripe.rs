@@ -1,6 +1,6 @@
+use super::boot_request;
 use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
-use loco_rs::testing::prelude::*;
 use sea_orm::ActiveValue;
 use serde_json::json;
 use serial_test::serial;
@@ -103,8 +103,11 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 #[tokio::test]
 #[serial]
 async fn a_duplicate_event_id_is_not_reapplied() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_stripe_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             billing::link_stripe_customer(&ctx.db, tenant_id, "cus_1")
@@ -151,8 +154,6 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 Some("free"),
                 "the duplicate must not have re-applied the plan change"
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -163,8 +164,11 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 #[tokio::test]
 #[serial]
 async fn a_cancellation_returns_the_tenant_to_free() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_stripe_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
             billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
@@ -209,8 +213,6 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 Some(1),
                 "a cancelled tenant must drop to Free's workspace cap, not keep the paid one"
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })
@@ -221,7 +223,10 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[tokio::test]
 #[serial]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
         let response = request
@@ -235,8 +240,6 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
             "an unconfigured webhook must refuse, never accept an unverifiable request: {:?}",
             response.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -245,8 +248,11 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 #[tokio::test]
 #[serial]
 async fn a_tampered_payload_is_rejected() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
     with_stripe_env(async {
-        request_with_create_db::<App, _, _>(|request, ctx| async move {
+        boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let body = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_t");
             let now = Utc::now().timestamp();
@@ -265,8 +271,6 @@ async fn a_tampered_payload_is_rejected() {
                 "response: {:?}",
                 response.text()
             );
-
-            super::close_app_pools(&ctx).await;
         })
         .await;
     })

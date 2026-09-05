@@ -119,7 +119,7 @@ queue:
 #
 # Opt-in: the whole block renders only when MAILER_HOST is set to something non-empty.
 # Nothing in this application sends mail today, and `Config.mailer` is an `Option`, so an absent block is a supported state rather than a missing one.
-# It has to be a template conditional rather than variables with defaults: `boot.rs` builds an `EmailSender` from this block whenever `smtp.enable` is true and propagates the failure, so a rendered block pointing at a placeholder host would fail the boot exactly where an unset variable used to.
+# It has to be a template conditional rather than variables with defaults: `boot.rs` builds an `EmailSender` from this block whenever `smtp.enable` is true and propagates the failure, so a rendered block pointing at a placeholder host would fail the boot immediately.
 <% if get_env(name="MAILER_HOST", default="") != "" %>
 mailer:
   # SMTP mailer configuration.

@@ -92,6 +92,8 @@ pub async fn get_active_schema(
     workspace_id: Uuid,
     name: &str,
 ) -> Result<SchemaRecord, YorishiroError> {
+    // SQLite serializes UUIDs as binary in SeaORM queries, but the migration stores them as
+    // hex strings in TEXT columns. Convert to hex for the filter so the comparison works.
     use super::_entities::content_schemas::Column;
 
     let row = Entity::find()
@@ -248,8 +250,15 @@ pub async fn create_schema(
     use super::_entities::content_schemas::Column;
 
     validate_definition(&definition)?;
+    tracing::debug!("create_schema: validation OK");
 
     let name = definition.name.clone();
+    tracing::debug!(
+        "create_schema: name={}, ws={}, tenant={}",
+        name,
+        workspace_id,
+        tenant_id
+    );
 
     crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
         .await

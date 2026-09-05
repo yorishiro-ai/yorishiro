@@ -59,7 +59,7 @@ pub async fn mark_active(
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
     conn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
+        conn.get_database_backend(),
         "UPDATE identity_workspaces \
          SET status = $1, schema_id = COALESCE(schema_id, $2) \
          WHERE id = $3",

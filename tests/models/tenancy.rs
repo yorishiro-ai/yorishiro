@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use crate::requests::boot_request;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use serial_test::serial;
 use std::sync::Arc;
@@ -16,7 +16,10 @@ use yorishiro::models::tenancy;
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[serial]
 async fn concurrent_create_workspace_cannot_exceed_the_cap() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         const RACERS: usize = 8;
 
         // A cap of 2 with one workspace already present leaves exactly one slot for eight racers to fight over.
@@ -82,8 +85,6 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             total, 2,
             "the tenant must never hold more than max_workspaces"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

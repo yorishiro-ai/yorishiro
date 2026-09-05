@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
@@ -21,7 +21,10 @@ fn chain_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-test".into()),
             ..Default::default()
@@ -152,7 +155,6 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
             "mid must keep its shortest hop_distance, not the diamond's longer one"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -161,7 +163,10 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
 #[tokio::test]
 #[serial]
 async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-shallow-test".into()),
             ..Default::default()
@@ -249,8 +254,6 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
             bob_data.get("ssn").is_none(),
             "non-x-embed field must be stripped by shallow_copy: {bob_data:?}"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
