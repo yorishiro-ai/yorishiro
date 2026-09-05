@@ -61,9 +61,10 @@ pub fn timestamps(manager: &SchemaManager<'_>) -> [ColumnDef; 2] {
     let ca = created_at(manager);
     let mut ua = ColumnDef::new(Alias::new("updated_at"));
     if manager.get_database_backend() == DbBackend::Sqlite {
-        ua.text().default(Expr::current_timestamp());
+        ua.text().not_null().default(Expr::current_timestamp());
     } else {
         ua.timestamp_with_time_zone()
+            .not_null()
             .default(Expr::current_timestamp());
     }
     [ca, ua.to_owned()]

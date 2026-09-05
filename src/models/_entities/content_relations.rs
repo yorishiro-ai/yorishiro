@@ -7,16 +7,12 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "content_relations")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
     #[sea_orm(unique_key = "relations_unique")]
-    #[sea_orm(column_type = "Text")]
     pub workspace_id: Uuid,
     #[sea_orm(unique_key = "relations_unique")]
-    #[sea_orm(column_type = "Text")]
     pub source_id: Uuid,
     #[sea_orm(unique_key = "relations_unique")]
-    #[sea_orm(column_type = "Text")]
     pub target_id: Uuid,
     #[sea_orm(column_type = "Text", unique_key = "relations_unique")]
     pub relation_type: String,

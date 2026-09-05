@@ -7,13 +7,9 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_api_keys")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
-    #[sea_orm(column_type = "Text", nullable)]
     pub workspace_id: Option<Uuid>,
-    #[sea_orm(column_type = "Text")]
     pub tenant_id: Uuid,
-    #[sea_orm(column_type = "Text", nullable)]
     pub user_id: Option<Uuid>,
     #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
     pub key_hash: Vec<u8>,

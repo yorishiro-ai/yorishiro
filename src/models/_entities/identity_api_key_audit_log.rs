@@ -7,15 +7,10 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "identity_api_key_audit_log")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
-    #[sea_orm(column_type = "Text")]
     pub workspace_id: Uuid,
-    #[sea_orm(column_type = "Text")]
     pub tenant_id: Uuid,
-    #[sea_orm(column_type = "Text", nullable)]
     pub api_key_id: Option<Uuid>,
-    #[sea_orm(column_type = "Text", nullable)]
     pub user_id: Option<Uuid>,
     #[sea_orm(column_type = "Text")]
     pub action: String,

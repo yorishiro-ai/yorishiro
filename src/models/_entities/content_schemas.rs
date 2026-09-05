@@ -7,12 +7,9 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "content_schemas")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    #[sea_orm(column_type = "Text")]
     pub id: Uuid,
-    #[sea_orm(column_type = "Text")]
     pub tenant_id: Uuid,
     #[sea_orm(unique_key = "schemas_workspace_name_version_key")]
-    #[sea_orm(column_type = "Text")]
     pub workspace_id: Uuid,
     #[sea_orm(
         column_type = "Text",
@@ -25,7 +22,6 @@ pub struct Model {
     pub definition: Json,
     #[sea_orm(column_type = "Text")]
     pub status: String,
-    #[sea_orm(column_type = "Text", nullable)]
     pub origin_template_id: Option<Uuid>,
     #[sea_orm(column_type = "Text")]
     pub origin_status: String,
