@@ -90,7 +90,8 @@ jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }  # licence key
 hmac = { version = "0.13.0" }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 url = { version = "2.5.8" }            # OIDC discovery (ee/services/oauth.rs)
-swagger = { version = "0.3" }           # OpenAPI spec generation
+utoipa = { version = "5.4.0", features = ["axum_extras", "uuid"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 [[bin]]
 name = "yorishiro"

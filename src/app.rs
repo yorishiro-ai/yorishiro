@@ -328,6 +328,7 @@ impl Hooks for App {
     /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here instead: this hook runs after Loco's own routes are built, which is where Loco itself says custom Axum logic belongs.
     /// The middleware layers must come after the MCP mount, not before: `.layer` wraps everything already on the router at the point it's called.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
+        let router = controllers::swagger::mount(router);
         let router = controllers::mcp::mount(router, ctx);
         let rate_limiter =
             std::sync::Arc::new(crate::services::rate_limit::RateLimiter::from_env());
