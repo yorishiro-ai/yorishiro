@@ -942,9 +942,10 @@ impl MigrationTrait for Migration {
                 .get_connection()
                 .execute_unprepared(
                     "CREATE VIRTUAL TABLE content_entities_fts USING fts5(\
-                     entity_id,\
-                     data\
-                 ) tokenize='trigram';",
+                     entity_id UNINDEXED,\
+                     data,\
+                     tokenize='trigram'\
+                 );",
                 )
                 .await?;
 
