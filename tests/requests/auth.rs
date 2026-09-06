@@ -223,7 +223,7 @@ async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<O
 #[tokio::test]
 #[serial]
 async fn create_tenant_serializes_on_its_advisory_lock() {
-    if !super::super::require_sqlite_backend() {
+    if super::super::require_sqlite_backend() {
         return;
     }
     super::with_max_tenants("100", async move {
