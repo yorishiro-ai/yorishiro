@@ -49,7 +49,7 @@ loco-rs = { workspace = true }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.1", features = ["rt-multi-thread"] }
+tokio = { version = "1.53.1", features = ["rt", "time", "macros"] }
 async-trait.workspace = true
 axum.workspace = true
 tracing.workspace = true

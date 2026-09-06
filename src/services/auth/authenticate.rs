@@ -48,7 +48,7 @@ pub async fn authenticate(
 /// `authenticate`'s Postgres path goes through the `authenticate_api_key` SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries `identity_api_keys`/`identity_workspaces` directly with the SeaORM entity API.
 /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves, since the join is on `k.workspace_id`; a tenant-scoped key (`workspace_id` NULL) matches nothing here either, same as on Postgres.
 ///
-/// Deliberately not routed through the `Authenticator` trait (`crate::services::auth::authenticator`): that seam exists so `ee/` can swap the authentication rule without touching call sites, and `ee/` does not run against SQLite (see `.claude/rules/loco-architecture.md`), so there is no second implementation for the seam to abstract over on this backend.
+/// Deliberately not routed through the `Authenticator` trait (`crate::services::auth::authenticator`): this trait exists so `ee/` can swap the authentication rule without touching call sites, and `ee/` does not run against SQLite (see `.claude/rules/loco-architecture.md`), so there is no second implementation for the trait to replace on this backend.
 pub async fn authenticate_sqlite(
     conn: &impl ConnectionTrait,
     presented_key: &str,

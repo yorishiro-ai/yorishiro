@@ -1,11 +1,11 @@
 //! Vector similarity search over `content_entities`.
 //!
-//! Embeddings live in the separate `content_entity_embeddings` table (see
-//! `migration/src/m20260903_000001_extract_embeddings_table.rs`), so every query here
+//! Embeddings live in the separate `content_entity_embeddings` table, so every query here
 //! joins `content_entities e` to that table when searching by vector.
 //!
-//! Two queries run for each backend: vector search first, then a trigram (PostgreSQL) or
-//! LIKE (SQLite) fallback for entities with no embedding at all.
+//! Two queries run for each backend: vector search first, then a trigram (PostgreSQL pg_trgm)
+//! or trigram (SQLite FTS5 `tokenize='trigram'`) fallback for entities with no embedding at
+//! all.  Both backends therefore use character-n-gram fuzzy matching for the fallback path.
 //! The two halves are merged in Rust.
 
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
@@ -93,7 +93,7 @@ pub async fn embed_query(
 }
 
 /// The `WHERE` fragment (and its bound values) both halves of the search apply, appended
-/// after `$2` (vector half) / no vector (trigram/LIKE half) so callers pass in the params
+/// after `$2` (vector half) / no vector (trigram/FTS5 half) so callers pass in the params
 /// that come before it and get back the ones to append.
 fn scope_clause(
     workspace_id: Uuid,
@@ -124,7 +124,8 @@ const HIT_COLUMNS: &str = "e.id, e.workspace_id, e.schema_id, e.schema_version, 
 /// distance to a query vector.
 ///
 /// PostgreSQL uses the HNSW `<=>` operator on `content_entity_embeddings.embedding`.
-/// SQLite computes cosine distance on the raw LE f32 BLOB with `vec_distance_cosine`.
+/// SQLite uses the `vec_distance_cosine` function for KNN search over the BLOB column,
+/// falling back to the FTS5 virtual table for text matching.
 ///
 /// Both backends join `content_entity_embeddings` via `entity_id` (not rowid): VACUUM
 /// may renumber implicit rowids, so we must never join on them (see
@@ -132,7 +133,7 @@ const HIT_COLUMNS: &str = "e.id, e.workspace_id, e.schema_id, e.schema_version, 
 struct VectorKnn {
     /// The SQL query to run.
     pub sql: String,
-    /// Values bound in order: `[vector_blob, workspace_id, entity_type?, filter?]`.
+    /// Values bound in order: `[vector_blob, workspace_id, entity_type?]`.
     pub values: Vec<sea_orm::Value>,
 }
 
@@ -154,17 +155,17 @@ impl VectorKnn {
     }
 
     fn sqlite(vector: Vec<f32>, workspace_id: Uuid, query: &SearchQuery, limit: i64) -> Self {
-        // Convert the vector to raw LE f32 bytes for the BLOB column.
+        // Convert the vector to raw LE f32 bytes for `vec_distance_cosine`.
         let blob_bytes =
             unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-        // Plain table, not vec0 virtual table: no MATCH/k = operators.
-        // Full scan ordered by cosine distance — fine at current scale.
-        // SQLite's Statement::from_sql_and_values only supports plain `?` placeholders.
+
+        // `vec_distance_cosine` computes the cosine distance between two vectors.
+        // `e.id = ee.entity_id` joins without depending on rowids (VACUUM may
+        // renumber them, see sqlite.org/lang_vacuum.html).
         let mut sql = format!(
-            "SELECT {HIT_COLUMNS}, \
-             vec_distance_cosine(ee.embedding, ?) AS distance \
+            "SELECT {HIT_COLUMNS}, vec_distance_cosine(?, ee.embedding) AS distance \
              FROM content_entities e \
-             JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+             JOIN content_entity_embeddings ee ON e.id = ee.entity_id \
              WHERE ee.embedding IS NOT NULL AND e.workspace_id = ?"
         );
         let mut values: Vec<sea_orm::Value> = vec![
@@ -183,7 +184,7 @@ impl VectorKnn {
 /// Returns entities ordered by cosine distance between the given embedding vector and the
 /// stored embedding, closest first.
 /// As an auxiliary path, entities with no embedding are also included when `query_text` is
-/// a pg_trgm fuzzy match (PostgreSQL) or LIKE match (SQLite) against their data.
+/// a pg_trgm fuzzy match (PostgreSQL) or FTS5 match (SQLite) against their data.
 /// Vector matches are always ranked ahead of trigram-only matches; trigram-only matches are
 /// ordered by similarity.
 pub async fn search_by_vector(
@@ -237,21 +238,33 @@ pub async fn search_by_vector(
         let (scope_sql, scope_values) = scope_clause(workspace_id, &query, 2);
 
         if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            let like_pattern = query_text.replace('%', r"\%").replace('_', r"\_");
+            // FTS5 virtual table with `tokenize='trigram'` provides character-n-gram
+            // fuzzy matching on SQLite, the same semantic approach as PostgreSQL's
+            // pg_trgm `similarity()` on the other backend.
+            // `MATCH` breaks `query_text` into 3-grams and finds rows sharing at least
+            // one trigram token; `bm25()` ranks them ascending (lower is better).
+            // `entity_id` resolves each FTS5 row back to the content table.
+            //
+            // LEFT JOIN to content_entity_embeddings so we can exclude entities that
+            // already have an embedding (ee.entity_id IS NULL): the fallback only
+            // surfaces entities with no embedding, matching the trigram path on PG.
+            //
+            // scope_clause generates `$N` parameters (PostgreSQL style), which SQLite
+            // cannot bind.  Build the WHERE clause manually with `?` placeholders,
+            // mirroring the original LIKE code's shape.
             let mut sql = format!(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
-                 FROM content_entities e \
+                 FROM content_entities_fts \
+                 JOIN content_entities e ON CAST(e.id AS TEXT) = content_entities_fts.entity_id \
                  LEFT JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
-                 WHERE ee.embedding IS NULL AND e.workspace_id = ? \
-                   AND e.data LIKE ? ESCAPE '\\' \
-                 LIMIT {remaining}"
+                 WHERE content_entities_fts MATCH ? AND ee.entity_id IS NULL AND e.workspace_id = ?"
             );
-            let like_value = format!("%{like_pattern}%");
-            let mut values: Vec<sea_orm::Value> = vec![workspace_id.into(), like_value.into()];
+            let mut values: Vec<sea_orm::Value> = vec![query_text.into(), workspace_id.into()];
             if let Some(entity_type) = &query.entity_type {
-                sql = sql.replace("LIMIT", "AND e.entity_type = ? LIMIT");
-                values.insert(2, entity_type.clone().into());
+                sql = format!("{sql} AND e.entity_type = ?");
+                values.push(entity_type.clone().into());
             }
+            let sql = format!("{sql} ORDER BY bm25(content_entities_fts) LIMIT {remaining}");
 
             let rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
                 conn.get_database_backend(),
@@ -266,7 +279,8 @@ pub async fn search_by_vector(
         } else {
             // PostgreSQL uses pg_trgm for fuzzy text matching.
             // `data::text` casts the JSONB column to text for trigram comparison.
-            // `similarity()` returns a float between 0 and 1 for ranking.
+            // `similarity()` returns a float between 0 and 1 for ranking; `DESC` puts
+            // the most similar match first.
             // LEFT JOIN to content_entity_embeddings so we can exclude entities that
             // already have an embedding (ee.embedding IS NULL).
             let trigram_sql = format!(

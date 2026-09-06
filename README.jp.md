@@ -2,92 +2,74 @@
 
 **[English](README.md)** | 日本語
 
-MCPネイティブのマルチテナント・ナレッジストア。ユーザー定義スキーマをサポートします。
-
-エンティティの「型」（フィールド、制約、リレーション）をJSONメタスキーマとして定義し、そのスキーマに検証されたデータをREST APIとMCP（Model Context Protocol）の両方を通じて読み書きできます。`x-embed` 付きのフィールドは自動的にベクトル埋め込みされ、自然言語クエリによる類似度検索が可能になります。
+自分のデータ構造を定義し、キーワードだけでなく意味で検索できるナレッジストア。
 
 ## できること
 
-- **スキーマ駆動データ**。フィールド、バリデーションルール、エンティティ間のリレーションを自由に定義できます。
-- **MCP統合**。Claude、Cursor、または任意のMCP互換クライアントを、検索・作成・管理用の23個の組み込みツールで接続できます。
-- **REST API**。APIキー認証付きの標準HTTPエンドポイント。
-- **ベクトル検索**。埋め込み済みテキストフィールド全体の自然言語による類似度検索。
-- **全文検索**。埋め込みのないエンティティを含む全エンティティの全文検索。
-- **スナップショットと復元**。ワークスペーススナップショットによる時点復元。
-- **マルチテナンシー**。ロールベースアクセス（owner、admin、member、viewer）付きのテナント・ワークスペースを整理。
+- **自分のデータ構造を定義する。** フィールド、バリデーションルール、エンティティ間のリレーションを持つエンティティ型を作成できます。データモデルが変わってもコード修正は不要。
+- **意味で検索する。** 「配送に関する顧客クレーム」といった説明を入力すると、正確に同じ言葉がなくても関連するレコードが見つかります。
+- **全文検索。** 埋め込みがまだ生成されていないレコードもキーワード検索でカバーします。
+- **AIツールに接続。** Claude、Cursor、他のMCP対応クライアントが23個の組み込みツールを使ってデータを検索・作成・管理できます。
+- **REST API。** 標準HTTPエンドポイントで自動化できます。
+- **バージョン復元。** スナップショットで個別レコードを以前の状態に復元できます。
+- **チームで整理する。** テナントとワークスペース、ロールベースのアクセス制御でデータを適切に分割・共有できます。
 
 ## アーキテクチャ
 
 ```mermaid
 flowchart TD
-    MCPClient["MCPクライアント<br/>(Claude など)"]
-    RESTClient["RESTクライアント<br/>(curl/SDK)"]
+    Client["お使いのツール<br/>(Claude, Cursor, curl, SDK)"]
 
-    subgraph Enterprise["ee/（enterprise edition）"]
-        EnterpriseREST["marketplace / origin / ビルディング / OAuth / LLMキー"]
+    subgraph Server["Yorishiro"]
+        Core["コアエンジン<br/>(スキーマ / エンティティ / 検索 / 認証)"]
+        MCP["MCPツール<br/>(23ツール)"]
+        REST["REST API"]
     end
 
-    subgraph Server["yorishiro（axum）"]
-        Core["コア<br/>(スキーマ / エンティティ / 検索 / 認証)"]
-        MCPAdapter["MCPアダプタ<br/>(23ツール)"]
-        RESTAdapter["RESTアダプタ"]
-        MCPAdapter --> Core
-        RESTAdapter --> Core
-    end
+    DB[("PostgreSQL<br/>または SQLite")]
 
-    DB[("PostgreSQL 18 + pgvector<br/>(RLS分離)")]
-    SQLiteDB[("SQLite（単一テナント、sqlite-vec）")]
-
-    MCPClient -->|"/mcp"| MCPAdapter
-    RESTClient -->|"/api/*"| RESTAdapter
-    RESTAdapter --> Core
-    EnterpriseREST --> Core
+    Client --> Server
+    MCP --> Core
+    REST --> Core
     Core --> DB
-    Core --> SQLiteDB
 ```
 
 ## エディション
 
-| | ライセンスキーなし | `YORISHIRO_LICENSE_KEY` あり |
+| | フリー | エンタープライズ |
 |---|---|---|
-| コア機能 | 提供 | 提供 |
-| エンタープライズ機能（marketplace、ビルド、OAuth、LLM推論） | `404` | 提供 |
-| Web UI | どちらでも提供 | |
+| コア機能 | 利用可能 | 利用可能 |
+| エンタープライズ機能（marketplace、ビルド、OAuth、LLM推論） | 利用不可 | 利用可能 |
 
-1つのリポジトリ、1つのバイナリ。設定の有無で動作が変わります。ライセンスチェックはリクエストごとに実行されるため、期限切れでも再起動なしでエンタープライズ機能が停止します。
+1つのバイナリ、1つのリポジトリ。エンタープライズ機能はライセンスキーで有効化します。
 
 ## クイックスタート
 
-最も簡単な方法はDockerを使用することです。モデルのダウンロードや手動設定は不要です。
+最も簡単な方法はDockerです：
 
-1. サーバーを起動:
+```console
+$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+    -e DATABASE_URL=postgres://user:pass@host:5432/yorishiro \
+    ghcr.io/yorishiro-ai/yorishiro:latest
+```
 
-   ```console
-   $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
-       -e DATABASE_URL=postgres://user:pass@host:5432/yorishiro \
-       ghcr.io/yorishiro-ai/yorishiro:latest
-   ```
+1. `http://localhost:8080/` にアクセスし、セットアップウィザードでアカウントを作成。
+2. APIキーを生成し、エンティティの作成を開始。
 
-2. `http://localhost:8080/` にアクセスし、セットアップウィザードで所有者アカウントを作成。
-
-3. APIキーを生成し、エンティティの作成を開始。
-
-ソースからビルドする場合:
+ソースからビルドする場合：
 
 ```console
 $ git clone https://github.com/yorishiro-ai/yorishiro && cd yorishiro
 $ make init
 ```
 
-これによりDocker ComposeでPostgreSQLとアプリが起動します。
-
 ## 設定
 
-環境変数でランタイムの動作を制御します。一般的な設定:
+設定は環境変数で行います：
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `DATABASE_URL` | *(必須)* | PostgreSQL接続文字列 |
+| `DATABASE_URL` | *(必須)* | データベース接続文字列 |
 | `YORISHIRO_MAX_TENANTS` | `1` | テナント上限（`0` = 無制限） |
 | `YORISHIRO_LICENSE_KEY` | *(空)* | エンタープライズライセンスキー |
 | `YORISHIRO_EMBEDDING_PROVIDER` | *(空)* | 埋め込みバックエンド（`local` はローカルモデル） |
@@ -96,7 +78,7 @@ $ make init
 
 ## SQLiteモード
 
-Yorishiroはローカル評価・単一テナントの個人利用のためにSQLiteで動作できます。sqlite-vecによるベクトル検索も利用可能です。マルチテナントホスティングはサポートしていません（データベースレベルの分離がないため）。
+ローカル利用・個人プロジェクトではSQLiteでYorishiroを動作できます。ベクトル検索はsqlite-vecで動作します。マルチテナントホスティングには対応していません。
 
 詳細は [docs/sqlite.md](docs/sqlite.md) を参照してください。
 
@@ -104,13 +86,11 @@ Yorishiroはローカル評価・単一テナントの個人利用のためにSQ
 
 | ドキュメント | 内容 |
 |---|---|
-| [docs/configuration.md](docs/configuration.md) | 全環境変数：埋め込み、検索クォータ、ログ設定 |
+| [docs/configuration.md](docs/configuration.md) | 全設定：埋め込み、検索クォータ、ログ |
 | [docs/sqlite.md](docs/sqlite.md) | SQLiteモード：機能と制限 |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | コードレイアウト、テスト、push前のチェック |
-| [AGENTS.md](AGENTS.md) | AIエージェントの焦点ルール |
-
-未執筆: メタスキーマガイド、REST/MCP APIリファレンス、デプロイメントガイド。
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 貢献ガイドライン |
+| [AGENTS.md](AGENTS.md) | AIエージェント向け情報 |
 
 ## ライセンス
 
-[Business Source License 1.1](LICENSE) の下でライセンスされています。セルフホスティングは許可されています。唯一の制限はYorishiroを競合のホストサービスとして提供することです。2030-07-14 にこのバージョンはGNU General Public License Version 2.0以降に自動的に変換されます。
+[Business Source License 1.1](LICENSE) の下でライセンスされています。セルフホスティングは許可されています。2030-07-14 にこのバージョンはGNU General Public License Version 2.0以降に自動的に変換されます。

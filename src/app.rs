@@ -171,7 +171,7 @@ impl Hooks for App {
     /// `crate::db`'s module doc has why that pool exists separately from `ctx.db`.
     ///
     /// On SQLite none of this runs, and the branch must skip it rather than let it fail: `PgPoolOptions::connect` on a `sqlite://` URL hangs indefinitely instead of erroring.
-    /// That backend has no second tenant to isolate (see `docs/sqlite.md`), so `DbHandle` and the `Authenticator` seam are not built at all; `controllers::extractors` authenticates against `ctx.db` directly there.
+    /// That backend has no second tenant to isolate (see `docs/sqlite.md`), so `DbHandle` and the `Authenticator` trait implementation are not built at all; `controllers::extractors` authenticates against `ctx.db` directly there.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
             crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
@@ -196,8 +196,9 @@ impl Hooks for App {
                 })?;
             ctx.shared_store
                 .insert(crate::db::DbHandle { tenant, identity });
-            // Each of the four seams below works the same way: a later `shared_store.insert` of the
-            // same trait object replaces the default without any call site changing.
+            // Each of the four trait objects below is replaced by a later `shared_store.insert`:
+            // `Arc<dyn Trait>` is keyed by `TypeId`, so the later insert wins without changing
+            // any call site.
             ctx.shared_store
                 .insert(crate::services::auth::default_authenticator());
         }
@@ -208,7 +209,7 @@ impl Hooks for App {
                 loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
             })?;
         ctx.shared_store.insert(embedding_provider);
-        // Both resolver seams are installed on every backend, unlike the authenticator above: they
+        // Both resolver trait objects are installed on every backend, unlike the authenticator above: they
         // read `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
         ctx.shared_store
             .insert(crate::services::embedding::default_embedding_resolver());
@@ -256,7 +257,7 @@ impl Hooks for App {
                 as std::sync::Arc<dyn crate::services::auth::Authenticator>);
         }
 
-        // The embedding and worker-class resolver seams, replacing the defaults inserted above.
+        // The embedding and worker-class resolver trait objects, replacing the defaults inserted above.
         // Both return `None` for a workspace with no row of its own, so a deployment that never
         // assigns one is unaffected; which compute a tenant's jobs run on, and against which
         // embedding backend, is the enterprise-edition decision that keeps these tables in `ee/`.

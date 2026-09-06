@@ -96,7 +96,7 @@ pub struct TokenResponse {
     pub id_token: String,
 }
 
-/// Exchanges an authorization code for tokens at the provider's token endpoint (the `authorization_code` grant, RFC 6749 §4.1.3), including the PKCE code verifier (RFC 7636) generated when the flow started.
+/// Exchanges an authorization code for tokens at the provider's token endpoint (the `authorization_code` grant per RFC 6749), including the PKCE code verifier (RFC 7636) generated when the flow started.
 pub async fn exchange_code_for_tokens(
     token_endpoint: &str,
     client_id: &str,

@@ -19,7 +19,7 @@ pub struct AuthorizeRedirect {
     pub csrf_cookie_value: String,
 }
 
-/// Builds the provider's authorize URL (RFC 6749 §4.1.1) with a freshly issued, signed `state` (see `state_token`) and PKCE challenge (RFC 7636) attached.
+/// Builds the provider's authorize URL (the OAuth 2.0 authorize endpoint) with a freshly issued, signed `state` (see `state_token`) and PKCE challenge (RFC 7636) attached.
 /// `openid email profile` is a fixed scope request, not configurable: `email` is the one claim `users::find_or_create` requires.
 pub async fn build_authorize_redirect(
     config: &OAuthConfig,

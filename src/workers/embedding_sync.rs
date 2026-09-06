@@ -64,7 +64,7 @@ impl WorkerClass {
         }
     }
 
-    /// The `snake_case` wire form this type already serializes to, exposed as a plain string for `ee/`'s `identity_workspace_worker_classes`.
+    /// The `snake_case` wire form this type already serializes to, usable as a plain string for `ee/`'s `identity_workspace_worker_classes`.
     /// Reusing it rather than inventing a second representation keeps a database value and a queue payload byte-identical to an operator inspecting either.
     #[must_use]
     pub fn as_db_str(self) -> &'static str {
@@ -93,7 +93,7 @@ impl WorkerClass {
 
 /// Resolves a workspace's own worker-class assignment, if it has one.
 ///
-/// A seam, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`], letting a deployment pin a workspace's jobs to particular compute without touching the callers that enqueue them.
+/// A trait, the same shape as [`crate::services::embedding::WorkspaceEmbeddingResolver`], letting a deployment pin a workspace's jobs to particular compute without touching the callers that enqueue them.
 /// [`DefaultWorkerClassResolver`] keeps every workspace on `Shared`.
 ///
 /// `conn` is `ctx.db` rather than the RLS-scoped pool: which compute a tenant pays for is deployment configuration, not tenant content.

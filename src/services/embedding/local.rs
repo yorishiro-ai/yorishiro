@@ -140,7 +140,7 @@ impl LocalEmbeddingProvider {
         // managed tier (replaced solely by `rename` into a path this provider has not opened yet).
         // An operator-chosen path would be outside that mechanism with no such guarantee, so an
         // `unsafe` block here would be asserting a safety invariant this function cannot actually
-        // promise. The read happens once at startup and is noise next to the model fetch it may
+        // promise. The read happens once at startup and adds negligible cost compared to the model fetch it may
         // follow.
         let bytes = std::fs::read(&config.model_path).map_err(|err| {
             internal(format!(

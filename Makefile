@@ -33,7 +33,7 @@ build:
 
 # make task NAME=seed_official_templates [ARGS="key:value"]
 task: build
-	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=$test_postgres ./target/debug/yorishiro task $(NAME) $(ARGS)
+	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro task $(NAME) $(ARGS)
 
 # make doctor DATABASE_URL=postgres://...
 doctor: build
@@ -43,13 +43,14 @@ endif
 	DATABASE_URL='$(DATABASE_URL)' LOCO_ENV=test_postgres ./target/debug/yorishiro doctor
 
 # Generate SeaORM entity structs from the current schema.
-# Starts a disposable pgvector/pgvector:pg18 container on port 15433,
+# Starts a disposable pgvector/pgvector:pg18 container on port 15432,
 # runs migrations, generates entities, tears everything down.
 entities: build
 	docker compose up -d testdb
 	@sleep 10
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
+	@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL (DATABASE_URL must start with postgres://)" >&2; exit 1; fi
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db entities
 	docker compose down -v testdb
 

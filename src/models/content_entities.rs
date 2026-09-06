@@ -329,12 +329,14 @@ pub async fn delete(
     }
 }
 
-/// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's added as a raw `Expr::cust_with_values` condition instead.
+/// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's built with `sea_query::extension::postgres::PgExpr::contains`, the builder for `PgBinOper::Contains`, instead of a raw SQL string.
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
+    use sea_orm::sea_query::extension::postgres::PgExpr;
+
     use super::_entities::content_entities::Column;
 
     let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
@@ -342,7 +344,7 @@ pub async fn list(
         select = select.filter(Column::EntityType.eq(entity_type));
     }
     if let Some(filter) = query.filter {
-        select = select.filter(Expr::cust_with_values("data @> $1", [filter]));
+        select = select.filter(Expr::col(Column::Data).contains(Expr::val(filter)));
     }
     if let Some(schema_version) = query.schema_version {
         select = select.filter(Column::SchemaVersion.eq(schema_version));
