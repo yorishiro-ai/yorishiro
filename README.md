@@ -31,8 +31,7 @@ flowchart TD
     subgraph Server["Yorishiro (axum)"]
         MCP["MCP<br/>(23 tools)"]
         REST["REST API"]
-        Core["Core<br/>(schemas / entities / search / auth)"]
-        Enterprise["ee/ (enterprise)<br/>(marketplace / billing / OAuth / LLM keys)"]
+        Core["Core + ee/<br/>(schemas / entities / search / auth / marketplace / billing / OAuth / LLM keys)<br/>license-gated routes are 404 when unlicensed"]
     end
 
     DB[("PostgreSQL<br/>or SQLite")]
@@ -41,8 +40,6 @@ flowchart TD
     RESTClient -->|"HTTP API"| REST
     MCP --> Core
     REST --> Core
-    REST --> Enterprise
-    Enterprise --> Core
     Core --> DB
 ```
 

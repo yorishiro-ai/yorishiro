@@ -31,8 +31,7 @@ flowchart TD
     subgraph Server["Yorishiro（axum）"]
         MCP["MCP<br/>(23ツール)"]
         REST["REST API"]
-        Core["コア<br/>(スキーマ / エンティティ / 検索 / 認証)"]
-        Enterprise["ee/（enterprise）<br/>(marketplace / billing / OAuth / LLMキー)"]
+        Core["コア + ee/<br/>(スキーマ / エンティティ / 検索 / 認証 / marketplace / billing / OAuth / LLMキー)<br/>ライセンスなしのルートは404を返す"]
     end
 
     DB[("PostgreSQL<br/>または SQLite")]
@@ -41,8 +40,6 @@ flowchart TD
     RESTClient -->|"HTTP API"| REST
     MCP --> Core
     REST --> Core
-    REST --> Enterprise
-    Enterprise --> Core
     Core --> DB
 ```
 
