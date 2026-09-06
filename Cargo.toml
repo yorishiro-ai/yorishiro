@@ -90,6 +90,7 @@ jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }  # licence key
 hmac = { version = "0.13.0" }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 url = { version = "2.5.8" }            # OIDC discovery (ee/services/oauth.rs)
+swagger = { version = "0.3" }           # OpenAPI spec generation
 
 [[bin]]
 name = "yorishiro"

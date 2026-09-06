@@ -18,19 +18,25 @@ A knowledge store where you define your own data structures and search by meanin
 
 ```mermaid
 flowchart TD
-    Client["Your tool<br/>(Claude, Cursor, curl, SDK)"]
+    MCPClient["MCP client<br/>(Claude, Cursor, etc.)"]
+    RESTClient["REST client<br/>(curl, SDK, browser)"]
 
-    subgraph Server["Yorishiro"]
-        Core["Core engine<br/>(schemas / entities / search / auth)"]
-        MCP["MCP tools<br/>(23 tools)"]
+    subgraph Enterprise["ee/ (enterprise edition)"]
+        EnterpriseREST["marketplace / billing / OAuth / LLM keys"]
+    end
+
+    subgraph Server["Yorishiro (axum)"]
+        Core["Core<br/>(schemas / entities / search / auth)"]
+        MCP["MCP<br/>(23 tools)"]
         REST["REST API"]
     end
 
     DB[("PostgreSQL<br/>or SQLite")]
 
-    Client --> Server
-    MCP --> Core
+    MCPClient -->|"MCP tools"| MCP
+    RESTClient -->|"HTTP API"| REST
     REST --> Core
+    EnterpriseREST --> Core
     Core --> DB
 ```
 

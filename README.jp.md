@@ -18,19 +18,25 @@
 
 ```mermaid
 flowchart TD
-    Client["お使いのツール<br/>(Claude, Cursor, curl, SDK)"]
+    MCPClient["MCPクライアント<br/>(Claude, Cursor など)"]
+    RESTClient["RESTクライアント<br/>(curl, SDK, ブラウザ)"]
 
-    subgraph Server["Yorishiro"]
-        Core["コアエンジン<br/>(スキーマ / エンティティ / 検索 / 認証)"]
-        MCP["MCPツール<br/>(23ツール)"]
+    subgraph Enterprise["ee/（enterprise edition）"]
+        EnterpriseREST["marketplace / ビルド / OAuth / LLMキー"]
+    end
+
+    subgraph Server["Yorishiro（axum）"]
+        Core["コア<br/>(スキーマ / エンティティ / 検索 / 認証)"]
+        MCP["MCP<br/>(23ツール)"]
         REST["REST API"]
     end
 
     DB[("PostgreSQL<br/>または SQLite")]
 
-    Client --> Server
-    MCP --> Core
+    MCPClient -->|"MCPツール"| MCP
+    RESTClient -->|"HTTP API"| REST
     REST --> Core
+    EnterpriseREST --> Core
     Core --> DB
 ```
 
