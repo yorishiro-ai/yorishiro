@@ -109,7 +109,8 @@ The cap is hardcoded to 1 rather than clamped against that variable because rais
 `db::require_min_sqlite_connections`, called from `after_context`, rejects boot outright when `max_connections < 2` rather than letting an operator discover this as an intermittent `500` under load.
 Measured at `max_connections: 1`: a read-only route still returned `200` (the failed `last_used_at` update is best-effort, logged not propagated), while a route needing a real second write (`set_maintenance`, writing through `ctx.db` independently of the held transaction) failed with `500` after ~500ms, logged as `Connection pool timed out`.
 `config/test_sqlite.yaml` ships `max_connections: 10`, and is a manual-verification-only environment (`LOCO_ENV=test_sqlite`) not wired into the request-test harness: `request_with_create_db` issues `CREATE DATABASE`, which SQLite has no equivalent for.
-`tests/` does include six dedicated SQLite test files (`content_entities_sqlite.rs`, `search.rs`'s LIKE fallback, `tenancy_sqlite.rs`, plus three request-test files: `schemas_sqlite.rs`, `workspaces_sqlite.rs`, and `auth_sqlite.rs`), each gated by `require_sqlite_backend()`.
+`tests/` includes five dedicated SQLite test files (`tests/models/content_entities_sqlite.rs`, `tests/models/tenancy_sqlite.rs`, `tests/requests/auth_sqlite.rs`, `tests/requests/schemas_sqlite.rs`, `tests/requests/workspaces_sqlite.rs`), each gated by `require_sqlite_backend()`, plus `tests/migration/sqlite.rs` for migration-level verification.
+`tests/models/search.rs` also contains a SQLite-specific test (`search_by_vector_falls_back_to_like_on_sqlite`), gated by `require_sqlite_backend()`.
 
 Embeddings are stored in a separate `content_entity_embeddings` table on both backends: `vector(768)` on PostgreSQL with an HNSW index, and a raw `BLOB` on SQLite with KNN search via `vec_distance_cosine`. Because `content_entities` has no `embedding` column on either backend, its CRUD code is identical across backends with no branching. The `EntityRecord` read type and all eight `content_entities` functions (`count`, `get`, `get_batch`, `list`, `export_all`, `create`, `update`, `delete`) work the same way on both backends.
 
@@ -117,8 +118,10 @@ Two functions remain PostgreSQL-only, for a reason unrelated to `embedding`: `ne
 `POST /api/migration-jobs/{id}/undo` works on SQLite once a snapshot exists to restore from; nothing in base writes one.
 `migration_dry_run` already uses `select_only()` with an explicit column list and is unaffected.
 
-Tests: `src/models/content_entities.rs`'s own `#[cfg(test)] mod sqlite_tests`, an in-memory SQLite database seeded with a tenant/workspace/schema via raw SQL, exercising the eight functions in one pass plus both outcomes `undo_job` distinguishes (snapshots seeded directly, since `snapshot()` itself cannot run there).
-`src/models/tenancy.rs` has its own `#[cfg(test)] mod tests` on the same pattern, `#[serial]` because they share the process-wide `YORISHIRO_MAX_TENANTS` env var.
+Tests: `tests/models/content_entities_sqlite.rs` seeds an in-memory SQLite database with a tenant/workspace/schema via raw SQL, exercising the eight functions in one pass plus both outcomes `undo_job` distinguishes (snapshots seeded directly, since `snapshot()` itself cannot run there).
+`tests/models/tenancy_sqlite.rs` follows the same pattern.
+`tests/models/search.rs` covers both the vector path and the LIKE fallback on SQLite, each gated by `require_sqlite_backend()`.
+`tests/models/tenancy.rs` is `#[serial]` because it shares the process-wide `YORISHIRO_MAX_TENANTS` env var.
 
 ## Embedding provider resolution
 

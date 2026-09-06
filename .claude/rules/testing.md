@@ -20,11 +20,11 @@ A fresh Postgres volume needs `vector`/`pg_trgm` installed into `template1` itse
 Check this at its own layer (`psql -d template1 -c '\dx'`), not assumed: a fresh volume missing the fix shows `template1` holding only `plpgsql`.
 
 **A request test that boots through `request_with_create_db` must call `close_app_pools` before its closure returns, or teardown panics even on a passing test.**
-`after_context` opens three connections Loco's harness doesn't know about: the identity pool (eager), the tenant pool (lazy), and one kept open on `ctx.db` itself (`config/test_postgres.yaml`'s `min_connections: 1`).
+`after_context` opens two pools Loco's harness doesn't know about: the identity pool (eager) and the tenant pool (lazy).
+`ctx.db`'s own pool is the third connection Loco tracks: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 Plus `spawn_startup_reindex` holds a session on `ctx.db` for the process lifetime; without signaling its `StartupReindexHandle` before closing pools, that task's session also causes `DROP DATABASE` to panic.
 `close_app_pools` in `tests/requests/mod.rs` is the pattern every request test copies.
-`config/test_postgres.yaml`'s `queue:` block uses the same pool-closing pattern: the fourth pool has no public close path at all (`shutdown()` only cancels its polling loop), so `queue:` is **omitted from `config/test_postgres.yaml`** for that reason.
-`tests/requests/queue.rs` tests enqueueing directly against a real database, confirming that `connect_workers` now registers four worker types rather than being a no-op.
+`config/test_postgres.yaml` has a `queue:` block (Postgres queue provider); the queue pool is the fourth pool and has no public close path at all (`shutdown()` only cancels its polling loop), so `tests/requests/queue.rs` tests enqueueing against a throwaway PostgreSQL database with a temporary SQLite queue file rather than through `request_with_create_db`.
 
 **A gate is not a gate until a deliberate violation makes it fire.**
 `redeem_invite`'s race-safety claim (two concurrent redemptions of the same token can't both succeed) needs two racing redemption calls behind a barrier to actually test the race; a sequential replay-rejection test only proves the upfront `SELECT` filters correctly, not that the `UPDATE ... WHERE used_at IS NULL` guard is race-safe.
