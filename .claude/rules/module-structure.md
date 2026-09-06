@@ -8,13 +8,13 @@ MCP middleware (rate limiting, request-body limits on the `/mcp` route specifica
 
 - **A tool handler's early exits are written at the call site, not hidden in a macro.**
   Authorization is `match super::authorize(...).await? { AuthzOutcome::Authorized(a) => a, AuthzOutcome::ScopeDenied(denied) => return Ok(denied) }`, and a fallible repository call is `match call.await { Ok(value) => value, Err(err) => return Ok(err_to_tool_result(err)) }`.
-  This replaces the `authorized!` / `verified!` / `mcp_try!` macros, which read as plain assignments at their 52 call sites while each could end the function.
+  This replaces the `authorized!` / `verified!` / `mcp_try!` macros, which read as plain assignments at each call site while each could end the function.
   The REST side expresses the same authorization as a type in the handler's signature (`Authorized<WriteScope>`), where a reader sees it without reading anything else; the MCP side cannot do that, so it spells the exit out instead.
 - **The denial is an `Ok`, and that is not an accident to be tidied away.**
   A scope denial and a business-logic error are both successful tool results carrying `is_error: true`, which is what an MCP client expects; only a protocol-level failure (`ErrorData`) is an `Err`.
   Returning a denial as `Err` would change what clients see.
 - **These exits cannot become a single `?`.**
-  That would need the handler to return `Result<CallToolResult, SomeToolExit>`, and `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.2.0`, `handler/server/router/tool.rs:202`), so anything else fails to compile inside `#[tool]`.
+  That would need the handler to return `Result<CallToolResult, SomeToolExit>`, and `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.0.1`, `handler/server/router/tool.rs:202`), so anything else fails to compile inside `#[tool]`.
   Confirmed by building it: the attempt fails with `E0271`, expecting `Result<CallToolResult, ErrorData>`.
   `rmcp` does have an `IntoCallToolResult for Result<T, E>` that would map an `Err` payload to a successful `is_error: true` response, but the `#[tool]` attribute never reaches it.
   Revisit only if `rmcp` relaxes that function type.
@@ -32,7 +32,7 @@ A route registered on both sides is therefore a startup crash rather than a comp
 - Everything compiles into one crate, `ee/` included, so a workspace-wide grep settles whether a `pub` item is called. It has to cover `ee/`, which is the only caller of much of what `src/` exposes.
 - An item reached only from `ee/` needs no special visibility: `crate::` reaches it either way. `pub` on such an item therefore says "part of this crate's external surface", which is a claim worth checking rather than a formality.
 - Keep genuinely crate-internal helpers `pub(crate)`/`pub(super)` so the distinction is visible in the code, not something a reviewer has to remember.
-- `Authenticator` (`services/auth`) is meant to be a seam, not an internal detail, once every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`Verified<R>` extractors, both MCP entry points): a new authenticated entry point must resolve through that seam rather than call `authenticate` directly, or a REST route and an MCP tool could end up disagreeing about who the caller is.
+- `Authenticator` (`services/auth`) is meant to be a seam, not an internal detail, once every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`AuditAuthorized`/`Verified<R>` extractors in `controllers/extractors.rs`, the `authorize`/`verify` functions in `services/mcp/mod.rs`): a new authenticated entry point must resolve through that seam rather than call `authenticate` directly, or a REST route and an MCP tool could end up disagreeing about who the caller is.
 
 ## Model column lists
 

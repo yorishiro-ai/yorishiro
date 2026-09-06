@@ -20,7 +20,8 @@ A fresh Postgres volume needs `vector`/`pg_trgm` installed into `template1` itse
 Check this at its own layer (`psql -d template1 -c '\dx'`), not assumed: a fresh volume missing the fix shows `template1` holding only `plpgsql`.
 
 **A request test that boots through `request_with_create_db` must call `close_app_pools` before its closure returns, or teardown panics even on a passing test.**
-`after_context` opens two pools Loco's harness doesn't know about (identity, eager; tenant, lazy), and `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open on `ctx.db` itself; none of the three close on their own when the closure returns.
+`after_context` opens three connections Loco's harness doesn't know about: the identity pool (eager), the tenant pool (lazy), and one kept open on `ctx.db` itself (`config/test_postgres.yaml`'s `min_connections: 1`).
+Plus `spawn_startup_reindex` holds a session on `ctx.db` for the process lifetime; without signaling its `StartupReindexHandle` before closing pools, that task's session also causes `DROP DATABASE` to panic.
 `close_app_pools` in `tests/requests/mod.rs` is the pattern every request test copies.
 `config/test_postgres.yaml`'s `queue:` block uses the same pool-closing pattern: the fourth pool has no public close path at all (`shutdown()` only cancels its polling loop), so `queue:` is **omitted from `config/test_postgres.yaml`** for that reason.
 `tests/requests/queue.rs` tests enqueueing directly against a real database, confirming that `connect_workers` now registers four worker types rather than being a no-op.
