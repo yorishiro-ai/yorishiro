@@ -21,22 +21,24 @@ flowchart TD
     MCPClient["MCPクライアント<br/>(Claude, Cursor など)"]
     RESTClient["RESTクライアント<br/>(curl, SDK, ブラウザ)"]
 
-    subgraph Enterprise["ee/（enterprise edition）"]
-        EnterpriseREST["marketplace / ビルド / OAuth / LLMキー"]
-    end
-
     subgraph Server["Yorishiro（axum）"]
-        Core["コア<br/>(スキーマ / エンティティ / 検索 / 認証)"]
         MCP["MCP<br/>(23ツール)"]
         REST["REST API"]
+
+        subgraph Enterprise["ee/（enterprise edition）"]
+            EE["marketplace / ビルド / OAuth / LLMキー"]
+        end
+
+        Core["コア<br/>(スキーマ / エンティティ / 検索 / 認証)"]
     end
 
     DB[("PostgreSQL<br/>または SQLite")]
 
     MCPClient -->|"MCPツール"| MCP
     RESTClient -->|"HTTP API"| REST
+    MCP --> Core
     REST --> Core
-    EnterpriseREST --> Core
+    EE --> REST
     Core --> DB
 ```
 
@@ -51,7 +53,19 @@ flowchart TD
 
 ## クイックスタート
 
-最も簡単な方法はDockerです：
+デフォルト設定はSQLiteを使用しており、外部データベースは不要です。
+
+```console
+$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+    ghcr.io/yorishiro-ai/yorishiro:latest
+```
+
+1. `http://localhost:8080/` にアクセスし、セットアップウィザードでアカウントを作成。
+2. APIキーを生成し、エンティティの作成を開始。
+
+### PostgreSQL に切り替える
+
+マルチテナントホスティングやベクトル検索には PostgreSQL を使用：
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
@@ -59,8 +73,16 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
-1. `http://localhost:8080/` にアクセスし、セットアップウィザードでアカウントを作成。
-2. APIキーを生成し、エンティティの作成を開始。
+### Valkey (Redis) に切り替える
+
+分散キュー処理には Valkey（または Redis）を使用：
+
+```console
+$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+    -e YORISHIRO_QUEUE_KIND=Redis \
+    -e QUEUE_URL=redis://user:pass@host:6379 \
+    ghcr.io/yorishiro-ai/yorishiro:latest
+```
 
 ソースからビルドする場合：
 
@@ -75,24 +97,20 @@ $ make init
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `DATABASE_URL` | *(必須)* | データベース接続文字列 |
+| `DATABASE_URL` | `sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
 | `YORISHIRO_MAX_TENANTS` | `1` | テナント上限（`0` = 無制限） |
 | `YORISHIRO_LICENSE_KEY` | *(空)* | エンタープライズライセンスキー |
-| `YORISHIRO_EMBEDDING_PROVIDER` | *(空)* | 埋め込みバックエンド（`local` はローカルモデル） |
+| `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みバックエンド（`none` で無効） |
+| `YORISHIRO_QUEUE_KIND` | 自動検出 | Valkey/Redis キューには `Redis` を設定 |
+| `QUEUE_URL` | `DATABASE_URL` と共有 | Redis キューに必須 |
 
 全一覧は [docs/configuration.md](docs/configuration.md) を参照してください。
-
-## SQLiteモード
-
-ローカル利用・個人プロジェクトではSQLiteでYorishiroを動作できます。ベクトル検索はsqlite-vecで動作します。マルチテナントホスティングには対応していません。
-
-詳細は [docs/sqlite.md](docs/sqlite.md) を参照してください。
 
 ## ドキュメント
 
 | ドキュメント | 内容 |
 |---|---|
-| [docs/configuration.md](docs/configuration.md) | 全設定：埋め込み、検索クォータ、ログ |
+| [docs/configuration.md](docs/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
 | [docs/sqlite.md](docs/sqlite.md) | SQLiteモード：機能と制限 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 貢献ガイドライン |
 | [AGENTS.md](AGENTS.md) | AIエージェント向け情報 |

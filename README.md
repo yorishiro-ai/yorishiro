@@ -21,22 +21,24 @@ flowchart TD
     MCPClient["MCP client<br/>(Claude, Cursor, etc.)"]
     RESTClient["REST client<br/>(curl, SDK, browser)"]
 
-    subgraph Enterprise["ee/ (enterprise edition)"]
-        EnterpriseREST["marketplace / billing / OAuth / LLM keys"]
-    end
-
     subgraph Server["Yorishiro (axum)"]
-        Core["Core<br/>(schemas / entities / search / auth)"]
         MCP["MCP<br/>(23 tools)"]
         REST["REST API"]
+
+        subgraph Enterprise["ee/ (enterprise edition)"]
+            EE["marketplace / billing / OAuth / LLM keys"]
+        end
+
+        Core["Core<br/>(schemas / entities / search / auth)"]
     end
 
     DB[("PostgreSQL<br/>or SQLite")]
 
     MCPClient -->|"MCP tools"| MCP
     RESTClient -->|"HTTP API"| REST
+    MCP --> Core
     REST --> Core
-    EnterpriseREST --> Core
+    EE --> REST
     Core --> DB
 ```
 
@@ -51,7 +53,19 @@ One binary, one repository. Enterprise features are controlled by a licence key.
 
 ## Quick start
 
-The easiest way is Docker:
+The default configuration uses SQLite — no external database required.
+
+```console
+$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+    ghcr.io/yorishiro-ai/yorishiro:latest
+```
+
+1. Open `http://localhost:8080/` and create an account through the setup wizard.
+2. Generate an API key and start creating entities.
+
+### Switching to PostgreSQL
+
+For multi-tenant hosting or vector search, use PostgreSQL:
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
@@ -59,8 +73,16 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
-1. Open `http://localhost:8080/` and create an account through the setup wizard.
-2. Generate an API key and start creating entities.
+### Switching to Valkey (Redis)
+
+For distributed queue processing:
+
+```console
+$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+    -e YORISHIRO_QUEUE_KIND=Redis \
+    -e QUEUE_URL=redis://user:pass@host:6379 \
+    ghcr.io/yorishiro-ai/yorishiro:latest
+```
 
 To build from source:
 
@@ -75,24 +97,20 @@ Most settings come from environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | *(required)* | Database connection |
+| `DATABASE_URL` | `sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
 | `YORISHIRO_MAX_TENANTS` | `1` | Tenant limit (`0` = unlimited) |
 | `YORISHIRO_LICENSE_KEY` | *(empty)* | Enterprise licence key |
-| `YORISHIRO_EMBEDDING_PROVIDER` | *(empty)* | Embedding backend (`local` for local model) |
+| `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding backend (`none` disables embeddings) |
+| `YORISHIRO_QUEUE_KIND` | Auto-detected | Set to `Redis` for Valkey/Redis queue |
+| `QUEUE_URL` | Shares `DATABASE_URL` | Required for Redis queue |
 
 See [docs/configuration.md](docs/configuration.md) for the full list.
-
-## SQLite mode
-
-You can run Yorishiro on SQLite for local use and personal projects. Vector search works via sqlite-vec. Multi-tenant hosting is not supported on SQLite.
-
-See [docs/sqlite.md](docs/sqlite.md) for details.
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [docs/configuration.md](docs/configuration.md) | All settings: embedding, search quotas, logging |
+| [docs/configuration.md](docs/configuration.md) | All settings: embedding, search quotas, logging, queue backends |
 | [docs/sqlite.md](docs/sqlite.md) | SQLite mode: capabilities and limitations |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributing guidelines |
 | [AGENTS.md](AGENTS.md) | Notes for AI agents |
