@@ -53,9 +53,6 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
 #[tokio::test]
 #[serial]
 async fn hooks_seed_creates_the_official_tenant_without_publishing_templates() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|_request, ctx| async move {
         App::seed(&ctx, std::path::Path::new("does-not-need-to-exist"))
             .await

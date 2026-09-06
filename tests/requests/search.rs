@@ -55,9 +55,6 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
     // provider-missing path, not on the local provider succeeding.
     unsafe { std::env::set_var("YORISHIRO_EMBEDDING_PROVIDER", "none") };
 
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { read_key } = setup(&ctx).await;
 

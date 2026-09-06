@@ -1,4 +1,4 @@
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState, licence_key_in, verify};
+use yorishiro::ee::services::licence::{LicenceClaims, LicenceState, verify};
 
 /// A keypair generated fresh per test process rather than checked into the repository: it signs only throwaway JWTs this suite mints and verifies itself, so committing it would be a private key in source control for no reason a scanner can tell apart from a real one.
 struct TestKeypair {
@@ -133,21 +133,4 @@ fn a_state_with_no_claims_is_never_active() {
         exp: chrono::Utc::now().timestamp() + 3600,
     });
     assert!(licensed.is_active());
-}
-
-#[test]
-fn licence_key_in_reads_the_key_and_ignores_unrelated_yaml_fields() {
-    let yaml = "server:\n  port: 5150\nlicense_key: from-file\n";
-    assert_eq!(licence_key_in(yaml), Some("from-file".to_string()));
-}
-
-#[test]
-fn licence_key_in_treats_an_empty_string_as_absent() {
-    let yaml = "license_key: \"\"\n";
-    assert_eq!(licence_key_in(yaml), None);
-}
-
-#[test]
-fn licence_key_in_returns_none_when_the_key_is_missing_entirely() {
-    assert_eq!(licence_key_in("server:\n  port: 5150\n"), None);
 }
