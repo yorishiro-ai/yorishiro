@@ -15,6 +15,17 @@ Attributing to the importer is always FK-safe, and for the common case (an owner
 **Before writing any Loco/SeaORM code, check the actual behavior against Loco's own documentation or source (`https://loco.rs/docs/`, DeepWiki on `loco-rs/loco` and `SeaQL/sea-orm`) rather than assuming from a general Rails/ActiveRecord mental model.**
 Several assumptions turn out wrong when checked: `ColType` has no primary-key-with-custom-default variant (`uuidv7()` on a UUID PK needs raw `sea_query::ColumnDef`, not a `ColType` helper); `sea-orm-cli`'s pgvector support is a compile-time feature of the installed binary, not something the app's own `Cargo.toml` features reach; the schema builder has no PostgreSQL schema-namespace, RLS, or GRANT support at all (raw SQL via `execute_unprepared` is loco's own documented answer, not a workaround).
 
+**Prefer Loco's own module over a hand-rolled equivalent.**
+When Loco provides a feature, use it through its extension points (`shared_store`, `Hooks`, `after_context`, etc.) rather than reimplementing it from scratch.
+This is the counterpart to the existing principle that "Loco itself is never patched": rather than modifying Loco, override it through the seams Loco already provides.
+When a hand-rolled implementation is justified, it must survive one of these tests:
+- `db.rs`'s two-pool architecture: Loco's `ctx.db` cannot carry the `SET ROLE`/`set_config(...)` session-state lifecycle that RLS requires.
+- `services/auth/`'s `Authenticator`: Loco's `Authenticable` offers only model-fixed finder methods and cannot be swapped wholesale through `shared_store`.
+- `YorishiroError`: Loco's `ErrorDetail` has only `error`/`description`/`errors` and has no field for `hint` (a follow-up action message for the user); `ValidationFailed`'s `hint` would be lost without a custom type.
+- Rate limiting: Loco's standard middleware catalog includes no rate limiter, so a custom layer is the only option.
+
+Before adding a new hand-rolled implementation, check whether Loco's modules (`loco_rs::cache`, `storage`, `scheduler`, etc.) already cover the same ground.
+
 **Repository layout**: a single Loco app crate at the repository root (package `yorishiro`, binary `yorishiro`).
 Migrations live in the `migration/` crate.
 The enterprise edition is `ee/`, a module of that same crate rather than a package of its own; see `ee-composition.md`.
@@ -89,9 +100,9 @@ The cap is hardcoded to 1 rather than clamped against that variable because rais
 
 **Authentication on SQLite bypasses the `Authenticator` seam.**
 `Hooks::after_context` (`src/app.rs`) skips building `DbHandle`/the default `Authenticator` entirely when the backend is SQLite, rather than attempting the PostgreSQL pool construction and expecting it to fail fast: `sqlx::postgres::PgPoolOptions::connect` on a `sqlite://` URL does not error, it hangs indefinitely (confirmed by direct probe), so reaching that code path on this backend would hang the boot with no diagnosable error.
-`AuthContext` (`src/controllers/extractors.rs`), `Authorized<R>` and `AuditAuthorized` (`src/services/auth/authorize.rs`) each branch the same way, calling `authenticate_sqlite`/`touch_last_used_sqlite` (`src/services/auth/authenticate.rs`) and then `ctx.db.begin()` for a plain deferred transaction rather than `TenantDb::begin_for_workspace`, since there is no RLS session state to scope.
+`AuthContext`/`Authorized<R>`/`AuditAuthorized` (`src/controllers/extractors.rs`) each branch the same way, calling `authenticate_sqlite`/`touch_last_used_sqlite` (`src/services/auth/authenticate.rs`) and then `ctx.db.begin()` for a plain deferred transaction rather than `TenantDb::begin_for_workspace`, since there is no RLS session state to scope.
+`Verified<R>` (`src/controllers/extractors.rs`) also has a SQLite branch, calling `authenticate_sqlite` and `touch_last_used_sqlite` like `AuthContext`, then skipping the transaction entirely (it needs no connection, only authentication and scope verification).
 `authenticate_sqlite` is a SeaORM entity-API replica of the Postgres `authenticate_api_key` SECURITY DEFINER function's single-argument semantics (only a workspace-scoped key resolves): RLS is what that function exists to bypass, and SQLite has no RLS, so a direct query suffices.
-`Verified<R>` has no SQLite branch; its one caller (`search_entities`) calls `db_handle()` unconditionally regardless.
 
 **SQLite needs at least 2 connections.**
 `Authorized<R>`/`AuditAuthorized` hold one connection open on a transaction for the request's duration while `touch_last_used_sqlite` acquires a second, independent one from the same pool: the same split Postgres's `authorize`/`touch_last_used_on` use, and for the same reason (a read-only handler drops its transaction without committing, so updating `last_used_at` there would roll back with it).
