@@ -1,16 +1,11 @@
+use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::tenancy::{self, MembershipRole};
 
-use super::boot_request;
-use super::with_max_tenants;
-
 #[tokio::test]
 #[serial]
 async fn signup_then_login_round_trip() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("request-test-tenant".into()),
@@ -78,7 +73,8 @@ async fn signup_then_login_round_trip() {
             .await;
         assert_eq!(replay_response.status_code(), 422);
 
-        // A wrong password on an otherwise-valid account must not leak whether the account exists differently than a truly unknown email would.
+        // A wrong password on an otherwise-valid account must not leak whether
+        // the account exists differently than a truly unknown email would.
         let bad_password_response = request
             .post("/auth/login")
             .json(&serde_json::json!({
@@ -91,14 +87,9 @@ async fn signup_then_login_round_trip() {
     .await;
 }
 
-/// Omitting `invite_token` creates a fresh tenant and joins the caller as `Owner`.
-/// No workspace is created, so this account cannot log in until an operator runs `create_workspace` then `create_api_key`.
 #[tokio::test]
 #[serial]
 async fn signup_without_invite_creates_its_own_tenant() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let signup_response = request
             .post("/auth/signup")
@@ -140,9 +131,6 @@ async fn signup_without_invite_creates_its_own_tenant() {
 #[tokio::test]
 #[serial]
 async fn signup_rejects_email_alongside_invite_token() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .post("/auth/signup")
@@ -166,9 +154,6 @@ async fn signup_rejects_email_alongside_invite_token() {
 #[tokio::test]
 #[serial]
 async fn signup_rejects_neither_invite_token_nor_email() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .post("/auth/signup")
@@ -190,10 +175,7 @@ async fn signup_rejects_neither_invite_token_nor_email() {
 #[tokio::test]
 #[serial]
 async fn signup_without_invite_respects_the_tenant_cap() {
-    with_max_tenants("1", async move {
-        if super::super::require_sqlite_backend() {
-            return;
-        }
+    super::with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {
             let first = request
                 .post("/auth/signup")
@@ -236,12 +218,16 @@ async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<O
 }
 
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
+/// This test is PostgreSQL-only: `lock_for_update` is a no-op on SQLite,
+/// so the serialisation guarantee does not hold.
 #[tokio::test]
 #[serial]
 async fn create_tenant_serializes_on_its_advisory_lock() {
-    with_max_tenants("100", async move {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    super::with_max_tenants("100", async move {
         with_db_max_connections("4", async move {
-            if super::super::require_sqlite_backend() { return; }
             boot_request::<App, _, _>(|_request, ctx| async move {
                 let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
                 yorishiro::db::lock_for_update(&holder, "create_tenant")

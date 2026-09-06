@@ -1,6 +1,5 @@
 mod audit_log;
 mod auth;
-mod auth_sqlite;
 mod dashboard;
 mod ee_setup;
 mod embedding;
@@ -16,7 +15,6 @@ mod official_templates;
 mod origin;
 mod queue;
 mod schemas;
-mod schemas_sqlite;
 mod search;
 mod setup;
 mod stripe;
@@ -25,7 +23,6 @@ mod template_library;
 mod tenant_auth;
 mod worker_class;
 mod workspaces;
-mod workspaces_sqlite;
 
 /// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there before.
 pub(crate) async fn with_max_tenants<T>(
@@ -52,7 +49,6 @@ use futures::FutureExt;
 use loco_rs::app::Hooks;
 use loco_rs::testing::prelude::*;
 use std::net::SocketAddr;
-use yorishiro::app::App;
 
 /// Close every connection pool this app opens on a PostgreSQL test database.
 ///
@@ -104,14 +100,23 @@ pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_pa
     let _ = std::fs::remove_file(format!("{db_path}-journal"));
 }
 
-/// Unified entry point for all PostgreSQL-backed request tests.
+/// Whether `DATABASE_URL` names a SQLite backend (file or in-memory).
 ///
-/// Boots the app through `request_with_create_db`, then wraps the callback in
-/// `catch_unwind` so that `close_app_pools` always runs — even if the callback panics.
-/// The original panic (assertion failure, etc.) is re-thrown afterward so the test
-/// reports the real failure message, not a wrapper artifact.
+/// Used by `boot_request` to dispatch to the correct boot path so the same
+/// test code runs against either backend.
+fn is_sqlite_backend() -> bool {
+    let url = std::env::var("DATABASE_URL").unwrap_or_default();
+    url.starts_with("sqlite://") || url.starts_with("sqlite::memory:")
+}
+
+/// Unified entry point for request tests across PostgreSQL and SQLite backends.
 ///
-/// All test files must use this instead of calling `request_with_create_db` directly.
+/// Detects the backend from `DATABASE_URL` and dispatches to
+/// `request_with_create_db` (PostgreSQL) or `request_with_create_sqlite` (SQLite),
+/// wrapping the callback in `catch_unwind` so that the appropriate pool closer
+/// always runs — even if the callback panics.
+///
+/// All test files use this instead of calling either boot path directly.
 #[allow(clippy::future_not_send)]
 #[allow(clippy::extra_unused_type_parameters)]
 pub(crate) async fn boot_request<H: Hooks, F, Fut>(callback: F)
@@ -119,20 +124,40 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    request_with_create_db::<App, _, _>(|request, ctx| {
-        let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
-        async move {
-            match result.await {
-                Ok(()) => {}
-                Err(panic) => {
-                    close_app_pools(&ctx).await;
-                    std::panic::resume_unwind(panic);
+    if is_sqlite_backend() {
+        let db_path = format!("sqlite_{}.sqlite3", uuid::Uuid::new_v4());
+        request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
+            let result =
+                std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
+            async move {
+                match result.await {
+                    Ok(()) => {}
+                    Err(panic) => {
+                        close_app_pools_sqlite(&ctx, &db_path).await;
+                        std::panic::resume_unwind(panic);
+                    }
                 }
+                close_app_pools_sqlite(&ctx, &db_path).await;
             }
-            close_app_pools(&ctx).await;
-        }
-    })
-    .await;
+        })
+        .await;
+    } else {
+        request_with_create_db::<H, _, _>(|request, ctx| {
+            let result =
+                std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
+            async move {
+                match result.await {
+                    Ok(()) => {}
+                    Err(panic) => {
+                        close_app_pools(&ctx).await;
+                        std::panic::resume_unwind(panic);
+                    }
+                }
+                close_app_pools(&ctx).await;
+            }
+        })
+        .await;
+    }
 }
 
 /// SQLite variant of `boot_request`.
@@ -140,6 +165,10 @@ where
 /// Boots the app through `request_with_create_sqlite`, then wraps the callback in
 /// `catch_unwind` so that `close_app_pools_sqlite` always runs.
 /// Re-throws the original panic afterward so the test reports the real failure message.
+///
+/// **Deprecated**: `boot_request` now dispatches automatically, so this path is
+/// kept only for tests that need explicit control (e.g. `search.rs` which seeds
+/// an in-memory database directly).
 #[allow(clippy::future_not_send)]
 #[allow(clippy::extra_unused_type_parameters)]
 pub(crate) async fn boot_request_sqlite<H: Hooks, F, Fut>(db_path: String, callback: F)
@@ -147,7 +176,7 @@ where
     F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| {
+    request_with_create_sqlite::<H, _, _>(db_path.clone(), |request, ctx| {
         let result = std::panic::AssertUnwindSafe(callback(request, ctx.clone())).catch_unwind();
         async move {
             match result.await {

@@ -53,9 +53,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn create_schema_from_a_builtin_template() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
 
@@ -78,9 +75,6 @@ async fn create_schema_from_a_builtin_template() {
 #[tokio::test]
 #[serial]
 async fn create_schema_rejects_an_unknown_template_id() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
 
@@ -102,9 +96,6 @@ async fn create_schema_rejects_an_unknown_template_id() {
 #[tokio::test]
 #[serial]
 async fn list_templates_and_get_template_over_rest() {
-    if super::super::require_sqlite_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
 

@@ -33,38 +33,13 @@ pub struct LicenceClaims {
     pub exp: i64,
 }
 
-/// Which of the two sources wins, as a pure function so the precedence is testable without touching the process environment: tests that set a variable race each other.
+/// The licence key from `YORISHIRO_LICENSE_KEY`, or `None` when absent or empty.
 ///
-/// The file is consulted only when the variable is **absent**.
-/// Set-but-empty means "no licence" rather than falling through, or `YORISHIRO_LICENSE_KEY=` could not turn off a licence configured in the file.
-pub(crate) fn resolve_licence_key(
-    from_env: Option<String>,
-    from_file: impl FnOnce() -> Option<String>,
-) -> Option<String> {
-    match from_env {
-        Some(value) => Some(value).filter(|v| !v.is_empty()),
-        None => from_file(),
-    }
-}
-
-/// `license_key:` from the config file, read here rather than in a shared config loader.
-///
-/// `config.yml` does not exist in this crate's own config directory, so this always returns `None` and only the environment-variable path (`YORISHIRO_LICENSE_KEY`, checked in `LicenceState::from_env` before this is ever called) is live.
-fn licence_key_from_config() -> Option<String> {
-    let path = std::env::var("YORISHIRO_CONFIG_PATH").unwrap_or_else(|_| "config.yml".into());
-    licence_key_in(&std::fs::read_to_string(path).ok()?)
-}
-
-/// The parse [`licence_key_from_config`] wraps, split out so it is testable without a file or the process environment: tests that set `YORISHIRO_CONFIG_PATH` would race each other.
-pub fn licence_key_in(yaml: &str) -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct JustTheLicence {
-        license_key: Option<String>,
-    }
-
-    // Not `deny_unknown_fields`: this reads one key out of a file whose other keys belong to a different struct.
-    let parsed: JustTheLicence = serde_yaml_ng::from_str(yaml).ok()?;
-    parsed.license_key.filter(|k| !k.is_empty())
+/// `YORISHIRO_LICENSE_KEY=` (set-but-empty) means "no licence" rather than
+/// falling through to any other source, so an operator can explicitly disable
+/// a licence configured elsewhere.
+pub(crate) fn resolve_licence_key(from_env: Option<String>) -> Option<String> {
+    from_env.filter(|v| !v.is_empty())
 }
 
 /// Verifies a licence key against a PEM-encoded RSA public key.
@@ -112,7 +87,7 @@ impl LicenceState {
         let from_env =
             std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());
 
-        let Some(token) = resolve_licence_key(from_env, licence_key_from_config) else {
+        let Some(token) = resolve_licence_key(from_env) else {
             tracing::info!("no licence key configured: enterprise features are disabled");
             return Self::default();
         };
