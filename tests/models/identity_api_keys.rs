@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
@@ -30,7 +30,10 @@ async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
 #[tokio::test]
 #[serial]
 async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;
         let other_workspace_id = setup_workspace(&ctx).await;
 
@@ -66,8 +69,6 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
             keys.iter().all(|k| k.workspace_id == Some(workspace_id)),
             "no cross-workspace leakage: {keys:?}"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -76,7 +77,10 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
 #[tokio::test]
 #[serial]
 async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;
         let created =
             ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
@@ -104,8 +108,6 @@ async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
             ),
             "result: {result:?}"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

@@ -1,10 +1,7 @@
-/// Migration schema and migration runner (see `migration/src/lib.rs`).
-#[path = "../migration/src/lib.rs"]
-pub mod migration;
-
 pub mod app;
 pub mod controllers;
 pub mod db;
+
 /// The enterprise edition.
 ///
 /// `ee/` sits at the repository root rather than under `src/` because `ee/LICENSE` defines its own

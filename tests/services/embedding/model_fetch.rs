@@ -159,7 +159,8 @@ async fn fetches_and_verifies_a_real_artifact() {
         .expect("second call failed");
     assert_eq!(again, path);
 
-    // A cached file of the wrong length must be replaced rather than returned: it passed its digest before some earlier rename, but nothing has looked at it since, and loading it would embed against corrupt bytes with every status still healthy.
+    // A cached file of the wrong length must be replaced rather than returned: loading it
+    // would embed against corrupt bytes with every status still healthy.
     fs::write(&path, b"truncated").expect("cannot truncate the cached file");
     let repaired = ensure_file(&dir, DEFAULT_MODEL, &DEFAULT_MODEL.tokenizer)
         .await

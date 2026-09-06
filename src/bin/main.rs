@@ -1,6 +1,6 @@
 use loco_rs::cli;
+use migration::Migrator;
 use yorishiro::app::App;
-use yorishiro::migration::Migrator;
 
 /// A self-hosted deployment is single-tenant unless it says otherwise, which is also what enables the first-run setup wizard.
 /// `YORISHIRO_MAX_TENANTS` unset would otherwise resolve to `Ok(None)`, which `setup::wizard_enabled` reads as "no cap, so no wizard", leaving a fresh install with no way to create its first tenant through the product.
@@ -19,6 +19,11 @@ use yorishiro::migration::Migrator;
 /// A hosted deployment wanting more than one tenant sets `YORISHIRO_MAX_TENANTS` explicitly, which
 /// is cheap for an operator who is provisioning the deployment anyway.
 fn main() -> loco_rs::Result<()> {
+    // Register sqlite-vec before any SQLite connection opens: every CLI subcommand
+    // (task, db, scheduler) and the test harness open ctx.db before App::boot runs,
+    // so the registration must happen here as well as in boot.
+    yorishiro::db::register_sqlite_extensions();
+
     // SAFETY: no other thread exists at this point in `main`; the tokio runtime is built below.
     unsafe {
         if std::env::var_os("YORISHIRO_MAX_TENANTS").is_none() {

@@ -1,5 +1,5 @@
+use super::boot_request;
 use chrono::Utc;
-use loco_rs::testing::prelude::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Statement};
 use serial_test::serial;
 use uuid::Uuid;
@@ -78,7 +78,10 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn llm_key_set_get_and_clear_round_trip() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let missing = request
@@ -125,8 +128,6 @@ async fn llm_key_set_get_and_clear_round_trip() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -135,7 +136,10 @@ async fn llm_key_set_get_and_clear_round_trip() {
 #[tokio::test]
 #[serial]
 async fn a_non_http_base_url_is_refused() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         for bad_url in [
@@ -159,8 +163,6 @@ async fn a_non_http_base_url_is_refused() {
                 put.text()
             );
         }
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -169,7 +171,10 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 #[serial]
 async fn infer_fill_without_a_configured_key_is_refused() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let setup = setup(&ctx).await;
 
@@ -195,8 +200,6 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(infer.status_code(), 422, "response: {:?}", infer.text());
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -206,7 +209,10 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 #[tokio::test]
 #[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let with_key = request
@@ -217,8 +223,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 
         assert_eq!(with_key.status_code(), without_key.status_code());
         assert_eq!(with_key.status_code(), 404);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -287,7 +291,10 @@ async fn create_entity(
 #[tokio::test]
 #[serial]
 async fn apply_answers_writes_directly_and_undo_reverses_it() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
@@ -344,8 +351,6 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
             fetched_after_undo["data"].get("summary").is_none(),
             "undo must restore the pre-inference state: {fetched_after_undo:?}"
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -356,7 +361,10 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
 #[tokio::test]
 #[serial]
 async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
@@ -394,7 +402,6 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
         assert_eq!(remaining, 0, "a rejected write must not leave a snapshot");
 
         txn.rollback().await.expect("rollback txn");
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -471,7 +478,10 @@ async fn apply_answers_with_content_entities_locked(
 #[tokio::test]
 #[serial]
 async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let message = apply_answers_with_content_entities_locked(&request, &ctx, "EXCLUSIVE").await;
         assert!(
             message.contains("lock timeout"),
@@ -481,8 +491,6 @@ async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error()
             !message.contains("transaction is aborted"),
             "the old code's masked failure mode must not reappear: {message}"
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -492,7 +500,10 @@ async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error()
 #[tokio::test]
 #[serial]
 async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let message =
             apply_answers_with_content_entities_locked(&request, &ctx, "ACCESS EXCLUSIVE").await;
         assert!(
@@ -503,8 +514,6 @@ async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
             !message.contains("transaction is aborted"),
             "the old code's masked failure mode must not reappear: {message}"
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

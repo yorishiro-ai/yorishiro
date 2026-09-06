@@ -4,6 +4,7 @@ pub mod prelude;
 
 pub mod content_entities;
 pub mod content_entity_column_preferences;
+pub mod content_entity_embeddings;
 pub mod content_entity_snapshots;
 pub mod content_relations;
 pub mod content_schemas;

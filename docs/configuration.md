@@ -83,7 +83,7 @@ Pooling is always mean pooling: that is what was trained with, so there is nothi
 
 | Variable | Description |
 |---|---|
-| `YORISHIRO_LOCAL_MODEL` | Which model to load: `multilingual-e5-base`. Unset defaults to `multilingual-e5-base`, since this codebase's search and recall are not English-only. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default. `nomic-embed-text-v1.5` was removed and now fails startup with a message pointing at the replacement and `reindex_embeddings`. |
+| `YORISHIRO_LOCAL_MODEL` | Which model to load: `multilingual-e5-base`. Unset defaults to `multilingual-e5-base`, since this codebase's search and recall are not English-only. An unrecognized value fails startup naming the valid ones, rather than silently falling back to the default. |
 | `YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH` | Maximum token count per input, truncating longer text (default: `512`, unchanged regardless of which model is selected). Must fit the selected model's own upper bound (`8192` for nomic-embed-text-v1.5, `512` for multilingual-e5-base); the default already satisfies both, so it needs no per-model adjustment on its own |
 
 Switching `YORISHIRO_LOCAL_MODEL` on a deployment that already has embedded workspaces does not itself move any workspace to the new model: the write-time model check ("Moving a workspace between embedding models" above) refuses writes for a workspace still stamped with the old one until `reindex_embeddings` runs against it.

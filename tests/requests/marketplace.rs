@@ -1,5 +1,5 @@
+use super::boot_request;
 use chrono::Utc;
-use loco_rs::testing::prelude::*;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
@@ -86,7 +86,10 @@ fn note_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn without_a_licence_the_marketplace_is_not_served() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx, "acme").await;
 
         let response = request
@@ -99,8 +102,6 @@ async fn without_a_licence_the_marketplace_is_not_served() {
             "response: {:?}",
             response.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -109,7 +110,10 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 #[tokio::test]
 #[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
             .get("/api/marketplace")
             .add_header("Authorization", "Bearer ysr_not_a_real_key")
@@ -120,8 +124,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
             "response: {:?}",
             response.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -130,7 +132,10 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 #[tokio::test]
 #[serial]
 async fn a_licence_does_not_replace_authentication() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
 
         let response = request
@@ -143,8 +148,6 @@ async fn a_licence_does_not_replace_authentication() {
             "response: {:?}",
             response.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -153,7 +156,10 @@ async fn a_licence_does_not_replace_authentication() {
 #[tokio::test]
 #[serial]
 async fn publish_list_fork_and_review_round_trip() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let owner = setup(&ctx, "acme").await;
 
@@ -319,8 +325,6 @@ async fn publish_list_fork_and_review_round_trip() {
              {:?}",
             fork_after_takedown.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -329,7 +333,10 @@ async fn publish_list_fork_and_review_round_trip() {
 #[tokio::test]
 #[serial]
 async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let owner = setup(&ctx, "acme").await;
         let other = setup(&ctx, "beta").await;
@@ -368,8 +375,6 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
             "response: {:?}",
             steal_publish.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -378,7 +383,10 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 #[tokio::test]
 #[serial]
 async fn a_rating_outside_the_range_is_rejected() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let owner = setup(&ctx, "acme").await;
         let reviewer = setup(&ctx, "beta").await;
@@ -415,8 +423,6 @@ async fn a_rating_outside_the_range_is_rejected() {
             "response: {:?}",
             bad_review.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

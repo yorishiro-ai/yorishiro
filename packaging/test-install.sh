@@ -12,15 +12,7 @@
 # Needs docker. Runs the same matrix locally as in CI, so a failure can be reproduced without
 # pushing.
 #
-# There is one package now. An earlier version of this file tested `yorishiro-ce` alongside
-# `yorishiro-ee`: it installed the community deb and rpm, asserted `Conflicts: yorishiro-ee`,
-# asserted the enterprise licence was absent from it, scanned the installed community binary for
-# markers (`hosted/stripe`, `api/marketplace`, `infer-fill`), and switched a machine between the
-# two editions in both directions. All of that is gone because the community package is gone:
-# `ee/` compiles into the single binary and the licence layer decides at runtime what serves, so
-# there is no second artifact to install and no on-disk edition boundary to assert. The marker
-# scan in particular could only ever fail now, since every marker it looked for is in this
-# binary by design. `packaging/nfpm-yorishiro.yaml` records the same reasoning.
+# There is one package: both editions ship in a single artifact.
 
 set -uo pipefail
 
@@ -122,10 +114,6 @@ note "rpm on almalinux:10 — the current RPM-family release this supports"
 # 2.39, measured, against a declared floor of 2.39. There is no GLIBCXX floor to check against:
 # the candle-based embedding provider links no C++ standard library dynamically.
 #
-# It replaced fedora:39, which was here because its glibc was 2.38, the floor as declared at the
-# time. That floor was wrong (the binary needs 2.39), so fedora:39 was a system this package
-# installed on and could not start on, and it is EOL besides.
-#
 # This is the only block that installs an rpm at all: the others install its counterpart deb. So
 # it is not a second opinion on the deb tests, it is the only evidence that the other half of
 # what a release publishes can be unpacked and run.
@@ -176,12 +164,8 @@ fi
 # --------------------------------------------------------------------------------------------
 note "an unconfigured start fails on the thing that is missing"
 # --------------------------------------------------------------------------------------------
-# There is no exit-code assertion here. An earlier version required exit 78 (EX_CONFIG) for a
-# missing DATABASE_URL and exit 1 for an unreachable one, because the unit used
-# `RestartPreventExitStatus=78` to tell a permanent misconfiguration from a database that is
-# merely slow to come up. This binary does not produce 78: it delegates to `loco_rs::cli::main`,
-# and nothing in `src/` returns that code, so the unit no longer carries the directive either
-# (see `packaging/yorishiro.service`). Asserting a number nothing emits would fail every run.
+# There is no exit-code assertion here: the unit no longer carries
+# `RestartPreventExitStatus=78` and this binary does not produce exit 78.
 #
 # What is still worth asserting is that the failure names the variable an operator has to set,
 # and does not hand them a Rust panic.

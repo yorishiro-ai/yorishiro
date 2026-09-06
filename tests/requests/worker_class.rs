@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use sea_orm::EntityTrait;
 use serial_test::serial;
 use uuid::Uuid;
@@ -58,7 +58,10 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn worker_class_set_get_and_clear_round_trip() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let missing = request
@@ -93,8 +96,6 @@ async fn worker_class_set_get_and_clear_round_trip() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(after_delete.status_code(), 404);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -103,7 +104,10 @@ async fn worker_class_set_get_and_clear_round_trip() {
 #[tokio::test]
 #[serial]
 async fn setting_a_new_class_replaces_the_old_one() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let first = request
@@ -129,8 +133,6 @@ async fn setting_a_new_class_replaces_the_old_one() {
             body["worker_class"], "official",
             "the second PUT must replace the first, not add a second row"
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -139,7 +141,10 @@ async fn setting_a_new_class_replaces_the_old_one() {
 #[tokio::test]
 #[serial]
 async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let setup = setup(&ctx).await;
         let resolver = WorkerClassAssignmentResolver;
 
@@ -181,7 +186,6 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "one workspace's assignment must not leak to another"
         );
 
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

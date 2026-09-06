@@ -8,6 +8,7 @@
 services:
   db:
     image: pgvector/pgvector:pg18
+    container_name: db
     environment:
       POSTGRES_USER: yorishiro
       POSTGRES_PASSWORD: yorishiro
@@ -16,6 +17,29 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+      # Runs once, only against an empty data directory.
+      # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
+      - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yorishiro"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  testdb:
+    image: pgvector/pgvector:pg18
+    container_name: testdb
+    environment:
+      POSTGRES_USER: yorishiro
+      POSTGRES_PASSWORD: yorishiro
+      POSTGRES_DB: yorishiro
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - test_pgdata:/var/lib/postgresql
+      # Runs once, only against an empty data directory.
+      # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
+      - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U yorishiro"]
       interval: 5s
@@ -26,6 +50,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: app
     # To use a model this machine already has, put `model.safetensors` and `tokenizer.json` in
     # `models/` and add:
     #
@@ -65,3 +90,4 @@ services:
 
 volumes:
   pgdata:
+  test_pgdata:

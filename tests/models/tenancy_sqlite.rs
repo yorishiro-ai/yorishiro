@@ -1,8 +1,8 @@
+use migration::{Migrator, MigratorTrait};
 /// SQLite-specific tests for tenancy: single-tenant cap and invite ID generation.
 use sea_orm::Database;
 use serial_test::serial;
 use yorishiro::error::YorishiroError;
-use yorishiro::migration::{Migrator, MigratorTrait};
 use yorishiro::models::tenancy::{MembershipRole, create_invite, create_tenant};
 
 /// A fresh in-memory SQLite database, migrated.

@@ -1,4 +1,4 @@
-use loco_rs::testing::prelude::*;
+use super::boot_request;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
@@ -59,7 +59,10 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let definition = serde_json::from_value(serde_json::json!({
@@ -146,8 +149,6 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .expect("read back survivor");
         assert_eq!(restored.data["title"], "before");
         assert_eq!(restored.schema_version, 1);
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -156,7 +157,10 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
 #[tokio::test]
 #[serial]
 async fn undo_an_unknown_job_is_refused() {
-    request_with_create_db::<App, _, _>(|request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&ctx).await;
 
         let response = request
@@ -169,8 +173,6 @@ async fn undo_an_unknown_job_is_refused() {
             "response: {:?}",
             response.text()
         );
-
-        super::close_app_pools(&ctx).await;
     })
     .await;
 }

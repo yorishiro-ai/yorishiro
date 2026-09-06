@@ -108,9 +108,9 @@ pub(super) const MODELS: &[&LocalModelDef] = &[&MULTILINGUAL_E5_BASE];
 /// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
 ///
 /// `multilingual-e5-base`, not `nomic-embed-text-v1.5`: this codebase's search and recall are not English-only, and only the multilingual model serves that well.
-/// Flipping this default was withheld until three things existed, in order: a numeric reference fixture and passing parity test for e5 (`tests/fixtures/multilingual-e5-base_reference_embeddings.json`), the write-time model check that refuses a write whose vector doesn't match the workspace's stamped model (`services/embedding/sync.rs`), and the `reindex_embeddings` task (with its own tests) that actually moves a workspace between models.
-/// All three now exist, which is what makes this flip safe rather than the exact "stamp says one model, data holds another" failure the write-time check exists to catch: a deployment upgrading with `YORISHIRO_LOCAL_MODEL` unset now boots onto e5, and every write to a workspace still stamped nomic is refused (loudly, `422`) rather than silently mixed, until `reindex_embeddings` is run against it.
-/// A workspace that was created before this deployment's model changed and still carries no stamp (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default, so it is also protected: writes go through the stamp that `sync_embedding` sets on the first embed, and the model check compares against that stamp.
+/// `multilingual-e5-base` is used instead of `nomic-embed-text-v1.5` because this codebase's search and recall are not English-only.
+/// The write-time model check (`services/embedding/sync.rs`) refuses a write whose vector doesn't match the workspace's stamped model, and the `reindex_embeddings` task moves a workspace between models: together these prevent the "stamp says one model, data holds another" failure.
+/// A workspace with no stamp (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default, so it is also protected: writes go through the stamp that `sync_embedding` sets on the first embed, and the model check compares against that stamp.
 /// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
 pub(super) const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 

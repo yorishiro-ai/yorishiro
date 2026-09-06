@@ -12,9 +12,7 @@
 # checked by hand, because putting an EOL Fedora's package repositories on the critical path of
 # every pull request trades a real dependency for a marginal case.
 #
-# One package, so one run. An earlier version looped over `ce` and `ee` because they were
-# different binaries behind the same unit name, which made "it starts under systemd" a separate
-# fact about each. There is one binary now.
+# One package, so one run.
 #
 # The unconfigured-start section exercises the zero-config default: production.yaml boots
 # against a local SQLite file with no external dependencies (DATABASE_URL defaults to

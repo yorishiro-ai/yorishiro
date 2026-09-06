@@ -248,20 +248,20 @@ const RENAMED_ONNX_VARS: [(&str, OnnxVarFate); 7] = [
     ),
 ];
 
-/// Fails startup when an old `YORISHIRO_ONNX_*` variable is still set.
+/// Fails startup when a retired `YORISHIRO_ONNX_*` variable is still set.
 ///
 /// A stale `YORISHIRO_ONNX_MODEL_PATH` naming an operator's own model is never read: it is simply invisible to [`resolve_model_paths`], which then runs its normal resolution as if nothing had been configured (using the `models/<short_id>/` default files if both are present, fetching the selected model, `model_fetch::DEFAULT_MODEL` unless `YORISHIRO_LOCAL_MODEL` says otherwise, if neither is, or erroring on an incomplete pair).
 /// A deployment that had a different model configured under the old name would, without this check, silently start writing vectors from a different model into an index built for the one it thinks it still has, with every status staying green.
 /// Refusing to boot forces the operator to remove or rename the variable (and confirm the resulting resolution is what they actually want) before that can happen, rather than a log line they could reasonably miss during an otherwise successful upgrade.
 ///
-/// `YORISHIRO_ONNX_POOLING`/`YORISHIRO_ONNX_QUERY_INSTRUCTION` still fail startup too, for
-/// consistency (every old name gets the same "stop and clean this up" treatment rather than some
-/// silently tolerated), but their message must not claim the wrong-model risk above: neither
+/// `YORISHIRO_ONNX_POOLING`/`YORISHIRO_ONNX_QUERY_INSTRUCTION` also fail startup for consistency
+/// (every retired name gets the same "stop and clean this up" treatment rather than some
+/// silently tolerated), but their message does not claim the wrong-model risk above: neither
 /// variable is read by anything, so a stale value changes no behaviour at all. Claiming a risk
 /// that does not exist would cost the accurate claim above its credibility on the next reader.
 ///
-/// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` are now also rejected here:
-/// the operator-chosen path was structurally unbound from the model identifier (which comes
+/// `YORISHIRO_LOCAL_MODEL_PATH`/`YORISHIRO_LOCAL_TOKENIZER_PATH` are rejected here as well:
+/// the operator-chosen path is structurally unbound from the model identifier (which comes
 /// from `YORISHIRO_LOCAL_MODEL`), so a mismatch could never be detected at write time.
 fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
     for (old, fate) in RENAMED_ONNX_VARS {

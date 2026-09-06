@@ -330,11 +330,6 @@ where
 
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
-///
-/// **Deliberately has no SQLite branch, unlike `Authorized<R>`/`AuditAuthorized`.**
-/// Its one caller, `search_entities` (`controllers/search.rs`), calls `db_handle(&ctx)?` directly in the handler body once the slow embedding call returns, so a SQLite branch here would still dead-end at that unconditional `db_handle` call.
-/// The route is unreachable on SQLite for an independent reason regardless: `content_entities.embedding` (the pgvector column `search_by_vector` reads) does not exist on that backend at all (see `docs/sqlite.md`).
-/// A future second caller of `Verified<R>` that doesn't touch `embedding`/`DbHandle` afterward would need this reconsidered.
 pub struct Verified<R> {
     pub ctx: auth::AuthContext,
     _scope: PhantomData<R>,
@@ -354,13 +349,17 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // Vector search uses `content_entities.embedding` which does not exist on SQLite.
-        // `db_handle()` would fail here with "DbHandle missing" (500), but the real issue is
-        // that this backend cannot serve the route at all, so return 501 with a clear message.
+        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to abstract over, so this authenticates directly against ctx.db instead of going through the Authenticator seam.
         if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            return Err(ApiError(YorishiroError::BackendUnsupported {
-                message: "vector search requires PostgreSQL; point DATABASE_URL at a PostgreSQL instance to use this feature".into(),
-            }));
+            let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
+                .await
+                .inspect_err(|err| log_auth_rejection(parts, err))?;
+            auth::require_scope(&ctx, R::SCOPE)?;
+            auth::touch_last_used_sqlite(&app_ctx.db, ctx.api_key_id).await;
+            return Ok(Verified {
+                ctx,
+                _scope: PhantomData,
+            });
         }
 
         let db = db_handle(&app_ctx)?;

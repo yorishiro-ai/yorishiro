@@ -162,3 +162,17 @@ pub async fn authorize_scope(
 
     Ok(ctx)
 }
+
+/// SQLite equivalent of [`authorize_scope`]: no `DbHandle` exists on this backend, so this authenticates directly against `ctx.db` and validates scope without opening a transaction.
+pub async fn authorize_scope_sqlite(
+    db: &sea_orm::DatabaseConnection,
+    presented_key: &str,
+    required: ApiKeyScope,
+) -> Result<AuthContext, YorishiroError> {
+    let ctx = authenticate_sqlite(db, presented_key).await?;
+    require_scope(&ctx, required)?;
+
+    super::touch_last_used_sqlite(db, ctx.api_key_id).await;
+
+    Ok(ctx)
+}

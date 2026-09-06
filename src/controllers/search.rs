@@ -2,6 +2,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
+use sea_orm::TransactionTrait;
 use serde::Deserialize;
 
 use crate::controllers::ApiError;
@@ -47,13 +48,20 @@ pub async fn search_entities(
     let vector = search::embed_query(provider.as_ref(), &params.query_text).await?;
 
     let workspace_id = verified.ctx.workspace_id;
-    let db = db_handle(&ctx)?;
+
     // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
-    let txn = db
-        .tenant
-        .begin_for_workspace(verified.ctx.tenant_id, workspace_id)
-        .await
-        .map_err(|err| YorishiroError::Internal(err.into()))?;
+    let txn = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        ctx.db
+            .begin()
+            .await
+            .map_err(|err| YorishiroError::Internal(err.into()))?
+    } else {
+        let db = db_handle(&ctx)?;
+        db.tenant
+            .begin_for_workspace(verified.ctx.tenant_id, workspace_id)
+            .await
+            .map_err(|err| YorishiroError::Internal(err.into()))?
+    };
 
     let hits =
         search::search_by_vector(&txn, workspace_id, vector, &params.query_text, query).await?;

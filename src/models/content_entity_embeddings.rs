@@ -1,15 +1,14 @@
-pub use super::_entities::content_entity_snapshots::{ActiveModel, Entity, Model};
+pub use super::_entities::content_entity_embeddings::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
+pub type ContentEntityEmbeddings = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        Ok(this)
+        Ok(self)
     }
 }
 

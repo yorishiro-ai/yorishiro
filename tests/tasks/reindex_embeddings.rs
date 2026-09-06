@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::requests::boot_request;
 use async_trait::async_trait;
-use loco_rs::testing::prelude::*;
 use sea_orm::FromQueryResult;
 use serial_test::serial;
 use yorishiro::app::App;
@@ -92,7 +92,7 @@ async fn embedding_is_set(ctx: &loco_rs::app::AppContext, entity_id: uuid::Uuid)
     }
     Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entities WHERE id = $1",
+        "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
         [entity_id.into()],
     ))
     .one(&ctx.db)
@@ -190,7 +190,10 @@ impl EmbeddingProvider for ConcurrentModificationProvider {
 #[tokio::test]
 #[serial]
 async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
         let first = insert_entity(&ctx, workspace.id, "first entity").await;
         let second = insert_entity(&ctx, workspace.id, "second entity").await;
@@ -217,8 +220,6 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
             Some("nomic-ai/nomic-embed-text-v1.5".into()),
             "a partial failure must not touch the workspace's stamp"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -227,7 +228,10 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
 #[tokio::test]
 #[serial]
 async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
         let first = insert_entity(&ctx, workspace.id, "first entity").await;
         let second = insert_entity(&ctx, workspace.id, "second entity").await;
@@ -254,7 +258,6 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
             "full success must restamp the workspace to the provider that actually wrote the vectors"
         );
 
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }
@@ -263,7 +266,10 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
 #[tokio::test]
 #[serial]
 async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure() {
-    request_with_create_db::<App, _, _>(|_request, ctx| async move {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace = insert_workspace(&ctx, "nomic-ai/nomic-embed-text-v1.5").await;
         let first = insert_entity(&ctx, workspace.id, "first entity").await;
         let second = insert_entity(&ctx, workspace.id, "second entity").await;
@@ -293,8 +299,6 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
             Some("nomic-ai/nomic-embed-text-v1.5".into()),
             "a concurrently modified entity must block the restamp exactly like any other failure"
         );
-
-        crate::requests::close_app_pools(&ctx).await;
     })
     .await;
 }

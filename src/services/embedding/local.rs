@@ -78,7 +78,7 @@ fn multilingual_e5_base_config() -> XlmRobertaConfig {
 /// Which model loads is selected by [`super::model_fetch::LocalModelDef`] (see [`super::model_fetch::MODELS`]), read through one of two `candle-transformers` architectures from a `safetensors` checkpoint: a different model here is a different [`LoadedModel`] variant, not a config change.
 ///
 /// Token embeddings are aggregated into a sentence vector via mean pooling weighted by the attention mask, then L2-normalized for stable cosine-distance search: both models this provider loads were trained and evaluated this way, and neither definition carries a pooling field of its own for exactly that reason.
-/// A field with one legal value on every definition so far would be the removed `YORISHIRO_ONNX_POOLING` reborn as code; one arrives the day a model that pools differently does.
+/// A field with one legal value on every definition so far would encode a future constraint on the field; one arrives the day a model that pools differently does.
 pub struct LocalEmbeddingProvider {
     // candle's `Tensor` ops on CPU are not internally parallel across an inference the way onnxruntime's
     // intra-op threading was, but the model is `Send + Sync` regardless; the Mutex here still exists to bound

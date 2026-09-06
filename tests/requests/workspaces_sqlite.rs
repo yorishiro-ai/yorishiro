@@ -60,7 +60,7 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
-    super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
+    super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
         let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
             .await
@@ -117,8 +117,6 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
         assert_eq!(response.status_code(), 404);
-
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }
@@ -135,11 +133,9 @@ async fn workspaces_endpoints_require_authentication_sqlite() {
         .path()
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
-    super::request_with_create_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
+    super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), 401);
-
-        super::close_app_pools_sqlite(&ctx, &db_path).await;
     })
     .await;
 }

@@ -1,0 +1,13 @@
+[package]
+name = "migration"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "migration"
+path = "src/lib.rs"
+
+[dependencies]
+loco-rs = { workspace = true }
+sea-orm-migration = { workspace = true }
