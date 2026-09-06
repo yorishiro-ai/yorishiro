@@ -7,11 +7,11 @@ Yorishiroは1つのバイナリとして提供されます。Dockerが最も簡�
 デフォルト設定はSQLiteを使用しており、外部データベースは不要です。
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
-1. `http://localhost:8080/` にアクセスし、セットアップウィザードでアカウントを作成。
+1. `http://localhost/` にアクセスし、セットアップウィザードでアカウントを作成。
 2. APIキーを生成し、エンティティの作成を開始。
 
 ## PostgreSQL に切り替える
@@ -19,7 +19,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
 マルチテナントホスティングやベクトル検索：
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     -e DATABASE_URL=postgres://user:pass@host:5432/yorishiro \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
@@ -29,7 +29,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
 分散キュー処理：
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     -e YORISHIRO_QUEUE_KIND=Redis \
     -e QUEUE_URL=redis://user:pass@host:6379 \
     ghcr.io/yorishiro-ai/yorishiro:latest
@@ -40,7 +40,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
 デフォルトではDockerはコンテナ内部にデータを保存します。永続化する場合：
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     -v yorishiro-data:/home/yorishiro/.cache/yorishiro \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```

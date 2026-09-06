@@ -56,41 +56,10 @@ flowchart TD
 
 デフォルト設定はSQLiteを使用しており、外部データベースは不要です。
 
-```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
-    ghcr.io/yorishiro-ai/yorishiro:latest
-```
-
-1. `http://localhost:8080/` にアクセスし、セットアップウィザードでアカウントを作成。
+1. `http://localhost/` にアクセスし、セットアップウィザードでアカウントを作成。
 2. APIキーを生成し、エンティティの作成を開始。
 
-### PostgreSQL に切り替える
-
-マルチテナントホスティングやベクトル検索には PostgreSQL を使用：
-
-```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
-    -e DATABASE_URL=postgres://user:pass@host:5432/yorishiro \
-    ghcr.io/yorishiro-ai/yorishiro:latest
-```
-
-### Valkey (Redis) に切り替える
-
-分散キュー処理には Valkey（または Redis）を使用：
-
-```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
-    -e YORISHIRO_QUEUE_KIND=Redis \
-    -e QUEUE_URL=redis://user:pass@host:6379 \
-    ghcr.io/yorishiro-ai/yorishiro:latest
-```
-
-ソースからビルドする場合：
-
-```console
-$ git clone https://github.com/yorishiro-ai/yorishiro && cd yorishiro
-$ make init
-```
+インストール手順は [docs/ja/installation.md](docs/ja/installation.md) を参照してください。
 
 ## 設定
 

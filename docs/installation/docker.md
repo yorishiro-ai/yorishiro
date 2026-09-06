@@ -7,7 +7,7 @@ Yorishiro ships as a single binary. Docker is the simplest option.
 The default configuration uses SQLite — no external database required.
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
@@ -19,7 +19,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080 \
 For multi-tenant hosting or vector search:
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     -e DATABASE_URL=postgres://user:pass@host:5432/yorishiro \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
@@ -29,7 +29,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
 For distributed queue processing:
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     -e YORISHIRO_QUEUE_KIND=Redis \
     -e QUEUE_URL=redis://user:pass@host:6379 \
     ghcr.io/yorishiro-ai/yorishiro:latest
@@ -40,7 +40,7 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
 By default Docker stores data inside the container. To persist data:
 
 ```console
-$ docker run -d --name yorishiro --restart unless-stopped -p 8080:8080 \
+$ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
     -v yorishiro-data:/home/yorishiro/.cache/yorishiro \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```

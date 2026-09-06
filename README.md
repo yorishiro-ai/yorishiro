@@ -56,7 +56,7 @@ One binary, one repository. Enterprise features are controlled by a licence key.
 
 The default configuration uses SQLite — no external database required.
 
-1. Open `http://localhost:8080/` and create an account through the setup wizard.
+1. Open `http://localhost/` and create an account through the setup wizard.
 2. Generate an API key and start creating entities.
 
 For installation instructions, see [docs/installation.md](docs/installation.md).
