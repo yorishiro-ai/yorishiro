@@ -41,12 +41,11 @@ async fn set_embedding_key(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
-    let workspace =
-        crate::models::_entities::identity_workspaces::Entity::find_by_id(auth_ctx.workspace_id)
-            .one(&ctx.db)
-            .await
-            .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?
-            .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
+    let workspace = crate::models::_entities::workspaces::Entity::find_by_id(auth_ctx.workspace_id)
+        .one(&ctx.db)
+        .await
+        .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?
+        .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
     embedding_keys::set(
         &ctx.db,

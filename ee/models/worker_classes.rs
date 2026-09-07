@@ -5,7 +5,7 @@
 //! A workspace with no row here stays `WorkerClass::Shared` (`WorkerClassResolver::resolve` returns `None`); this module never falls back on its own, so the caller (`WorkerClassAssignmentResolver`) decides that.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_workspace_worker_classes::{ActiveModel, Column, Entity};
+use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
 use crate::workers::embedding_sync::WorkerClass;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

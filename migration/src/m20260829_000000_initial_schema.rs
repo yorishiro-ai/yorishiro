@@ -25,7 +25,7 @@ pub struct Migration;
 /// the pair of `authenticate_api_key` overloads that used to be created without `audit` and recreated with it in a later file, and nothing else.
 ///
 /// Everything that looks like a later patch is still in its original position rather than folded into the table it patches.
-/// That is deliberate for the Postgres-only `identity_templates.created_by` FK (`ON DELETE SET NULL`) and the `tags TEXT[]` column, both absent on SQLite by design.
+/// That is deliberate for the Postgres-only `templates.created_by` FK (`ON DELETE SET NULL`) and the `tags TEXT[]` column, both absent on SQLite by design.
 /// Remaining `ALTER` statements are structural necessities: circular FK resolution (up), sea-query type limitations (no TEXT[]), backend-branching FK ON DELETE, and RLS enablement syntax.
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -34,7 +34,7 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // identity_tenants
+        // tenants
         // Idempotent (`duplicate_object` swallowed): every `GRANT ... TO yorishiro_app` in a later migration, and every RLS-scoped connection's `after_connect` (`src/db.rs`), requires this role to already exist.
         // PostgreSQL 16+ doesn't let even the role's creator `SET ROLE` to it automatically, so the migration also grants membership to itself right after creating it.
         // A superuser migration role masks a missing grant here (it can `SET ROLE` regardless of membership), so verify this on a non-superuser role.
@@ -58,7 +58,7 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_tenants"))
+                    .table(Alias::new("tenants"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("name")).text().not_null())
@@ -74,7 +74,7 @@ impl MigrationTrait for Migration {
         // Enabling RLS anyway is defense in depth against a future grant added without re-deriving this reasoning.
         helpers::enable_rls_with_policy(
             manager,
-            "identity_tenants",
+            "tenants",
             "tenant_isolation",
             "id",
             "app.current_tenant",
@@ -82,10 +82,10 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // identity_users
+        // users
         // password_hash is nullable: a user may be OAuth-provisioned instead of password-based.
         let table = Table::create()
-            .table(Alias::new("identity_users"))
+            .table(Alias::new("users"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
             .col(
@@ -104,7 +104,7 @@ impl MigrationTrait for Migration {
         // Every row is either password-authenticated (password_hash set, oauth_* both NULL) or OAuth-provisioned (oauth_provider + oauth_subject_id set, password_hash may be NULL), never a mix and never neither.
         helpers::create_table_with_checks(
             manager,
-            "identity_users",
+            "users",
             table,
             &[(
                 "users_auth_method_check",
@@ -122,7 +122,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("users_oauth_identity_idx")
                     .unique()
-                    .table(Alias::new("identity_users"))
+                    .table(Alias::new("users"))
                     .col(Alias::new("oauth_provider"))
                     .col(Alias::new("oauth_subject_id"))
                     .and_where(Expr::col(Alias::new("oauth_provider")).is_not_null())
@@ -130,11 +130,11 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // No RLS and no GRANT for this table: identity_users is a control-plane table reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, so yorishiro_app has no business touching it directly.
+        // No RLS and no GRANT for this table: users is a control-plane table reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, so yorishiro_app has no business touching it directly.
 
-        // identity_tenant_memberships
+        // tenant_memberships
         let table = Table::create()
-            .table(Alias::new("identity_tenant_memberships"))
+            .table(Alias::new("tenant_memberships"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
             .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
@@ -144,21 +144,15 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_tenant_memberships_tenant_id")
-                    .from(
-                        Alias::new("identity_tenant_memberships"),
-                        Alias::new("tenant_id"),
-                    )
-                    .to(Alias::new("identity_tenants"), Alias::new("id"))
+                    .from(Alias::new("tenant_memberships"), Alias::new("tenant_id"))
+                    .to(Alias::new("tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_tenant_memberships_user_id")
-                    .from(
-                        Alias::new("identity_tenant_memberships"),
-                        Alias::new("user_id"),
-                    )
-                    .to(Alias::new("identity_users"), Alias::new("id"))
+                    .from(Alias::new("tenant_memberships"), Alias::new("user_id"))
+                    .to(Alias::new("users"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .to_owned();
@@ -166,7 +160,7 @@ impl MigrationTrait for Migration {
         // role CHECK (role IN ('owner', 'admin', 'member', 'viewer')).
         helpers::create_table_with_checks(
             manager,
-            "identity_tenant_memberships",
+            "tenant_memberships",
             table,
             &[(
                 "tenant_memberships_role_check",
@@ -180,7 +174,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("uq_tenant_memberships_tenant_id_user_id")
-                    .table(Alias::new("identity_tenant_memberships"))
+                    .table(Alias::new("tenant_memberships"))
                     .col(Alias::new("tenant_id"))
                     .col(Alias::new("user_id"))
                     .unique()
@@ -191,7 +185,7 @@ impl MigrationTrait for Migration {
         // Strict policy: current_setting('app.current_tenant')::uuid with no `true` (lenient) argument, so a missing setting raises rather than matching nothing.
         helpers::enable_rls_with_policy(
             manager,
-            "identity_tenant_memberships",
+            "tenant_memberships",
             "tenant_isolation",
             "tenant_id",
             "app.current_tenant",
@@ -199,11 +193,11 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No GRANT: identity_tenant_memberships is control-plane data, reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, same reasoning as identity_tenants and identity_users.
+        // No GRANT: tenant_memberships is control-plane data, reached only through the migration-role identity pool (see src/db.rs), never a tenant-scoped request connection, same reasoning as tenants and users.
 
-        // identity_workspaces
+        // workspaces
         let mut table = Table::create()
-            .table(Alias::new("identity_workspaces"))
+            .table(Alias::new("workspaces"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
             .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
@@ -227,8 +221,8 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_workspaces_tenant_id")
-                    .from(Alias::new("identity_workspaces"), Alias::new("tenant_id"))
-                    .to(Alias::new("identity_tenants"), Alias::new("id"))
+                    .from(Alias::new("workspaces"), Alias::new("tenant_id"))
+                    .to(Alias::new("tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .to_owned();
@@ -239,7 +233,7 @@ impl MigrationTrait for Migration {
                 .foreign_key(
                     ForeignKey::create()
                         .name("fk_identity_workspaces_schema_id")
-                        .from(Alias::new("identity_workspaces"), Alias::new("schema_id"))
+                        .from(Alias::new("workspaces"), Alias::new("schema_id"))
                         .to(Alias::new("content_schemas"), Alias::new("id")),
                 )
                 .to_owned();
@@ -247,7 +241,7 @@ impl MigrationTrait for Migration {
 
         helpers::create_table_with_checks(
             manager,
-            "identity_workspaces",
+            "workspaces",
             table,
             &[
                 (
@@ -266,7 +260,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("identity_workspaces_tenant_id_name_key")
-                    .table(Alias::new("identity_workspaces"))
+                    .table(Alias::new("workspaces"))
                     .col(Alias::new("tenant_id"))
                     .col(Alias::new("name"))
                     .unique()
@@ -277,7 +271,7 @@ impl MigrationTrait for Migration {
         // Strict form: `yorishiro_app` sets both GUCs on every connection, so reaching this table without a tenant is a bug, and raising surfaces it rather than reading as an empty tenant.
         helpers::enable_rls_with_policy(
             manager,
-            "identity_workspaces",
+            "workspaces",
             "tenant_isolation",
             "tenant_id",
             "app.current_tenant",
@@ -285,22 +279,22 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        helpers::grant(manager, "SELECT", "identity_workspaces").await?;
+        helpers::grant(manager, "SELECT", "workspaces").await?;
 
         // Column-level GRANT UPDATE: `status` and `schema_id` are the whole of what a request writes here.
         // `max_entities`, `name` and the embedding stamp are provisioning decisions; a request that could rewrite its own quota is a different system.
         // Issued raw since helpers::grant()'s signature only expresses whole-table grants.
         helpers::pg_only(
             manager,
-            "GRANT UPDATE (status, schema_id) ON identity_workspaces TO yorishiro_app;",
+            "GRANT UPDATE (status, schema_id) ON workspaces TO yorishiro_app;",
         )
         .await?;
 
-        // identity_api_keys
+        // api_keys
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_api_keys"))
+                    .table(Alias::new("api_keys"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     // Nullable: a tenant-scoped key (one that spans every workspace in its tenant) carries no workspace_id at all.
@@ -308,24 +302,24 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_api_keys_workspace_id")
-                            .from(Alias::new("identity_api_keys"), Alias::new("workspace_id"))
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .from(Alias::new("api_keys"), Alias::new("workspace_id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_api_keys_tenant_id")
-                            .from(Alias::new("identity_api_keys"), Alias::new("tenant_id"))
-                            .to(Alias::new("identity_tenants"), Alias::new("id"))
+                            .from(Alias::new("api_keys"), Alias::new("tenant_id"))
+                            .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .col(helpers::uuid_col(manager, Alias::new("user_id")))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_api_keys_user_id")
-                            .from(Alias::new("identity_api_keys"), Alias::new("user_id"))
-                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .from(Alias::new("api_keys"), Alias::new("user_id"))
+                            .to(Alias::new("users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
                     .col(
@@ -362,7 +356,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("api_keys_tenant_id_idx")
-                    .table(Alias::new("identity_api_keys"))
+                    .table(Alias::new("api_keys"))
                     .col(Alias::new("tenant_id"))
                     .to_owned(),
             )
@@ -378,8 +372,8 @@ impl MigrationTrait for Migration {
         // No-op on SQLite: a single-tenant, single-file database has no other tenant/workspace's keys to hide.
         helpers::pg_only(
             manager,
-            "ALTER TABLE identity_api_keys ENABLE ROW LEVEL SECURITY;
-             CREATE POLICY workspace_isolation ON identity_api_keys
+            "ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+             CREATE POLICY workspace_isolation ON api_keys
                USING (
                  workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid
                  OR (
@@ -390,16 +384,11 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        helpers::grant(
-            manager,
-            "SELECT, INSERT, UPDATE, DELETE",
-            "identity_api_keys",
-        )
-        .await?;
+        helpers::grant(manager, "SELECT, INSERT, UPDATE, DELETE", "api_keys").await?;
 
-        // identity_invites
+        // invites
         let table = Table::create()
-            .table(Alias::new("identity_invites"))
+            .table(Alias::new("invites"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
             .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
@@ -417,15 +406,15 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_invites_tenant_id")
-                    .from(Alias::new("identity_invites"), Alias::new("tenant_id"))
-                    .to(Alias::new("identity_tenants"), Alias::new("id"))
+                    .from(Alias::new("invites"), Alias::new("tenant_id"))
+                    .to(Alias::new("tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .to_owned();
 
         helpers::create_table_with_checks(
             manager,
-            "identity_invites",
+            "invites",
             table,
             &[(
                 "identity_invites_role_check",
@@ -438,7 +427,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("invites_tenant_id_idx")
-                    .table(Alias::new("identity_invites"))
+                    .table(Alias::new("invites"))
                     .col(Alias::new("tenant_id"))
                     .to_owned(),
             )
@@ -447,7 +436,7 @@ impl MigrationTrait for Migration {
         // Strict policy: yorishiro_app sets app.current_tenant on every connection, so this table is reached only through the tenant-scoped identity pool, never a connection missing the GUC.
         helpers::enable_rls_with_policy(
             manager,
-            "identity_invites",
+            "invites",
             "tenant_isolation",
             "tenant_id",
             "app.current_tenant",
@@ -455,15 +444,15 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // No GRANT: identity_invites is control-plane, same as identity_tenants, identity_users and identity_tenant_memberships.
+        // No GRANT: invites is control-plane, same as tenants, users and tenant_memberships.
         // The admin CLI creates invites as the schema owner during provisioning, before any request-scoped role needs to touch this table.
 
-        // identity_templates
+        // templates
         let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_templates"))
+                    .table(Alias::new("templates"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
@@ -494,27 +483,27 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_tenant_id")
-                            .from(Alias::new("identity_templates"), Alias::new("tenant_id"))
-                            .to(Alias::new("identity_tenants"), Alias::new("id")),
+                            .from(Alias::new("templates"), Alias::new("tenant_id"))
+                            .to(Alias::new("tenants"), Alias::new("id")),
                     )
                     // Self-referential: deleting a template others were forked from must leave
                     // the forks usable, losing only the pointer back.
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_fork_of")
-                            .from(Alias::new("identity_templates"), Alias::new("fork_of"))
-                            .to(Alias::new("identity_templates"), Alias::new("id"))
+                            .from(Alias::new("templates"), Alias::new("fork_of"))
+                            .to(Alias::new("templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
-                    // FK to identity_users: created_by SET NULL for PostgreSQL (a template outlives
+                    // FK to users: created_by SET NULL for PostgreSQL (a template outlives
                     // its author).  SQLite declares inline here because ALTER TABLE has no
                     // ADD CONSTRAINT on that backend — the difference in ON DELETE action is
                     // baked into the CREATE TABLE per-backend rather than patched afterward.
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_templates_created_by")
-                            .from(Alias::new("identity_templates"), Alias::new("created_by"))
-                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .from(Alias::new("templates"), Alias::new("created_by"))
+                            .to(Alias::new("users"), Alias::new("id"))
                             .on_delete(if manager.get_database_backend() == DbBackend::Sqlite {
                                 ForeignKeyAction::NoAction
                             } else {
@@ -531,14 +520,14 @@ impl MigrationTrait for Migration {
         // array), read/written as such by the application on that backend.
         helpers::pg_only(
             manager,
-            "ALTER TABLE identity_templates ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';",
+            "ALTER TABLE templates ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';",
         )
         .await?;
         if manager.get_database_backend() == sea_orm::DbBackend::Sqlite {
             manager
                 .get_connection()
                 .execute_unprepared(
-                    "ALTER TABLE identity_templates ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';",
+                    "ALTER TABLE templates ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';",
                 )
                 .await?;
         }
@@ -547,7 +536,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("templates_tenant_id_idx")
-                    .table(Alias::new("identity_templates"))
+                    .table(Alias::new("templates"))
                     .col(Alias::new("tenant_id"))
                     .to_owned(),
             )
@@ -557,7 +546,7 @@ impl MigrationTrait for Migration {
         // No SQLite equivalent: `tags` is plain JSON-encoded TEXT there, not an indexable array type.
         helpers::pg_only(
             manager,
-            "CREATE INDEX templates_tags_idx ON identity_templates USING gin(tags);",
+            "CREATE INDEX templates_tags_idx ON templates USING gin(tags);",
         )
         .await?;
 
@@ -565,9 +554,9 @@ impl MigrationTrait for Migration {
         //
         // No GRANT either, for the same reason: yorishiro_app is never the role that reaches this table, so there is nothing to grant it.
 
-        // identity_maintenance
+        // maintenance
         let table = Table::create()
-            .table(Alias::new("identity_maintenance"))
+            .table(Alias::new("maintenance"))
             .if_not_exists()
             // One row, enforced by the primary key.
             // Not the usual uuidv7_pk() shape: the PK is a boolean singleton, checked below to be exactly TRUE.
@@ -603,7 +592,7 @@ impl MigrationTrait for Migration {
         // `mode` and `retry_after` CHECKs follow the same path for the same reason.
         helpers::create_table_with_checks(
             manager,
-            "identity_maintenance",
+            "maintenance",
             table,
             &[
                 ("maintenance_id_check", "id"),
@@ -620,13 +609,13 @@ impl MigrationTrait for Migration {
         // The migration crate has no generated entity types, so this uses raw SQL.
         manager
             .get_connection()
-            .execute_unprepared("INSERT INTO identity_maintenance (id) VALUES (TRUE);")
+            .execute_unprepared("INSERT INTO maintenance (id) VALUES (TRUE);")
             .await?;
 
         // No RLS on this table: it is a global singleton, not tenant- or workspace-scoped data.
         //
         // GRANT is SELECT only: yorishiro_app reads the maintenance flag on every request but never writes it (writes go through the migration-role/admin path instead).
-        helpers::grant(manager, "SELECT", "identity_maintenance").await?;
+        helpers::grant(manager, "SELECT", "maintenance").await?;
 
         // content_schemas
         manager
@@ -680,14 +669,14 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_content_schemas_tenant_id")
                             .from(Alias::new("content_schemas"), Alias::new("tenant_id"))
-                            .to(Alias::new("identity_tenants"), Alias::new("id"))
+                            .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_content_schemas_workspace_id")
                             .from(Alias::new("content_schemas"), Alias::new("workspace_id"))
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
@@ -697,20 +686,20 @@ impl MigrationTrait for Migration {
                                 Alias::new("content_schemas"),
                                 Alias::new("origin_template_id"),
                             )
-                            .to(Alias::new("identity_templates"), Alias::new("id"))
+                            .to(Alias::new("templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
             )
             .await?;
 
-        // The circular half: `identity_workspaces.schema_id` is created as a plain column with no FK above, since content_schemas did not exist yet at that point.
+        // The circular half: `workspaces.schema_id` is created as a plain column with no FK above, since content_schemas did not exist yet at that point.
         // content_schemas exists now, so the FK it deferred is added here.
         //
         // No-op on SQLite: that backend doesn't resolve FK targets at DDL time, so the FK is declared inline in its own CREATE TABLE instead of deferring it.
         helpers::pg_only(
             manager,
-            "ALTER TABLE identity_workspaces \
+            "ALTER TABLE workspaces \
              ADD CONSTRAINT fk_identity_workspaces_schema_id \
              FOREIGN KEY (schema_id) REFERENCES content_schemas(id);",
         )
@@ -766,7 +755,7 @@ impl MigrationTrait for Migration {
         // code, so a delete arriving from the admin CLI or a migration is covered too.
         //
         // Defined here (alongside content_schemas, the table it writes to) even though it
-        // fires on identity_templates, matching the old DDL's own ordering choice of
+        // fires on templates, matching the old DDL's own ordering choice of
         // placing it next to content.schemas rather than next to identity.templates.
         //
         // The trigger also stamps `updated_at` on the in-place rewrite.
@@ -787,7 +776,7 @@ impl MigrationTrait for Migration {
         helpers::pg_only(
             manager,
             "CREATE TRIGGER templates_detach_schema_origins
-             BEFORE DELETE ON identity_templates
+             BEFORE DELETE ON templates
              FOR EACH ROW EXECUTE FUNCTION detach_orphaned_schema_origin();",
         )
         .await?;
@@ -800,7 +789,7 @@ impl MigrationTrait for Migration {
             manager,
             &format!(
                 "CREATE TRIGGER templates_detach_schema_origins
-                 AFTER DELETE ON identity_templates
+                 AFTER DELETE ON templates
                  FOR EACH ROW
                  BEGIN
                    {}
@@ -851,7 +840,7 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_content_entities_workspace_id")
                             .from(Alias::new("content_entities"), Alias::new("workspace_id"))
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     // No ON DELETE action in the old DDL (line 239): default NO ACTION.
@@ -865,14 +854,14 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_content_entities_created_by")
                             .from(Alias::new("content_entities"), Alias::new("created_by"))
-                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .to(Alias::new("users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_content_entities_updated_by")
                             .from(Alias::new("content_entities"), Alias::new("updated_by"))
-                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .to(Alias::new("users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
@@ -1063,7 +1052,7 @@ impl MigrationTrait for Migration {
                 ForeignKey::create()
                     .name("fk_content_relations_workspace_id")
                     .from(Alias::new("content_relations"), Alias::new("workspace_id"))
-                    .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                    .to(Alias::new("workspaces"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .foreign_key(
@@ -1177,7 +1166,7 @@ impl MigrationTrait for Migration {
                                 Alias::new("content_entity_snapshots"),
                                 Alias::new("workspace_id"),
                             )
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
@@ -1227,12 +1216,12 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // identity_tenant_billing
+        // tenant_billing
         let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_tenant_billing"))
+                    .table(Alias::new("tenant_billing"))
                     .if_not_exists()
                     .col(
                         helpers::uuid_col(manager, Alias::new("tenant_id"))
@@ -1250,21 +1239,18 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_tenant_billing_tenant_id")
-                            .from(
-                                Alias::new("identity_tenant_billing"),
-                                Alias::new("tenant_id"),
-                            )
-                            .to(Alias::new("identity_tenants"), Alias::new("id"))
+                            .from(Alias::new("tenant_billing"), Alias::new("tenant_id"))
+                            .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
             .await?;
 
-        // No GRANT and RLS anyway, for the reason identity_tenants gives above: this table is reached only through ctx.db, never a tenant-scoped request connection.
+        // No GRANT and RLS anyway, for the reason tenants gives above: this table is reached only through ctx.db, never a tenant-scoped request connection.
         helpers::enable_rls_with_policy(
             manager,
-            "identity_tenant_billing",
+            "tenant_billing",
             "tenant_billing_isolation",
             "tenant_id",
             "app.current_tenant",
@@ -1272,11 +1258,11 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // identity_stripe_processed_events
+        // stripe_processed_events
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_stripe_processed_events"))
+                    .table(Alias::new("stripe_processed_events"))
                     .if_not_exists()
                     .col(
                         ColumnDef::new(Alias::new("event_id"))
@@ -1297,7 +1283,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("stripe_processed_events_customer_id_idx")
                     .if_not_exists()
-                    .table(Alias::new("identity_stripe_processed_events"))
+                    .table(Alias::new("stripe_processed_events"))
                     .col(Alias::new("customer_id"))
                     .col(Alias::new("stripe_created"))
                     .and_where(Expr::col(Alias::new("customer_id")).is_not_null())
@@ -1305,14 +1291,14 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // yorishiro_app gets no GRANT at all here, matching identity_tenants/identity_tenant_billing: this table is reached only through ctx.db (the migration-role connection, the Stripe webhook handler's only DB access), never a tenant-scoped request connection.
+        // yorishiro_app gets no GRANT at all here, matching tenants/tenant_billing: this table is reached only through ctx.db (the migration-role connection, the Stripe webhook handler's only DB access), never a tenant-scoped request connection.
         // No RLS either: unlike tenant_billing this table has no tenant_id column to scope a policy on (it's keyed by Stripe's own event id), and it is never reached by anything but ctx.db regardless.
 
-        // identity_template_versions
+        // template_versions
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_template_versions"))
+                    .table(Alias::new("template_versions"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     .col(helpers::uuid_col(manager, Alias::new("template_id")).not_null())
@@ -1341,21 +1327,15 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_template_versions_template_id")
-                            .from(
-                                Alias::new("identity_template_versions"),
-                                Alias::new("template_id"),
-                            )
-                            .to(Alias::new("identity_templates"), Alias::new("id"))
+                            .from(Alias::new("template_versions"), Alias::new("template_id"))
+                            .to(Alias::new("templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_template_versions_created_by")
-                            .from(
-                                Alias::new("identity_template_versions"),
-                                Alias::new("created_by"),
-                            )
-                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .from(Alias::new("template_versions"), Alias::new("created_by"))
+                            .to(Alias::new("users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
@@ -1366,7 +1346,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("template_versions_template_idx")
-                    .table(Alias::new("identity_template_versions"))
+                    .table(Alias::new("template_versions"))
                     .col(Alias::new("template_id"))
                     .col((Alias::new("version"), IndexOrder::Desc))
                     .to_owned(),
@@ -1377,7 +1357,7 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_template_reviews"))
+                    .table(Alias::new("template_reviews"))
                     .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     .col(helpers::uuid_col(manager, Alias::new("template_id")).not_null())
@@ -1406,31 +1386,22 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_template_reviews_template_id")
-                            .from(
-                                Alias::new("identity_template_reviews"),
-                                Alias::new("template_id"),
-                            )
-                            .to(Alias::new("identity_templates"), Alias::new("id"))
+                            .from(Alias::new("template_reviews"), Alias::new("template_id"))
+                            .to(Alias::new("templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_template_reviews_tenant_id")
-                            .from(
-                                Alias::new("identity_template_reviews"),
-                                Alias::new("tenant_id"),
-                            )
-                            .to(Alias::new("identity_tenants"), Alias::new("id"))
+                            .from(Alias::new("template_reviews"), Alias::new("tenant_id"))
+                            .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_template_reviews_created_by")
-                            .from(
-                                Alias::new("identity_template_reviews"),
-                                Alias::new("created_by"),
-                            )
-                            .to(Alias::new("identity_users"), Alias::new("id"))
+                            .from(Alias::new("template_reviews"), Alias::new("created_by"))
+                            .to(Alias::new("users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
@@ -1441,20 +1412,20 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("template_reviews_template_idx")
-                    .table(Alias::new("identity_template_reviews"))
+                    .table(Alias::new("template_reviews"))
                     .col(Alias::new("template_id"))
                     .to_owned(),
             )
             .await?;
 
-        // No RLS, no GRANT to yorishiro_app on either table, matching identity_templates itself: both are read in exactly the same paths (the repository layer, as the owner role, scoping by tenant in the query) and are never reached through the tenant pool.
+        // No RLS, no GRANT to yorishiro_app on either table, matching templates itself: both are read in exactly the same paths (the repository layer, as the owner role, scoping by tenant in the query) and are never reached through the tenant pool.
 
-        // identity_workspace_llm_keys
+        // workspace_llm_keys
         let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_workspace_llm_keys"))
+                    .table(Alias::new("workspace_llm_keys"))
                     .if_not_exists()
                     .col(
                         helpers::uuid_col(manager, Alias::new("workspace_id"))
@@ -1469,18 +1440,15 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_identity_workspace_llm_keys_workspace_id")
-                            .from(
-                                Alias::new("identity_workspace_llm_keys"),
-                                Alias::new("workspace_id"),
-                            )
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .from(Alias::new("workspace_llm_keys"), Alias::new("workspace_id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
             .await?;
 
-        // No RLS and no GRANT, deliberately, matching identity_templates: yorishiro_app is never the role that reaches this table.
+        // No RLS and no GRANT, deliberately, matching templates: yorishiro_app is never the role that reaches this table.
         // Reads and writes go through the migration-role pool (ctx.db), which is what keeps a workspace's credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
         // columns
@@ -1523,7 +1491,7 @@ impl MigrationTrait for Migration {
                         Alias::new("content_entity_column_preferences"),
                         Alias::new("workspace_id"),
                     )
-                    .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                    .to(Alias::new("workspaces"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .to_owned();
@@ -1562,19 +1530,19 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // identity_api_key_audit_log
+        // api_key_audit_log
         // Independent of `scope`, deliberately: `scope` stays the four-way ordered read/write/schema/migration ladder (`ApiKeyScope`'s derived `Ord`), and folding audit into that ladder above `migration` would let an audit-reading key also run a batch migration and flip maintenance mode, which nobody asked for.
         // A separate boolean composes with any scope instead: a key is `scope=read, audit=true` to read the log without write access, or any other scope plus audit, entirely independent of where that scope sits in the ladder.
 
-        // identity_api_key_audit_log
+        // api_key_audit_log
         let table = Table::create()
-            .table(Alias::new("identity_api_key_audit_log"))
+            .table(Alias::new("api_key_audit_log"))
             .if_not_exists()
             .col(helpers::uuidv7_pk(manager))
             .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
             .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
-            // No foreign_key(): identity_api_keys::revoke deletes the key row outright (see its own doc comment), and a hard FK, even ON DELETE SET NULL, would still require the referenced row to exist at insert time and would touch this table on every revoke.
-            // Recorded as a plain UUID so "which key" survives the key's own deletion; a caller resolves it against identity_api_keys and reads a miss as "since revoked".
+            // No foreign_key(): api_keys::revoke deletes the key row outright (see its own doc comment), and a hard FK, even ON DELETE SET NULL, would still require the referenced row to exist at insert time and would touch this table on every revoke.
+            // Recorded as a plain UUID so "which key" survives the key's own deletion; a caller resolves it against api_keys and reads a miss as "since revoked".
             .col(helpers::uuid_col(manager, Alias::new("api_key_id")))
             .col(helpers::uuid_col(manager, Alias::new("user_id")))
             // A closed set, matching the as_db_str()/from_db_str() pattern every other stored-string enum in this codebase uses (MaintenanceMode, MembershipRole, ApiKeyScope): the CHECK constraint below is what stops a typo'd action from silently becoming a fourth value nothing filters on.
@@ -1586,39 +1554,30 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_api_key_audit_log_workspace_id")
-                    .from(
-                        Alias::new("identity_api_key_audit_log"),
-                        Alias::new("workspace_id"),
-                    )
-                    .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                    .from(Alias::new("api_key_audit_log"), Alias::new("workspace_id"))
+                    .to(Alias::new("workspaces"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_api_key_audit_log_tenant_id")
-                    .from(
-                        Alias::new("identity_api_key_audit_log"),
-                        Alias::new("tenant_id"),
-                    )
-                    .to(Alias::new("identity_tenants"), Alias::new("id"))
+                    .from(Alias::new("api_key_audit_log"), Alias::new("tenant_id"))
+                    .to(Alias::new("tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
-            // SetNull, not the no-FK-at-all treatment api_key_id gets above: identity_users rows are not routinely deleted the way a revoked key is, so a real FK here is cheap, and SetNull keeps a record of "some now-deleted user did this" rather than losing the row's referential integrity.
+            // SetNull, not the no-FK-at-all treatment api_key_id gets above: users rows are not routinely deleted the way a revoked key is, so a real FK here is cheap, and SetNull keeps a record of "some now-deleted user did this" rather than losing the row's referential integrity.
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_identity_api_key_audit_log_user_id")
-                    .from(
-                        Alias::new("identity_api_key_audit_log"),
-                        Alias::new("user_id"),
-                    )
-                    .to(Alias::new("identity_users"), Alias::new("id"))
+                    .from(Alias::new("api_key_audit_log"), Alias::new("user_id"))
+                    .to(Alias::new("users"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::SetNull),
             )
             .to_owned();
 
         helpers::create_table_with_checks(
             manager,
-            "identity_api_key_audit_log",
+            "api_key_audit_log",
             table,
             &[(
                 "identity_api_key_audit_log_action_check",
@@ -1631,7 +1590,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("api_key_audit_log_workspace_id_created_at_idx")
-                    .table(Alias::new("identity_api_key_audit_log"))
+                    .table(Alias::new("api_key_audit_log"))
                     .col(Alias::new("workspace_id"))
                     .col(Alias::new("created_at"))
                     .to_owned(),
@@ -1644,7 +1603,7 @@ impl MigrationTrait for Migration {
         // FORCE ROW LEVEL SECURITY is deliberately not applied: it would also bind the table owner (the migration role that performs the set_maintenance audit insert on ctx.db), and a superuser migration role bypasses FORCE regardless, so it would add nothing under test-loco's roles while silently breaking the ctx.db write path on a deployment whose migration role is a non-superuser owner.
         helpers::enable_rls_with_policy(
             manager,
-            "identity_api_key_audit_log",
+            "api_key_audit_log",
             "workspace_isolation",
             "workspace_id",
             "app.current_workspace",
@@ -1654,7 +1613,7 @@ impl MigrationTrait for Migration {
 
         // SELECT, INSERT only, deliberately, never UPDATE/DELETE: an audit trail a key can rewrite or erase isn't one.
         // yorishiro_app can append new rows and read them back, but has no way to alter or remove what has already landed.
-        helpers::grant(manager, "SELECT, INSERT", "identity_api_key_audit_log").await?;
+        helpers::grant(manager, "SELECT, INSERT", "api_key_audit_log").await?;
 
         // Both overloads, with `audit` in the returned column list.
         // `RETURNS TABLE`'s column list cannot be widened with ALTER FUNCTION, so both
@@ -1671,8 +1630,8 @@ impl MigrationTrait for Migration {
              SET search_path = pg_catalog, public
              AS $$
                SELECT k.id, k.workspace_id, w.tenant_id, k.scope, k.user_id, k.audit
-               FROM identity_api_keys k
-               JOIN identity_workspaces w ON w.id = k.workspace_id
+               FROM api_keys k
+               JOIN workspaces w ON w.id = k.workspace_id
                WHERE k.key_hash = p_key_hash
              $$;
 
@@ -1694,8 +1653,8 @@ impl MigrationTrait for Migration {
                       k.scope,
                       k.user_id,
                       k.audit
-               FROM identity_api_keys k
-               LEFT JOIN identity_workspaces w
+               FROM api_keys k
+               LEFT JOIN workspaces w
                       ON k.workspace_id IS NULL
                      AND w.id = p_requested_workspace
                      AND w.tenant_id = k.tenant_id
@@ -1708,12 +1667,12 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // identity_workspace_embedding_keys
+        // workspace_embedding_keys
         let [created_at, updated_at] = helpers::timestamps(manager);
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_workspace_embedding_keys"))
+                    .table(Alias::new("workspace_embedding_keys"))
                     .if_not_exists()
                     .col(
                         helpers::uuid_col(manager, Alias::new("workspace_id"))
@@ -1740,25 +1699,25 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_identity_workspace_embedding_keys_workspace_id")
                             .from(
-                                Alias::new("identity_workspace_embedding_keys"),
+                                Alias::new("workspace_embedding_keys"),
                                 Alias::new("workspace_id"),
                             )
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
             .await?;
 
-        // No RLS and no GRANT, deliberately, matching identity_workspace_llm_keys: yorishiro_app is never the role that reaches this table.
+        // No RLS and no GRANT, deliberately, matching workspace_llm_keys: yorishiro_app is never the role that reaches this table.
         // Reads and writes go through the migration-role pool (ctx.db), which keeps a workspace's embedding credentials off the RLS-scoped request connection entirely rather than relying on a policy being right.
 
-        // identity_workspace_worker_classes
+        // workspace_worker_classes
         let [created_at, updated_at] = helpers::timestamps(manager);
 
         // `worker_class` CHECK constraint.
-        // Its siblings carry this constraint (`identity_tenant_memberships.role`,
-        // `identity_api_keys.scope`, the audit log's `action`), for the reason `action`'s own
+        // Its siblings carry this constraint (`tenant_memberships.role`,
+        // `api_keys.scope`, the audit log's `action`), for the reason `action`'s own
         // migration states: a CHECK is what stops a typo'd value from silently becoming a
         // fourth thing nothing filters on.
         //
@@ -1771,7 +1730,7 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Alias::new("identity_workspace_worker_classes"))
+                    .table(Alias::new("workspace_worker_classes"))
                     .if_not_exists()
                     .col(
                         helpers::uuid_col(manager, Alias::new("workspace_id"))
@@ -1788,10 +1747,10 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_identity_workspace_worker_classes_workspace_id")
                             .from(
-                                Alias::new("identity_workspace_worker_classes"),
+                                Alias::new("workspace_worker_classes"),
                                 Alias::new("workspace_id"),
                             )
-                            .to(Alias::new("identity_workspaces"), Alias::new("id"))
+                            .to(Alias::new("workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .check(Expr::cust(
@@ -1807,10 +1766,10 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Initial schema: down() drops tables in topological order.
         //
-        // `identity_workspaces.schema_id → content_schemas.id` and
-        // `content_schemas.workspace_id → identity_workspaces.id` form a circular FK pair.
-        // `DROP TABLE identity_workspaces CASCADE` breaks the cycle: CASCADE drops FK
-        // constraints that reference `identity_workspaces` (including `content_schemas`'s
+        // `workspaces.schema_id → content_schemas.id` and
+        // `content_schemas.workspace_id → workspaces.id` form a circular FK pair.
+        // `DROP TABLE workspaces CASCADE` breaks the cycle: CASCADE drops FK
+        // constraints that reference `workspaces` (including `content_schemas`'s
         // FK `fk_content_schemas_workspace_id`), so `content_schemas` can then be dropped.
         // CASCADE does not drop other tables — only FK-constraint objects and rows in
         // tables whose FK has `ON DELETE CASCADE`.  The remaining tables are dropped in
@@ -1818,7 +1777,7 @@ impl MigrationTrait for Migration {
         manager
             .drop_table(
                 Table::drop()
-                    .table(Alias::new("identity_workspaces"))
+                    .table(Alias::new("workspaces"))
                     .cascade()
                     .if_exists()
                     .to_owned(),
@@ -1842,7 +1801,7 @@ impl MigrationTrait for Migration {
         // `authenticate_api_key` has two overloads, both must be dropped.
         helpers::pg_only(
             manager,
-            "DROP TRIGGER IF EXISTS templates_detach_schema_origins ON identity_templates;
+            "DROP TRIGGER IF EXISTS templates_detach_schema_origins ON templates;
              DROP FUNCTION IF EXISTS detach_orphaned_schema_origin();
              DROP FUNCTION IF EXISTS authenticate_api_key(bytea);
              DROP FUNCTION IF EXISTS authenticate_api_key(bytea, uuid);",
@@ -1852,25 +1811,25 @@ impl MigrationTrait for Migration {
         // Step 3: drop remaining tables in dependency order.
         for table in [
             "content_entity_embeddings",         // → content_entities; dropped first
-            "content_relations",                 // → identity_workspaces, content_entities ×2
-            "content_entity_snapshots",          // → identity_workspaces, content_entities (no FK)
-            "content_entity_column_preferences", // → identity_workspaces
-            "identity_api_key_audit_log", // → identity_workspaces, identity_tenants, identity_users
-            "identity_api_keys",          // → identity_workspaces, identity_tenants, identity_users
-            "identity_workspace_worker_classes", // → identity_workspaces
-            "identity_workspace_embedding_keys", // → identity_workspaces
-            "identity_workspace_llm_keys", // → identity_workspaces
-            "content_entities",           // → identity_workspaces, content_schemas, identity_users
-            "content_schemas", // → identity_tenants, identity_workspaces, identity_templates; dropped after content_entities
-            "identity_tenant_memberships", // → identity_tenants, identity_users
-            "identity_invites", // → identity_tenants
-            "identity_template_reviews", // → identity_templates, identity_tenants, identity_users
-            "identity_template_versions", // → identity_templates, identity_users
-            "identity_templates", // → identity_tenants, identity_templates(self-ref), identity_users; must precede identity_users
-            "identity_users", // no FK deps (self-referential only); must follow identity_templates
-            "identity_tenant_billing", // → identity_tenants
-            "identity_maintenance", // no FK deps
-            "identity_tenants", // no FK deps
+            "content_relations",                 // → workspaces, content_entities ×2
+            "content_entity_snapshots",          // → workspaces, content_entities (no FK)
+            "content_entity_column_preferences", // → workspaces
+            "api_key_audit_log",                 // → workspaces, tenants, users
+            "api_keys",                          // → workspaces, tenants, users
+            "workspace_worker_classes",          // → workspaces
+            "workspace_embedding_keys",          // → workspaces
+            "workspace_llm_keys",                // → workspaces
+            "content_entities",                  // → workspaces, content_schemas, users
+            "content_schemas", // → tenants, workspaces, templates; dropped after content_entities
+            "tenant_memberships", // → tenants, users
+            "invites",         // → tenants
+            "template_reviews", // → templates, tenants, users
+            "template_versions", // → templates, users
+            "templates",       // → tenants, templates(self-ref), users; must precede users
+            "users",           // no FK deps (self-referential only); must follow templates
+            "tenant_billing",  // → tenants
+            "maintenance",     // no FK deps
+            "tenants",         // no FK deps
         ] {
             manager
                 .drop_table(

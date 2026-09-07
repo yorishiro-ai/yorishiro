@@ -15,7 +15,7 @@ use crate::controllers::extractors::AuthContext;
 use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_workspaces;
+use crate::models::_entities::workspaces;
 use crate::models::tenancy;
 use crate::models::{content_entities, content_relations, content_schemas};
 
@@ -25,7 +25,7 @@ async fn get_workspace_in_tenant(
     ctx: &AppContext,
     tenant_id: Uuid,
     workspace_id: Uuid,
-) -> Result<identity_workspaces::Model, ApiError> {
+) -> Result<workspaces::Model, ApiError> {
     let workspace = tenancy::get_workspace(&ctx.db, workspace_id).await?;
     if workspace.tenant_id != tenant_id {
         return Err(
@@ -38,9 +38,9 @@ async fn get_workspace_in_tenant(
 pub async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-) -> Result<Json<Vec<identity_workspaces::Model>>, ApiError> {
-    let workspaces = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.eq(auth.tenant_id))
+) -> Result<Json<Vec<workspaces::Model>>, ApiError> {
+    let workspaces = workspaces::Entity::find()
+        .filter(workspaces::Column::TenantId.eq(auth.tenant_id))
         .all(&ctx.db)
         .await
         .map_err(|err| ApiError::from(YorishiroError::Internal(err.into())))?;

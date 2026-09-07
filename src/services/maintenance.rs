@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::models::identity_maintenance;
+use crate::models::maintenance;
 
 /// Paths that answer even under full lock.
 ///
@@ -42,7 +42,7 @@ pub async fn maintenance_guard(
         return next.run(request).await;
     }
 
-    let current = match identity_maintenance::get(&ctx.db).await {
+    let current = match maintenance::get(&ctx.db).await {
         Ok(current) => current,
         Err(err) => return ApiError::from(err).into_response(),
     };

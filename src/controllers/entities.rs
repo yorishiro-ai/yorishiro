@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
+use crate::models::api_key_audit_log;
 use crate::models::content_entities::{self, EntityRecord, UndoReport};
-use crate::models::identity_api_key_audit_log;
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
@@ -120,15 +120,15 @@ pub async fn undo_migration_job(
     // Recorded on the same transaction as the undo itself, before commit: a rollback of the undo
     // must also roll back the record that it happened, or a failed request could still leave an
     // audit trail claiming it succeeded.
-    identity_api_key_audit_log::record(
+    api_key_audit_log::record(
         authorized.txn(),
-        identity_api_key_audit_log::AuditActor {
+        api_key_audit_log::AuditActor {
             workspace_id,
             tenant_id: authorized.ctx.tenant_id,
             api_key_id: authorized.ctx.api_key_id,
             user_id: authorized.ctx.user_id,
         },
-        identity_api_key_audit_log::AuditAction::UndoMigrationJob,
+        api_key_audit_log::AuditAction::UndoMigrationJob,
         serde_json::json!({ "job_id": job_id, "restored": report.restored, "missing": report.missing }),
     )
     .await?;
@@ -177,15 +177,15 @@ pub async fn reindex_workspace(
 
     // Recorded on the same RLS-scoped transaction as the request itself: this is a
     // migration-scope operation that the audit log must capture.
-    identity_api_key_audit_log::record(
+    api_key_audit_log::record(
         authorized.txn(),
-        identity_api_key_audit_log::AuditActor {
+        api_key_audit_log::AuditActor {
             workspace_id,
             tenant_id: authorized.ctx.tenant_id,
             api_key_id: authorized.ctx.api_key_id,
             user_id: authorized.ctx.user_id,
         },
-        identity_api_key_audit_log::AuditAction::ReindexEmbeddings,
+        api_key_audit_log::AuditAction::ReindexEmbeddings,
         serde_json::json!({ "job_id": job_id }),
     )
     .await?;

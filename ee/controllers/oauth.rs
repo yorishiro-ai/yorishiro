@@ -11,7 +11,7 @@
 use crate::YorishiroError;
 use crate::controllers::ApiError;
 use crate::error::ResultExt;
-use crate::models::identity_api_keys::IdentityApiKeys;
+use crate::models::api_keys::IdentityApiKeys;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};

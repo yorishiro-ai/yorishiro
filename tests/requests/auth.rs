@@ -7,7 +7,7 @@ use yorishiro::models::tenancy::{self, MembershipRole};
 #[serial]
 async fn signup_then_login_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
+        let tenant = yorishiro::models::_entities::tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("request-test-tenant".into()),
             ..Default::default()
         };
@@ -15,11 +15,11 @@ async fn signup_then_login_round_trip() {
             .await
             .expect("insert tenant");
 
-        let workspace = yorishiro::models::_entities::identity_workspaces::ActiveModel {
+        let workspace = yorishiro::models::_entities::workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("request-test-ws".into()),
             status: sea_orm::ActiveValue::Set(
-                yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
+                yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
             ),
             ..Default::default()
         };

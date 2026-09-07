@@ -13,8 +13,9 @@ use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
 use crate::error::YorishiroError;
 use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
 use crate::models::content_schemas::{self, SchemaRecord, SchemaSummary};
-use crate::models::identity_templates;
-use crate::templates::{self, TemplateSummary};
+use crate::models::templates as model_templates;
+use crate::templates;
+pub use crate::templates::TemplateSummary;
 
 #[derive(Serialize)]
 pub struct CreateSchemaResponse {
@@ -60,7 +61,7 @@ pub async fn create_schema(
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => {
             let (definition, origin) =
-                identity_templates::resolve_template_definition(&ctx.db, tenant_id, &template_id)
+                model_templates::resolve_template_definition(&ctx.db, tenant_id, &template_id)
                     .await?;
             origin_template_id = origin;
             origin_snapshot = origin.map(|_| definition.clone());

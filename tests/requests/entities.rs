@@ -2,9 +2,9 @@ use super::boot_request;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenants, workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{content_entities, content_schemas};
 use yorishiro::services::auth::ApiKeyScope;
 
@@ -15,14 +15,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -38,7 +38,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
         .await
         .expect("add owner");
     // Migration scope: undoing a batch is a migration operation, above schema in the ladder.
-    let key = identity_api_keys::Entity::create_api_key(
+    let key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Migration,

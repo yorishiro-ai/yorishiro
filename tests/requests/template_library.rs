@@ -1,9 +1,9 @@
 use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenants, workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
@@ -13,14 +13,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set(name.to_string()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -41,7 +41,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
-    let owner_key = identity_api_keys::Entity::create_api_key(
+    let owner_key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Migration,
@@ -63,7 +63,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, member.id, MembershipRole::Member)
         .await
         .expect("add member");
-    let member_key = identity_api_keys::Entity::create_api_key(
+    let member_key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Write,
@@ -178,7 +178,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
 
-        let community = yorishiro::models::_entities::identity_templates::ActiveModel {
+        let community = yorishiro::models::_entities::templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(owner_a.tenant_id),
             name: sea_orm::ActiveValue::Set("shared-note".into()),
             definition: sea_orm::ActiveValue::Set(note_definition()),
@@ -238,7 +238,7 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
         let owner_a = setup(&ctx, "acme").await;
         let owner_b = setup(&ctx, "beta").await;
 
-        let community = yorishiro::models::_entities::identity_templates::ActiveModel {
+        let community = yorishiro::models::_entities::templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(owner_a.tenant_id),
             name: sea_orm::ActiveValue::Set("shared-note".into()),
             definition: sea_orm::ActiveValue::Set(note_definition()),

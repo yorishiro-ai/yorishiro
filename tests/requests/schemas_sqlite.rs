@@ -4,8 +4,8 @@
 /// SQLite backend.
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenants, workspaces};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::services::auth::ApiKeyScope;
 
@@ -16,7 +16,7 @@ fn dump_db(db_path: &str, label: &str) {
             "-column",
             db_path,
             "SELECT 'content_schemas' as tbl, COUNT(*) as cnt FROM content_schemas \
-             UNION ALL SELECT 'identity_workspaces', COUNT(*) FROM identity_workspaces;",
+             UNION ALL SELECT 'workspaces', COUNT(*) FROM workspaces;",
         ])
         .output()
         .ok();
@@ -32,14 +32,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -54,7 +54,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
-    let key = identity_api_keys::Entity::create_api_key(
+    let key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Schema,

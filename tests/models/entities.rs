@@ -1,8 +1,8 @@
 use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{tenants, workspaces};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{content_entities, content_schemas};
 
 /// `migration_dry_run` uses `select_only().group_by(...).into_model::<GroupedCount>()`.
@@ -12,7 +12,7 @@ use yorishiro::models::{content_entities, content_schemas};
 #[serial]
 async fn drift_and_migration_dry_run_see_a_second_version() {
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("drift-test".into()),
             ..Default::default()
         };
@@ -20,7 +20,7 @@ async fn drift_and_migration_dry_run_see_a_second_version() {
             .await
             .expect("insert tenant");
 
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),

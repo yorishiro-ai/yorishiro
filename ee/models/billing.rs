@@ -4,7 +4,7 @@
 //! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_tenant_billing::{ActiveModel, Column, Entity};
+use crate::models::_entities::tenant_billing::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
@@ -18,8 +18,8 @@ pub struct TenantBillingRecord {
     pub stripe_customer_id: Option<String>,
 }
 
-impl From<crate::models::_entities::identity_tenant_billing::Model> for TenantBillingRecord {
-    fn from(model: crate::models::_entities::identity_tenant_billing::Model) -> Self {
+impl From<crate::models::_entities::tenant_billing::Model> for TenantBillingRecord {
+    fn from(model: crate::models::_entities::tenant_billing::Model) -> Self {
         TenantBillingRecord {
             tenant_id: model.tenant_id,
             plan: model.plan,

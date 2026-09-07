@@ -6,7 +6,7 @@
 //! Nothing else does: [`describe`] is what an endpoint calls, and it reports the endpoint and model without the secret.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_workspace_llm_keys::{ActiveModel, Column, Entity};
+use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;

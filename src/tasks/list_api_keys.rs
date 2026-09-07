@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
-use crate::models::identity_api_keys::Entity as ApiKeys;
+use crate::models::api_keys::Entity as ApiKeys;
 
 /// `cargo loco task list_api_keys workspace_id:<uuid>`
 pub struct ListApiKeys;

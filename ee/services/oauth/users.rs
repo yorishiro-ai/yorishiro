@@ -4,11 +4,11 @@
 //! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `ee::models::oauth_users` rather than beside the base model, since `identity_users` knows nothing about the OAuth-specific lookups over `oauth_provider`/`oauth_subject_id`.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_tenants;
-use crate::models::_entities::identity_workspaces as identity_workspaces_entity;
+use crate::models::_entities::tenants;
+use crate::models::_entities::workspaces as identity_workspaces_entity;
 use crate::models::content_schemas;
-use crate::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
 use crate::models::tenancy::{self, MembershipRole};
+use crate::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait,
@@ -81,10 +81,7 @@ pub async fn find_or_create(
     };
 
     if let Some(max) = tenancy::max_tenants_from_env()? {
-        let count = identity_tenants::Entity::find()
-            .count(conn)
-            .await
-            .internal()?;
+        let count = tenants::Entity::find().count(conn).await.internal()?;
         if count >= max as u64 {
             return Err(YorishiroError::ScopeInsufficient {
                 message: "this deployment has reached its tenant limit".into(),
@@ -96,7 +93,7 @@ pub async fn find_or_create(
     }
 
     let tenant_name = tenant_name_from_email(email);
-    let tenant_active = identity_tenants::ActiveModel {
+    let tenant_active = tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set(tenant_name),
         ..Default::default()
     };

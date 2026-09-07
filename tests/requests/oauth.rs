@@ -10,7 +10,7 @@ use sha2::Sha256;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::ee::services::oauth;
-use yorishiro::models::_entities::identity_tenants;
+use yorishiro::models::_entities::tenants;
 
 /// The OAuth routes carry the licence gate, so an unlicensed process answers 404 to all three before
 /// any handler runs.
@@ -304,7 +304,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
         licence(&ctx);
-        let existing_tenant = identity_tenants::ActiveModel {
+        let existing_tenant = tenants::ActiveModel {
             name: ActiveValue::Set("existing".into()),
             ..Default::default()
         };
@@ -374,17 +374,16 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         // The assertions below read these rows back through `ctx.db`, so an uncommitted transaction would leave them invisible.
         txn.commit().await.expect("commit provisioning");
 
-        let workspace = yorishiro::models::_entities::identity_workspaces::Entity::find_by_id(
-            provisioned.workspace_id,
-        )
-        .one(&ctx.db)
-        .await
-        .unwrap()
-        .expect("the provisioned workspace must exist");
+        let workspace =
+            yorishiro::models::_entities::workspaces::Entity::find_by_id(provisioned.workspace_id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("the provisioned workspace must exist");
 
         assert_eq!(
             workspace.status,
-            yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE,
+            yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE,
             "an auto-provisioned workspace must not be left schema_pending"
         );
         let schema_id = workspace

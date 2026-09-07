@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
-use crate::models::_entities::identity_workspaces;
+use crate::models::_entities::workspaces;
 
 /// `cargo loco task list_workspaces tenant_id:<uuid>`
 pub struct ListWorkspaces;
@@ -23,8 +23,8 @@ impl Task for ListWorkspaces {
             .parse()
             .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
 
-        let workspaces = identity_workspaces::Entity::find()
-            .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        let workspaces = workspaces::Entity::find()
+            .filter(workspaces::Column::TenantId.eq(tenant_id))
             .all(&app_context.db)
             .await
             .map_err(|err| Error::Message(err.to_string()))?;

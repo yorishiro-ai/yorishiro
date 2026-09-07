@@ -4,8 +4,8 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, S
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{tenants, workspaces};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{content_entities, content_schemas, search};
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::services::embedding::sync;
@@ -42,7 +42,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("search-test".into()),
             ..Default::default()
         };
@@ -50,7 +50,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             .await
             .expect("insert tenant");
 
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -60,7 +60,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             .await
             .expect("insert workspace");
 
-        let other_workspace = identity_workspaces::ActiveModel {
+        let other_workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("other".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -177,7 +177,7 @@ impl EmbeddingProvider for FixedWidthProvider {
     }
 }
 
-/// A workspace stamped with a dimension count (`identity_workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
+/// A workspace stamped with a dimension count (`workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
@@ -185,14 +185,14 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("dimension-mismatch-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -302,7 +302,7 @@ impl EmbeddingProvider for FixedModelProvider {
     }
 }
 
-/// A workspace stamped with a model name (`identity_workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `content_entities.embedding vector(768)` allows, and the case that check exists to catch.
+/// A workspace stamped with a model name (`workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `content_entities.embedding vector(768)` allows, and the case that check exists to catch.
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
@@ -310,14 +310,14 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("model-mismatch-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -395,7 +395,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
                 "nomic-ai/nomic-embed-text-v1.5".into(),
@@ -406,7 +406,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -505,7 +505,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-dimension-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
                 "nomic-ai/nomic-embed-text-v1.5".into(),
@@ -516,7 +516,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -575,14 +575,14 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("concurrent-reindex-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -623,7 +623,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         .expect("create entity 2");
 
         // Pre-stamp with an old model to simulate a workspace that needs reindexing.
-        let mut old_active = identity_workspaces::ActiveModel {
+        let mut old_active = workspaces::ActiveModel {
             id: sea_orm::ActiveValue::Unchanged(workspace.id),
             ..Default::default()
         };
@@ -726,7 +726,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         // The final workspace stamp must match the provider that won the lock race.
         // We check that the stamp and the stored vectors agree: whichever provider won,
         // both the stamp and every entity's embedding must point to it.
-        let final_model = identity_workspaces::Entity::find_by_id(workspace.id)
+        let final_model = workspaces::Entity::find_by_id(workspace.id)
             .one(&ctx.db)
             .await
             .expect("query final workspace")
@@ -789,14 +789,14 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("reindex-overwrite-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -886,7 +886,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // Stamp the workspace with the old model so reindex considers it "in sync" — but
         // reindex's entire purpose is to re-embed regardless, so this stamp is only there
         // to make the test realistic.
-        let mut old_active = identity_workspaces::ActiveModel {
+        let mut old_active = workspaces::ActiveModel {
             id: sea_orm::ActiveValue::Unchanged(workspace.id),
             ..Default::default()
         };
@@ -916,7 +916,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         assert_eq!(outcome.reindexed, 2, "both entities must be reindexed");
 
         // Stamp and vectors must now agree on the new model.
-        let final_model = identity_workspaces::Entity::find_by_id(workspace.id)
+        let final_model = workspaces::Entity::find_by_id(workspace.id)
             .one(&ctx.db)
             .await
             .expect("query final workspace")
@@ -974,14 +974,14 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("trigram-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -1064,7 +1064,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     crate::requests::boot_request_sqlite::<App, _, _>(
         db_path.clone(),
         |_request, ctx| async move {
-            let tenant = identity_tenants::ActiveModel {
+            let tenant = tenants::ActiveModel {
                 name: sea_orm::ActiveValue::Set("fts5-fallback-test".into()),
                 ..Default::default()
             };
@@ -1073,7 +1073,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 .expect("insert tenant");
             let tenant_id = tenant.id;
 
-            let workspace = identity_workspaces::ActiveModel {
+            let workspace = workspaces::ActiveModel {
                 tenant_id: sea_orm::ActiveValue::Set(tenant_id),
                 name: sea_orm::ActiveValue::Set("main".into()),
                 status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),

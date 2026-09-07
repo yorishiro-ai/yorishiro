@@ -13,13 +13,13 @@ async fn seeded_sqlite_db() -> (sea_orm::DatabaseConnection, uuid::Uuid) {
         .await
         .unwrap();
 
-    let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
+    let tenant = yorishiro::models::_entities::tenants::ActiveModel {
         name: ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = tenant.insert(&db).await.expect("insert tenant");
 
-    let workspace = yorishiro::models::_entities::identity_workspaces::ActiveModel {
+    let workspace = yorishiro::models::_entities::workspaces::ActiveModel {
         tenant_id: ActiveValue::Set(tenant.id),
         name: ActiveValue::Set("ws".into()),
         status: ActiveValue::Set("active".into()),

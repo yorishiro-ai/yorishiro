@@ -9,7 +9,7 @@
 use crate::error::YorishiroError;
 use crate::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use crate::models::content_schemas::{self, SchemaRecord};
-use crate::models::identity_templates;
+use crate::models::templates;
 use loco_rs::app::AppContext;
 use sea_orm::ConnectionTrait;
 use uuid::Uuid;
@@ -92,7 +92,7 @@ async fn merge_sides(
         });
     };
 
-    let template = identity_templates::get_template(&ctx.db, tenant_id, template_id).await?;
+    let template = templates::get_template(&ctx.db, tenant_id, template_id).await?;
 
     Ok(MergeSides {
         base,

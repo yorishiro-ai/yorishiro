@@ -4,7 +4,7 @@
 //! These three functions are what makes applying an event idempotent and monotonic; the controller decides what an event means, and asks here whether it should be applied at all.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_stripe_processed_events::{ActiveModel, Column, Entity};
+use crate::models::_entities::stripe_processed_events::{ActiveModel, Column, Entity};
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,

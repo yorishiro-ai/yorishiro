@@ -6,8 +6,8 @@ use sea_orm::FromQueryResult;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{tenants, workspaces};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{content_entities, content_schemas};
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::services::embedding::sync;
@@ -24,15 +24,15 @@ fn note_definition() -> serde_json::Value {
 async fn insert_workspace(
     ctx: &loco_rs::app::AppContext,
     stamped_model: &str,
-) -> identity_workspaces::Model {
-    let tenant = identity_tenants::ActiveModel {
+) -> workspaces::Model {
+    let tenant = tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("reindex-embeddings-test".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -76,7 +76,7 @@ async fn stamped_model(ctx: &loco_rs::app::AppContext, workspace_id: uuid::Uuid)
     }
     Row::find_by_statement(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT embedding_model FROM identity_workspaces WHERE id = $1",
+        "SELECT embedding_model FROM workspaces WHERE id = $1",
         [workspace_id.into()],
     ))
     .one(&ctx.db)

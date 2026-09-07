@@ -23,7 +23,7 @@ async fn signup_then_login_round_trip_sqlite() {
         .join(format!("yorishiro_test_{}.sqlite3", uuid::Uuid::new_v4()));
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, ctx| async move {
-        let tenant = yorishiro::models::_entities::identity_tenants::ActiveModel {
+        let tenant = yorishiro::models::_entities::tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("request-test-tenant".into()),
             ..Default::default()
         };
@@ -31,11 +31,11 @@ async fn signup_then_login_round_trip_sqlite() {
             .await
             .expect("insert tenant");
 
-        let workspace = yorishiro::models::_entities::identity_workspaces::ActiveModel {
+        let workspace = yorishiro::models::_entities::workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("request-test-ws".into()),
             status: sea_orm::ActiveValue::Set(
-                yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
+                yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE.to_string(),
             ),
             ..Default::default()
         };

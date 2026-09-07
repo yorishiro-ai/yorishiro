@@ -475,20 +475,20 @@ fn spawn_startup_reindex(ctx: AppContext) {
             // If they differ, enqueue a reindex.
             use sea_orm::{EntityTrait, QuerySelect};
 
-            let workspaces: Vec<_> = match crate::models::identity_workspaces::Entity::find()
+            let workspaces: Vec<_> = match crate::models::workspaces::Entity::find()
                 .select_only()
-                .column(crate::models::_entities::identity_workspaces::Column::Id)
-                .column(crate::models::_entities::identity_workspaces::Column::EmbeddingModel)
-                .column(crate::models::_entities::identity_workspaces::Column::EmbeddingDimensions)
+                .column(crate::models::_entities::workspaces::Column::Id)
+                .column(crate::models::_entities::workspaces::Column::EmbeddingModel)
+                .column(crate::models::_entities::workspaces::Column::EmbeddingDimensions)
                 .column_as(
-                    crate::models::_entities::identity_tenants::Column::EmbeddingModel,
+                    crate::models::_entities::tenants::Column::EmbeddingModel,
                     "tenant_model",
                 )
                 .column_as(
-                    crate::models::_entities::identity_tenants::Column::EmbeddingDimensions,
+                    crate::models::_entities::tenants::Column::EmbeddingDimensions,
                     "tenant_dimensions",
                 )
-                .left_join(crate::models::identity_tenants::Entity)
+                .left_join(crate::models::tenants::Entity)
                 .into_model::<crate::services::embedding::sync::StartupReindexRow>()
                 .all(&ctx.db)
                 .await

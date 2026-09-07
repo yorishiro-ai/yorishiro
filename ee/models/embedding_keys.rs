@@ -5,7 +5,7 @@
 //! A workspace with no row here uses the deployment default (`WorkspaceEmbeddingResolver::resolve` returns `None`); this module never falls back on its own, so the caller (`EmbeddingKeyResolver`) decides that.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_workspace_embedding_keys::{ActiveModel, Column, Entity};
+use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;

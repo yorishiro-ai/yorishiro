@@ -3,7 +3,7 @@
 //! The query alone: what to do with a lookup's result (first login vs. returning user, tenant and workspace auto-provisioning) is `services::oauth::users`'s.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_users;
+use crate::models::_entities::users;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
@@ -23,9 +23,9 @@ pub async fn find_by_oauth_identity(
     provider: &str,
     subject_id: &str,
 ) -> Result<Option<OAuthUser>, YorishiroError> {
-    let user = identity_users::Entity::find()
-        .filter(identity_users::Column::OauthProvider.eq(provider))
-        .filter(identity_users::Column::OauthSubjectId.eq(subject_id))
+    let user = users::Entity::find()
+        .filter(users::Column::OauthProvider.eq(provider))
+        .filter(users::Column::OauthSubjectId.eq(subject_id))
         .one(conn)
         .await
         .internal()?;
@@ -56,7 +56,7 @@ pub async fn create_oauth_user(
     provider: &str,
     subject_id: &str,
 ) -> Result<OAuthUser, CreateOauthUserError> {
-    let active = identity_users::ActiveModel {
+    let active = users::ActiveModel {
         email: ActiveValue::Set(email.to_string()),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
         oauth_provider: ActiveValue::Set(Some(provider.to_string())),

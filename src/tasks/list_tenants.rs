@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::models::_entities::identity_tenants;
+use crate::models::_entities::tenants;
 
 /// `cargo loco task list_tenants`
 pub struct ListTenants;
@@ -16,7 +16,7 @@ impl Task for ListTenants {
     }
 
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
-        let tenants = identity_tenants::Entity::find()
+        let tenants = tenants::Entity::find()
             .all(&app_context.db)
             .await
             .map_err(|err| Error::Message(err.to_string()))?;

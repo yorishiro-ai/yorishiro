@@ -10,7 +10,7 @@
 use crate::YorishiroError;
 use crate::db::DbHandle;
 use crate::error::ResultExt;
-use crate::models::_entities::{identity_api_keys, identity_tenants};
+use crate::models::_entities::{api_keys, tenants};
 use crate::services::auth::{ApiKeyScope, AuthContext, Authenticator};
 use async_trait::async_trait;
 use sea_orm::{ActiveValue, EntityTrait, PaginatorTrait};
@@ -141,7 +141,7 @@ pub async fn create_tenant_api_key(
             hint: "use one of: read, write, schema".into(),
         })?;
 
-    let exists = identity_tenants::Entity::find_by_id(tenant_id)
+    let exists = tenants::Entity::find_by_id(tenant_id)
         .count(conn)
         .await
         .internal()?
@@ -177,7 +177,7 @@ pub async fn create_tenant_api_key(
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let plaintext = format!("{prefix}_{secret}");
 
-    let active = identity_api_keys::ActiveModel {
+    let active = api_keys::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(None),
         key_hash: ActiveValue::Set(crate::services::auth::hash_key(&plaintext)),
@@ -186,7 +186,7 @@ pub async fn create_tenant_api_key(
         user_id: ActiveValue::Set(user_id),
         ..Default::default()
     };
-    let inserted = identity_api_keys::Entity::insert(active)
+    let inserted = api_keys::Entity::insert(active)
         .exec_with_returning(conn)
         .await
         .internal()?;

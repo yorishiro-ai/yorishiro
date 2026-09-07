@@ -177,7 +177,7 @@ impl YorishiroMcpServer {
             },
             (None, Some(template_id)) => {
                 let (definition, origin) =
-                    match crate::models::identity_templates::resolve_template_definition(
+                    match crate::models::templates::resolve_template_definition(
                         &self.ctx.db,
                         authorized.ctx.tenant_id,
                         &template_id,

@@ -1,9 +1,7 @@
 //! Usage counters for invoicing/dashboard display.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{
-    content_entities, identity_tenant_memberships, identity_workspaces,
-};
+use crate::models::_entities::{content_entities, tenant_memberships, workspaces};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
@@ -22,14 +20,14 @@ pub async fn compute_tenant_usage(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<TenantUsage, YorishiroError> {
-    let workspace_count = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+    let workspace_count = workspaces::Entity::find()
+        .filter(workspaces::Column::TenantId.eq(tenant_id))
         .count(conn)
         .await
         .internal()?;
 
-    let member_count = identity_tenant_memberships::Entity::find()
-        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
+    let member_count = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
         .count(conn)
         .await
         .internal()?;
@@ -38,8 +36,8 @@ pub async fn compute_tenant_usage(
     // via the belongs_to relation content_entities::Relation::IdentityWorkspaces already defines
     // (content_entities.workspace_id -> identity_workspaces.id).
     let entity_count = content_entities::Entity::find()
-        .inner_join(identity_workspaces::Entity)
-        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        .inner_join(workspaces::Entity)
+        .filter(workspaces::Column::TenantId.eq(tenant_id))
         .count(conn)
         .await
         .internal()?;

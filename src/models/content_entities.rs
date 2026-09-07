@@ -148,9 +148,9 @@ async fn check_entity_quota(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    let max_entities = crate::models::identity_workspaces::Entity::find_by_id(workspace_id)
+    let max_entities = crate::models::workspaces::Entity::find_by_id(workspace_id)
         .select_only()
-        .column(crate::models::_entities::identity_workspaces::Column::MaxEntities)
+        .column(crate::models::_entities::workspaces::Column::MaxEntities)
         .into_tuple::<Option<i32>>()
         .one(conn)
         .await
@@ -204,7 +204,7 @@ pub async fn create(
     check_entity_quota(conn, workspace_id).await?;
 
     // Before resolving the schema, so an empty workspace is told it is empty rather than reporting the schema name as not found.
-    if crate::models::identity_workspaces::is_schema_pending(conn, workspace_id).await? {
+    if crate::models::workspaces::is_schema_pending(conn, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "workspace '{workspace_id}' has no schema yet, so there is nothing to \

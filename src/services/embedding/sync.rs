@@ -401,7 +401,7 @@ async fn reindex_workspace_inner(
                 provider.dimensions()
             ))
         })?;
-        let mut active = crate::models::identity_workspaces::ActiveModel {
+        let mut active = crate::models::workspaces::ActiveModel {
             id: ActiveValue::Unchanged(workspace_id),
             ..Default::default()
         };
@@ -505,16 +505,16 @@ pub async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
-    use crate::models::_entities::identity_tenants::Column as TenantColumn;
-    use crate::models::_entities::identity_workspaces::Column;
+    use crate::models::_entities::tenants::Column as TenantColumn;
+    use crate::models::_entities::workspaces::Column;
 
-    let row = crate::models::identity_workspaces::Entity::find()
+    let row = crate::models::workspaces::Entity::find()
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
         .column_as(TenantColumn::EmbeddingModel, "tenant_model")
         .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
-        .left_join(crate::models::identity_tenants::Entity)
+        .left_join(crate::models::tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
         .into_model::<EmbeddingChainRow>()
         .one(conn)
@@ -548,11 +548,11 @@ async fn stamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::identity_workspaces::Column;
+    use crate::models::_entities::workspaces::Column;
 
     // Only stamp if the workspace has no existing model stamp:
     // this is the first-write stamp, not an unconditional overwrite.
-    crate::models::identity_workspaces::Entity::update_many()
+    crate::models::workspaces::Entity::update_many()
         .col_expr(Column::EmbeddingModel, Expr::value(model))
         .col_expr(Column::EmbeddingDimensions, Expr::value(dimensions))
         .filter(Column::Id.eq(workspace_id))

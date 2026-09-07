@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::models::_entities::identity_tenants::ActiveModel;
+use crate::models::_entities::tenants::ActiveModel;
 
 /// `cargo loco task create_tenant name:acme`
 ///

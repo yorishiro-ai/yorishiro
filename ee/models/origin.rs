@@ -42,7 +42,7 @@ pub async fn list_with_upstream_changes(
         "SELECT s.id AS schema_id, s.name AS schema_name, s.version, \
                 t.id AS template_id, t.name AS template_name, t.updated_at AS changed_at \
            FROM content_schemas s \
-           JOIN identity_templates t ON t.id = s.origin_template_id \
+           JOIN templates t ON t.id = s.origin_template_id \
           WHERE s.workspace_id = $1 \
             AND s.status = 'active' \
             AND s.origin_status = 'linked' \

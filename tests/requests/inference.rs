@@ -7,9 +7,9 @@ use yorishiro::app::App;
 use yorishiro::db::DbHandle;
 use yorishiro::ee::models::entity_fill;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenants, workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the test process booted with.
@@ -30,14 +30,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -56,7 +56,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     // than Migration (POST /api/migration-jobs/{job_id}/undo's requirement, see
     // controllers::entities::undo_migration_job), and Migration subsumes it, so one key issued at
     // the higher scope satisfies both this file's infer_fill calls and its undo call.
-    let key = identity_api_keys::Entity::create_api_key(
+    let key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Migration,

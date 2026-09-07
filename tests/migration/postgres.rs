@@ -1,6 +1,6 @@
 //! The same apply/roll-back/reapply guarantees as `sqlite.rs`, on PostgreSQL.
 //!
-//! These exist because a rollback bug reached review that SQLite could not have caught: `identity_workspaces.schema_id` and `content_schemas` reference each other, and the constraint that closes that circle is a separate `ALTER TABLE` on PostgreSQL only.
+//! These exist because a rollback bug reached review that SQLite could not have caught: `workspaces.schema_id` and `content_schemas` reference each other, and the constraint that closes that circle is a separate `ALTER TABLE` on PostgreSQL only.
 //! SQLite declares the same foreign key inline in its own `CREATE TABLE`, so dropping the table carries it away and the rollback there succeeded while PostgreSQL's failed with `cannot drop table content_schemas because other objects depend on it`.
 //!
 //! Skipped when `DATABASE_URL` names no PostgreSQL server, so `cargo test` still works on a machine with no database.

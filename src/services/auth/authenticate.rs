@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{identity_api_keys, identity_workspaces};
+use crate::models::_entities::{api_keys, workspaces};
 
 use super::{ApiKeyScope, AuthContext, hash_key};
 
@@ -55,8 +55,8 @@ pub async fn authenticate_sqlite(
 ) -> Result<AuthContext, YorishiroError> {
     let key_hash = hash_key(presented_key);
 
-    let key = identity_api_keys::Entity::find()
-        .filter(identity_api_keys::Column::KeyHash.eq(key_hash))
+    let key = api_keys::Entity::find()
+        .filter(api_keys::Column::KeyHash.eq(key_hash))
         .one(conn)
         .await
         .internal()?
@@ -66,7 +66,7 @@ pub async fn authenticate_sqlite(
         return Err(YorishiroError::Unauthenticated);
     };
 
-    let workspace = identity_workspaces::Entity::find_by_id(workspace_id)
+    let workspace = workspaces::Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -91,12 +91,12 @@ pub async fn authenticate_sqlite(
 
 /// SQLite equivalent of [`touch_last_used`]: same best-effort, non-failing update, on the SeaORM entity API instead of a raw `sqlx::PgConnection`.
 pub async fn touch_last_used_sqlite(conn: &impl ConnectionTrait, api_key_id: Uuid) {
-    let result = identity_api_keys::Entity::update_many()
+    let result = api_keys::Entity::update_many()
         .col_expr(
-            identity_api_keys::Column::LastUsedAt,
+            api_keys::Column::LastUsedAt,
             sea_orm::sea_query::Expr::value(chrono::Utc::now()),
         )
-        .filter(identity_api_keys::Column::Id.eq(api_key_id))
+        .filter(api_keys::Column::Id.eq(api_key_id))
         .exec(conn)
         .await;
     if let Err(err) = result {
@@ -113,7 +113,7 @@ pub async fn touch_last_used(
     conn: &mut sqlx::PgConnection,
     api_key_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    sqlx::query("UPDATE identity_api_keys SET last_used_at = now() WHERE id = $1")
+    sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
         .bind(api_key_id)
         .execute(conn)
         .await

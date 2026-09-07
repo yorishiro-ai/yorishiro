@@ -4,7 +4,7 @@ use serial_test::serial;
 use std::sync::Arc;
 use tokio::sync::Barrier;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
+use yorishiro::models::_entities::{tenants, workspaces};
 use yorishiro::models::tenancy;
 
 /// Eight concurrent `create_workspace` calls against a tenant with one workspace slot left must produce exactly one workspace, not eight.
@@ -23,7 +23,7 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
         const RACERS: usize = 8;
 
         // A cap of 2 with one workspace already present leaves exactly one slot for eight racers to fight over.
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("race".into()),
             max_workspaces: sea_orm::ActiveValue::Set(Some(2)),
             ..Default::default()
@@ -76,8 +76,8 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
         );
 
         // The count is the assertion that actually matters: a racer could in principle return `Ok` without its row surviving, and the cap exists to bound rows, not return values.
-        let total = identity_workspaces::Entity::find()
-            .filter(identity_workspaces::Column::TenantId.eq(tenant.id))
+        let total = workspaces::Entity::find()
+            .filter(workspaces::Column::TenantId.eq(tenant.id))
             .count(&ctx.db)
             .await
             .expect("count workspaces");

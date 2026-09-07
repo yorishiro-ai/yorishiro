@@ -38,7 +38,7 @@ fn worker_class_serializes_to_snake_case() {
     );
 }
 
-/// `as_db_str`/`from_db_str` must round-trip every variant, and must agree with the `snake_case` serde wire form above: `ee/`'s `identity_workspace_worker_classes` stores this same string, so a row read from the database and a value read off a queued job's payload must be indistinguishable.
+/// `as_db_str`/`from_db_str` must round-trip every variant, and must agree with the `snake_case` serde wire form above: `ee/`'s `workspace_worker_classes` stores this same string, so a row read from the database and a value read off a queued job's payload must be indistinguishable.
 #[test]
 fn db_str_round_trips_and_matches_the_serde_wire_form() {
     for class in [

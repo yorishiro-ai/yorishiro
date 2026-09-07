@@ -1,8 +1,8 @@
 use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{tenants, workspaces};
+use yorishiro::models::workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{content_entities, content_relations, content_schemas, recall};
 
 fn chain_definition() -> serde_json::Value {
@@ -25,14 +25,14 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -167,14 +167,14 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-shallow-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),

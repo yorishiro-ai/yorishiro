@@ -36,29 +36,29 @@ pub enum Relation {
     #[sea_orm(has_many = "super::content_entities::Entity")]
     ContentEntities,
     #[sea_orm(
-        belongs_to = "super::identity_templates::Entity",
+        belongs_to = "super::templates::Entity",
         from = "Column::OriginTemplateId",
-        to = "super::identity_templates::Column::Id",
+        to = "super::templates::Column::Id",
         on_update = "NoAction",
         on_delete = "SetNull"
     )]
-    IdentityTemplates,
+    Templates,
     #[sea_orm(
-        belongs_to = "super::identity_tenants::Entity",
+        belongs_to = "super::tenants::Entity",
         from = "Column::TenantId",
-        to = "super::identity_tenants::Column::Id",
+        to = "super::tenants::Column::Id",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    IdentityTenants,
+    Tenants,
     #[sea_orm(
-        belongs_to = "super::identity_workspaces::Entity",
+        belongs_to = "super::workspaces::Entity",
         from = "Column::WorkspaceId",
-        to = "super::identity_workspaces::Column::Id",
+        to = "super::workspaces::Column::Id",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    IdentityWorkspaces,
+    Workspaces,
 }
 
 impl Related<super::content_entities::Entity> for Entity {
@@ -67,20 +67,20 @@ impl Related<super::content_entities::Entity> for Entity {
     }
 }
 
-impl Related<super::identity_templates::Entity> for Entity {
+impl Related<super::templates::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::IdentityTemplates.def()
+        Relation::Templates.def()
     }
 }
 
-impl Related<super::identity_tenants::Entity> for Entity {
+impl Related<super::tenants::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::IdentityTenants.def()
+        Relation::Tenants.def()
     }
 }
 
-impl Related<super::identity_workspaces::Entity> for Entity {
+impl Related<super::workspaces::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::IdentityWorkspaces.def()
+        Relation::Workspaces.def()
     }
 }
