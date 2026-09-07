@@ -1,8 +1,8 @@
 //! OpenAPI documentation served through Swagger UI.
 //!
 //! Mount in `Hooks::after_routes`:
-//! ```
-//! router = swagger::mount(router);
+//! ```ignore
+//! let router = swagger::mount(router);
 //! ```
 //! Exposes Swagger UI at `/docs` and the OpenAPI spec at `/docs/openapi.json`.
 
