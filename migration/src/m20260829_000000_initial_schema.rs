@@ -26,7 +26,7 @@ pub struct Migration;
 ///
 /// Everything that looks like a later patch is still in its original position rather than folded into the table it patches.
 /// That is deliberate for the Postgres-only `identity_templates.created_by` FK (`ON DELETE SET NULL`) and the `tags TEXT[]` column, both absent on SQLite by design.
-/// Remaining `ALTER` statements are structural necessities: circular FK resolution, sea-query type limitations (no TEXT[]), backend-branching FK ON DELETE, and RLS enablement syntax.
+/// Remaining `ALTER` statements are structural necessities: circular FK resolution (up), sea-query type limitations (no TEXT[]), backend-branching FK ON DELETE, and RLS enablement syntax.
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {
@@ -534,11 +534,14 @@ impl MigrationTrait for Migration {
             "ALTER TABLE identity_templates ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';",
         )
         .await?;
-        helpers::sqlite_only(
-            manager,
-            "ALTER TABLE identity_templates ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';",
-        )
-        .await?;
+        if manager.get_database_backend() == sea_orm::DbBackend::Sqlite {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "ALTER TABLE identity_templates ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';",
+                )
+                .await?;
+        }
 
         manager
             .create_index(
@@ -898,10 +901,6 @@ impl MigrationTrait for Migration {
         // SQLite path: `content_entity_embeddings` stores vectors as opaque BLOBs.
         // entity_id is the join key (not implicit rowid): VACUUM may renumber
         // implicit rowids, so we must never join on them (see sqlite.org/lang_vacuum.html).
-        // KNN search uses plain table scan with `vec_distance_cosine` rather than
-        // vec0 virtual tables — no MATCH/k= syntax needed.
-        // SQLite never had an `embedding` column on `content_entities` — vectors are
-        // stored exclusively in this table.
         manager
             .create_table(
                 Table::create()
@@ -926,6 +925,67 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+
+        // FTS5 virtual table: full-text search over `content_entities`.
+        //
+        // `entity_id` is declared explicitly so the join back to `content_entities`
+        // never depends on rowids.  `data` is also explicit so the index carries the
+        // searchable text.  Using explicit columns avoids the `content=` option which
+        // requires a special insert syntax that conflicts with the trigger bodies.
+        // `tokenize='trigram'` gives character-n-gram fuzzy matching, the same semantic
+        // approach as PostgreSQL pg_trgm on the other backend.
+        //
+        // `entity_id` is stored as a string (CAST(BLOB AS TEXT)) because FTS5 explicit
+        // columns are TEXT and cannot hold BLOBs.  Joins use `CAST(e.id AS TEXT)`.
+        if manager.get_database_backend() == sea_orm::DbBackend::Sqlite {
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "CREATE VIRTUAL TABLE content_entities_fts USING fts5(\
+                     entity_id UNINDEXED,\
+                     data,\
+                     tokenize='trigram'\
+                 );",
+                )
+                .await?;
+
+            // Populate the FTS5 index with existing data.
+            // FTS5 auto-assigns `rowid`; we store the PK as a TEXT string in `entity_id`.
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "INSERT INTO content_entities_fts(entity_id, data) \
+                     SELECT CAST(id AS TEXT), data FROM content_entities;",
+                )
+                .await?;
+
+            // FTS5 triggers to keep the index in sync.
+            //
+            // `ai`: after insert — add the new row to the FTS index.
+            // `ad`: after delete — remove the deleted row from the index.
+            // `au`: after update — replace the old entry with the new data.
+            //
+            // `entity_id` is cast to TEXT because FTS5 explicit columns are TEXT.
+            manager
+                .get_connection()
+                .execute_unprepared(
+                    "CREATE TRIGGER content_entities_fts_ai AFTER INSERT ON content_entities BEGIN \
+                     INSERT INTO content_entities_fts(entity_id, data) \
+                     VALUES (CAST(NEW.id AS TEXT), NEW.data); \
+                 END;
+
+                 CREATE TRIGGER content_entities_fts_ad AFTER DELETE ON content_entities BEGIN \
+                     DELETE FROM content_entities_fts WHERE entity_id = CAST(OLD.id AS TEXT); \
+                 END;
+
+                 CREATE TRIGGER content_entities_fts_au AFTER UPDATE ON content_entities BEGIN \
+                     DELETE FROM content_entities_fts WHERE entity_id = CAST(OLD.id AS TEXT); \
+                     INSERT INTO content_entities_fts(entity_id, data) \
+                     VALUES (CAST(NEW.id AS TEXT), NEW.data); \
+                 END;",
+                )
+                .await?;
+        }
 
         // The multi-column composite is expressible through `create_index`; the GIN/trigram
         // indexes that follow are not.
@@ -1236,6 +1296,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("stripe_processed_events_customer_id_idx")
+                    .if_not_exists()
                     .table(Alias::new("identity_stripe_processed_events"))
                     .col(Alias::new("customer_id"))
                     .col(Alias::new("stripe_created"))
@@ -1744,23 +1805,39 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Initial schema: down() drops tables in topological order, breaking the
-        // circular FK between `identity_workspaces.schema_id → content_schemas.id`
-        // (`fk_identity_workspaces_schema_id`, added via ALTER TABLE in up()) and
-        // `content_schemas.workspace_id → identity_workspaces.id`
-        // (`fk_content_schemas_workspace_id`).
+        // Initial schema: down() drops tables in topological order.
         //
-        // Step 1: drop the circular FK so the remaining tables can be dropped
-        // in a clean dependency order (up() added it with pg_only, so down()
-        // uses the same to be a no-op on SQLite).
-        helpers::pg_only(
-            manager,
-            "ALTER TABLE identity_workspaces DROP CONSTRAINT IF EXISTS fk_identity_workspaces_schema_id;",
-        )
-        .await?;
+        // `identity_workspaces.schema_id → content_schemas.id` and
+        // `content_schemas.workspace_id → identity_workspaces.id` form a circular FK pair.
+        // `DROP TABLE identity_workspaces CASCADE` breaks the cycle: CASCADE drops FK
+        // constraints that reference `identity_workspaces` (including `content_schemas`'s
+        // FK `fk_content_schemas_workspace_id`), so `content_schemas` can then be dropped.
+        // CASCADE does not drop other tables — only FK-constraint objects and rows in
+        // tables whose FK has `ON DELETE CASCADE`.  The remaining tables are dropped in
+        // dependency order; tables already emptied by CASCADE are harmlessly skipped.
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("identity_workspaces"))
+                    .cascade()
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
+
+        // Step 1: drop virtual tables before their underlying tables (FTS5 depends
+        // on `content_entities`).  No-op on PostgreSQL.
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("content_entities_fts"))
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
 
         // Step 2: drop the trigger and functions created in up(), before any
-        // table drops (the trigger references the function, and leaving either
+        // remaining table drops (the trigger references the function, and leaving either
         // behind would cause `CREATE FUNCTION` to fail on a subsequent up()).
         // `authenticate_api_key` has two overloads, both must be dropped.
         helpers::pg_only(
@@ -1772,34 +1849,28 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        // Step 3: drop tables by dependency (referencing tables first, then
-        // referenced tables).  The role outlives the schema on purpose: it is
-        // created idempotently by up(), other databases in the same cluster may
-        // still be using it, and dropping a role that owns objects elsewhere
-        // fails anyway.
+        // Step 3: drop remaining tables in dependency order.
         for table in [
-            "content_entity_embeddings",         // → content_entities
+            "content_entity_embeddings",         // → content_entities; dropped first
             "content_relations",                 // → identity_workspaces, content_entities ×2
-            "content_entity_snapshots",          // → identity_workspaces
+            "content_entity_snapshots",          // → identity_workspaces, content_entities (no FK)
             "content_entity_column_preferences", // → identity_workspaces
-            "content_entities", // → identity_workspaces, content_schemas, identity_users
-            "content_schemas",  // → identity_tenants, identity_workspaces, identity_templates
             "identity_api_key_audit_log", // → identity_workspaces, identity_tenants, identity_users
-            "identity_api_keys", // → identity_workspaces, identity_tenants, identity_users
-            "identity_invites", // → identity_tenants
-            "identity_template_reviews", // → identity_templates, identity_tenants, identity_users
-            "identity_template_versions", // → identity_templates, identity_users
-            "identity_templates", // → identity_tenants, identity_templates(self-ref), identity_users
+            "identity_api_keys",          // → identity_workspaces, identity_tenants, identity_users
             "identity_workspace_worker_classes", // → identity_workspaces
             "identity_workspace_embedding_keys", // → identity_workspaces
             "identity_workspace_llm_keys", // → identity_workspaces
-            "identity_stripe_processed_events", // no FK deps
+            "content_entities",           // → identity_workspaces, content_schemas, identity_users
+            "content_schemas", // → identity_tenants, identity_workspaces, identity_templates; dropped after content_entities
+            "identity_tenant_memberships", // → identity_tenants, identity_users
+            "identity_invites", // → identity_tenants
+            "identity_template_reviews", // → identity_templates, identity_tenants, identity_users
+            "identity_template_versions", // → identity_templates, identity_users
+            "identity_templates", // → identity_tenants, identity_templates(self-ref), identity_users; must precede identity_users
+            "identity_users", // no FK deps (self-referential only); must follow identity_templates
             "identity_tenant_billing", // → identity_tenants
             "identity_maintenance", // no FK deps
-            "identity_tenant_memberships", // → identity_tenants, identity_users
-            "identity_users",     // no FK deps
-            "identity_workspaces", // → identity_tenants (after circular FK dropped above)
-            "identity_tenants",   // no FK deps
+            "identity_tenants", // no FK deps
         ] {
             manager
                 .drop_table(

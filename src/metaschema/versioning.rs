@@ -68,7 +68,7 @@ fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
 }
 
 /// The floor-side mirror of [`lowered_ceiling`].
-/// A bare `new > old` happens to give these two cases the right answer, but only by luck of which way `None` sorts: spelling it out keeps the two sides symmetric and stops the next reader from having to recall that ordering.
+/// A bare `new > old` happens to give these two cases the right answer, but only by luck of which way `None` sorts: spelling it out keeps the two sides symmetric and makes the ordering clear to anyone reading it.
 fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
         (None, Some(_)) => true,

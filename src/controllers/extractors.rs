@@ -91,7 +91,7 @@ pub(crate) fn embedding_provider(
         })
 }
 
-/// The embedding provider `workspace_id` should actually use: its own assignment through the `WorkspaceEmbeddingResolver` seam if it has one, the deployment default otherwise.
+/// The embedding provider `workspace_id` should actually use: its own assignment through the `WorkspaceEmbeddingResolver` trait object if it has one, the deployment default otherwise.
 /// Also used by `services::mcp`.
 pub(crate) async fn resolve_embedding_provider(
     ctx: &AppContext,
@@ -116,7 +116,7 @@ pub(crate) async fn resolve_embedding_provider(
     }
 }
 
-/// The `WorkerClass` `workspace_id`'s queued jobs should carry: its own assignment through the `WorkerClassResolver` seam if it has one, `WorkerClass::Shared` otherwise.
+/// The `WorkerClass` `workspace_id`'s queued jobs should carry: its own assignment through the `WorkerClassResolver` trait object if it has one, `WorkerClass::Shared` otherwise.
 pub(crate) async fn resolve_worker_class(
     ctx: &AppContext,
     workspace_id: Uuid,
@@ -166,7 +166,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to abstract over, so this authenticates directly against ctx.db instead of going through the Authenticator seam.
+        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
             let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
@@ -215,7 +215,7 @@ impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
 
-/// An extractor that authenticates, verifies the required scope, and begins a transaction with the RLS context already set, all in one step (see `TenantDb::begin_for_workspace`).
+/// An extractor that authenticates, verifies the required scope, and begins a transaction with the RLS context already set in a single call (see `TenantDb::begin_for_workspace`).
 /// There is no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which structurally prevents forgetting the scope check.
 ///
 /// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
@@ -349,7 +349,7 @@ where
 
         let app_ctx = AppContext::from_ref(state);
 
-        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to abstract over, so this authenticates directly against ctx.db instead of going through the Authenticator seam.
+        // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
             let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await

@@ -93,7 +93,7 @@ pub async fn authorize_audit(
 /// A plain `ctx.db.begin()`, not `begin_with_options(SqliteTransactionMode::Immediate)`: SQLite's default (DEFERRED) matches PostgreSQL's own behavior of not taking a write lock until a write actually happens, and `db::lock_for_update`'s doc comment already covers why a transaction that reads a stale value and later tries to commit a write against it fails with `SQLITE_BUSY` rather than silently succeeding.
 /// If concurrent SQLite request handling is ever observed to fail on `SQLITE_BUSY` in practice, `Immediate` is reachable here (unlike inside `lock_for_update`, which never opens its own transaction).
 ///
-/// No RLS to scope on this backend, so no `set_config` step; scope/audit is still enforced the same way `authorize`/`authorize_audit` enforce it, just against a plain transaction rather than an RLS-scoped one.
+/// No RLS to scope on this backend, so no `set_config` call; scope/audit is still enforced the same way `authorize`/`authorize_audit` enforce it, just against a plain transaction rather than an RLS-scoped one.
 pub async fn authorize_sqlite(
     db: &sea_orm::DatabaseConnection,
     presented_key: &str,
@@ -122,7 +122,7 @@ pub async fn authorize_audit_sqlite(
     Ok((ctx, txn))
 }
 
-/// Touches `last_used_at` through a connection freshly acquired for this workspace, logging (never failing the caller) on either step's error.
+/// Touches `last_used_at` through a connection freshly acquired for this workspace, logging (never failing the caller) on either call's error.
 pub async fn touch_last_used_on(
     db: &DbHandle,
     tenant_id: uuid::Uuid,
@@ -145,7 +145,7 @@ pub async fn touch_last_used_on(
     }
 }
 
-/// A connection-free variant of `authorize`, used on paths that need to run a slow step (like embedding generation) before touching the DB: it only authenticates and validates scope, updating `last_used_at` through a short-lived connection that's returned immediately.
+/// A connection-free variant of `authorize`, used on paths that need to run a slow operation (like embedding generation) before touching the DB: it only authenticates and validates scope, updating `last_used_at` through a short-lived connection that's returned immediately.
 pub async fn authorize_scope(
     db: &DbHandle,
     authenticator: &dyn Authenticator,

@@ -11,6 +11,7 @@ pub mod relations;
 pub mod schemas;
 pub mod search;
 pub mod setup;
+pub mod swagger;
 pub mod system;
 pub mod template_library;
 pub mod whoami;

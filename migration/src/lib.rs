@@ -2,8 +2,8 @@
 #![allow(clippy::wildcard_imports)]
 pub use sea_orm_migration::prelude::*;
 mod helpers;
-mod m20260829_000000_initial_schema;
 
+mod m20260829_000000_initial_schema;
 pub struct Migrator;
 
 #[async_trait::async_trait]

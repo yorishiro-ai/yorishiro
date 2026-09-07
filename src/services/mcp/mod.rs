@@ -160,7 +160,7 @@ pub(super) async fn authorize(
     }
 }
 
-/// Connection-less counterpart to `authorize`, used by tools that must run a slow step (embedding generation) before touching the database.
+/// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
 /// See `services::auth::authorize_scope`.
 pub(super) async fn verify(
     ctx: &AppContext,
@@ -171,7 +171,7 @@ pub(super) async fn verify(
     let headers = header_pairs(parts);
 
     // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
-    // directly against ctx.db instead of going through the Authenticator seam, mirroring the REST
+    // directly against ctx.db instead of going through the Authenticator trait, mirroring the REST
     // adapter's `AuthContext` extractor (extractors.rs) and `Verified<R>` extractor.
     if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
         return match auth::authorize_scope_sqlite(&ctx.db, presented_key, required).await {

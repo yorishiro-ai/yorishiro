@@ -64,7 +64,7 @@ pub struct LocalModelDef {
 }
 
 /// The `candle-transformers` model family a [`LocalModelDef`] loads through.
-/// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not leak into callers.
+/// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not change the function signature or return type for callers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {
     /// `candle_transformers::models::xlm_roberta::XLMRobertaModel`.
@@ -237,12 +237,12 @@ const STALE_PARTIAL_AGE: std::time::Duration = std::time::Duration::from_secs(6 
 
 /// Removes abandoned temp files left by earlier killed downloads.
 ///
-/// A killed download leaves `<name>.partial.<pid>`, and the next start has a different pid, so without this nothing ever reuses or removes it: on a deployment whose network keeps dropping mid-fetch, that is hundreds of megabytes of dead bytes per attempt, accumulating forever.
+/// A killed download leaves `<name>.partial.<pid>`, and a subsequent start has a different pid, so without this nothing ever reuses or removes it: on a deployment whose network keeps dropping mid-fetch, that is hundreds of megabytes of dead bytes per attempt, accumulating forever.
 ///
 /// The age check is what keeps this away from a download that is still running.
 /// Two processes starting together (a server and a worker, or `--server-and-worker` alongside a task) each write their own pid-suffixed file, and a sweep that removed a live one would fail the other's rename with `ENOENT`.
 /// Requiring [`STALE_PARTIAL_AGE`] of no writes means an in-flight download is never a candidate, since it is writing continuously; anything that old belongs to a process that is gone.
-/// Even in the case where that is somehow wrong, the consequence is bounded: the rename fails, that start fails with it, and under a supervisor's restart the next attempt finds the destination already there or fetches it cleanly.
+/// Even in the case where that is somehow wrong, the consequence is bounded: the rename fails, that start fails with it, and on a subsequent attempt a supervisor restart finds the destination already there or fetches it cleanly.
 ///
 /// Every failure here is ignored: a directory that cannot be read, or a file that cannot be removed, must not stop a fetch that is otherwise fine.
 fn sweep_stale_partials(dir: &Path, artifact: &Artifact) {

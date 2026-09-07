@@ -74,6 +74,9 @@ pub fn timestamps(manager: &SchemaManager<'_>) -> [ColumnDef; 2] {
 ///
 /// `column = current_setting(setting)::uuid`, either strict (missing setting raises) or lenient (`lenient => true`, missing setting reads as NULL, matching nothing): strict for tables `yorishiro_app` always reaches with both GUCs set, lenient for tables the control-plane pool also reaches without naming a workspace.
 ///
+/// Uses `execute_unprepared` because SeaORM's schema builder has no RLS support.
+/// All parameters (table, column, policy name) are hardcoded migration constants — not user input.
+///
 /// No-ops on SQLite: a single-tenant, single-file database has no other tenant's rows to hide, so there is no policy to install.
 pub async fn enable_rls_with_policy(
     manager: &SchemaManager<'_>,
@@ -106,6 +109,9 @@ pub async fn enable_rls_with_policy(
 /// Deliberately never a schema-wide `GRANT ... ON ALL TABLES IN SCHEMA public`: that would sweep in the tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`).
 /// Every grant is named here, one call per table, so an ungranted table is ungranted because no call exists for it, not because a wildcard missed it.
 ///
+/// Uses `execute_unprepared` because SeaORM has no GRANT builder.
+/// All callers pass hardcoded privilege strings and table names from the migration — no user input.
+///
 /// No-ops on SQLite: there is no separate `yorishiro_app` role on that backend, since the process itself is the only tenant.
 pub async fn grant(
     manager: &SchemaManager<'_>,
@@ -127,6 +133,7 @@ pub async fn grant(
 /// SQLite's `ALTER TABLE` supports only rename/add-column/drop-column, so a named `ADD CONSTRAINT` after the fact (Postgres's usual shape in this crate) doesn't work there: the checks go inline into the `CREATE TABLE` for SQLite instead, and as `ALTER TABLE ... ADD CONSTRAINT` statements for Postgres.
 ///
 /// SeaORM's `TableAlterStatement` has no `add_constraint` builder — `execute_unprepared` is Loco's own documented pattern for these.
+/// The `expr` values are CHECK constraint expressions (hardcoded migration constants), not user input.
 pub async fn create_table_with_checks(
     manager: &SchemaManager<'_>,
     table_name: &str,
