@@ -1296,6 +1296,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 Index::create()
                     .name("stripe_processed_events_customer_id_idx")
+                    .if_not_exists()
                     .table(Alias::new("identity_stripe_processed_events"))
                     .col(Alias::new("customer_id"))
                     .col(Alias::new("stripe_created"))
