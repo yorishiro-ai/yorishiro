@@ -266,6 +266,8 @@ if [ -z "$ready" ]; then
   bad "postgres never became ready"
 else
   docker exec "pg-$$" psql -U yorishiro -d yorishiro \
+    -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
+    -c '\c template1' \
     -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
 
   docker run -d --name "app-$$" --network "$NET" -v "$PKG_DIR":/pkg:ro ubuntu:24.04 sleep infinity >/dev/null

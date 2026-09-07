@@ -21,8 +21,24 @@ fmt:
 fmt-check:
 	cargo fmt --all -- --check
 
-# Run the full suite against the selected backend (postgres by default).
+# Run the full suite against a disposable testdb container (port 15432).
+# docker compose up -d testdb starts the container; init-extensions.sql
+# installs vector + pg_trgm into both the target database and template1
+# so that Loco's CREATE DATABASE-based test harness works.
+#
+# Override DATABASE_URL to point at a different Postgres instance.
 test-postgres: build
+	@if ! docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then \
+		docker compose up -d testdb; \
+		@echo "Waiting for testdb to become healthy..."; \
+		for i in $$(seq 1 60); do \
+			if docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then break; fi; \
+			sleep 1; \
+		done; \
+		if [ "$$(docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null)" != '"healthy"' ]; then \
+			echo "ERROR: testdb did not become healthy" >&2; exit 1; \
+		fi; \
+	fi
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace -- --test-threads=1
 
 test-sqlite: build
