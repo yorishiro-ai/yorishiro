@@ -103,3 +103,23 @@ This process still needs the same configuration (database URL, embedding setting
 By default, 2 workers run in parallel. You can control this with `YORISHIRO_QUEUE_WORKERS`. The reaper (which recovers jobs from crashed workers) runs every 30 minutes by default and can be tuned with `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`.
 
 Workers can run on a separate machine pointing at the same database and queue URL. With PostgreSQL, multiple worker processes truly run in parallel. With SQLite, they run one at a time (but still provide crash recovery).
+
+## Tenant reindex schedule
+
+You can configure a deployment to automatically reindex every workspace under a tenant on a regular interval. The schedule runs through the normal reindex flow (same as the manual `reindex_embeddings` task), so it respects the same workspace provider and model version checks.
+
+Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC). The scheduler picks up the next tick within a five-minute grace window, so a missed run is not lost if the process restarts during that window.
+
+To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to your `config/*.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
+
+## SQLite ANN benchmark
+
+When you run Yorishiro on SQLite with a large number of embedded entities, full-scan vector search may become slow. This deployment ships a benchmark task that measures the actual latency on your data and recommends whether to adopt the vec0 virtual table (KNN index).
+
+```
+cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
+```
+
+The task measures median, min, and max latency across five iterations of a vector search query. When the entity count is 1000 or more and the median latency exceeds 200 ms, the task recommends adopting vec0. You can adjust both thresholds with `min_entities` and `max_latency_ms` CLI arguments.
+
+This task is measurement only: it does not change any schema or configuration. It helps you decide whether the vec0 virtual table is worth adopting on your deployment.

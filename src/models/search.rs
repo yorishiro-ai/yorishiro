@@ -47,7 +47,7 @@ pub struct SearchHit {
 }
 
 #[derive(FromQueryResult)]
-struct SearchRow {
+pub struct SearchRow {
     id: Uuid,
     workspace_id: Uuid,
     schema_id: Uuid,
@@ -62,7 +62,7 @@ struct SearchRow {
 }
 
 impl SearchRow {
-    fn into_hit(self) -> SearchHit {
+    pub fn into_hit(self) -> SearchHit {
         SearchHit {
             entity: EntityRecord {
                 id: self.id,
@@ -202,8 +202,11 @@ impl VectorKnn {
 /// Resolves the workspace's effective embedding width for selecting the correct
 /// width-specific table. Returns the width and the table name.
 ///
+/// Resolves the workspace's effective embedding width for selecting the correct
+/// width-specific table. Returns the width and the table name.
+///
 /// Falls back to the deployment default (YORISHIRO_EMBEDDING_DIMENSIONS, default 768).
-async fn resolve_search_table(
+pub async fn resolve_search_table(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<(usize, String), YorishiroError> {
@@ -213,7 +216,9 @@ async fn resolve_search_table(
     let dimension = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(768)))
+        .or(Some(
+            i32::try_from(chain.deployment_dimensions).unwrap_or(768),
+        ))
         .unwrap_or(768) as usize;
     Ok((dimension, format!("content_entity_embeddings_{dimension}")))
 }

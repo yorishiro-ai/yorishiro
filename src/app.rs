@@ -391,6 +391,7 @@ impl Hooks for App {
         // neither runs at boot, so this changes nothing for a deployment that never invokes them.
         tasks.register(crate::ee::tasks::seed_official_templates::SeedOfficialTemplates);
         tasks.register(crate::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
+        tasks.register(crate::ee::tasks::reindex_scheduler::TenantReindexScheduler);
         // tasks-inject (do not remove)
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {

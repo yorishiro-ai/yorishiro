@@ -132,11 +132,18 @@ pub async fn sync_embedding(
     let effective_dimension = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(768)))
-        .unwrap() as usize;
+        .unwrap_or(i32::try_from(chain.deployment_dimensions).unwrap_or(768))
+        as usize;
 
-    let written =
-        embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector, effective_dimension).await?;
+    let written = embed_and_write(
+        conn,
+        workspace_id,
+        entity_id,
+        snapshot_updated_at,
+        vector,
+        effective_dimension,
+    )
+    .await?;
 
     // Stamp the workspace *after* the write succeeds, not before: stamping before would record a
     // model name even when the write fails (entity deleted, concurrently modified, or the write
@@ -355,7 +362,15 @@ async fn reindex_embedding_for_record(
     };
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
     let dimension = provider.dimensions();
-    let written = embed_and_write(conn, workspace_id, record.id, record.updated_at, vector, dimension).await?;
+    let written = embed_and_write(
+        conn,
+        workspace_id,
+        record.id,
+        record.updated_at,
+        vector,
+        dimension,
+    )
+    .await?;
     Ok(if written {
         ReindexStep::Reindexed
     } else {

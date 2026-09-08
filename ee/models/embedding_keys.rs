@@ -96,7 +96,7 @@ async fn create_width_table(
     if backend == sea_orm::DatabaseBackend::Sqlite {
         conn.execute_raw(Statement::from_sql_and_values(
             backend,
-            &format!(
+            format!(
                 "CREATE TABLE {table_name} (\
                  entity_id BLOB PRIMARY KEY, \
                  embedding BLOB, \
@@ -109,7 +109,7 @@ async fn create_width_table(
     } else {
         conn.execute_raw(Statement::from_sql_and_values(
             backend,
-            &format!(
+            format!(
                 "CREATE TABLE {table_name} (\
                  entity_id UUID PRIMARY KEY, \
                  embedding vector({dimension}))"
@@ -122,7 +122,9 @@ async fn create_width_table(
         let idx_name = format!("idx_{table_name}_hnsw");
         conn.execute_raw(Statement::from_sql_and_values(
             backend,
-            &format!("CREATE INDEX {idx_name} ON {table_name} USING hnsw (embedding vector_cosine_ops)"),
+            format!(
+                "CREATE INDEX {idx_name} ON {table_name} USING hnsw (embedding vector_cosine_ops)"
+            ),
             [],
         ))
         .await
