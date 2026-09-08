@@ -2,7 +2,9 @@
 
 pub use super::content_entities::Entity as ContentEntities;
 pub use super::content_entity_column_preferences::Entity as ContentEntityColumnPreferences;
-pub use super::content_entity_embeddings::Entity as ContentEntityEmbeddings;
+pub use super::content_entity_embeddings_768::Entity as ContentEntityEmbeddings768;
+pub use super::content_entity_embeddings_1024::Entity as ContentEntityEmbeddings1024;
+pub use super::content_entity_embeddings_1536::Entity as ContentEntityEmbeddings1536;
 pub use super::content_entity_snapshots::Entity as ContentEntitySnapshots;
 pub use super::content_relations::Entity as ContentRelations;
 pub use super::content_schemas::Entity as ContentSchemas;
@@ -16,6 +18,7 @@ pub use super::identity_template_versions::Entity as IdentityTemplateVersions;
 pub use super::identity_templates::Entity as IdentityTemplates;
 pub use super::identity_tenant_billing::Entity as IdentityTenantBilling;
 pub use super::identity_tenant_memberships::Entity as IdentityTenantMemberships;
+pub use super::identity_tenant_reindex_schedules::Entity as IdentityTenantReindexSchedules;
 pub use super::identity_tenants::Entity as IdentityTenants;
 pub use super::identity_users::Entity as IdentityUsers;
 pub use super::identity_workspace_embedding_keys::Entity as IdentityWorkspaceEmbeddingKeys;

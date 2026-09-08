@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "identity_tenant_reindex_schedules")]
 pub struct Model {
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub tenant_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub interval: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub timezone: Option<String>,
-    pub scheduled_for: DateTimeWithTimeZone,
+    pub scheduled_for: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }
@@ -32,15 +32,5 @@ pub enum Relation {
 impl Related<super::identity_tenants::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IdentityTenants.def()
-    }
-}
-
-#[async_trait::async_trait]
-impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, _db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
-    where
-        C: ConnectionTrait,
-    {
-        Ok(self)
     }
 }
