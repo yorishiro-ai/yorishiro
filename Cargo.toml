@@ -71,7 +71,7 @@ schemars = { version = "1.2.2", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
 # vLLM/real OpenAI over HTTP.
 reqwest.workspace = true
-# Local embedding provider (services::embedding::local): runs nomic-embed-text-v1.5 in-process
+# Local embedding provider (services::embedding::local): runs intfloat/multilingual-e5-base in-process
 # from safetensors weights. candle-core/candle-nn/candle-transformers build a fully static binary
 # (no openssl-sys, no libstdc++ link).
 candle-core = { version = "0.11.0" }

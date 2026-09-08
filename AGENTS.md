@@ -98,8 +98,7 @@ MCP is a service, not a controller. Route mounting (`src/controllers/mcp.rs::mou
 
 Rules for code style live at `.claude/rules/`:
 - `loco-architecture.md` — repository layout, migrations, models, SeaORM entity API, two-pool `db.rs` architecture
-- `editions.md` — `ee/` boundary, BUSL-1.1 vs. `ee/LICENSE`, edition decisions
-- `ee-composition.md` — how `ee/` is wired into the crate, licence gate
+- `editions.md` — `ee/` boundary, BUSL-1.1 vs. `ee/LICENSE`, edition decisions, licence gate
 - `error-handling.md` — `YorishiroError`, `ResultExt`, `into_http_parts()`
 - `module-structure.md` — MCP tool handler exits, router merge, visibility, column lists
 - `testing.md` — integration-test pattern, pool-closing, race-gate pitfalls
