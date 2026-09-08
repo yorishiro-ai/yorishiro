@@ -7,7 +7,7 @@
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 
-.PHONY: check clippy fmt fmt-check test-postgres test-sqlite build task doctor entities
+.PHONY: check clippy fmt fmt-check test-postgres test-sqlite build task doctor entities check-all
 
 check:
 	cargo check --locked --workspace
@@ -28,18 +28,18 @@ fmt-check:
 #
 # Override DATABASE_URL to point at a different Postgres instance.
 test-postgres: build
-	@if ! docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then \
-		docker compose up -d testdb; \
-		@echo "Waiting for testdb to become healthy..."; \
-		for i in $$(seq 1 60); do \
-			if docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then break; fi; \
-			sleep 1; \
-		done; \
-		if [ "$$(docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null)" != '"healthy"' ]; then \
-			echo "ERROR: testdb did not become healthy" >&2; exit 1; \
-		fi; \
+	docker compose up -d testdb
+	@echo "Waiting for testdb to become healthy..."; \
+	for i in $$(seq 1 120); do \
+		if docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then break; fi; \
+		sleep 2; \
+	done; \
+	if ! docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then \
+		echo "ERROR: testdb did not become healthy" >&2; exit 1; \
 	fi
+	@sleep 10
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace -- --test-threads=1
+	docker compose down -v testdb
 
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' LOCO_ENV=test_sqlite cargo test --locked --workspace -- --test-threads=1
@@ -63,6 +63,14 @@ endif
 # runs migrations, generates entities, tears everything down.
 entities: build
 	docker compose up -d testdb
+	@echo "Waiting for testdb to become healthy..."; \
+	for i in $$(seq 1 120); do \
+		if docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then break; fi; \
+		sleep 2; \
+	done; \
+	if ! docker inspect -f '{{.State.Health.Status}}' testdb 2>/dev/null | grep -q healthy; then \
+		echo "ERROR: testdb did not become healthy" >&2; exit 1; \
+	fi
 	@sleep 10
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
