@@ -1,0 +1,7 @@
+# Thresholds for clippy::cognitive_complexity and clippy::too_many_lines.
+# Both lints are warn-only in CI (see .github/workflows/ci.yml's "Clippy complexity report"
+# step): the existing codebase has ~101 functions over these thresholds, so enforcing them
+# with -D warnings would break every open PR. New/changed code is expected to stay under
+# these; shrink the existing count over time rather than suppressing the warning.
+cognitive-complexity-threshold = 7
+too-many-lines-threshold = 50
