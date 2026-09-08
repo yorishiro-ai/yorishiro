@@ -35,7 +35,7 @@ pub struct ScheduleDescription {
     /// The next scheduled run, computed from the last tick time.
     /// The ticker sets this before enqueueing to prevent duplicate runs
     /// if a tick was missed and the next tick would otherwise replay it.
-    pub scheduled_for: chrono::DateTime<chrono::Utc>,
+    pub scheduled_for: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Stores or replaces a tenant's reindex schedule.
@@ -92,7 +92,7 @@ pub async fn set(
         tenant_id: ActiveValue::Set(tenant_id),
         interval: ActiveValue::Set(interval.to_string()),
         timezone: ActiveValue::Set(timezone.map(|s| s.trim().to_string())),
-        scheduled_for: ActiveValue::Set(expected),
+        scheduled_for: ActiveValue::Set(Some(expected)),
         updated_at: ActiveValue::Set(chrono::Utc::now().into()),
         ..Default::default()
     };
@@ -134,7 +134,7 @@ pub async fn describe(
             interval: row.interval,
             timezone: row.timezone,
             // Entity stores DateTimeWithTimeZone (FixedOffset); convert to Utc for the API.
-            scheduled_for: row.scheduled_for.into(),
+            scheduled_for: row.scheduled_for.map(chrono::DateTime::<chrono::Utc>::from),
         })
     })
 }
@@ -192,7 +192,10 @@ impl Task for TenantReindexScheduler {
 
         for schedule in &schedules {
             // Only enqueue if the expected time has passed (within grace window).
-            let sched_utc: chrono::DateTime<chrono::Utc> = schedule.scheduled_for.into();
+            let sched_utc = match schedule.scheduled_for {
+                Some(v) => chrono::DateTime::<chrono::Utc>::from(v),
+                None => continue,
+            };
             if sched_utc > tick && sched_utc > cutoff {
                 continue;
             }
@@ -234,7 +237,7 @@ impl Task for TenantReindexScheduler {
                 .checked_add_signed(chrono::Duration::minutes(5))
                 .unwrap()
                 .into();
-            active.scheduled_for = ActiveValue::Set(new_sched);
+            active.scheduled_for = ActiveValue::Set(Some(new_sched));
             active.updated_at = ActiveValue::Set(chrono::Utc::now().into());
             active
                 .update(&app_context.db)

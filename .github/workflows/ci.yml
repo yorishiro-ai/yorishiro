@@ -64,6 +64,12 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --workspace --tests -- -D warnings
 
+      - name: Clippy complexity report
+        # Warn-only (see clippy.toml): reports functions over the cognitive-complexity/line
+        # thresholds without failing the build. cognitive_complexity and too_many_lines are
+        # both nursery/pedantic lints, off by default, so --force-warn opts them in here.
+        run: cargo clippy --locked --workspace --tests -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+
       - name: Show sccache stats
         run: sccache --show-stats
 

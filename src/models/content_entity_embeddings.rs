@@ -9,14 +9,14 @@
 //! and `ContentEntityEmbeddings1536` type aliases allow callers to refer
 //! to a specific width without importing the `_entities` module directly.
 
+pub use super::_entities::content_entity_embeddings_768::{
+    ActiveModel as ActiveModel768, Entity as Entity768, Model as Model768,
+};
 pub use super::_entities::content_entity_embeddings_1024::{
     ActiveModel as ActiveModel1024, Entity as Entity1024, Model as Model1024,
 };
 pub use super::_entities::content_entity_embeddings_1536::{
     ActiveModel as ActiveModel1536, Entity as Entity1536, Model as Model1536,
-};
-pub use super::_entities::content_entity_embeddings_768::{
-    ActiveModel as ActiveModel768, Entity as Entity768, Model as Model768,
 };
 
 /// Type alias for the 768-width entity.
