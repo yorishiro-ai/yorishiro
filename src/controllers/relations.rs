@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, WriteScope};
-use crate::models::content_relations::{self, RelationRecord};
+use crate::models::entity_relations::{self, RelationRecord};
 
 #[derive(Deserialize)]
 pub struct CreateRelationRequest {
@@ -43,13 +43,13 @@ pub async fn create_relation(
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let input = content_relations::CreateRelationInput {
+    let input = entity_relations::CreateRelationInput {
         source_id: body.source_id,
         target_id: body.target_id,
         relation_type: body.relation_type,
         properties: body.properties.unwrap_or_else(|| serde_json::json!({})),
     };
-    let record = content_relations::create(authorized.txn(), workspace_id, input).await?;
+    let record = entity_relations::create(authorized.txn(), workspace_id, input).await?;
     authorized.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
@@ -59,7 +59,7 @@ pub async fn get_relation(
     Path(id): Path<Uuid>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record = content_relations::get(authorized.txn(), workspace_id, id).await?;
+    let record = entity_relations::get(authorized.txn(), workspace_id, id).await?;
     Ok(Json(record))
 }
 
@@ -68,7 +68,7 @@ pub async fn delete_relation(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    content_relations::delete(authorized.txn(), workspace_id, id).await?;
+    entity_relations::delete(authorized.txn(), workspace_id, id).await?;
     authorized.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -77,7 +77,7 @@ pub async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
-    let query = content_relations::ListRelationsQuery {
+    let query = entity_relations::ListRelationsQuery {
         source_id: params.source_id,
         target_id: params.target_id,
         relation_type: params.relation_type,
@@ -86,7 +86,7 @@ pub async fn list_relations(
     };
 
     let workspace_id = authorized.ctx.workspace_id;
-    let records = content_relations::list(authorized.txn(), workspace_id, query).await?;
+    let records = entity_relations::list(authorized.txn(), workspace_id, query).await?;
     Ok(Json(records))
 }
 
@@ -97,7 +97,7 @@ pub async fn set_relation_status(
 ) -> Result<Json<RelationRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let record =
-        content_relations::set_status(authorized.txn(), workspace_id, id, &body.status).await?;
+        entity_relations::set_status(authorized.txn(), workspace_id, id, &body.status).await?;
     authorized.commit().await?;
     Ok(Json(record))
 }

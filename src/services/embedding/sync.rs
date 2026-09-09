@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::EntityTypeDef;
-use crate::models::content_entities::EntityRecord;
+use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 /// Concatenates the values of `x-embed` fields as `"field: value"` to build the text to embed.
@@ -38,7 +38,7 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
     }
 }
 
-/// Generates an embedding vector from an entity's `x-embed` fields and updates the `content_entity_embeddings` table.
+/// Generates an embedding vector from an entity's `x-embed` fields and updates the `entity_embeddings` table.
 /// Returns `Ok(())` without doing anything if the schema has no `x-embed` fields or none have values: embedding is an auxiliary feature and must never block the entity write it follows.
 ///
 /// Checks the workspace's stamp against the provider's model and dimensions before writing.
@@ -60,7 +60,7 @@ pub async fn sync_embedding(
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
-    // The embedding column is now width-partitioned: each table (e.g. `content_entity_embeddings_768`)
+    // The embedding column is now width-partitioned: each table (e.g. `entity_embeddings_768`)
     // holds vectors from a single model width. A wrong-width write would land in the wrong table,
     // which is silently wrong — no Postgres error to catch it. This dimension check is the first
     // line of defense, matching the original intent that the width-specific column type provided.
@@ -98,7 +98,7 @@ pub async fn sync_embedding(
     // dimension check above only improves an error message on a write Postgres would have refused
     // regardless.
     // The coexistence itself is a coincidence of both current models happening to share a width, not
-    // something `content_entities` guarantees: the day a third local model ships at a different
+    // something `entity_entities` guarantees: the day a third local model ships at a different
     // width, the column's own fixed type already forces every workspace in this deployment onto one
     // width, and mixing stops being possible in the first place.
     // The check enforces the effective model (workspace stamp → tenant default → deployment),
@@ -170,7 +170,7 @@ pub async fn sync_embedding(
 /// Writes an already-computed embedding vector into the width-specific table,
 /// with no check against the workspace's stamped model or dimensions.
 ///
-/// `dimension` selects which table: `content_entity_embeddings_{dimension}`.
+/// `dimension` selects which table: `entity_embeddings_{dimension}`.
 /// Returns whether the row was actually written: `false` means the `updated_at`
 /// guard below skipped the write because the entity changed since
 /// `snapshot_updated_at` was read, not an error.
@@ -184,7 +184,7 @@ pub async fn sync_embedding(
 /// that refuses a write on exactly that mismatch would refuse its own writes on
 /// every row.
 /// Safe to bypass here only because `reindex_workspace` restamps
-/// `identity_workspaces.embedding_model` itself, and only after every row
+/// `workspace_workspaces.embedding_model` itself, and only after every row
 /// succeeds: the stamp and the actual column contents genuinely disagree for its
 /// own duration, which is the situation `sync_embedding`'s check exists to
 /// prevent everywhere else.
@@ -209,7 +209,7 @@ async fn embed_and_write(
     // We use raw SQL because the vector column lives in a separate table whose shape differs
     // between PostgreSQL (`vector(N)`) and SQLite (`BLOB`), and SeaORM has no builder for
     // this cross-backend shape.  The `updated_at` guard is a WHERE clause on
-    // `content_entities`, which is shared.
+    // `entity_entities`, which is shared.
     let backend = conn.get_database_backend();
 
     // SQLite stores vectors as raw LE f32 bytes in the BLOB column.
@@ -221,7 +221,7 @@ async fn embed_and_write(
         Vec::new()
     };
 
-    let table_name = format!("content_entity_embeddings_{dimension}");
+    let table_name = format!("entity_embeddings_{dimension}");
 
     // Both the plain INSERT and the ON CONFLICT DO UPDATE share the same
     // `updated_at` guard: if the entity was modified between the batch fetch
@@ -238,19 +238,19 @@ async fn embed_and_write(
                 "INSERT INTO {table_name} (entity_id, embedding) \
                  SELECT $1, $2 \
                  WHERE EXISTS ( \
-                   SELECT 1 FROM content_entities \
-                   WHERE content_entities.id = $1 \
-                     AND content_entities.workspace_id = $3 \
-                     AND content_entities.updated_at = $4 \
+                   SELECT 1 FROM entity_entities \
+                   WHERE entity_entities.id = $1 \
+                     AND entity_entities.workspace_id = $3 \
+                     AND entity_entities.updated_at = $4 \
                  ) \
                  ON CONFLICT(entity_id) \
                  DO UPDATE SET embedding = $2 \
                    WHERE {table_name}.entity_id = $1 \
                      AND EXISTS ( \
-                       SELECT 1 FROM content_entities \
-                       WHERE content_entities.id = {table_name}.entity_id \
-                         AND content_entities.workspace_id = $3 \
-                         AND content_entities.updated_at = $4 \
+                       SELECT 1 FROM entity_entities \
+                       WHERE entity_entities.id = {table_name}.entity_id \
+                         AND entity_entities.workspace_id = $3 \
+                         AND entity_entities.updated_at = $4 \
                      ) \
                  RETURNING 1"
             ),
@@ -284,7 +284,7 @@ async fn embed_and_write(
     Ok(true)
 }
 
-/// Resolves the schema definition needed for embedding sync on its own, relying only on the return value of `content_entities::create`/`update` (`EntityRecord`), then calls [`sync_embedding`].
+/// Resolves the schema definition needed for embedding sync on its own, relying only on the return value of `entity_entities::create`/`update` (`EntityRecord`), then calls [`sync_embedding`].
 /// The record's data belongs to the schema version it was validated against (`record.schema_id`), so fetching by ID rather than the active version is correct.
 ///
 /// The intended entry point for controllers to call after `Authorized::commit()`.
@@ -295,7 +295,7 @@ pub async fn sync_embedding_for_record(
     provider: &dyn EmbeddingProvider,
 ) -> Result<(), YorishiroError> {
     let schema =
-        crate::models::content_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
+        crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
     let entity_type_def = schema
         .definition
         .entity_types
@@ -345,7 +345,7 @@ async fn reindex_embedding_for_record(
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexStep, YorishiroError> {
     let schema =
-        crate::models::content_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
+        crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
     let entity_type_def = schema
         .definition
         .entity_types
@@ -401,7 +401,7 @@ async fn reindex_workspace_inner(
     candidate_ids: &[Uuid],
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
-    let records = crate::models::content_entities::get_batch(conn, workspace_id, candidate_ids)
+    let records = crate::models::entity_entities::get_batch(conn, workspace_id, candidate_ids)
         .await
         .internal()?;
 
@@ -440,7 +440,7 @@ async fn reindex_workspace_inner(
                 provider.dimensions()
             ))
         })?;
-        let mut active = crate::models::identity_workspaces::ActiveModel {
+        let mut active = crate::models::workspace_workspaces::ActiveModel {
             id: ActiveValue::Unchanged(workspace_id),
             ..Default::default()
         };
@@ -457,7 +457,7 @@ async fn reindex_workspace_inner(
 }
 
 /// Re-embeds every entity in a workspace with `provider`, then restamps
-/// `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values,
+/// `workspace_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values,
 /// but only when every entity succeeded.
 ///
 /// This is the core the `reindex_embeddings` task wraps; see that task's own doc comment for
@@ -483,7 +483,7 @@ pub async fn reindex_workspace(
 ///
 /// The three-tier inheritance is:
 ///
-/// 1. Workspace stamp: if `identity_workspaces.embedding_model`/`embedding_dimensions` is set,
+/// 1. Workspace stamp: if `workspace_workspaces.embedding_model`/`embedding_dimensions` is set,
 ///    use those values directly.
 /// 2. Tenant default: if the workspace's tenant has `embedding_model`/`embedding_dimensions` set,
 ///    use those as the fallback.
@@ -544,16 +544,16 @@ pub async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
-    use crate::models::_entities::identity_tenants::Column as TenantColumn;
-    use crate::models::_entities::identity_workspaces::Column;
+    use crate::models::_entities::tenant_tenants::Column as TenantColumn;
+    use crate::models::_entities::workspace_workspaces::Column;
 
-    let row = crate::models::identity_workspaces::Entity::find()
+    let row = crate::models::workspace_workspaces::Entity::find()
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
         .column_as(TenantColumn::EmbeddingModel, "tenant_model")
         .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
-        .left_join(crate::models::identity_tenants::Entity)
+        .left_join(crate::models::tenant_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
         .into_model::<EmbeddingChainRow>()
         .one(conn)
@@ -587,11 +587,11 @@ async fn stamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::identity_workspaces::Column;
+    use crate::models::_entities::workspace_workspaces::Column;
 
     // Only stamp if the workspace has no existing model stamp:
     // this is the first-write stamp, not an unconditional overwrite.
-    crate::models::identity_workspaces::Entity::update_many()
+    crate::models::workspace_workspaces::Entity::update_many()
         .col_expr(Column::EmbeddingModel, Expr::value(model))
         .col_expr(Column::EmbeddingDimensions, Expr::value(dimensions))
         .filter(Column::Id.eq(workspace_id))

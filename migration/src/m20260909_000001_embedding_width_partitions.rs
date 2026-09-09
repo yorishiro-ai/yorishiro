@@ -6,13 +6,13 @@
 //! the largest width and wasting space on every row.
 //!
 //! Tables follow the same backend split as the original
-//! `content_entity_embeddings`:
+//! `entity_embeddings`:
 //! - PostgreSQL: `vector(N)` with HNSW index.
 //! - SQLite: `BLOB` (no index, KNN via `vec_distance_cosine`).
 //!
 //! A CASCADE delete on `entity_id` would need to hit every table.
-//! Instead, `content_entities` has no FK on `entity_id`, so deletes
-//! cascade from `content_entities(id)` → `content_entity_embeddings(id)`.
+//! Instead, `entity_entities` has no FK on `entity_id`, so deletes
+//! cascade from `entity_entities(id)` → `entity_embeddings(id)`.
 //! The per-width tables use `ON DELETE CASCADE` on `entity_id` so a
 //! deleted entity drops its vector from whatever table holds it.
 
@@ -28,7 +28,7 @@ const WIDTHS: &[i32] = &[768, 1024, 1536];
 
 /// The table name for a given width.
 fn table_name(width: i32) -> String {
-    format!("content_entity_embeddings_{width}")
+    format!("entity_embeddings_{width}")
 }
 
 /// The `vector(N)` type for PostgreSQL.
@@ -67,7 +67,7 @@ impl MigrationTrait for Migration {
                         "CREATE TABLE {tname} (\
                          entity_id BLOB PRIMARY KEY, \
                          embedding BLOB, \
-                         FOREIGN KEY (entity_id) REFERENCES content_entities(id) ON DELETE CASCADE)"
+                         FOREIGN KEY (entity_id) REFERENCES entity_entities(id) ON DELETE CASCADE)"
                     ))
                     .await?;
             } else {
@@ -91,12 +91,12 @@ impl MigrationTrait for Migration {
             }
         }
 
-        // Migrate existing data from the original `content_entity_embeddings`
+        // Migrate existing data from the original `entity_embeddings`
         // into the width-specific tables.
         //
         // The deployment default width (YORISHIRO_EMBEDDING_DIMENSIONS, default 768)
         // is used as the target for existing vectors. This is correct because
-        // `content_entity_embeddings.embedding` is `vector(768)` at the SQL type
+        // `entity_embeddings.embedding` is `vector(768)` at the SQL type
         // level, meaning every existing row is already 768-dimensional.
         if WIDTHS.contains(&768) {
             let target = table_name(768);
@@ -108,7 +108,7 @@ impl MigrationTrait for Migration {
                     .execute_unprepared(&format!(
                         "INSERT INTO {target} (entity_id, embedding) \
                          SELECT entity_id, embedding \
-                         FROM content_entity_embeddings \
+                         FROM entity_embeddings \
                          WHERE embedding IS NOT NULL \
                          ON CONFLICT(entity_id) DO NOTHING"
                     ))
@@ -120,7 +120,7 @@ impl MigrationTrait for Migration {
                     .execute_unprepared(&format!(
                         "INSERT INTO {target} (entity_id, embedding) \
                          SELECT entity_id, embedding::vector(768) \
-                         FROM content_entity_embeddings \
+                         FROM entity_embeddings \
                          WHERE embedding IS NOT NULL \
                          ON CONFLICT(entity_id) DO NOTHING"
                     ))
@@ -130,13 +130,13 @@ impl MigrationTrait for Migration {
             // Drop the original table after migration.
             if backend == DbBackend::Sqlite {
                 // SQLite needs CASCADE because other tables may still have FKs.
-                // The original content_entity_embeddings has no other dependents
+                // The original entity_embeddings has no other dependents
                 // at this point (the per-width tables have no FK to it, they
-                // only reference content_entities directly).
+                // only reference entity_entities directly).
                 manager
                     .drop_table(
                         Table::drop()
-                            .table(Alias::new("content_entity_embeddings"))
+                            .table(Alias::new("entity_embeddings"))
                             .if_exists()
                             .to_owned(),
                     )
@@ -147,7 +147,7 @@ impl MigrationTrait for Migration {
                 manager
                     .drop_table(
                         Table::drop()
-                            .table(Alias::new("content_entity_embeddings"))
+                            .table(Alias::new("entity_embeddings"))
                             .if_exists()
                             .cascade()
                             .to_owned(),
@@ -167,7 +167,7 @@ impl MigrationTrait for Migration {
             manager
                 .create_table(
                     Table::create()
-                        .table(Alias::new("content_entity_embeddings"))
+                        .table(Alias::new("entity_embeddings"))
                         .if_not_exists()
                         .col(
                             ColumnDef::new(Alias::new("entity_id"))
@@ -179,11 +179,8 @@ impl MigrationTrait for Migration {
                         .foreign_key(
                             ForeignKey::create()
                                 .name("fk_entity_embeddings_entity_id")
-                                .from(
-                                    Alias::new("content_entity_embeddings"),
-                                    Alias::new("entity_id"),
-                                )
-                                .to(Alias::new("content_entities"), Alias::new("id"))
+                                .from(Alias::new("entity_embeddings"), Alias::new("entity_id"))
+                                .to(Alias::new("entity_entities"), Alias::new("id"))
                                 .on_delete(ForeignKeyAction::Cascade),
                         )
                         .to_owned(),
@@ -194,7 +191,7 @@ impl MigrationTrait for Migration {
                 manager
                     .get_connection()
                     .execute_unprepared(&format!(
-                        "INSERT INTO content_entity_embeddings (entity_id, embedding) \
+                        "INSERT INTO entity_embeddings (entity_id, embedding) \
                          SELECT entity_id, embedding \
                          FROM {}",
                         table_name(768)
@@ -206,7 +203,7 @@ impl MigrationTrait for Migration {
             manager
                 .create_table(
                     Table::create()
-                        .table(Alias::new("content_entity_embeddings"))
+                        .table(Alias::new("entity_embeddings"))
                         .if_not_exists()
                         .col(
                             ColumnDef::new(Alias::new("entity_id"))
@@ -218,11 +215,8 @@ impl MigrationTrait for Migration {
                         .foreign_key(
                             ForeignKey::create()
                                 .name("fk_entity_embeddings_entity_id")
-                                .from(
-                                    Alias::new("content_entity_embeddings"),
-                                    Alias::new("entity_id"),
-                                )
-                                .to(Alias::new("content_entities"), Alias::new("id"))
+                                .from(Alias::new("entity_embeddings"), Alias::new("entity_id"))
+                                .to(Alias::new("entity_entities"), Alias::new("id"))
                                 .on_delete(ForeignKeyAction::Cascade),
                         )
                         .to_owned(),
@@ -232,7 +226,7 @@ impl MigrationTrait for Migration {
             manager
                 .get_connection()
                 .execute_unprepared(
-                    "CREATE INDEX entities_embedding_hnsw ON content_entity_embeddings \
+                    "CREATE INDEX entities_embedding_hnsw ON entity_embeddings \
                      USING hnsw (embedding vector_cosine_ops)",
                 )
                 .await?;
@@ -241,7 +235,7 @@ impl MigrationTrait for Migration {
                 manager
                     .get_connection()
                     .execute_unprepared(&format!(
-                        "INSERT INTO content_entity_embeddings (entity_id, embedding) \
+                        "INSERT INTO entity_embeddings (entity_id, embedding) \
                          SELECT entity_id, embedding \
                          FROM {}",
                         table_name(768)

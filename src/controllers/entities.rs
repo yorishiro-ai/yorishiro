@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
-use crate::models::content_entities::{self, EntityRecord, UndoReport};
-use crate::models::identity_api_key_audit_log;
+use crate::models::api_key_audit_log;
+use crate::models::entity_entities::{self, EntityRecord, UndoReport};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
@@ -45,14 +45,13 @@ pub async fn create_entity(
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let input = content_entities::CreateEntityInput {
+    let input = entity_entities::CreateEntityInput {
         schema_name: body.schema_name,
         entity_type: body.entity_type,
         data: body.data,
     };
     let created_by = authorized.ctx.user_id;
-    let record =
-        content_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
+    let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
     authorized.commit().await?;
     embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id).await;
     Ok((StatusCode::CREATED, Json(record)))
@@ -63,7 +62,7 @@ pub async fn get_entity(
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record = content_entities::get(authorized.txn(), workspace_id, id).await?;
+    let record = entity_entities::get(authorized.txn(), workspace_id, id).await?;
     Ok(Json(record))
 }
 
@@ -76,7 +75,7 @@ pub async fn update_entity(
     let workspace_id = authorized.ctx.workspace_id;
     let updated_by = authorized.ctx.user_id;
     let record =
-        content_entities::update(authorized.txn(), workspace_id, id, body.data, updated_by).await?;
+        entity_entities::update(authorized.txn(), workspace_id, id, body.data, updated_by).await?;
     authorized.commit().await?;
     embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id).await;
     Ok(Json(record))
@@ -87,7 +86,7 @@ pub async fn delete_entity(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    content_entities::delete(authorized.txn(), workspace_id, id).await?;
+    entity_entities::delete(authorized.txn(), workspace_id, id).await?;
     authorized.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -96,7 +95,7 @@ pub async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
-    let query = content_entities::ListEntitiesQuery {
+    let query = entity_entities::ListEntitiesQuery {
         entity_type: params.entity_type,
         filter: crate::controllers::parse_filter_param(params.filter)?,
         schema_version: params.schema_version,
@@ -104,7 +103,7 @@ pub async fn list_entities(
     };
 
     let workspace_id = authorized.ctx.workspace_id;
-    let records = content_entities::list(authorized.txn(), workspace_id, query).await?;
+    let records = entity_entities::list(authorized.txn(), workspace_id, query).await?;
     Ok(Json(records))
 }
 
@@ -116,19 +115,19 @@ pub async fn undo_migration_job(
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<UndoReport>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let report = content_entities::undo_job(authorized.txn(), workspace_id, job_id).await?;
+    let report = entity_entities::undo_job(authorized.txn(), workspace_id, job_id).await?;
     // Recorded on the same transaction as the undo itself, before commit: a rollback of the undo
     // must also roll back the record that it happened, or a failed request could still leave an
     // audit trail claiming it succeeded.
-    identity_api_key_audit_log::record(
+    api_key_audit_log::record(
         authorized.txn(),
-        identity_api_key_audit_log::AuditActor {
+        api_key_audit_log::AuditActor {
             workspace_id,
             tenant_id: authorized.ctx.tenant_id,
             api_key_id: authorized.ctx.api_key_id,
             user_id: authorized.ctx.user_id,
         },
-        identity_api_key_audit_log::AuditAction::UndoMigrationJob,
+        api_key_audit_log::AuditAction::UndoMigrationJob,
         serde_json::json!({ "job_id": job_id, "restored": report.restored, "missing": report.missing }),
     )
     .await?;
@@ -177,15 +176,15 @@ pub async fn reindex_workspace(
 
     // Recorded on the same RLS-scoped transaction as the request itself: this is a
     // migration-scope operation that the audit log must capture.
-    identity_api_key_audit_log::record(
+    api_key_audit_log::record(
         authorized.txn(),
-        identity_api_key_audit_log::AuditActor {
+        api_key_audit_log::AuditActor {
             workspace_id,
             tenant_id: authorized.ctx.tenant_id,
             api_key_id: authorized.ctx.api_key_id,
             user_id: authorized.ctx.user_id,
         },
-        identity_api_key_audit_log::AuditAction::ReindexEmbeddings,
+        api_key_audit_log::AuditAction::ReindexEmbeddings,
         serde_json::json!({ "job_id": job_id }),
     )
     .await?;

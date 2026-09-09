@@ -15,17 +15,17 @@ use crate::controllers::extractors::AuthContext;
 use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_workspaces;
+use crate::models::_entities::workspace_workspaces;
 use crate::models::tenancy;
-use crate::models::{content_entities, content_relations, content_schemas};
+use crate::models::{entity_entities, entity_relations, schema_schemas};
 
 /// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or act on another tenant's workspace by guessing its id.
-/// `identity_workspaces` has no RLS of its own (it's read through `ctx.db`, the migration-role connection), so this check is the only thing enforcing that boundary for these handlers.
+/// `workspace_workspaces` has no RLS of its own (it's read through `ctx.db`, the migration-role connection), so this check is the only thing enforcing that boundary for these handlers.
 async fn get_workspace_in_tenant(
     ctx: &AppContext,
     tenant_id: Uuid,
     workspace_id: Uuid,
-) -> Result<identity_workspaces::Model, ApiError> {
+) -> Result<workspace_workspaces::Model, ApiError> {
     let workspace = tenancy::get_workspace(&ctx.db, workspace_id).await?;
     if workspace.tenant_id != tenant_id {
         return Err(
@@ -38,9 +38,9 @@ async fn get_workspace_in_tenant(
 pub async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-) -> Result<Json<Vec<identity_workspaces::Model>>, ApiError> {
-    let workspaces = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.eq(auth.tenant_id))
+) -> Result<Json<Vec<workspace_workspaces::Model>>, ApiError> {
+    let workspaces = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(auth.tenant_id))
         .all(&ctx.db)
         .await
         .map_err(|err| ApiError::from(YorishiroError::Internal(err.into())))?;
@@ -106,9 +106,9 @@ pub async fn get_workspace(
 ) -> Result<Json<WorkspaceDetail>, ApiError> {
     let workspace = get_workspace_in_tenant(&ctx, authorized.ctx.tenant_id, id).await?;
 
-    let entity_count = content_entities::count(authorized.txn(), workspace.id).await?;
-    let relation_count = content_relations::count(authorized.txn(), workspace.id).await?;
-    let schema_count = content_schemas::count_active(authorized.txn(), workspace.id).await?;
+    let entity_count = entity_entities::count(authorized.txn(), workspace.id).await?;
+    let relation_count = entity_relations::count(authorized.txn(), workspace.id).await?;
+    let schema_count = schema_schemas::count_active(authorized.txn(), workspace.id).await?;
 
     Ok(Json(WorkspaceDetail {
         id: workspace.id,

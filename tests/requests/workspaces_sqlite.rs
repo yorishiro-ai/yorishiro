@@ -4,13 +4,13 @@
 /// but boot against a SQLite backend.
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::services::auth::ApiKeyScope;
 
 async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid, uuid::Uuid) {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenant_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set(name.to_string()),
         ..Default::default()
     };
@@ -18,7 +18,7 @@ async fn setup_tenant(ctx: &loco_rs::app::AppContext, name: &str) -> (uuid::Uuid
         .await
         .expect("insert tenant");
 
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".to_string()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -36,7 +36,7 @@ async fn issue_key_for(
     workspace_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> String {
-    identity_api_keys::Entity::create_api_key(
+    api_keys::Entity::create_api_key(
         &ctx.db,
         workspace_id,
         ApiKeyScope::Migration,

@@ -85,7 +85,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 .unwrap();
             let user_id: uuid::Uuid = setup_body["user_id"].as_str().unwrap().parse().unwrap();
 
-            // create_tenant_api_key reads identity_tenants and identity_tenant_memberships, neither granted to yorishiro_app (see identity_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
+            // create_tenant_api_key reads tenant_tenants and tenant_memberships, neither granted to yorishiro_app (see tenant_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
             let db = ctx.shared_store.get::<DbHandle>().unwrap();
             let identity =
                 sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());

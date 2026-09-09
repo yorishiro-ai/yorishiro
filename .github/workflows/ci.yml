@@ -161,7 +161,11 @@ jobs:
             exit 1
           fi
           echo "Generated $count entity files (had $count_before before)"
-          git diff --exit-code src/models/_entities/
+          # Skip entity_embeddings_*.rs — PgVector doesn't implement Eq, so
+          # sea-orm-codegen omits ActiveModelBehavior, but DeriveEntityModel
+          # requires it. Restore committed files and skip diff check.
+          git checkout -- src/models/_entities/entity_embeddings_768.rs src/models/_entities/entity_embeddings_1024.rs src/models/_entities/entity_embeddings_1536.rs
+          git diff --exit-code -- ':!src/models/_entities/entity_embeddings_768.rs' ':!src/models/_entities/entity_embeddings_1024.rs' ':!src/models/_entities/entity_embeddings_1536.rs'
 
       - name: Run tests
         env:

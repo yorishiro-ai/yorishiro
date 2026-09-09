@@ -6,9 +6,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::content_entities::{self, CreateEntityInput};
-use crate::models::content_relations::{self, CreateRelationInput};
-use crate::models::content_schemas;
+use crate::models::entity_entities::{self, CreateEntityInput};
+use crate::models::entity_relations::{self, CreateRelationInput};
+use crate::models::schema_schemas;
 
 pub use crate::models::export::ExportRecord;
 
@@ -26,9 +26,9 @@ pub struct ImportResult {
 /// Schemas and entities are re-inserted with freshly generated IDs, so an entity line resolves its schema by *name* (preferring a schema line this same import already processed over the exported, workspace-local `schema_id`), and a relation line's `source_id`/`target_id` are remapped through the entity lines this same import already processed.
 /// A schema/entity line must therefore appear before anything that references it: the order `export::export_all` produces (schemas, then entities, then relations).
 ///
-/// `tenant_id` comes from the authenticated request, not the export: an exported schema's `tenant_id` is only meaningful in its source tenant, and reusing it here would violate `content_schemas`' FK to `identity_tenants` once source and destination tenants differ.
+/// `tenant_id` comes from the authenticated request, not the export: an exported schema's `tenant_id` is only meaningful in its source tenant, and reusing it here would violate `schema_schemas`' FK to `tenant_tenants` once source and destination tenants differ.
 ///
-/// Every imported entity is attributed to `imported_by`, not the exported `created_by`: the exported value names a user in the source tenant that `yorishiro_app` can't verify exists (`identity_users` carries no grant to that role), risking an FK violation on restore.
+/// Every imported entity is attributed to `imported_by`, not the exported `created_by`: the exported value names a user in the source tenant that `yorishiro_app` can't verify exists (`user_users` carries no grant to that role), risking an FK violation on restore.
 pub async fn import_jsonl(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -64,7 +64,7 @@ pub async fn import_jsonl(
             ExportRecord::Schema(schema) => {
                 let old_id = schema.id;
                 let name = schema.definition.name.clone();
-                content_schemas::create_schema(
+                schema_schemas::create_schema(
                     conn,
                     tenant_id,
                     workspace_id,
@@ -80,7 +80,7 @@ pub async fn import_jsonl(
             ExportRecord::Entity(entity) => {
                 let old_id = entity.id;
 
-                // `content_entities::create` takes a schema name, not an ID.
+                // `entity_entities::create` takes a schema name, not an ID.
                 // Prefer a schema line this import just created; fall back to looking the exported ID up in the destination workspace, for a schema that already exists there.
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
@@ -88,7 +88,7 @@ pub async fn import_jsonl(
                         Some(name) => name.clone(),
                         None => {
                             let name =
-                                content_schemas::get_by_id(conn, workspace_id, entity.schema_id)
+                                schema_schemas::get_by_id(conn, workspace_id, entity.schema_id)
                                     .await
                                     .map_err(|err| annotate_line(line_no, err))?
                                     .name;
@@ -103,7 +103,7 @@ pub async fn import_jsonl(
                     entity_type: entity.entity_type,
                     data: entity.data,
                 };
-                let created = content_entities::create(conn, workspace_id, input, imported_by)
+                let created = entity_entities::create(conn, workspace_id, input, imported_by)
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 entity_id_map.insert(old_id, created.id);
@@ -125,7 +125,7 @@ pub async fn import_jsonl(
                     relation_type: relation.relation_type,
                     properties: relation.properties,
                 };
-                content_relations::create(conn, workspace_id, input)
+                entity_relations::create(conn, workspace_id, input)
                     .await
                     .map_err(|err| annotate_line(line_no, err))?;
                 result.relations += 1;

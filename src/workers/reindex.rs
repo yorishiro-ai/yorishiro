@@ -82,7 +82,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
 
 /// Fetch all entity IDs for a workspace via raw SQL.
 ///
-/// PostgreSQL only: `content_entities` has no `embedding` column on SQLite.
+/// PostgreSQL only: `entity_entities` has no `embedding` column on SQLite.
 async fn fetch_candidates(
     db: &DatabaseConnection,
     workspace_id: Uuid,
@@ -93,7 +93,7 @@ async fn fetch_candidates(
     }
     let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "SELECT id FROM content_entities WHERE workspace_id = $1",
+        "SELECT id FROM entity_entities WHERE workspace_id = $1",
         [workspace_id.into()],
     ))
     .all(db)

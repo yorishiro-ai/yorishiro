@@ -26,7 +26,7 @@
 //! ```
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::content_entities;
+use crate::models::entity_entities;
 use crate::models::search::SearchHit;
 use crate::models::search::SearchRow;
 use crate::models::search::resolve_search_table;
@@ -87,7 +87,7 @@ impl Task for SqliteAnnBenchmark {
             .map_err(|e| Error::Message(e.to_string()))?;
 
         // Count entities with embeddings in this workspace.
-        let entity_count = content_entities::Entity::find()
+        let entity_count = entity_entities::Entity::find()
             .count(&ctx.db)
             .await
             .internal()
@@ -142,7 +142,7 @@ async fn fetch_sample_embedding(
 ) -> std::result::Result<Option<(Uuid, Vec<u8>)>, YorishiroError> {
     let sql = format!(
         "SELECT ee.entity_id, ee.embedding FROM {table_name} ee \
-         JOIN content_entities e ON e.id = ee.entity_id \
+         JOIN entity_entities e ON e.id = ee.entity_id \
          WHERE e.workspace_id = ? \
          LIMIT 1"
     );
@@ -362,7 +362,7 @@ fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) ->
          e.entity_type, e.data, e.created_at, e.updated_at, \
          e.created_by, e.updated_by, \
          vec_distance_cosine(?, ee.embedding) AS distance \
-         FROM content_entities e \
+         FROM entity_entities e \
          JOIN {table_name} ee ON e.id = ee.entity_id \
          WHERE ee.embedding IS NOT NULL AND e.workspace_id = ? \
          ORDER BY distance LIMIT 10"
@@ -388,7 +388,7 @@ fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> KnnQ
          e.entity_type, e.data, e.created_at, e.updated_at, \
          e.created_by, e.updated_by, \
          ee.distance AS distance \
-         FROM content_entities e \
+         FROM entity_entities e \
          JOIN {table_name}_vec0 ee \
              ON ee.rowid = e.id \
              AND ee MATCH (k=10) \

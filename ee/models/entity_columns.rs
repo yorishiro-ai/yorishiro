@@ -4,7 +4,7 @@
 //! A per-user override belongs in this table as a second nullable column, not in a second table.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::content_entity_column_preferences::{ActiveModel, Column, Entity};
+use crate::models::_entities::entity_column_preferences::{ActiveModel, Column, Entity};
 use crate::models::pagination::ListParams;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
@@ -28,7 +28,7 @@ pub struct ColumnPreference {
 }
 
 fn to_preference(
-    model: crate::models::_entities::content_entity_column_preferences::Model,
+    model: crate::models::_entities::entity_column_preferences::Model,
 ) -> ColumnPreference {
     ColumnPreference {
         entity_type: model.entity_type,

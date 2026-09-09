@@ -106,7 +106,7 @@ pub async fn enable_rls_with_policy(
 
 /// A single explicit per-table GRANT to `yorishiro_app`.
 ///
-/// Deliberately never a schema-wide `GRANT ... ON ALL TABLES IN SCHEMA public`: that would sweep in the tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`).
+/// Deliberately never a schema-wide `GRANT ... ON ALL TABLES IN SCHEMA public`: that would sweep in the tables that must stay ungranted (`tenant_tenants`, `user_users`, `tenant_memberships`, `workspace_invites`, `template_templates`, `workspace_llm_keys`).
 /// Every grant is named here, one call per table, so an ungranted table is ungranted because no call exists for it, not because a wildcard missed it.
 ///
 /// Uses `execute_unprepared` because SeaORM has no GRANT builder.

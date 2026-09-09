@@ -1,17 +1,17 @@
-//! The webhook's replay and ordering guards, over this crate's own `identity_stripe_processed_events` table.
+//! The webhook's replay and ordering guards, over this crate's own `stripe_events` table.
 //!
 //! Stripe retries a delivery on a slow or failed response and does not guarantee ordering, so the same event can arrive twice and an older one can arrive after a newer one.
 //! These three functions are what makes applying an event idempotent and monotonic; the controller decides what an event means, and asks here whether it should be applied at all.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_stripe_processed_events::{ActiveModel, Column, Entity};
+use crate::models::_entities::stripe_events::{ActiveModel, Column, Entity};
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 };
 
 /// Whether `event_id` has already been applied.
-/// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `identity_stripe_processed_events`, so this is a plain existence check.
+/// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `stripe_events`, so this is a plain existence check.
 pub async fn is_event_processed(
     conn: &impl ConnectionTrait,
     event_id: &str,

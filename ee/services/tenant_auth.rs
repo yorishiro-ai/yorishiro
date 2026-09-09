@@ -10,7 +10,7 @@
 use crate::YorishiroError;
 use crate::db::DbHandle;
 use crate::error::ResultExt;
-use crate::models::_entities::{identity_api_keys, identity_tenants};
+use crate::models::_entities::{api_keys, tenant_tenants};
 use crate::services::auth::{ApiKeyScope, AuthContext, Authenticator};
 use async_trait::async_trait;
 use sea_orm::{ActiveValue, EntityTrait, PaginatorTrait};
@@ -127,7 +127,7 @@ pub struct CreatedTenantApiKey {
 /// Base's own `create_api_key` always records a workspace, so a key with none cannot be made through it: this writes the row directly.
 /// The role cap is the same one that command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
 ///
-/// **`conn` must be the identity pool (`DbHandle::identity`, wrapped as a `sea_orm::DatabaseConnection`), not the tenant pool.** This reads `identity_tenants` and `identity_tenant_memberships`, and neither is granted to `yorishiro_app` (the tenant pool's role): calling this against the tenant pool fails with "permission denied for table identity_tenants".
+/// **`conn` must be the identity pool (`DbHandle::identity`, wrapped as a `sea_orm::DatabaseConnection`), not the tenant pool.** This reads `tenant_tenants` and `tenant_memberships`, and neither is granted to `yorishiro_app` (the tenant pool's role): calling this against the tenant pool fails with "permission denied for table tenant_tenants".
 pub async fn create_tenant_api_key(
     conn: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -141,7 +141,7 @@ pub async fn create_tenant_api_key(
             hint: "use one of: read, write, schema".into(),
         })?;
 
-    let exists = identity_tenants::Entity::find_by_id(tenant_id)
+    let exists = tenant_tenants::Entity::find_by_id(tenant_id)
         .count(conn)
         .await
         .internal()?
@@ -177,7 +177,7 @@ pub async fn create_tenant_api_key(
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let plaintext = format!("{prefix}_{secret}");
 
-    let active = identity_api_keys::ActiveModel {
+    let active = api_keys::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(None),
         key_hash: ActiveValue::Set(crate::services::auth::hash_key(&plaintext)),
@@ -186,7 +186,7 @@ pub async fn create_tenant_api_key(
         user_id: ActiveValue::Set(user_id),
         ..Default::default()
     };
-    let inserted = identity_api_keys::Entity::insert(active)
+    let inserted = api_keys::Entity::insert(active)
         .exec_with_returning(conn)
         .await
         .internal()?;

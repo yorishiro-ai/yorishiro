@@ -13,8 +13,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
-    identity_invites, identity_tenant_memberships, identity_tenants, identity_users,
-    identity_workspaces,
+    tenant_memberships, tenant_tenants, user_users, workspace_invites, workspace_workspaces,
 };
 use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
 
@@ -24,8 +23,8 @@ pub const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 
 /// Counts real (non-infrastructure) tenants: every row except `INFRASTRUCTURE_TENANT_ID`.
 pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
-    identity_tenants::Entity::find()
-        .filter(identity_tenants::Column::Id.ne(INFRASTRUCTURE_TENANT_ID))
+    tenant_tenants::Entity::find()
+        .filter(tenant_tenants::Column::Id.ne(INFRASTRUCTURE_TENANT_ID))
         .count(conn)
         .await
         .internal()
@@ -37,7 +36,7 @@ pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yorishiro
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,
-) -> Result<identity_tenants::Model, YorishiroError> {
+) -> Result<tenant_tenants::Model, YorishiroError> {
     // SQLite has no database-enforced tenant isolation (no RLS, no roles), so a second tenant on that backend would be a silent isolation break rather than merely an unwanted one.
     // The cap is hardcoded rather than read from YORISHIRO_MAX_TENANTS: an operator raising that variable must not be able to loosen a constraint that exists because the isolation mechanism itself is absent, not because of a configurable policy choice.
     let effective_max = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
@@ -65,12 +64,12 @@ pub async fn create_tenant(
         }
     }
 
-    let active = identity_tenants::ActiveModel {
+    let active = tenant_tenants::ActiveModel {
         name: ActiveValue::Set(name.to_string()),
         max_workspaces: ActiveValue::Set(None),
         ..Default::default()
     };
-    // `id` on SQLite is filled in by identity_tenants::ActiveModel's before_save (crate::db::sqlite_generated_id), not here.
+    // `id` on SQLite is filled in by tenant_tenants::ActiveModel's before_save (crate::db::sqlite_generated_id), not here.
     active.insert(conn).await.internal()
 }
 
@@ -96,7 +95,7 @@ pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
     }
 }
 
-/// Mirrors the `identity_tenant_memberships.role` check constraint (`owner`/`admin`/`member`/`viewer`).
+/// Mirrors the `tenant_memberships.role` check constraint (`owner`/`admin`/`member`/`viewer`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MembershipRole {
@@ -150,11 +149,11 @@ pub async fn create_user(
     email: &str,
     password: &str,
     display_name: Option<&str>,
-) -> Result<identity_users::Model, YorishiroError> {
+) -> Result<user_users::Model, YorishiroError> {
     let password_hash =
         hash::hash_password(password).map_err(|err| YorishiroError::Internal(err.into()))?;
 
-    let active = identity_users::ActiveModel {
+    let active = user_users::ActiveModel {
         email: ActiveValue::Set(email.to_string()),
         password_hash: ActiveValue::Set(Some(password_hash)),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
@@ -178,9 +177,9 @@ pub async fn verify_login(
     conn: &impl ConnectionTrait,
     email: &str,
     password: &str,
-) -> Result<Option<identity_users::Model>, YorishiroError> {
-    let user = identity_users::Entity::find()
-        .filter(identity_users::Column::Email.eq(email))
+) -> Result<Option<user_users::Model>, YorishiroError> {
+    let user = user_users::Entity::find()
+        .filter(user_users::Column::Email.eq(email))
         .one(conn)
         .await
         .internal()?;
@@ -209,7 +208,7 @@ pub async fn add_member(
     use sea_orm::sea_query::OnConflict;
 
     // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
-    let active = identity_tenant_memberships::ActiveModel {
+    let active = tenant_memberships::ActiveModel {
         id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         user_id: ActiveValue::Set(user_id),
@@ -217,13 +216,13 @@ pub async fn add_member(
         ..Default::default()
     };
 
-    identity_tenant_memberships::Entity::insert(active)
+    tenant_memberships::Entity::insert(active)
         .on_conflict(
             OnConflict::columns([
-                identity_tenant_memberships::Column::TenantId,
-                identity_tenant_memberships::Column::UserId,
+                tenant_memberships::Column::TenantId,
+                tenant_memberships::Column::UserId,
             ])
-            .update_column(identity_tenant_memberships::Column::Role)
+            .update_column(tenant_memberships::Column::Role)
             .to_owned(),
         )
         .exec(conn)
@@ -237,9 +236,9 @@ pub async fn add_member(
 pub async fn get_user_by_email(
     conn: &impl ConnectionTrait,
     email: &str,
-) -> Result<Option<identity_users::Model>, YorishiroError> {
-    identity_users::Entity::find()
-        .filter(identity_users::Column::Email.eq(email))
+) -> Result<Option<user_users::Model>, YorishiroError> {
+    user_users::Entity::find()
+        .filter(user_users::Column::Email.eq(email))
         .one(conn)
         .await
         .internal()
@@ -251,10 +250,10 @@ pub async fn list_members(
     tenant_id: Uuid,
     page: super::pagination::ListParams,
 ) -> Result<Vec<MembershipRecord>, YorishiroError> {
-    let memberships = identity_tenant_memberships::Entity::find()
-        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
-        .find_also_related(identity_users::Entity)
-        .order_by_asc(identity_tenant_memberships::Column::CreatedAt)
+    let memberships = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
+        .find_also_related(user_users::Entity)
+        .order_by_asc(tenant_memberships::Column::CreatedAt)
         .limit(page.limit() as u64)
         .offset(page.offset() as u64)
         .all(conn)
@@ -282,9 +281,9 @@ pub async fn get_membership_role(
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<Option<MembershipRole>, YorishiroError> {
-    let membership = identity_tenant_memberships::Entity::find()
-        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
-        .filter(identity_tenant_memberships::Column::UserId.eq(user_id))
+    let membership = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
+        .filter(tenant_memberships::Column::UserId.eq(user_id))
         .one(conn)
         .await
         .internal()?;
@@ -303,12 +302,12 @@ pub async fn create_invite(
     email: &str,
     role: MembershipRole,
     ttl: Duration,
-) -> Result<(identity_invites::Model, String), YorishiroError> {
+) -> Result<(workspace_invites::Model, String), YorishiroError> {
     let token = random_hex(INVITE_TOKEN_BYTES);
     let token_hash = hash_key(&token);
     let expires_at = Utc::now() + ttl;
 
-    let active = identity_invites::ActiveModel {
+    let active = workspace_invites::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         email: ActiveValue::Set(email.to_string()),
         role: ActiveValue::Set(role.as_db_str().to_string()),
@@ -348,10 +347,10 @@ pub async fn redeem_invite(
     let now = Utc::now();
 
     // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
-    let invite = identity_invites::Entity::find()
-        .filter(identity_invites::Column::TokenHash.eq(token_hash.clone()))
-        .filter(identity_invites::Column::UsedAt.is_null())
-        .filter(identity_invites::Column::ExpiresAt.gt(now))
+    let invite = workspace_invites::Entity::find()
+        .filter(workspace_invites::Column::TokenHash.eq(token_hash.clone()))
+        .filter(workspace_invites::Column::UsedAt.is_null())
+        .filter(workspace_invites::Column::ExpiresAt.gt(now))
         .one(conn)
         .await
         .internal()?;
@@ -360,14 +359,14 @@ pub async fn redeem_invite(
         return Ok(None);
     };
 
-    let update_result = identity_invites::Entity::update_many()
+    let update_result = workspace_invites::Entity::update_many()
         .col_expr(
-            identity_invites::Column::UsedAt,
+            workspace_invites::Column::UsedAt,
             sea_orm::sea_query::Expr::value(now),
         )
-        .filter(identity_invites::Column::Id.eq(invite.id))
-        .filter(identity_invites::Column::UsedAt.is_null())
-        .filter(identity_invites::Column::ExpiresAt.gt(now))
+        .filter(workspace_invites::Column::Id.eq(invite.id))
+        .filter(workspace_invites::Column::UsedAt.is_null())
+        .filter(workspace_invites::Column::ExpiresAt.gt(now))
         .exec(conn)
         .await
         .internal()?;
@@ -403,11 +402,11 @@ pub async fn list_workspaces(
     tenant_id: Uuid,
     page: super::pagination::ListParams,
 ) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    use crate::models::_entities::identity_workspaces;
+    use crate::models::_entities::workspace_workspaces;
 
-    let workspaces = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
-        .order_by_asc(identity_workspaces::Column::CreatedAt)
+    let workspaces = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .order_by_asc(workspace_workspaces::Column::CreatedAt)
         .limit(page.limit() as u64)
         .offset(page.offset() as u64)
         .all(conn)
@@ -432,10 +431,10 @@ pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    use crate::models::_entities::identity_workspaces;
+    use crate::models::_entities::workspace_workspaces;
 
-    let memberships = identity_tenant_memberships::Entity::find()
-        .filter(identity_tenant_memberships::Column::UserId.eq(user_id))
+    let memberships = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::UserId.eq(user_id))
         .all(conn)
         .await
         .internal()?;
@@ -445,8 +444,8 @@ pub async fn list_workspaces_for_user(
         return Ok(vec![]);
     }
 
-    let workspaces = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.is_in(tenant_ids))
+    let workspaces = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.is_in(tenant_ids))
         .all(conn)
         .await
         .internal()?;
@@ -465,9 +464,9 @@ pub async fn get_workspace_tenant(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
-    use crate::models::_entities::identity_workspaces;
+    use crate::models::_entities::workspace_workspaces;
 
-    identity_workspaces::Entity::find_by_id(workspace_id)
+    workspace_workspaces::Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -499,13 +498,13 @@ pub async fn create_workspace(
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
     _embedding: Option<(&str, i32)>,
-) -> Result<identity_workspaces::Model, YorishiroError> {
-    use crate::models::_entities::identity_tenants;
-    use crate::models::identity_workspaces::{
+) -> Result<workspace_workspaces::Model, YorishiroError> {
+    use crate::models::_entities::tenant_tenants;
+    use crate::models::workspace_workspaces::{
         WORKSPACE_STATUS_ACTIVE, WORKSPACE_STATUS_SCHEMA_PENDING,
     };
 
-    let tenant = identity_tenants::Entity::find_by_id(tenant_id)
+    let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
         .one(conn)
         .await
         .internal()?
@@ -515,8 +514,8 @@ pub async fn create_workspace(
         crate::db::lock_for_update(conn, &workspace_count_lock_key(tenant_id))
             .await
             .internal()?;
-        let count = identity_workspaces::Entity::find()
-            .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+        let count = workspace_workspaces::Entity::find()
+            .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
             .count(conn)
             .await
             .internal()?;
@@ -530,7 +529,7 @@ pub async fn create_workspace(
         }
     }
 
-    let active = identity_workspaces::ActiveModel {
+    let active = workspace_workspaces::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         name: ActiveValue::Set(name.to_string()),
         max_entities: ActiveValue::Set(max_entities),
@@ -557,15 +556,15 @@ pub async fn set_tenant_max_workspaces(
     tenant_id: Uuid,
     max_workspaces: Option<i32>,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::identity_tenants;
+    use crate::models::_entities::tenant_tenants;
 
-    let tenant = identity_tenants::Entity::find_by_id(tenant_id)
+    let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
         .one(conn)
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
 
-    let mut active: identity_tenants::ActiveModel = tenant.into();
+    let mut active: tenant_tenants::ActiveModel = tenant.into();
     active.max_workspaces = ActiveValue::Set(max_workspaces);
     active.update(conn).await.internal()?;
     Ok(())
@@ -575,10 +574,10 @@ pub async fn set_tenant_max_workspaces(
 pub async fn get_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-) -> Result<identity_workspaces::Model, YorishiroError> {
-    use crate::models::_entities::identity_workspaces;
+) -> Result<workspace_workspaces::Model, YorishiroError> {
+    use crate::models::_entities::workspace_workspaces;
 
-    identity_workspaces::Entity::find_by_id(workspace_id)
+    workspace_workspaces::Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -596,9 +595,9 @@ pub async fn delete_workspace(
     conn: &DatabaseTransaction,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::identity_workspaces;
+    use crate::models::_entities::workspace_workspaces;
 
-    let workspace = identity_workspaces::Entity::find_by_id(workspace_id)
+    let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -610,8 +609,8 @@ pub async fn delete_workspace(
         .await
         .internal()?;
 
-    let remaining = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.eq(workspace.tenant_id))
+    let remaining = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(workspace.tenant_id))
         .count(conn)
         .await
         .internal()?;
@@ -621,7 +620,7 @@ pub async fn delete_workspace(
         });
     }
 
-    identity_workspaces::Entity::delete_by_id(workspace_id)
+    workspace_workspaces::Entity::delete_by_id(workspace_id)
         .exec(conn)
         .await
         .internal()?;
@@ -636,8 +635,8 @@ pub struct UserRecord {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<identity_users::Model> for UserRecord {
-    fn from(m: identity_users::Model) -> Self {
+impl From<user_users::Model> for UserRecord {
+    fn from(m: user_users::Model) -> Self {
         Self {
             id: m.id,
             email: m.email,

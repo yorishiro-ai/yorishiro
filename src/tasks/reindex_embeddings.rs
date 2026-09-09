@@ -8,7 +8,7 @@ use crate::services::embedding;
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
 ///
-/// Re-embeds every entity in a workspace with the deployment's currently configured embedding provider, then restamps `identity_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, so a workspace can move from one local model to another (nomic-embed-text-v1.5 to multilingual-e5-base, or any future model change) without the write-time model check in `services/embedding/sync.rs` refusing every subsequent write forever.
+/// Re-embeds every entity in a workspace with the deployment's currently configured embedding provider, then restamps `workspace_workspaces.embedding_model`/`embedding_dimensions` to that provider's own values, so a workspace can move from one local model to another (nomic-embed-text-v1.5 to multilingual-e5-base, or any future model change) without the write-time model check in `services/embedding/sync.rs` refusing every subsequent write forever.
 ///
 /// Unlike `resync_embeddings`, which only fills entities whose `embedding` column is NULL, this re-embeds every entity with `x-embed` fields regardless of whether it already has a vector: the whole point is replacing vectors from the old model, not filling gaps left by the old model.
 ///
@@ -20,7 +20,7 @@ use crate::services::embedding;
 ///
 /// This loads every candidate `EntityRecord` into memory in one batch, the same shape `resync_embeddings` already uses, rather than paging: consistent with that task, not a new consideration introduced here.
 ///
-/// PostgreSQL only, for the same reason as `resync_embeddings`: `content_entities` has no `embedding` column at all on SQLite.
+/// PostgreSQL only, for the same reason as `resync_embeddings`: `entity_entities` has no `embedding` column at all on SQLite.
 pub struct ReindexEmbeddings;
 
 #[derive(FromQueryResult)]
@@ -80,7 +80,7 @@ impl Task for ReindexEmbeddings {
 
         let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres,
-            "SELECT id FROM content_entities WHERE workspace_id = $1",
+            "SELECT id FROM entity_entities WHERE workspace_id = $1",
             [workspace_id.into()],
         ))
         .all(&app_context.db)

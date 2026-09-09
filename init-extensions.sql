@@ -16,7 +16,7 @@ ALTER ROLE yorishiro CREATEDB;
 -- Also into template1: Loco's request-test harness (loco_rs::testing::request_with_create_db)
 -- creates each throwaway test database with CREATE DATABASE, which copies template1, not the
 -- POSTGRES_DB this script otherwise runs against. Without this, converge fails on
--- content_entities.embedding inside every request test, and the resulting boot-error panics
+-- entity_entities.embedding inside every request test, and the resulting boot-error panics
 -- during loco_rs's own cleanup_db rather than surfacing as the actual error.
 \c template1
 CREATE EXTENSION IF NOT EXISTS vector;

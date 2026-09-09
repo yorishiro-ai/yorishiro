@@ -1,6 +1,6 @@
 //! Subscription tiers for the hosted offering.
 //!
-//! Self-hosted deployments never assign a plan (`identity_tenants.plan` stays absent, since base never writes `identity_tenant_billing`); this type is only ever produced by this crate's Stripe integration.
+//! Self-hosted deployments never assign a plan (`tenant_tenants.plan` stays absent, since base never writes `tenant_billing`); this type is only ever produced by this crate's Stripe integration.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub enum Plan {
 }
 
 /// Caps applied when a tenant is on a given plan.
-/// `max_workspaces` is written straight onto `identity_tenants` (see `crate::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
+/// `max_workspaces` is written straight onto `tenant_tenants` (see `crate::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
 /// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
 #[derive(Debug, Clone, Copy)]
 pub struct PlanCaps {

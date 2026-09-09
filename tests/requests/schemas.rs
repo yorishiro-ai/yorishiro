@@ -1,9 +1,9 @@
 use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
@@ -12,14 +12,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenant_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -34,7 +34,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
-    let key = identity_api_keys::Entity::create_api_key(
+    let key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Schema,
@@ -134,7 +134,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { tenant_id, key } = setup(&ctx).await;
 
-        let template = yorishiro::models::_entities::identity_templates::ActiveModel {
+        let template = yorishiro::models::_entities::template_templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant_id),
             name: sea_orm::ActiveValue::Set("library-note".into()),
             definition: sea_orm::ActiveValue::Set(serde_json::json!({
@@ -177,7 +177,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
     .await;
 }
 
-/// A caller passing no origin on a second version must not silently un-link a schema that was created from a template: `content_schemas::create_schema` inherits the previous active version's origin when the caller passes `None`.
+/// A caller passing no origin on a second version must not silently un-link a schema that was created from a template: `schema_schemas::create_schema` inherits the previous active version's origin when the caller passes `None`.
 #[tokio::test]
 #[serial]
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
@@ -187,7 +187,7 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { tenant_id, key } = setup(&ctx).await;
 
-        let template = yorishiro::models::_entities::identity_templates::ActiveModel {
+        let template = yorishiro::models::_entities::template_templates::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant_id),
             name: sea_orm::ActiveValue::Set("library-note".into()),
             definition: sea_orm::ActiveValue::Set(serde_json::json!({

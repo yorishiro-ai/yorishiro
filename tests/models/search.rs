@@ -4,9 +4,9 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, S
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::models::{content_entities, content_schemas, search};
+use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::{entity_entities, schema_schemas, search};
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::services::embedding::sync;
 
@@ -19,11 +19,11 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
-/// Writes a raw vector directly into `content_entity_embeddings_768`, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
+/// Writes a raw vector directly into `entity_embeddings_768`, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
 async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vector: Vec<f32>) {
     conn.execute_raw(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO content_entity_embeddings_768 (entity_id, embedding) VALUES ($1, $2)\
+        "INSERT INTO entity_embeddings_768 (entity_id, embedding) VALUES ($1, $2)\
          ON CONFLICT(entity_id) DO UPDATE SET embedding = $2",
         [
             entity_id.into(),
@@ -42,7 +42,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("search-test".into()),
             ..Default::default()
         };
@@ -50,7 +50,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             .await
             .expect("insert tenant");
 
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -60,7 +60,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             .await
             .expect("insert workspace");
 
-        let other_workspace = identity_workspaces::ActiveModel {
+        let other_workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("other".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -71,11 +71,11 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             .expect("insert other workspace");
 
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
         let other_def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(
+        schema_schemas::create_schema(
             &ctx.db,
             tenant.id,
             other_workspace.id,
@@ -86,10 +86,10 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         .await
         .expect("create schema in other workspace");
 
-        let close = content_entities::create(
+        let close = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "close match" }),
@@ -98,10 +98,10 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         )
         .await
         .expect("create close entity");
-        let far = content_entities::create(
+        let far = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "far match" }),
@@ -110,10 +110,10 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         )
         .await
         .expect("create far entity");
-        let other_workspace_entity = content_entities::create(
+        let other_workspace_entity = entity_entities::create(
             &ctx.db,
             other_workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "belongs to another workspace" }),
@@ -177,7 +177,7 @@ impl EmbeddingProvider for FixedWidthProvider {
     }
 }
 
-/// A workspace stamped with a dimension count (`identity_workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
+/// A workspace stamped with a dimension count (`workspace_workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
@@ -185,14 +185,14 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("dimension-mismatch-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -204,14 +204,14 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
-        let entity = content_entities::create(
+        let entity = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "will not get an embedding" }),
@@ -238,7 +238,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -302,7 +302,7 @@ impl EmbeddingProvider for FixedModelProvider {
     }
 }
 
-/// A workspace stamped with a model name (`identity_workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `content_entities.embedding vector(768)` allows, and the case that check exists to catch.
+/// A workspace stamped with a model name (`workspace_workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `entity_entities.embedding vector(768)` allows, and the case that check exists to catch.
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
@@ -310,14 +310,14 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("model-mismatch-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -331,14 +331,14 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
-        let entity = content_entities::create(
+        let entity = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "will not get an embedding" }),
@@ -369,7 +369,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -395,7 +395,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
                 "nomic-ai/nomic-embed-text-v1.5".into(),
@@ -406,7 +406,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -416,14 +416,14 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
-        let entity = content_entities::create(
+        let entity = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "resolves from tenant tier" }),
@@ -453,7 +453,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM entity_embeddings_768 WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -464,10 +464,10 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
         assert_eq!(stored, Some(true), "embedding must have been written");
 
         // A different model should be refused by the inherited model check.
-        let entity2 = content_entities::create(
+        let entity2 = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "wrong model, should be refused" }),
@@ -505,7 +505,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("tenant-dimension-tier-test".into()),
             embedding_model: sea_orm::ActiveValue::Set(Some(
                 "nomic-ai/nomic-embed-text-v1.5".into(),
@@ -516,7 +516,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -526,14 +526,14 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
-        let entity = content_entities::create(
+        let entity = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "wrong dimension from tenant" }),
@@ -575,14 +575,14 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("concurrent-reindex-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -592,15 +592,15 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
         // Create entities to reindex.
-        let e1 = content_entities::create(
+        let e1 = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "entity one" }),
@@ -609,10 +609,10 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         )
         .await
         .expect("create entity 1");
-        let e2 = content_entities::create(
+        let e2 = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "entity two" }),
@@ -623,7 +623,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         .expect("create entity 2");
 
         // Pre-stamp with an old model to simulate a workspace that needs reindexing.
-        let mut old_active = identity_workspaces::ActiveModel {
+        let mut old_active = workspace_workspaces::ActiveModel {
             id: sea_orm::ActiveValue::Unchanged(workspace.id),
             ..Default::default()
         };
@@ -726,7 +726,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         // The final workspace stamp must match the provider that won the lock race.
         // We check that the stamp and the stored vectors agree: whichever provider won,
         // both the stamp and every entity's embedding must point to it.
-        let final_model = identity_workspaces::Entity::find_by_id(workspace.id)
+        let final_model = workspace_workspaces::Entity::find_by_id(workspace.id)
             .one(&ctx.db)
             .await
             .expect("query final workspace")
@@ -754,7 +754,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
+                    "SELECT embedding FROM entity_embeddings_768 WHERE entity_id = $1",
                     [(*entity_id).into()],
                 ))
                 .one(&ctx.db)
@@ -789,14 +789,14 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("reindex-overwrite-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -806,15 +806,15 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
         // Create entities.
-        let e1 = content_entities::create(
+        let e1 = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "entity one" }),
@@ -823,10 +823,10 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         )
         .await
         .expect("create entity 1");
-        let e2 = content_entities::create(
+        let e2 = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "entity two" }),
@@ -843,7 +843,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         for entity in [&e1, &e2] {
-            let entity_record = content_entities::Entity::find_by_id(entity.id)
+            let entity_record = entity_entities::Entity::find_by_id(entity.id)
                 .one(&ctx.db)
                 .await
                 .expect("find entity")
@@ -868,7 +868,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
+                    "SELECT embedding FROM entity_embeddings_768 WHERE entity_id = $1",
                     [entity_id.into()],
                 ))
                 .one(&ctx.db)
@@ -886,7 +886,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         // Stamp the workspace with the old model so reindex considers it "in sync" — but
         // reindex's entire purpose is to re-embed regardless, so this stamp is only there
         // to make the test realistic.
-        let mut old_active = identity_workspaces::ActiveModel {
+        let mut old_active = workspace_workspaces::ActiveModel {
             id: sea_orm::ActiveValue::Unchanged(workspace.id),
             ..Default::default()
         };
@@ -916,7 +916,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         assert_eq!(outcome.reindexed, 2, "both entities must be reindexed");
 
         // Stamp and vectors must now agree on the new model.
-        let final_model = identity_workspaces::Entity::find_by_id(workspace.id)
+        let final_model = workspace_workspaces::Entity::find_by_id(workspace.id)
             .one(&ctx.db)
             .await
             .expect("query final workspace")
@@ -942,7 +942,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
+                    "SELECT embedding FROM entity_embeddings_768 WHERE entity_id = $1",
                     [entity_id.into()],
                 ))
                 .one(&ctx.db)
@@ -974,14 +974,14 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("trigram-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -991,14 +991,14 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(note_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
-        let matching = content_entities::create(
+        let matching = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "quarterly roadmap review" }),
@@ -1007,10 +1007,10 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
         )
         .await
         .expect("create matching entity");
-        content_entities::create(
+        entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "completely unrelated grocery list" }),
@@ -1046,7 +1046,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// appear.
 ///
 /// On SQLite, the search function's trigram half (pg_trgm on PostgreSQL) is replaced by an
-/// FTS5 query against `content_entities_fts` with `tokenize='trigram'`. This test boots
+/// FTS5 query against `entity_fts` with `tokenize='trigram'`. This test boots
 /// against a SQLite file database to confirm the FTS5 path works end to end, including schema
 /// creation, entity insertion, and trigger-driven index updates.
 #[tokio::test]
@@ -1064,7 +1064,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     crate::requests::boot_request_sqlite::<App, _, _>(
         db_path.clone(),
         |_request, ctx| async move {
-            let tenant = identity_tenants::ActiveModel {
+            let tenant = tenant_tenants::ActiveModel {
                 name: sea_orm::ActiveValue::Set("fts5-fallback-test".into()),
                 ..Default::default()
             };
@@ -1073,7 +1073,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 .expect("insert tenant");
             let tenant_id = tenant.id;
 
-            let workspace = identity_workspaces::ActiveModel {
+            let workspace = workspace_workspaces::ActiveModel {
                 tenant_id: sea_orm::ActiveValue::Set(tenant_id),
                 name: sea_orm::ActiveValue::Set("main".into()),
                 status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -1085,15 +1085,15 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             let workspace_id = workspace.id;
 
             let def = serde_json::from_value(note_definition()).expect("parse definition");
-            content_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
+            schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
                 .await
                 .expect("create schema");
 
             // Create an entity whose title contains the search phrase.
-            let matching = content_entities::create(
+            let matching = entity_entities::create(
                 &ctx.db,
                 workspace_id,
-                content_entities::CreateEntityInput {
+                entity_entities::CreateEntityInput {
                     schema_name: "note".into(),
                     entity_type: "note".into(),
                     data: serde_json::json!({ "title": "quarterly roadmap review" }),
@@ -1104,10 +1104,10 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             .expect("create matching entity");
 
             // Create an entity whose title does not match.
-            content_entities::create(
+            entity_entities::create(
                 &ctx.db,
                 workspace_id,
-                content_entities::CreateEntityInput {
+                entity_entities::CreateEntityInput {
                     schema_name: "note".into(),
                     entity_type: "note".into(),
                     data: serde_json::json!({ "title": "completely unrelated grocery list" }),
@@ -1135,11 +1135,11 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 
             // Modify the entity's data so the old search phrase no longer matches, then
             // confirm a search for the new phrase finds it.
-            let rec = content_entities::get(&ctx.db, workspace_id, matching.id)
+            let rec = entity_entities::get(&ctx.db, workspace_id, matching.id)
                 .await
                 .expect("fetch entity for update");
 
-            content_entities::update(
+            entity_entities::update(
                 &ctx.db,
                 workspace_id,
                 rec.id,
@@ -1178,11 +1178,11 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
             assert_eq!(hits[0].entity.id, matching.id);
 
-            content_entities::delete(&ctx.db, workspace_id, matching.id)
+            entity_entities::delete(&ctx.db, workspace_id, matching.id)
                 .await
                 .expect("delete entity");
 
-            let after_delete = content_entities::get(&ctx.db, workspace_id, matching.id).await;
+            let after_delete = entity_entities::get(&ctx.db, workspace_id, matching.id).await;
             assert!(after_delete.is_err(), "deleted entity must not be found");
         },
     )

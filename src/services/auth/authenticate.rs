@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{identity_api_keys, identity_workspaces};
+use crate::models::_entities::{api_keys, workspace_workspaces};
 
 use super::{ApiKeyScope, AuthContext, hash_key};
 
@@ -16,7 +16,7 @@ pub async fn authenticate(
 ) -> Result<AuthContext, YorishiroError> {
     let key_hash = hash_key(presented_key);
 
-    // `authenticate_api_key` is SECURITY DEFINER, so this bypasses RLS on identity_api_keys/identity_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id/audit (never key_hash itself).
+    // `authenticate_api_key` is SECURITY DEFINER, so this bypasses RLS on api_keys/workspace_workspaces, and limits the columns it returns to id/workspace_id/tenant_id/scope/user_id/audit (never key_hash itself).
     let row: Option<(Uuid, Uuid, Uuid, String, Option<Uuid>, bool)> = sqlx::query_as(
         "SELECT id, workspace_id, tenant_id, scope, user_id, audit FROM authenticate_api_key($1)",
     )
@@ -45,7 +45,7 @@ pub async fn authenticate(
 
 /// SQLite equivalent of [`authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
 ///
-/// `authenticate`'s Postgres path goes through the `authenticate_api_key` SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries `identity_api_keys`/`identity_workspaces` directly with the SeaORM entity API.
+/// `authenticate`'s Postgres path goes through the `authenticate_api_key` SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries `api_keys`/`workspace_workspaces` directly with the SeaORM entity API.
 /// Matches the SQL function's single-argument overload exactly: only a workspace-scoped key (`workspace_id` set) resolves, since the join is on `k.workspace_id`; a tenant-scoped key (`workspace_id` NULL) matches nothing here either, same as on Postgres.
 ///
 /// Deliberately not routed through the `Authenticator` trait (`crate::services::auth::authenticator`): this trait exists so `ee/` can swap the authentication rule without touching call sites, and `ee/` does not run against SQLite (see `.claude/rules/loco-architecture.md`), so there is no second implementation for the trait to replace on this backend.
@@ -55,8 +55,8 @@ pub async fn authenticate_sqlite(
 ) -> Result<AuthContext, YorishiroError> {
     let key_hash = hash_key(presented_key);
 
-    let key = identity_api_keys::Entity::find()
-        .filter(identity_api_keys::Column::KeyHash.eq(key_hash))
+    let key = api_keys::Entity::find()
+        .filter(api_keys::Column::KeyHash.eq(key_hash))
         .one(conn)
         .await
         .internal()?
@@ -66,7 +66,7 @@ pub async fn authenticate_sqlite(
         return Err(YorishiroError::Unauthenticated);
     };
 
-    let workspace = identity_workspaces::Entity::find_by_id(workspace_id)
+    let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
         .one(conn)
         .await
         .internal()?
@@ -91,12 +91,12 @@ pub async fn authenticate_sqlite(
 
 /// SQLite equivalent of [`touch_last_used`]: same best-effort, non-failing update, on the SeaORM entity API instead of a raw `sqlx::PgConnection`.
 pub async fn touch_last_used_sqlite(conn: &impl ConnectionTrait, api_key_id: Uuid) {
-    let result = identity_api_keys::Entity::update_many()
+    let result = api_keys::Entity::update_many()
         .col_expr(
-            identity_api_keys::Column::LastUsedAt,
+            api_keys::Column::LastUsedAt,
             sea_orm::sea_query::Expr::value(chrono::Utc::now()),
         )
-        .filter(identity_api_keys::Column::Id.eq(api_key_id))
+        .filter(api_keys::Column::Id.eq(api_key_id))
         .exec(conn)
         .await;
     if let Err(err) = result {
@@ -113,7 +113,7 @@ pub async fn touch_last_used(
     conn: &mut sqlx::PgConnection,
     api_key_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    sqlx::query("UPDATE identity_api_keys SET last_used_at = now() WHERE id = $1")
+    sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
         .bind(api_key_id)
         .execute(conn)
         .await

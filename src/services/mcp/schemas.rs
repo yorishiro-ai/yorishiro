@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::error::YorishiroError;
 use crate::metaschema::MetaSchemaDefinition;
-use crate::models::content_schemas;
+use crate::models::schema_schemas;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -73,7 +73,7 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.ctx.workspace_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let summaries = match content_schemas::list(authorized.txn(), workspace_id, page).await {
+        let summaries = match schema_schemas::list(authorized.txn(), workspace_id, page).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
@@ -95,7 +95,7 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.ctx.workspace_id;
         let record =
-            match content_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name)
+            match schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name)
                 .await
             {
                 Ok(value) => value,
@@ -118,16 +118,11 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match content_schemas::get_by_id(
-            authorized.txn(),
-            workspace_id,
-            args.schema_id,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let record =
+            match schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(record)
     }
 
@@ -177,7 +172,7 @@ impl YorishiroMcpServer {
             },
             (None, Some(template_id)) => {
                 let (definition, origin) =
-                    match crate::models::identity_templates::resolve_template_definition(
+                    match crate::models::template_templates::resolve_template_definition(
                         &self.ctx.db,
                         authorized.ctx.tenant_id,
                         &template_id,
@@ -195,7 +190,7 @@ impl YorishiroMcpServer {
 
         let tenant_id = authorized.ctx.tenant_id;
         let workspace_id = authorized.ctx.workspace_id;
-        let (record, diff) = match content_schemas::create_schema(
+        let (record, diff) = match schema_schemas::create_schema(
             authorized.txn(),
             tenant_id,
             workspace_id,
@@ -248,7 +243,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match content_schemas::get_active_schema(
+        let record = match schema_schemas::get_active_schema(
             authorized.txn(),
             workspace_id,
             &args.schema_name,

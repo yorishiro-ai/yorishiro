@@ -4,7 +4,7 @@
 
 use crate::db;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{identity_template_versions, identity_tenants};
+use crate::models::_entities::{template_versions, tenant_tenants};
 use crate::models::tenancy::INFRASTRUCTURE_TENANT_ID;
 use loco_rs::app::AppContext;
 use sea_orm::sea_query::OnConflict;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 pub const OFFICIAL_TENANT_ID: Uuid = INFRASTRUCTURE_TENANT_ID;
 
 /// Shown as the listing's author.
-/// `identity_templates.author` is free text, so this does not require a user account.
+/// `template_templates.author` is free text, so this does not require a user account.
 pub const OFFICIAL_AUTHOR: &str = "Yorishiro";
 
 const OFFICIAL_TENANT_NAME: &str = "Yorishiro Official";
@@ -54,9 +54,9 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
         .await?;
 
         // Compare against the newest version of any status, not just `stable`: publishing a fresh version every run would otherwise walk the version number up forever while the definition stayed the same.
-        let latest = identity_template_versions::Entity::find()
-            .filter(identity_template_versions::Column::TemplateId.eq(template_id))
-            .order_by_desc(identity_template_versions::Column::Version)
+        let latest = template_versions::Entity::find()
+            .filter(template_versions::Column::TemplateId.eq(template_id))
+            .order_by_desc(template_versions::Column::Version)
             .limit(1)
             .one(&ctx.db)
             .await
@@ -94,14 +94,14 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
 /// Idempotent (`ON CONFLICT DO NOTHING` on the fixed id).
 pub async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
     // Bypasses tenancy::create_tenant: the publisher is infrastructure, not subject to YORISHIRO_MAX_TENANTS.
-    let active = identity_tenants::ActiveModel {
+    let active = tenant_tenants::ActiveModel {
         id: ActiveValue::Set(OFFICIAL_TENANT_ID),
         name: ActiveValue::Set(OFFICIAL_TENANT_NAME.to_string()),
         ..Default::default()
     };
-    identity_tenants::Entity::insert(active)
+    tenant_tenants::Entity::insert(active)
         .on_conflict(
-            OnConflict::column(identity_tenants::Column::Id)
+            OnConflict::column(tenant_tenants::Column::Id)
                 .do_nothing()
                 .to_owned(),
         )
@@ -112,14 +112,14 @@ pub async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), Y
 }
 
 /// Creates the template row, or refreshes the description/definition of the existing one.
-/// `identity_templates` is unique on `(tenant_id, name)`, which is what makes this idempotent.
+/// `template_templates` is unique on `(tenant_id, name)`, which is what makes this idempotent.
 async fn upsert_template(
     conn: &impl ConnectionTrait,
     name: &str,
     description: Option<&str>,
     definition: &serde_json::Value,
 ) -> Result<Uuid, YorishiroError> {
-    use crate::models::_entities::identity_templates::{ActiveModel, Column, Entity};
+    use crate::models::_entities::template_templates::{ActiveModel, Column, Entity};
 
     let active = ActiveModel {
         tenant_id: ActiveValue::Set(OFFICIAL_TENANT_ID),

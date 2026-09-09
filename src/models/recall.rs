@@ -8,9 +8,9 @@ use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::content_entities::{self, EntityRecord};
-use crate::models::content_relations::{self, DEFAULT_NEIGHBORS_LIMIT};
-use crate::models::content_schemas::{self, SchemaRecord};
+use crate::models::entity_entities::{self, EntityRecord};
+use crate::models::entity_relations::{self, DEFAULT_NEIGHBORS_LIMIT};
+use crate::models::schema_schemas::{self, SchemaRecord};
 
 pub const DEFAULT_RECALL_LIMIT: i64 = DEFAULT_NEIGHBORS_LIMIT;
 
@@ -101,7 +101,7 @@ pub async fn recall_context(
     let depth = query.depth.clamp(1, MAX_RECALL_DEPTH);
     let full = query.full;
 
-    let entity = content_entities::get(conn, workspace_id, entity_id).await?;
+    let entity = entity_entities::get(conn, workspace_id, entity_id).await?;
 
     let mut schema_cache: HashMap<Uuid, SchemaRecord> = HashMap::new();
 
@@ -114,7 +114,7 @@ pub async fn recall_context(
         let mut next_frontier = Vec::new();
 
         let mut by_pivot =
-            content_relations::neighbors_batch(conn, workspace_id, &frontier, limit + 1).await?;
+            entity_relations::neighbors_batch(conn, workspace_id, &frontier, limit + 1).await?;
 
         for &source_id in &frontier {
             let Some(mut node_neighbors) = by_pivot.remove(&source_id) else {
@@ -139,7 +139,7 @@ pub async fn recall_context(
                         Some(schema) => schema,
                         None => {
                             let schema =
-                                content_schemas::get_by_id(conn, workspace_id, schema_id).await?;
+                                schema_schemas::get_by_id(conn, workspace_id, schema_id).await?;
                             schema_cache.entry(schema_id).or_insert(schema)
                         }
                     };

@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::models::identity_maintenance;
+use crate::models::system_maintenance;
 
 /// `cargo loco task maintenance_status`
 pub struct MaintenanceStatus;
@@ -17,7 +17,7 @@ impl Task for MaintenanceStatus {
     }
 
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
-        let state = identity_maintenance::get(&app_context.db)
+        let state = system_maintenance::get(&app_context.db)
             .await
             .map_err(|err| Error::Message(err.to_string()))?;
 

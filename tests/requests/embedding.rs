@@ -4,9 +4,9 @@ use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::embedding_resolver::EmbeddingKeyResolver;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 use yorishiro::services::embedding::WorkspaceEmbeddingResolver;
 
@@ -16,14 +16,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenant_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -38,7 +38,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
-    let key = identity_api_keys::Entity::create_api_key(
+    let key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Schema,
@@ -163,8 +163,8 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
 
         // The workspace was created via ActiveModel::insert directly (not POST /setup), so it
         // carries no embedding_dimensions stamp yet; stamp it explicitly to exercise the check.
-        let mut active: identity_workspaces::ActiveModel =
-            identity_workspaces::Entity::find_by_id(setup.workspace_id)
+        let mut active: workspace_workspaces::ActiveModel =
+            workspace_workspaces::Entity::find_by_id(setup.workspace_id)
                 .one(&ctx.db)
                 .await
                 .expect("find workspace")
@@ -259,12 +259,12 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
 
 /// A second workspace under the same tenant as `setup`, for the cross-workspace isolation check above.
 async fn setup_second_workspace(ctx: &loco_rs::app::AppContext, first: &Setup) -> Uuid {
-    let first_workspace = identity_workspaces::Entity::find_by_id(first.workspace_id)
+    let first_workspace = workspace_workspaces::Entity::find_by_id(first.workspace_id)
         .one(&ctx.db)
         .await
         .expect("find first workspace")
         .expect("first workspace exists");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(first_workspace.tenant_id),
         name: sea_orm::ActiveValue::Set("second".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),

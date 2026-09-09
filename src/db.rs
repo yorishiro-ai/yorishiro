@@ -181,7 +181,7 @@ impl Storage for TenantDb {
 
 /// Which pools this deployment holds for control-plane vs. tenant-scoped access.
 ///
-/// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`identity_users`/`identity_tenant_memberships`/`identity_invites`) that have no tenant/workspace context yet to scope by.
+/// `identity` connects with the migration role, bypassing RLS for the control-plane tables (`user_users`/`tenant_memberships`/`workspace_invites`) that have no tenant/workspace context yet to scope by.
 #[derive(Clone)]
 pub struct DbHandle {
     pub tenant: TenantDb,
@@ -209,7 +209,7 @@ pub fn sqlite_generated_id(
 ///
 /// Checks `is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, which `is_unchanged()` does not match.
 ///
-/// `insert` is a parameter because an insert normally takes the column's database default. `content_schemas` is the exception and passes `false` on both paths, since SQLite refuses a non-constant default on a column added to an existing table.
+/// `insert` is a parameter because an insert normally takes the column's database default. `schema_schemas` is the exception and passes `false` on both paths, since SQLite refuses a non-constant default on a column added to an existing table.
 ///
 /// There is deliberately no counterpart for `created_at`: that column has `NOT NULL DEFAULT now()` on both backends, so nothing in application code should be able to move it.
 pub fn stamped_updated_at(

@@ -77,7 +77,7 @@ async fn delete_llm_key(
 pub struct InferFillReport {
     /// Groups every snapshot this run takes, so `POST /api/migration-jobs/{job_id}/undo` (base's own, unchanged) can put every entity this run touched back to what it held before.
     pub job_id: Uuid,
-    /// Fields a model proposed and this run wrote to `content_entities`.
+    /// Fields a model proposed and this run wrote to `entity_entities`.
     pub applied: i64,
     /// Entities skipped: nothing missing, the model declined to guess, or the guess didn't fit the schema.
     pub skipped: i64,
@@ -85,7 +85,7 @@ pub struct InferFillReport {
 
 /// `POST /api/schemas/active/{name}/infer-fill`
 ///
-/// Writes each accepted guess straight to `content_entities`, the same "compute and write immediately" shape the embedding-sync worker types use, rather than holding proposals in a separate table for a second confirming request: a guess is reversible the same way any other entity write is, through base's own `content_entities::snapshot`/`undo_job`, so that extra step would buy no reversibility this deployment does not already have.
+/// Writes each accepted guess straight to `entity_entities`, the same "compute and write immediately" shape the embedding-sync worker types use, rather than holding proposals in a separate table for a second confirming request: a guess is reversible the same way any other entity write is, through base's own `entity_entities::snapshot`/`undo_job`, so that extra step would buy no reversibility this deployment does not already have.
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -119,7 +119,7 @@ async fn infer_fill(
         .internal()?;
 
     let active =
-        crate::models::content_schemas::get_active_schema(&schema_txn, workspace_id, &name).await?;
+        crate::models::schema_schemas::get_active_schema(&schema_txn, workspace_id, &name).await?;
     let job_id = Uuid::new_v4();
     let client = InferenceClient::new(config);
 

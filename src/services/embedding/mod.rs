@@ -28,7 +28,7 @@ pub enum EmbedKind {
 }
 
 /// Provider that generates embedding vectors.
-/// The `content_entities.embedding` column is dimensionless (`vector`), so any model works.
+/// The `entity_entities.embedding` column is dimensionless (`vector`), so any model works.
 /// All vectors in a deployment must share the same dimension count.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
@@ -76,11 +76,11 @@ pub trait EmbeddingProvider: Send + Sync {
 /// A trait that a deployment can implement to let a workspace point at a different embedding backend than the deployment default (its own local model, a different OpenAI-compatible endpoint) without touching the callers that resolve a provider.
 /// [`DefaultEmbeddingResolver`] is the behaviour of every deployment that does not replace it: every workspace uses the deployment-wide provider.
 ///
-/// `conn` is `ctx.db` (Loco's own `DatabaseConnection`), not the RLS-scoped tenant pool: a per-workspace assignment is deployment configuration, read the same way `identity_workspace_llm_keys` is, not tenant content.
+/// `conn` is `ctx.db` (Loco's own `DatabaseConnection`), not the RLS-scoped tenant pool: a per-workspace assignment is deployment configuration, read the same way `workspace_llm_keys` is, not tenant content.
 /// This is why `conn` takes a `sea_orm::DatabaseConnection` rather than `DbHandle`: `DbHandle` does not exist on SQLite (see `Hooks::after_context`), and this trait must work on both backends, unlike `Authenticator`, which is a PostgreSQL/RLS-only concept by design.
 ///
 /// Returns `Ok(None)` when the workspace has no assignment of its own, so the caller falls back to the deployment default already held in `shared_store` rather than this trait constructing it: building the fallback (a local model load can be hundreds of megabytes) is a cost only worth paying once, not on every call whether or not a workspace override exists.
-/// No caching: this runs once per call, same as `identity_workspace_llm_keys::get`.
+/// No caching: this runs once per call, same as `workspace_llm_keys::get`.
 /// Acceptable for the same reason it is there: a metadata read, not the slow work.
 #[async_trait]
 pub trait WorkspaceEmbeddingResolver: Send + Sync {
