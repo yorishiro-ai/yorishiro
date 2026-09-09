@@ -47,7 +47,7 @@ pub struct SearchHit {
 }
 
 #[derive(FromQueryResult)]
-struct SearchRow {
+pub struct SearchRow {
     id: Uuid,
     workspace_id: Uuid,
     schema_id: Uuid,
@@ -62,7 +62,7 @@ struct SearchRow {
 }
 
 impl SearchRow {
-    fn into_hit(self) -> SearchHit {
+    pub fn into_hit(self) -> SearchHit {
         SearchHit {
             entity: EntityRecord {
                 id: self.id,
@@ -123,11 +123,11 @@ const HIT_COLUMNS: &str = "e.id, e.workspace_id, e.schema_id, e.schema_version, 
 /// The vector-search half of [`search_by_vector`]: find entities ordered by cosine
 /// distance to a query vector.
 ///
-/// PostgreSQL uses the HNSW `<=>` operator on `content_entity_embeddings.embedding`.
-/// SQLite uses the `vec_distance_cosine` function for KNN search over the BLOB column,
-/// falling back to the FTS5 virtual table for text matching.
+/// Uses a width-partitioned table (e.g. `content_entity_embeddings_768`) selected by the
+/// workspace's effective dimension. PostgreSQL uses the HNSW `<=>` operator; SQLite uses
+/// the `vec_distance_cosine` function.
 ///
-/// Both backends join `content_entity_embeddings` via `entity_id` (not rowid): VACUUM
+/// Both backends join the width-specific table via `entity_id` (not rowid): VACUUM
 /// may renumber implicit rowids, so we must never join on them (see
 /// sqlite.org/lang_vacuum.html).
 struct VectorKnn {
@@ -138,12 +138,18 @@ struct VectorKnn {
 }
 
 impl VectorKnn {
-    fn postgres(vector: Vec<f32>, workspace_id: Uuid, query: &SearchQuery, limit: i64) -> Self {
+    fn postgres(
+        vector: Vec<f32>,
+        workspace_id: Uuid,
+        query: &SearchQuery,
+        limit: i64,
+        table_name: &str,
+    ) -> Self {
         let (scope_sql, scope_values) = scope_clause(workspace_id, query, 2);
         let sql = format!(
             "SELECT {HIT_COLUMNS}, (ee.embedding <=> $1) AS distance \
              FROM content_entities e \
-             JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+             JOIN {table_name} ee ON ee.entity_id = e.id \
              WHERE ee.embedding IS NOT NULL{scope_sql} \
              ORDER BY ee.embedding <=> $1 \
              LIMIT {limit}"
@@ -154,7 +160,13 @@ impl VectorKnn {
         Self { sql, values }
     }
 
-    fn sqlite(vector: Vec<f32>, workspace_id: Uuid, query: &SearchQuery, limit: i64) -> Self {
+    fn sqlite(
+        vector: Vec<f32>,
+        workspace_id: Uuid,
+        query: &SearchQuery,
+        limit: i64,
+        table_name: &str,
+    ) -> Self {
         // Convert the vector to raw LE f32 bytes for `vec_distance_cosine`.
         let blob_bytes =
             unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
@@ -165,7 +177,7 @@ impl VectorKnn {
         let mut sql = format!(
             "SELECT {HIT_COLUMNS}, vec_distance_cosine(?, ee.embedding) AS distance \
              FROM content_entities e \
-             JOIN content_entity_embeddings ee ON e.id = ee.entity_id \
+             JOIN {table_name} ee ON e.id = ee.entity_id \
              WHERE ee.embedding IS NOT NULL AND e.workspace_id = ?"
         );
         let mut values: Vec<sea_orm::Value> = vec![
@@ -187,6 +199,30 @@ impl VectorKnn {
 /// a pg_trgm fuzzy match (PostgreSQL) or FTS5 match (SQLite) against their data.
 /// Vector matches are always ranked ahead of trigram-only matches; trigram-only matches are
 /// ordered by similarity.
+/// Resolves the workspace's effective embedding width for selecting the correct
+/// width-specific table. Returns the width and the table name.
+///
+/// Resolves the workspace's effective embedding width for selecting the correct
+/// width-specific table. Returns the width and the table name.
+///
+/// Falls back to the deployment default (YORISHIRO_EMBEDDING_DIMENSIONS, default 768).
+pub async fn resolve_search_table(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(usize, String), YorishiroError> {
+    use crate::services::embedding::sync::resolve_embedding_chain;
+
+    let chain = resolve_embedding_chain(conn, workspace_id).await?;
+    let dimension = chain
+        .workspace_dimensions
+        .or(chain.tenant_dimensions)
+        .or(Some(
+            i32::try_from(chain.deployment_dimensions).unwrap_or(768),
+        ))
+        .unwrap_or(768) as usize;
+    Ok((dimension, format!("content_entity_embeddings_{dimension}")))
+}
+
 pub async fn search_by_vector(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -204,11 +240,15 @@ pub async fn search_by_vector(
         });
     }
 
+    let (_dimension, embed_table) = resolve_search_table(conn, workspace_id).await?;
+
     let knn = match conn.get_database_backend() {
         sea_orm::DatabaseBackend::Postgres => {
-            VectorKnn::postgres(vector, workspace_id, &query, limit)
+            VectorKnn::postgres(vector, workspace_id, &query, limit, &embed_table)
         }
-        sea_orm::DatabaseBackend::Sqlite => VectorKnn::sqlite(vector, workspace_id, &query, limit),
+        sea_orm::DatabaseBackend::Sqlite => {
+            VectorKnn::sqlite(vector, workspace_id, &query, limit, &embed_table)
+        }
         // _ includes MySQL and any future backends: vector search is Postgres/SQLite only.
         _ => {
             return Err(YorishiroError::BackendUnsupported {
@@ -256,7 +296,7 @@ pub async fn search_by_vector(
                 "SELECT {HIT_COLUMNS}, NULL AS distance \
                  FROM content_entities_fts \
                  JOIN content_entities e ON CAST(e.id AS TEXT) = content_entities_fts.entity_id \
-                 LEFT JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+                 LEFT JOIN {embed_table} ee ON ee.entity_id = e.id \
                  WHERE content_entities_fts MATCH ? AND ee.entity_id IS NULL AND e.workspace_id = ?"
             );
             let mut values: Vec<sea_orm::Value> = vec![query_text.into(), workspace_id.into()];
@@ -286,7 +326,7 @@ pub async fn search_by_vector(
             let trigram_sql = format!(
                 "SELECT {HIT_COLUMNS}, NULL::float8 AS distance \
                  FROM content_entities e \
-                 LEFT JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+                 LEFT JOIN {embed_table} ee ON ee.entity_id = e.id \
                  WHERE ee.embedding IS NULL{scope_sql} \
                    AND (e.data::text) % $1 \
                  ORDER BY similarity(e.data::text, $1) DESC \

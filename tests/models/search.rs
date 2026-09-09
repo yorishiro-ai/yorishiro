@@ -19,11 +19,11 @@ fn note_definition() -> serde_json::Value {
     })
 }
 
-/// Writes a raw vector directly into `content_entity_embeddings`, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
+/// Writes a raw vector directly into `content_entity_embeddings_768`, bypassing the embedding provider entirely: `search_by_vector` only needs a stored vector, and a test has no business calling out to a real embedding service.
 async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vector: Vec<f32>) {
     conn.execute_raw(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO content_entity_embeddings (entity_id, embedding) VALUES ($1, $2)\
+        "INSERT INTO content_entity_embeddings_768 (entity_id, embedding) VALUES ($1, $2)\
          ON CONFLICT(entity_id) DO UPDATE SET embedding = $2",
         [
             entity_id.into(),
@@ -238,7 +238,7 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -369,7 +369,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -453,7 +453,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             }
             Row::find_by_statement(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
-                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings WHERE entity_id = $1",
+                "SELECT (embedding IS NOT NULL) AS has_embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
                 [entity.id.into()],
             ))
             .one(&ctx.db)
@@ -754,7 +754,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entity_embeddings WHERE entity_id = $1",
+                    "SELECT embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
                     [(*entity_id).into()],
                 ))
                 .one(&ctx.db)
@@ -868,7 +868,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entity_embeddings WHERE entity_id = $1",
+                    "SELECT embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
                     [entity_id.into()],
                 ))
                 .one(&ctx.db)
@@ -942,7 +942,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 }
                 Row::find_by_statement(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Postgres,
-                    "SELECT embedding FROM content_entity_embeddings WHERE entity_id = $1",
+                    "SELECT embedding FROM content_entity_embeddings_768 WHERE entity_id = $1",
                     [entity_id.into()],
                 ))
                 .one(&ctx.db)

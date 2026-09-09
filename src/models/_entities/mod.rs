@@ -4,7 +4,9 @@ pub mod prelude;
 
 pub mod content_entities;
 pub mod content_entity_column_preferences;
-pub mod content_entity_embeddings;
+pub mod content_entity_embeddings_1024;
+pub mod content_entity_embeddings_1536;
+pub mod content_entity_embeddings_768;
 pub mod content_entity_snapshots;
 pub mod content_relations;
 pub mod content_schemas;
@@ -18,6 +20,7 @@ pub mod identity_template_versions;
 pub mod identity_templates;
 pub mod identity_tenant_billing;
 pub mod identity_tenant_memberships;
+pub mod identity_tenant_reindex_schedules;
 pub mod identity_tenants;
 pub mod identity_users;
 pub mod identity_workspace_embedding_keys;

@@ -64,6 +64,7 @@ Ungated (serve regardless):
 
 Tests live in `tests/requests/licence_gate.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing. The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
 
-## Config-file fallback (dead code)
+## Config file
 
-`licence_key_from_config` in `licence.rs` reads `config.yml`/`YORISHIRO_CONFIG_PATH`; this application resolves `config/{environment}.yaml` and defines no `license_key:` field there, so the function always returns `None`. Only the `YORISHIRO_LICENSE_KEY` environment variable is live.
+This application resolves `config/{environment}.yaml` and defines no `license_key:` field there.
+The only live configuration is the `YORISHIRO_LICENSE_KEY` environment variable.

@@ -60,8 +60,13 @@ pub async fn sync_embedding(
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
 
-    // `content_entity_embeddings.embedding` is `vector(768)` at the SQL type level, so a wrong-width write is already rejected by Postgres itself, not silently accepted: `pgvector` errors with "expected 768 dimensions, not N".
-    // That error names neither the workspace nor the write that produced it, so this check exists to turn that into an operator-readable message (which workspace, which width was expected, what to do about it), not to prevent data corruption the database wasn't already preventing.
+    // The embedding column is now width-partitioned: each table (e.g. `content_entity_embeddings_768`)
+    // holds vectors from a single model width. A wrong-width write would land in the wrong table,
+    // which is silently wrong — no Postgres error to catch it. This dimension check is the first
+    // line of defense, matching the original intent that the width-specific column type provided.
+    // The model stamp check below is the second line: two models of the same width (nomic-embed-text
+    // v1.5 and multilingual-e5-base both 768) can coexist in the same table, and this check is the
+    // only thing standing between a workspace and a silent write from the wrong model.
     let chain = resolve_embedding_chain(conn, workspace_id).await?;
     // Three-tier inheritance: workspace stamp → tenant default → deployment default.
     let effective_dimensions = chain
@@ -124,8 +129,21 @@ pub async fn sync_embedding(
     // sync for the same entity is already in flight or has already landed, so nothing needs
     // redoing on this call's behalf. See `embed_and_write`'s own doc comment for why
     // `reindex_workspace` cannot make the same choice.
-    let written =
-        embed_and_write(conn, workspace_id, entity_id, snapshot_updated_at, vector).await?;
+    let effective_dimension = chain
+        .workspace_dimensions
+        .or(chain.tenant_dimensions)
+        .unwrap_or(i32::try_from(chain.deployment_dimensions).unwrap_or(768))
+        as usize;
+
+    let written = embed_and_write(
+        conn,
+        workspace_id,
+        entity_id,
+        snapshot_updated_at,
+        vector,
+        effective_dimension,
+    )
+    .await?;
 
     // Stamp the workspace *after* the write succeeds, not before: stamping before would record a
     // model name even when the write fails (entity deleted, concurrently modified, or the write
@@ -149,33 +167,39 @@ pub async fn sync_embedding(
     Ok(())
 }
 
-/// Writes an already-computed embedding vector into `content_entity_embeddings`, with no
-/// check against the workspace's stamped model or dimensions.
+/// Writes an already-computed embedding vector into the width-specific table,
+/// with no check against the workspace's stamped model or dimensions.
 ///
-/// Returns whether the row was actually written: `false` means the `updated_at` guard below
-/// skipped the write because the entity changed since `snapshot_updated_at` was read, not an
-/// error.
+/// `dimension` selects which table: `content_entity_embeddings_{dimension}`.
+/// Returns whether the row was actually written: `false` means the `updated_at`
+/// guard below skipped the write because the entity changed since
+/// `snapshot_updated_at` was read, not an error.
 ///
-/// [`sync_embedding`] wraps this with both checks for the normal write path, and ignores the
-/// returned bool: a skipped write there means a newer sync for the same entity is already in
-/// flight or has already landed, so nothing needs redoing.
-/// [`reindex_workspace`] calls this directly instead: its entire job is changing which model
-/// a workspace's vectors were embedded with, so a check that refuses a write on exactly that
-/// mismatch would refuse its own writes on every row.
+/// [`sync_embedding`] wraps this with both checks for the normal write path,
+/// and ignores the returned bool: a skipped write there means a newer sync for
+/// the same entity is already in flight or has already landed, so nothing needs
+/// redoing.
+/// [`reindex_workspace`] calls this directly instead: its entire job is
+/// changing which model a workspace's vectors were embedded with, so a check
+/// that refuses a write on exactly that mismatch would refuse its own writes on
+/// every row.
 /// Safe to bypass here only because `reindex_workspace` restamps
-/// `identity_workspaces.embedding_model` itself, and only after every row succeeds: the stamp
-/// and the actual column contents genuinely disagree for its own duration, which is the
-/// situation `sync_embedding`'s check exists to prevent everywhere else.
-/// `reindex_workspace` does *not* ignore the returned bool the way `sync_embedding` does:
-/// unlike an ordinary sync, a skipped reindex write means this entity's current data was
-/// never actually re-embedded with the new model, so counting it as reindexed would let the
-/// workspace restamp while that row still holds the old model's vector.
+/// `identity_workspaces.embedding_model` itself, and only after every row
+/// succeeds: the stamp and the actual column contents genuinely disagree for its
+/// own duration, which is the situation `sync_embedding`'s check exists to
+/// prevent everywhere else.
+/// `reindex_workspace` does *not* ignore the returned bool the way
+/// `sync_embedding` does: unlike an ordinary sync, a skipped reindex write
+/// means this entity's current data was never actually re-embedded with the new
+/// model, so counting it as reindexed would let the workspace restamp while that
+/// row still holds the old model's vector.
 async fn embed_and_write(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     entity_id: Uuid,
     snapshot_updated_at: chrono::DateTime<chrono::Utc>,
     vector: Vec<f32>,
+    dimension: usize,
 ) -> Result<bool, YorishiroError> {
     // `updated_at` as a write condition prevents a vector computed from stale data from
     // overwriting a newer one when concurrent syncs for the same entity finish out of order.
@@ -183,7 +207,7 @@ async fn embed_and_write(
     // sync.
     //
     // We use raw SQL because the vector column lives in a separate table whose shape differs
-    // between PostgreSQL (`vector(768)`) and SQLite (`BLOB`), and SeaORM has no builder for
+    // between PostgreSQL (`vector(N)`) and SQLite (`BLOB`), and SeaORM has no builder for
     // this cross-backend shape.  The `updated_at` guard is a WHERE clause on
     // `content_entities`, which is shared.
     let backend = conn.get_database_backend();
@@ -197,6 +221,8 @@ async fn embed_and_write(
         Vec::new()
     };
 
+    let table_name = format!("content_entity_embeddings_{dimension}");
+
     // Both the plain INSERT and the ON CONFLICT DO UPDATE share the same
     // `updated_at` guard: if the entity was modified between the batch fetch
     // and this write landing, we must not record a stale vector regardless of
@@ -208,24 +234,26 @@ async fn embed_and_write(
     let rows_affected = conn
         .execute_raw(Statement::from_sql_and_values(
             backend,
-            "INSERT INTO content_entity_embeddings (entity_id, embedding) \
-             SELECT $1, $2 \
-             WHERE EXISTS ( \
-               SELECT 1 FROM content_entities \
-               WHERE content_entities.id = $1 \
-                 AND content_entities.workspace_id = $3 \
-                 AND content_entities.updated_at = $4 \
-             ) \
-             ON CONFLICT(entity_id) \
-             DO UPDATE SET embedding = $2 \
-               WHERE content_entity_embeddings.entity_id = $1 \
-                 AND EXISTS ( \
+            format!(
+                "INSERT INTO {table_name} (entity_id, embedding) \
+                 SELECT $1, $2 \
+                 WHERE EXISTS ( \
                    SELECT 1 FROM content_entities \
-                   WHERE content_entities.id = content_entity_embeddings.entity_id \
+                   WHERE content_entities.id = $1 \
                      AND content_entities.workspace_id = $3 \
                      AND content_entities.updated_at = $4 \
                  ) \
-             RETURNING 1",
+                 ON CONFLICT(entity_id) \
+                 DO UPDATE SET embedding = $2 \
+                   WHERE {table_name}.entity_id = $1 \
+                     AND EXISTS ( \
+                       SELECT 1 FROM content_entities \
+                       WHERE content_entities.id = {table_name}.entity_id \
+                         AND content_entities.workspace_id = $3 \
+                         AND content_entities.updated_at = $4 \
+                     ) \
+                 RETURNING 1"
+            ),
             if backend == sea_orm::DatabaseBackend::Postgres {
                 vec![
                     entity_id.into(),
@@ -306,8 +334,10 @@ enum ReindexStep {
 /// The reindex loop's per-entity step: composes the embedding text, embeds it, and writes it via [`embed_and_write`], bypassing both of [`sync_embedding`]'s checks (model stamp and dimension) for the reason documented on [`embed_and_write`] itself.
 /// Otherwise identical to [`sync_embedding_for_record`]: same schema resolution, same no-op on an entity_type with no `x-embed` fields.
 ///
-/// Skipping the dimension check specifically is harmless today only because `content_entity_embeddings.embedding` is `vector(768)` at the SQL type level: Postgres itself still refuses a wrong-width write, `pgvector` erroring with "expected 768 dimensions, not N".
-/// The day a differently-sized model is added and this deployment's column type changes to match, that raw Postgres error, naming neither the workspace nor the entity, becomes the first thing a reindex against the new model hits, rather than the readable message [`sync_embedding`]'s own dimension check would have given.
+/// The `provider`'s `dimensions()` decides which table the vector lands in, matching the width
+/// the reindex is producing. The dimension check is intentionally skipped: a reindex is the
+/// operation that *changes* which width a workspace uses, so refusing on width mismatch would
+/// refuse its own writes.
 async fn reindex_embedding_for_record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -331,7 +361,16 @@ async fn reindex_embedding_for_record(
         return Ok(ReindexStep::NothingToEmbed);
     };
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    let written = embed_and_write(conn, workspace_id, record.id, record.updated_at, vector).await?;
+    let dimension = provider.dimensions();
+    let written = embed_and_write(
+        conn,
+        workspace_id,
+        record.id,
+        record.updated_at,
+        vector,
+        dimension,
+    )
+    .await?;
     Ok(if written {
         ReindexStep::Reindexed
     } else {

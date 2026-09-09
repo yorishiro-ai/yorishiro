@@ -1801,6 +1801,49 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // identity_tenant_reindex_schedules
+        //
+        // Per-tenant reindex scheduling table (enterprise edition).
+        // No RLS and no GRANT: reads and writes go through the migration-role pool,
+        // the same pattern as identity_workspace_llm_keys and identity_workspace_embedding_keys.
+        let [created_at, updated_at] = helpers::timestamps(manager);
+        let ts_tz_col = helpers::ts_tz_col(manager, Alias::new("scheduled_for"));
+        manager
+            .create_table(
+                Table::create()
+                    .table(Alias::new("identity_tenant_reindex_schedules"))
+                    .if_not_exists()
+                    .col(
+                        helpers::uuid_col(manager, Alias::new("tenant_id"))
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Alias::new("interval")).text().not_null())
+                    .col(ColumnDef::new(Alias::new("timezone")).text())
+                    .col(ts_tz_col)
+                    .col(created_at)
+                    .col(updated_at)
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_identity_tenant_reindex_schedules_tenant_id")
+                            .from(
+                                Alias::new("identity_tenant_reindex_schedules"),
+                                Alias::new("tenant_id"),
+                            )
+                            .to(Alias::new("identity_tenants"), Alias::new("id"))
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        helpers::pg_only(
+            manager,
+            "REVOKE ALL ON TABLE identity_tenant_reindex_schedules FROM PUBLIC;
+             GRANT SELECT ON TABLE identity_tenant_reindex_schedules TO yorishiro_app;",
+        )
+        .await?;
+
         Ok(())
     }
 
@@ -1858,6 +1901,7 @@ impl MigrationTrait for Migration {
             "identity_api_key_audit_log", // → identity_workspaces, identity_tenants, identity_users
             "identity_api_keys",          // → identity_workspaces, identity_tenants, identity_users
             "identity_workspace_worker_classes", // → identity_workspaces
+            "identity_tenant_reindex_schedules", // → identity_tenants
             "identity_workspace_embedding_keys", // → identity_workspaces
             "identity_workspace_llm_keys", // → identity_workspaces
             "content_entities",           // → identity_workspaces, content_schemas, identity_users
