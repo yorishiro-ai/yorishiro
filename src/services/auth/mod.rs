@@ -117,7 +117,7 @@ pub(crate) fn random_hex(byte_len: usize) -> String {
     hex_encode(&bytes)
 }
 
-/// Hashes a presented key into the form stored in `identity_api_keys.key_hash`.
+/// Hashes a presented key into the form stored in `api_keys.key_hash`.
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }

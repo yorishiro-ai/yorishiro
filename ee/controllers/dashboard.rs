@@ -1,7 +1,7 @@
 //! `GET /api/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
 
 use crate::error::ResultExt;
-use crate::models::_entities::identity_tenants;
+use crate::models::_entities::tenant_tenants;
 use crate::models::tenancy::{self, MembershipRecord};
 use axum::Json;
 use axum::extract::State;
@@ -39,7 +39,7 @@ async fn tenant_overview(
             tracing::warn!(error = %err, "hosted dashboard request rejected during authentication")
         })?;
 
-    let tenant = identity_tenants::Entity::find_by_id(tenant_id)
+    let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
         .one(&ctx.db)
         .await
         .internal()?

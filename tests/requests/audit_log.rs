@@ -2,8 +2,8 @@ use super::boot_request;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_api_keys, identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::services::auth::ApiKeyScope;
 
@@ -17,14 +17,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenant_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set(tenant_name.into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -45,7 +45,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
         .await
         .expect("add owner");
 
-    let migration_key = identity_api_keys::Entity::create_api_key(
+    let migration_key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Migration,
@@ -55,7 +55,7 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
     .await
     .expect("issue migration key")
     .plaintext;
-    let audit_key = identity_api_keys::Entity::create_api_key(
+    let audit_key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Read,
@@ -134,7 +134,7 @@ async fn undo_migration_job_is_recorded() {
             }
         }))
         .expect("parse definition");
-        yorishiro::models::content_schemas::create_schema(
+        yorishiro::models::schema_schemas::create_schema(
             &ctx.db,
             setup.tenant_id,
             setup.workspace_id,
@@ -144,10 +144,10 @@ async fn undo_migration_job_is_recorded() {
         )
         .await
         .expect("create schema");
-        let entity = yorishiro::models::content_entities::create(
+        let entity = yorishiro::models::entity_entities::create(
             &ctx.db,
             setup.workspace_id,
-            yorishiro::models::content_entities::CreateEntityInput {
+            yorishiro::models::entity_entities::CreateEntityInput {
                 schema_name: "note".into(),
                 entity_type: "note".into(),
                 data: serde_json::json!({ "title": "before" }),
@@ -157,7 +157,7 @@ async fn undo_migration_job_is_recorded() {
         .await
         .expect("create entity");
         let job_id = Uuid::new_v4();
-        yorishiro::models::content_entities::snapshot(
+        yorishiro::models::entity_entities::snapshot(
             &ctx.db,
             setup.workspace_id,
             entity.id,
@@ -165,7 +165,7 @@ async fn undo_migration_job_is_recorded() {
         )
         .await
         .expect("snapshot entity");
-        yorishiro::models::content_entities::update(
+        yorishiro::models::entity_entities::update(
             &ctx.db,
             setup.workspace_id,
             entity.id,

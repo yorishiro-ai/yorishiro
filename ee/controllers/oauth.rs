@@ -11,7 +11,7 @@
 use crate::YorishiroError;
 use crate::controllers::ApiError;
 use crate::error::ResultExt;
-use crate::models::identity_api_keys::IdentityApiKeys;
+use crate::models::api_keys::IdentityApiKeys;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -124,7 +124,7 @@ async fn callback(
         oauth::handle_callback(&config, &code, &request_state, csrf_cookie_value.as_deref())
             .await?;
 
-    // The deployment's actual embedding model and width, the same source `setup.rs` stamps a freshly bootstrapped workspace with, not a guessed default: `content_entities.embedding`'s index is a fixed width, and a workspace stamped with the wrong one fails every entity write's dimension check.
+    // The deployment's actual embedding model and width, the same source `setup.rs` stamps a freshly bootstrapped workspace with, not a guessed default: `entity_entities.embedding`'s index is a fixed width, and a workspace stamped with the wrong one fails every entity write's dimension check.
     let embedding_provider = ctx
         .shared_store
         .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>()

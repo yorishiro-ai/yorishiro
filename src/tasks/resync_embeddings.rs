@@ -4,16 +4,16 @@ use sea_orm::{FromQueryResult, Statement};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::models::content_entities;
+use crate::models::entity_entities;
 use crate::services::embedding;
 
 /// `cargo loco task resync_embeddings workspace_id:<uuid>`
 ///
-/// Re-syncs embeddings for entities that have no row in `content_entity_embeddings`: an operational recovery command for entities that fell out of search because no sync ever completed for them.
+/// Re-syncs embeddings for entities that have no row in `entity_embeddings`: an operational recovery command for entities that fell out of search because no sync ever completed for them.
 ///
 /// Two things leave an entity in that state. A sync that was enqueued but never succeeded (an embedding provider outage that outlasts the job's own retries), and a write that never enqueued one at all: `models::import`'s `import_jsonl` still does not, on either transport, so every entity restored from a backup needs this command run against its workspace before it is searchable by anything but the pg_trgm / FTS5 fuzzy fallback.
 ///
-/// Uses a LEFT JOIN anti-join against `content_entity_embeddings` so the query works on both PostgreSQL and SQLite.
+/// Uses a LEFT JOIN anti-join against `entity_embeddings` so the query works on both PostgreSQL and SQLite.
 ///
 /// This calls `sync_embedding_for_record`, the same guarded path a normal entity write uses, deliberately: if the deployment's configured provider does not match a workspace's stamped model (`services/embedding/sync.rs`'s write-time model check), every candidate here fails for that reason and none get a vector.
 /// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
@@ -34,9 +34,9 @@ struct CandidateRow {
     updated_by: Option<Uuid>,
 }
 
-impl From<CandidateRow> for content_entities::EntityRecord {
+impl From<CandidateRow> for entity_entities::EntityRecord {
     fn from(row: CandidateRow) -> Self {
-        content_entities::EntityRecord {
+        entity_entities::EntityRecord {
             id: row.id,
             workspace_id: row.workspace_id,
             schema_id: row.schema_id,
@@ -81,8 +81,8 @@ impl Task for ResyncEmbeddings {
             "SELECT e.id, e.workspace_id, e.schema_id, e.schema_version, \
              e.entity_type, e.data, e.created_at, e.updated_at, \
              e.created_by, e.updated_by \
-             FROM content_entities e \
-             LEFT JOIN content_entity_embeddings ee ON ee.entity_id = e.id \
+             FROM entity_entities e \
+             LEFT JOIN entity_embeddings ee ON ee.entity_id = e.id \
              WHERE e.workspace_id = $1 AND ee.entity_id IS NULL",
             [workspace_id.into()],
         ))
@@ -93,7 +93,7 @@ impl Task for ResyncEmbeddings {
         let mut synced = 0;
         let mut failed = 0;
         for candidate in &candidates {
-            let record = content_entities::EntityRecord {
+            let record = entity_entities::EntityRecord {
                 id: candidate.id,
                 workspace_id: candidate.workspace_id,
                 schema_id: candidate.schema_id,

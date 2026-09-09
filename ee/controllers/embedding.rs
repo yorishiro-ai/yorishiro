@@ -1,6 +1,6 @@
 //! A workspace's own embedding provider assignment.
 //!
-//! A workspace that wants its vectors produced by a different backend than the deployment default (its own node, a different OpenAI-compatible endpoint) configures one here, the same shape `identity_workspace_llm_keys` already gives LLM inference.
+//! A workspace that wants its vectors produced by a different backend than the deployment default (its own node, a different OpenAI-compatible endpoint) configures one here, the same shape `workspace_llm_keys` already gives LLM inference.
 //! A workspace with none configured keeps using the deployment default, so an existing deployment is unaffected until an operator sets one.
 
 use crate::controllers::ApiError;
@@ -42,7 +42,7 @@ async fn set_embedding_key(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
     let workspace =
-        crate::models::_entities::identity_workspaces::Entity::find_by_id(auth_ctx.workspace_id)
+        crate::models::_entities::workspace_workspaces::Entity::find_by_id(auth_ctx.workspace_id)
             .one(&ctx.db)
             .await
             .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?

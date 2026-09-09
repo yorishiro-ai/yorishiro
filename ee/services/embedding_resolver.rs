@@ -1,4 +1,4 @@
-//! This crate's `WorkspaceEmbeddingResolver`: a workspace with its own row in `identity_workspace_embedding_keys` uses that provider instead of the deployment default.
+//! This crate's `WorkspaceEmbeddingResolver`: a workspace with its own row in `workspace_embedding_keys` uses that provider instead of the deployment default.
 
 use std::sync::Arc;
 

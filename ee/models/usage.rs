@@ -2,7 +2,7 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
-    content_entities, identity_tenant_memberships, identity_workspaces,
+    entity_entities, tenant_memberships, workspace_workspaces,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::Serialize;
@@ -17,29 +17,29 @@ pub struct TenantUsage {
 }
 
 /// Computes usage counters for invoicing/dashboard display.
-/// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every workspace in a tenant and `content_entities` only has a workspace-level RLS policy, not a tenant-wide one.
+/// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every workspace in a tenant and `entity_entities` only has a workspace-level RLS policy, not a tenant-wide one.
 pub async fn compute_tenant_usage(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<TenantUsage, YorishiroError> {
-    let workspace_count = identity_workspaces::Entity::find()
-        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+    let workspace_count = workspace_workspaces::Entity::find()
+        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
         .count(conn)
         .await
         .internal()?;
 
-    let member_count = identity_tenant_memberships::Entity::find()
-        .filter(identity_tenant_memberships::Column::TenantId.eq(tenant_id))
+    let member_count = tenant_memberships::Entity::find()
+        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
         .count(conn)
         .await
         .internal()?;
 
-    // Filters on identity_workspaces.tenant_id, a column content_entities does not itself carry,
-    // via the belongs_to relation content_entities::Relation::IdentityWorkspaces already defines
-    // (content_entities.workspace_id -> identity_workspaces.id).
-    let entity_count = content_entities::Entity::find()
-        .inner_join(identity_workspaces::Entity)
-        .filter(identity_workspaces::Column::TenantId.eq(tenant_id))
+    // Filters on workspace_workspaces.tenant_id, a column entity_entities does not itself carry,
+    // via the belongs_to relation entity_entities::Relation::IdentityWorkspaces already defines
+    // (entity_entities.workspace_id -> workspace_workspaces.id).
+    let entity_count = entity_entities::Entity::find()
+        .inner_join(workspace_workspaces::Entity)
+        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
         .count(conn)
         .await
         .internal()?;

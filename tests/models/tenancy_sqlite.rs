@@ -71,7 +71,7 @@ async fn a_second_tenant_is_refused_on_sqlite_even_with_a_large_max_tenants() {
 }
 
 /// `create_invite` builds its `ActiveModel` with `..Default::default()`, so `id` reaches the insert `NotSet`.
-/// PostgreSQL fills it from the column's `uuidv7()` default; SQLite has no such default, so this table's `before_save` must call `db::sqlite_generated_id` or the insert fails with `NOT NULL constraint failed: identity_invites.id`.
+/// PostgreSQL fills it from the column's `uuidv7()` default; SQLite has no such default, so this table's `before_save` must call `db::sqlite_generated_id` or the insert fails with `NOT NULL constraint failed: workspace_invites.id`.
 ///
 /// This test exists here rather than in `tests/` because that suite is PostgreSQL-only (`request_with_create_db` issues `CREATE DATABASE`), so nothing there reaches the backend where the failure occurs.
 #[tokio::test]

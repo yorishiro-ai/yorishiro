@@ -2,7 +2,7 @@
 //!
 //! Reads and writes go through `ctx.db` (the migration-role connection),
 //! not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table,
-//! matching `identity_workspace_embedding_keys` and `identity_workspace_llm_keys`.
+//! matching `workspace_embedding_keys` and `workspace_llm_keys`.
 //!
 //! A scheduler row tells the deployment-wide ticker (started in `Hooks::after_context`)
 //! to enqueue a reindex for every workspace under this tenant on each tick.
@@ -15,7 +15,7 @@
 //! enqueues a reindex for every workspace under each tenant that needs one.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_tenant_reindex_schedules::{ActiveModel, Column, Entity};
+use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Column, Entity};
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use sea_orm::sea_query::OnConflict;
@@ -144,7 +144,7 @@ pub async fn get(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<
-    Option<crate::models::_entities::identity_tenant_reindex_schedules::Model>,
+    Option<crate::models::_entities::tenant_reindex_schedules::Model>,
     YorishiroError,
 > {
     let row = Entity::find()
@@ -175,8 +175,8 @@ impl Task for TenantReindexScheduler {
     }
 
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
-        use crate::models::_entities::identity_tenant_reindex_schedules as ScheduleEntity;
-        use crate::models::_entities::identity_workspaces as WorkspaceEntity;
+        use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
+        use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::ReindexArgs;
 

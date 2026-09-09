@@ -9,7 +9,7 @@ use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::models::billing;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
-use yorishiro::models::_entities::identity_tenants;
+use yorishiro::models::_entities::tenant_tenants;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -61,7 +61,7 @@ fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
 }
 
 async fn create_tenant(conn: &impl sea_orm::ConnectionTrait, name: &str) -> Uuid {
-    let active = identity_tenants::ActiveModel {
+    let active = tenant_tenants::ActiveModel {
         name: ActiveValue::Set(name.into()),
         max_workspaces: ActiveValue::Set(None),
         ..Default::default()
@@ -203,7 +203,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
             assert_eq!(billing_record.plan.as_deref(), Some("free"));
 
             use sea_orm::EntityTrait;
-            let tenant = identity_tenants::Entity::find_by_id(tenant_id)
+            let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
                 .one(&ctx.db)
                 .await
                 .unwrap()

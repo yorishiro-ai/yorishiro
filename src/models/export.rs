@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::content_entities::{self, EntityRecord};
-use crate::models::content_relations::{self, RelationRecord};
-use crate::models::content_schemas::{self, SchemaRecord};
+use crate::models::entity_entities::{self, EntityRecord};
+use crate::models::entity_relations::{self, RelationRecord};
+use crate::models::schema_schemas::{self, SchemaRecord};
 
 /// One line of a JSONL export: a tagged union so schema/entity/relation records can be told apart on read-back without a separate line-position convention.
 /// `Deserialize` is derived so `models::import::import_jsonl` can read the same shape back in.
@@ -25,19 +25,19 @@ pub async fn export_all(
 ) -> Result<Vec<ExportRecord>, YorishiroError> {
     let mut records = Vec::new();
     records.extend(
-        content_schemas::export_all(conn, workspace_id)
+        schema_schemas::export_all(conn, workspace_id)
             .await?
             .into_iter()
             .map(ExportRecord::Schema),
     );
     records.extend(
-        content_entities::export_all(conn, workspace_id)
+        entity_entities::export_all(conn, workspace_id)
             .await?
             .into_iter()
             .map(ExportRecord::Entity),
     );
     records.extend(
-        content_relations::export_all(conn, workspace_id)
+        entity_relations::export_all(conn, workspace_id)
             .await?
             .into_iter()
             .map(ExportRecord::Relation),

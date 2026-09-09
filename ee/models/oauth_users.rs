@@ -1,9 +1,9 @@
-//! Reading and writing the OAuth identity columns on `identity_users`.
+//! Reading and writing the OAuth identity columns on `user_users`.
 //!
 //! The query alone: what to do with a lookup's result (first login vs. returning user, tenant and workspace auto-provisioning) is `services::oauth::users`'s.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_users;
+use crate::models::_entities::user_users;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
 };
@@ -23,9 +23,9 @@ pub async fn find_by_oauth_identity(
     provider: &str,
     subject_id: &str,
 ) -> Result<Option<OAuthUser>, YorishiroError> {
-    let user = identity_users::Entity::find()
-        .filter(identity_users::Column::OauthProvider.eq(provider))
-        .filter(identity_users::Column::OauthSubjectId.eq(subject_id))
+    let user = user_users::Entity::find()
+        .filter(user_users::Column::OauthProvider.eq(provider))
+        .filter(user_users::Column::OauthSubjectId.eq(subject_id))
         .one(conn)
         .await
         .internal()?;
@@ -38,7 +38,7 @@ pub async fn find_by_oauth_identity(
 
 #[derive(Debug)]
 pub enum CreateOauthUserError {
-    /// Some unique constraint on `identity_users` rejected the insert.
+    /// Some unique constraint on `user_users` rejected the insert.
     /// This can only be the `email` column's own constraint (a genuinely different account already holds this email): `find_or_create` holds `pg_advisory_xact_lock` for this exact `(provider, subject_id)` for the whole first-login path, including a re-check via `find_by_oauth_identity` immediately before this insert, so no other caller can be concurrently inserting the same identity.
     /// `users_oauth_identity_idx` cannot be the constraint that fired here.
     UniqueViolation,
@@ -56,7 +56,7 @@ pub async fn create_oauth_user(
     provider: &str,
     subject_id: &str,
 ) -> Result<OAuthUser, CreateOauthUserError> {
-    let active = identity_users::ActiveModel {
+    let active = user_users::ActiveModel {
         email: ActiveValue::Set(email.to_string()),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
         oauth_provider: ActiveValue::Set(Some(provider.to_string())),

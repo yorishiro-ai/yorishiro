@@ -11,7 +11,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::models::content_relations;
+use crate::models::entity_relations;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -74,7 +74,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let input = content_relations::CreateRelationInput {
+        let input = entity_relations::CreateRelationInput {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
@@ -82,7 +82,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match content_relations::create(authorized.txn(), workspace_id, input).await {
+        let record = match entity_relations::create(authorized.txn(), workspace_id, input).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
@@ -102,7 +102,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match content_relations::get(authorized.txn(), workspace_id, args.id).await {
+        let record = match entity_relations::get(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
@@ -121,7 +121,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        match content_relations::delete(authorized.txn(), workspace_id, args.id).await {
+        match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
@@ -140,7 +140,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let query = content_relations::ListRelationsQuery {
+        let query = entity_relations::ListRelationsQuery {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
@@ -149,7 +149,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let records = match content_relations::list(authorized.txn(), workspace_id, query).await {
+        let records = match entity_relations::list(authorized.txn(), workspace_id, query).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
@@ -173,7 +173,7 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match content_relations::set_status(
+        let record = match entity_relations::set_status(
             authorized.txn(),
             workspace_id,
             args.id,

@@ -3,11 +3,11 @@
 //! The query alone: what to do about a change is `services::origin`'s, which decides whether a merge is safe and what it would produce.
 //!
 //! Owns no table.
-//! `content_schemas` and `identity_templates` are both base's; both are read here on `ctx.db` (the migration/admin connection), since `identity_templates` carries no GRANT to `yorishiro_app` and a request's RLS-scoped connection cannot see it at all.
+//! `schema_schemas` and `template_templates` are both base's; both are read here on `ctx.db` (the migration/admin connection), since `template_templates` carries no GRANT to `yorishiro_app` and a request's RLS-scoped connection cannot see it at all.
 //! That does not make this base's: the endpoint it serves is enterprise, and an edition is decided by what a feature is rather than by which tables it reads.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::content_schemas::UpstreamChange;
+use crate::models::schema_schemas::UpstreamChange;
 use crate::models::pagination::ListParams;
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
@@ -41,8 +41,8 @@ pub async fn list_with_upstream_changes(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT s.id AS schema_id, s.name AS schema_name, s.version, \
                 t.id AS template_id, t.name AS template_name, t.updated_at AS changed_at \
-           FROM content_schemas s \
-           JOIN identity_templates t ON t.id = s.origin_template_id \
+           FROM schema_schemas s \
+           JOIN template_templates t ON t.id = s.origin_template_id \
           WHERE s.workspace_id = $1 \
             AND s.status = 'active' \
             AND s.origin_status = 'linked' \

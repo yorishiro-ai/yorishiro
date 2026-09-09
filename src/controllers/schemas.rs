@@ -12,8 +12,8 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
 use crate::error::YorishiroError;
 use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
-use crate::models::content_schemas::{self, SchemaRecord, SchemaSummary};
-use crate::models::identity_templates;
+use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
+use crate::models::template_templates;
 use crate::templates::{self, TemplateSummary};
 
 #[derive(Serialize)]
@@ -27,7 +27,7 @@ pub async fn list_schemas(
     Query(page): Query<crate::controllers::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let summaries = content_schemas::list(authorized.txn(), workspace_id, page.into()).await?;
+    let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.into()).await?;
     Ok(Json(summaries))
 }
 
@@ -60,7 +60,7 @@ pub async fn create_schema(
         CreateSchemaRequest::Definition(definition) => definition,
         CreateSchemaRequest::Template { template_id } => {
             let (definition, origin) =
-                identity_templates::resolve_template_definition(&ctx.db, tenant_id, &template_id)
+                template_templates::resolve_template_definition(&ctx.db, tenant_id, &template_id)
                     .await?;
             origin_template_id = origin;
             origin_snapshot = origin.map(|_| definition.clone());
@@ -69,7 +69,7 @@ pub async fn create_schema(
     };
 
     let workspace_id = authorized.ctx.workspace_id;
-    let (schema, diff) = content_schemas::create_schema(
+    let (schema, diff) = schema_schemas::create_schema(
         authorized.txn(),
         tenant_id,
         workspace_id,
@@ -90,7 +90,7 @@ pub async fn get_active_schema(
     Path(name): Path<String>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record = content_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
+    let record = schema_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
     Ok(Json(record))
 }
 
@@ -99,7 +99,7 @@ pub async fn get_schema_by_id(
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record = content_schemas::get_by_id(authorized.txn(), workspace_id, schema_id).await?;
+    let record = schema_schemas::get_by_id(authorized.txn(), workspace_id, schema_id).await?;
     Ok(Json(record))
 }
 
@@ -122,7 +122,7 @@ pub async fn get_entity_type_json_schema(
     Path((name, entity_type)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record = content_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
+    let record = schema_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
 
     let entity_type_def = record
         .definition

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::models::identity_templates;
+use crate::models::template_templates;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -47,7 +47,7 @@ impl YorishiroMcpServer {
         let tenant_id = authorized.ctx.tenant_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let templates =
-            match identity_templates::list_templates(&self.ctx.db, tenant_id, page).await {
+            match template_templates::list_templates(&self.ctx.db, tenant_id, page).await {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
             };
@@ -70,7 +70,7 @@ impl YorishiroMcpServer {
 
         let tenant_id = authorized.ctx.tenant_id;
         let template =
-            match identity_templates::get_template(&self.ctx.db, tenant_id, args.id).await {
+            match template_templates::get_template(&self.ctx.db, tenant_id, args.id).await {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
             };

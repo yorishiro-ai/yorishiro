@@ -3,13 +3,13 @@
 //! Creating a schema from a template is not part of this: base owns `template_id` on `POST /api/schemas` and the `origin_*` columns.
 //! This module owns the machinery that flows a template's edits into copies afterwards.
 //!
-//! These functions take both a schema connection and `ctx`, and the split is not incidental: the schema is workspace content, read over the RLS-scoped connection (the one an `Authorized` extractor's transaction holds), while `identity_templates` is control-plane data the request role holds no grant on and can only be reached through `ctx.db`.
+//! These functions take both a schema connection and `ctx`, and the split is not incidental: the schema is workspace content, read over the RLS-scoped connection (the one an `Authorized` extractor's transaction holds), while `template_templates` is control-plane data the request role holds no grant on and can only be reached through `ctx.db`.
 //! Passing `ctx.db` for the schema side would bypass RLS; passing the RLS-scoped connection for the template side would fail with a permission error.
 
 use crate::error::YorishiroError;
 use crate::metaschema::{MetaSchemaDefinition, VersioningDiff};
-use crate::models::content_schemas::{self, SchemaRecord};
-use crate::models::identity_templates;
+use crate::models::schema_schemas::{self, SchemaRecord};
+use crate::models::template_templates;
 use loco_rs::app::AppContext;
 use sea_orm::ConnectionTrait;
 use uuid::Uuid;
@@ -53,7 +53,7 @@ async fn merge_sides(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<MergeSides, YorishiroError> {
-    let schema = content_schemas::get_by_id(schema_conn, workspace_id, schema_id).await?;
+    let schema = schema_schemas::get_by_id(schema_conn, workspace_id, schema_id).await?;
 
     // `get_by_id` fetches any version, archived ones included: it is how a caller reads an old definition.
     // Merging into one is a different matter: `create_schema` archives whatever is currently active and installs the result as the new active version, so merging an archived version would resurrect an abandoned definition as the live one, and entities written against the current active version would find their schema replaced by an older lineage.
@@ -92,7 +92,7 @@ async fn merge_sides(
         });
     };
 
-    let template = identity_templates::get_template(&ctx.db, tenant_id, template_id).await?;
+    let template = template_templates::get_template(&ctx.db, tenant_id, template_id).await?;
 
     Ok(MergeSides {
         base,
@@ -123,7 +123,7 @@ pub async fn merge_apply(
     let plan = merge::three_way(&sides.base, &sides.upstream, &sides.local.definition);
     let merged = merge::apply_plan(&plan, &sides.upstream, &sides.local.definition)?;
 
-    content_schemas::create_schema(
+    schema_schemas::create_schema(
         schema_conn,
         tenant_id,
         workspace_id,

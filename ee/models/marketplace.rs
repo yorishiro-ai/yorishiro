@@ -1,4 +1,4 @@
-//! The template marketplace: `identity_templates`, `identity_template_versions` and `identity_template_reviews`.
+//! The template marketplace: `template_templates`, `template_versions` and `template_reviews`.
 //!
 //! All three are created by the one schema migration in the root `migration` crate; this crate has never had a migration crate of its own, and the tables are base-owned even though only `ee/` reads them.
 //!
@@ -43,8 +43,8 @@ pub struct TemplateVersionRecord {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<crate::models::_entities::identity_template_versions::Model> for TemplateVersionRecord {
-    fn from(row: crate::models::_entities::identity_template_versions::Model) -> Self {
+impl From<crate::models::_entities::template_versions::Model> for TemplateVersionRecord {
+    fn from(row: crate::models::_entities::template_versions::Model) -> Self {
         Self {
             id: row.id,
             template_id: row.template_id,
@@ -68,8 +68,8 @@ pub struct TemplateReviewRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<crate::models::_entities::identity_template_reviews::Model> for TemplateReviewRecord {
-    fn from(row: crate::models::_entities::identity_template_reviews::Model) -> Self {
+impl From<crate::models::_entities::template_reviews::Model> for TemplateReviewRecord {
+    fn from(row: crate::models::_entities::template_reviews::Model) -> Self {
         Self {
             id: row.id,
             template_id: row.template_id,
@@ -131,16 +131,16 @@ pub async fn list_marketplace(
     MarketplaceListing::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT t.id AS template_id, t.name, t.description, t.tags, t.author, t.tenant_id, \
-         (SELECT max(v.version) FROM identity_template_versions v \
+         (SELECT max(v.version) FROM template_versions v \
            WHERE v.template_id = t.id AND v.status = 'stable') AS latest_stable_version, \
-         (SELECT count(*) FROM identity_template_reviews r \
+         (SELECT count(*) FROM template_reviews r \
            WHERE r.template_id = t.id) AS review_count, \
-         (SELECT avg(r.rating)::float8 FROM identity_template_reviews r \
+         (SELECT avg(r.rating)::float8 FROM template_reviews r \
            WHERE r.template_id = t.id) AS average_rating \
-         FROM identity_templates t \
+         FROM template_templates t \
          WHERE t.visibility = 'community' \
            AND EXISTS ( \
-             SELECT 1 FROM identity_template_versions v \
+             SELECT 1 FROM template_versions v \
               WHERE v.template_id = t.id AND v.status <> 'draft' \
            ) \
          ORDER BY t.name ASC, t.id ASC \
@@ -155,22 +155,22 @@ pub async fn list_marketplace(
 /// Versions of a template that `tenant_id` is allowed to see.
 ///
 /// **Drafts are the caller's own only.**
-/// The database does not enforce this: `identity_template_versions` carries no RLS, matching `identity_templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
+/// The database does not enforce this: `template_versions` carries no RLS, matching `template_templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
 pub async fn list_versions(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
-    use crate::models::_entities::identity_template_versions::{Column, Entity, Relation};
-    use crate::models::_entities::identity_templates::Column as TemplateColumn;
+    use crate::models::_entities::template_versions::{Column, Entity, Relation};
+    use crate::models::_entities::template_templates::Column as TemplateColumn;
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
 
     let rows = Entity::find()
         .filter(Column::TemplateId.eq(template_id))
         .join(
             sea_orm::JoinType::InnerJoin,
-            Relation::IdentityTemplates.def(),
+            Relation::TemplateTemplates.def(),
         )
         .filter(
             Condition::any()
@@ -206,12 +206,12 @@ pub(crate) async fn insert_next_version(
 ) -> Result<TemplateVersionRecord, YorishiroError> {
     TemplateVersionRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-        "INSERT INTO identity_template_versions \
+        "INSERT INTO template_versions \
                 (template_id, version, definition, changelog, status, created_by) \
          SELECT $1, \
                 COALESCE(max(v.version), 0) + 1, \
                 $2, $3, $4, $5 \
-           FROM identity_template_versions v \
+           FROM template_versions v \
           WHERE v.template_id = $1 \
          RETURNING id, template_id, version, definition, changelog, status, created_at",
         [
@@ -235,15 +235,15 @@ pub async fn list_reviews(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateReviewRecord>, YorishiroError> {
-    use crate::models::_entities::identity_template_reviews::{Column, Entity, Relation};
-    use crate::models::_entities::identity_templates::Column as TemplateColumn;
+    use crate::models::_entities::template_reviews::{Column, Entity, Relation};
+    use crate::models::_entities::template_templates::Column as TemplateColumn;
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
 
     let rows = Entity::find()
         .filter(Column::TemplateId.eq(template_id))
         .join(
             sea_orm::JoinType::InnerJoin,
-            Relation::IdentityTemplates.def(),
+            Relation::TemplateTemplates.def(),
         )
         .filter(
             Condition::any()
@@ -266,7 +266,7 @@ pub(crate) async fn is_visible(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    use crate::models::_entities::identity_templates::{Column, Entity};
+    use crate::models::_entities::template_templates::{Column, Entity};
     use sea_orm::{ColumnTrait, Condition, PaginatorTrait, QueryFilter};
 
     let count = Entity::find()
@@ -290,7 +290,7 @@ pub(crate) async fn upsert_review(
     user_id: Option<Uuid>,
     request: &SubmitReviewRequest,
 ) -> Result<TemplateReviewRecord, YorishiroError> {
-    use crate::models::_entities::identity_template_reviews::{ActiveModel, Column, Entity};
+    use crate::models::_entities::template_reviews::{ActiveModel, Column, Entity};
 
     let active = ActiveModel {
         template_id: sea_orm::ActiveValue::Set(template_id),
@@ -328,7 +328,7 @@ pub(crate) async fn find_fork_source(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<Option<ForkSource>, YorishiroError> {
-    use crate::models::_entities::identity_templates::{Column, Entity};
+    use crate::models::_entities::template_templates::{Column, Entity};
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QuerySelect};
 
     Entity::find()
@@ -355,7 +355,7 @@ pub(crate) async fn find_forkable_definition(
     template_id: Uuid,
     version: Option<i32>,
 ) -> Result<Option<Value>, YorishiroError> {
-    use crate::models::_entities::identity_template_versions::{Column, Entity};
+    use crate::models::_entities::template_versions::{Column, Entity};
     use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
 
     #[derive(FromQueryResult)]
@@ -407,7 +407,7 @@ pub(crate) async fn insert_fork(
     fork_of: Uuid,
     user_id: Option<Uuid>,
 ) -> Result<InsertForkOutcome, YorishiroError> {
-    use crate::models::_entities::identity_templates::ActiveModel;
+    use crate::models::_entities::template_templates::ActiveModel;
 
     // `visibility = 'tenant'` for the reason this function's own doc comment gives; not one of
     // ForkSource's copyable columns, since a fork never starts out community-visible regardless
@@ -443,7 +443,7 @@ pub(crate) async fn is_owned_by(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    use crate::models::_entities::identity_templates::{Column, Entity};
+    use crate::models::_entities::template_templates::{Column, Entity};
     use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
 
     let count = Entity::find()
@@ -462,9 +462,9 @@ pub(crate) async fn update_visibility(
     template_id: Uuid,
     visibility: &str,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::identity_templates::ActiveModel;
+    use crate::models::_entities::template_templates::ActiveModel;
 
-    // updated_at is not set here: identity_templates::ActiveModel's before_save stamps it on
+    // updated_at is not set here: template_templates::ActiveModel's before_save stamps it on
     // every update whose caller didn't already set it explicitly, so a hand-written `now()` would
     // just duplicate what before_save already does.
     let active = ActiveModel {

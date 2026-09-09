@@ -47,7 +47,7 @@ pub struct LocalModelDef {
     revision: &'static str,
     model: Artifact,
     tokenizer: Artifact,
-    /// Output vector width. Both definitions below happen to produce 768, which is what lets a deployment mix them in one `content_entities.embedding vector(768)` column at all; see the write-time model check in `services/embedding/sync.rs` for why that coincidence still needs guarding.
+    /// Output vector width. Both definitions below happen to produce 768, which is what lets a deployment mix them in one `entity_entities.embedding vector(768)` column at all; see the write-time model check in `services/embedding/sync.rs` for why that coincidence still needs guarding.
     pub(super) dimensions: usize,
     /// Upper bound on tokenized sequence length before truncation.
     ///

@@ -8,7 +8,7 @@
 use crate::controllers::ApiError;
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::VersioningDiff;
-use crate::models::content_schemas::{SchemaRecord, UpstreamChange};
+use crate::models::schema_schemas::{SchemaRecord, UpstreamChange};
 use crate::services::auth::{ApiKeyScope, require_scope};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -39,7 +39,7 @@ async fn list_upstream_changes(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
 
-    // ctx.db: this joins identity_templates, which the request role cannot read.
+    // ctx.db: this joins template_templates, which the request role cannot read.
     let changes =
         origin_model::list_with_upstream_changes(&ctx.db, auth_ctx.workspace_id, page.into())
             .await?;

@@ -1,7 +1,7 @@
 mod content_entities_sqlite;
 mod entities;
-mod identity_api_keys;
-mod identity_templates;
+mod api_keys;
+mod template_templates;
 mod recall;
 mod search;
 mod tenancy;

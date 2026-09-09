@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::embedding_provider;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::identity_api_keys::IdentityApiKeys;
+use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole};
 
 fn wizard_enabled() -> bool {

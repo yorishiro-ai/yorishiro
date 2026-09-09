@@ -4,9 +4,9 @@ use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{
-    identity_api_keys, identity_templates, identity_tenants, identity_workspaces,
+    api_keys, template_templates, tenant_tenants, workspace_workspaces,
 };
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::services::auth::ApiKeyScope;
 
@@ -16,14 +16,14 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = identity_tenants::ActiveModel {
+    let tenant = tenant_tenants::ActiveModel {
         name: sea_orm::ActiveValue::Set("acme".into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
         .await
         .expect("insert tenant");
-    let workspace = identity_workspaces::ActiveModel {
+    let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
         name: sea_orm::ActiveValue::Set("main".into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -38,7 +38,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
         .await
         .expect("add owner");
-    let key = identity_api_keys::Entity::create_api_key(
+    let key = api_keys::Entity::create_api_key(
         &ctx.db,
         workspace.id,
         ApiKeyScope::Schema,
@@ -58,8 +58,8 @@ async fn insert_template(
     ctx: &loco_rs::app::AppContext,
     tenant_id: Uuid,
     definition: serde_json::Value,
-) -> identity_templates::Model {
-    let template = identity_templates::ActiveModel {
+) -> template_templates::Model {
+    let template = template_templates::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant_id),
         name: sea_orm::ActiveValue::Set("library-note".into()),
         definition: sea_orm::ActiveValue::Set(definition),
@@ -177,7 +177,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .unwrap();
 
         // Edit the template upstream: add a field the workspace does not have.
-        let mut active: identity_templates::ActiveModel = template.clone().into();
+        let mut active: template_templates::ActiveModel = template.clone().into();
         active.definition = sea_orm::ActiveValue::Set(json!({
             "name": "library-note",
             "entity_types": {
@@ -285,7 +285,7 @@ async fn merging_a_conflicting_field_is_refused() {
             }))
             .await;
 
-        let mut active: identity_templates::ActiveModel = template.clone().into();
+        let mut active: template_templates::ActiveModel = template.clone().into();
         active.definition = sea_orm::ActiveValue::Set(json!({
             "name": "library-note",
             "entity_types": {

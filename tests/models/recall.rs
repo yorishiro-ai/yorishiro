@@ -1,9 +1,9 @@
 use crate::requests::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{identity_tenants, identity_workspaces};
-use yorishiro::models::identity_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::models::{content_entities, content_relations, content_schemas, recall};
+use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
+use yorishiro::models::{entity_entities, entity_relations, schema_schemas, recall};
 
 fn chain_definition() -> serde_json::Value {
     serde_json::json!({
@@ -25,14 +25,14 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -42,37 +42,37 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
             .await
             .expect("insert workspace");
         let def = serde_json::from_value(chain_definition()).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
         let make_node = |title: &str| {
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "chain".into(),
                 entity_type: "node".into(),
                 data: serde_json::json!({ "title": title }),
             }
         };
 
-        let root = content_entities::create(&ctx.db, workspace.id, make_node("root"), None)
+        let root = entity_entities::create(&ctx.db, workspace.id, make_node("root"), None)
             .await
             .expect("create root");
-        let mid = content_entities::create(&ctx.db, workspace.id, make_node("mid"), None)
+        let mid = entity_entities::create(&ctx.db, workspace.id, make_node("mid"), None)
             .await
             .expect("create mid");
-        let leaf = content_entities::create(&ctx.db, workspace.id, make_node("leaf"), None)
+        let leaf = entity_entities::create(&ctx.db, workspace.id, make_node("leaf"), None)
             .await
             .expect("create leaf");
         // Not reachable within depth 2 from root (root -> mid -> leaf -> unreached is 3 hops).
         let unreached =
-            content_entities::create(&ctx.db, workspace.id, make_node("unreached"), None)
+            entity_entities::create(&ctx.db, workspace.id, make_node("unreached"), None)
                 .await
                 .expect("create unreached");
 
-        content_relations::create(
+        entity_relations::create(
             &ctx.db,
             workspace.id,
-            content_relations::CreateRelationInput {
+            entity_relations::CreateRelationInput {
                 source_id: root.id,
                 target_id: mid.id,
                 relation_type: "links_to".into(),
@@ -81,10 +81,10 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
         )
         .await
         .expect("root -> mid");
-        content_relations::create(
+        entity_relations::create(
             &ctx.db,
             workspace.id,
-            content_relations::CreateRelationInput {
+            entity_relations::CreateRelationInput {
                 source_id: mid.id,
                 target_id: leaf.id,
                 relation_type: "links_to".into(),
@@ -94,10 +94,10 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
         .await
         .expect("mid -> leaf");
         // Diamond: leaf also points straight back to mid, so mid is reachable via two paths.
-        content_relations::create(
+        entity_relations::create(
             &ctx.db,
             workspace.id,
-            content_relations::CreateRelationInput {
+            entity_relations::CreateRelationInput {
                 source_id: leaf.id,
                 target_id: mid.id,
                 relation_type: "links_to".into(),
@@ -106,10 +106,10 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
         )
         .await
         .expect("leaf -> mid (diamond)");
-        content_relations::create(
+        entity_relations::create(
             &ctx.db,
             workspace.id,
-            content_relations::CreateRelationInput {
+            entity_relations::CreateRelationInput {
                 source_id: leaf.id,
                 target_id: unreached.id,
                 relation_type: "links_to".into(),
@@ -167,14 +167,14 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let tenant = identity_tenants::ActiveModel {
+        let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("recall-shallow-test".into()),
             ..Default::default()
         };
         let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
             .await
             .expect("insert tenant");
-        let workspace = identity_workspaces::ActiveModel {
+        let workspace = workspace_workspaces::ActiveModel {
             tenant_id: sea_orm::ActiveValue::Set(tenant.id),
             name: sea_orm::ActiveValue::Set("main".into()),
             status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
@@ -197,14 +197,14 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
             "relation_types": { "knows": { "source": "person", "target": "person" } }
         });
         let def = serde_json::from_value(def_json).expect("parse definition");
-        content_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
+        schema_schemas::create_schema(&ctx.db, tenant.id, workspace.id, def, None, None)
             .await
             .expect("create schema");
 
-        let alice = content_entities::create(
+        let alice = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "person".into(),
                 entity_type: "person".into(),
                 data: serde_json::json!({ "name": "Alice" }),
@@ -213,10 +213,10 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
         )
         .await
         .expect("create alice");
-        let bob = content_entities::create(
+        let bob = entity_entities::create(
             &ctx.db,
             workspace.id,
-            content_entities::CreateEntityInput {
+            entity_entities::CreateEntityInput {
                 schema_name: "person".into(),
                 entity_type: "person".into(),
                 data: serde_json::json!({ "name": "Bob", "ssn": "secret" }),
@@ -225,10 +225,10 @@ async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
         )
         .await
         .expect("create bob");
-        content_relations::create(
+        entity_relations::create(
             &ctx.db,
             workspace.id,
-            content_relations::CreateRelationInput {
+            entity_relations::CreateRelationInput {
                 source_id: alice.id,
                 target_id: bob.id,
                 relation_type: "knows".into(),

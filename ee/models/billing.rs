@@ -1,10 +1,10 @@
-//! Billing state stored in this crate's own `identity_tenant_billing` table.
+//! Billing state stored in this crate's own `tenant_billing` table.
 //!
-//! `models::identity_tenants` knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
+//! `models::tenant_tenants` knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
 //! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_tenant_billing::{ActiveModel, Column, Entity};
+use crate::models::_entities::tenant_billing::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
@@ -18,8 +18,8 @@ pub struct TenantBillingRecord {
     pub stripe_customer_id: Option<String>,
 }
 
-impl From<crate::models::_entities::identity_tenant_billing::Model> for TenantBillingRecord {
-    fn from(model: crate::models::_entities::identity_tenant_billing::Model) -> Self {
+impl From<crate::models::_entities::tenant_billing::Model> for TenantBillingRecord {
+    fn from(model: crate::models::_entities::tenant_billing::Model) -> Self {
         TenantBillingRecord {
             tenant_id: model.tenant_id,
             plan: model.plan,
@@ -89,7 +89,7 @@ pub async fn link_stripe_customer(
 /// Sets a tenant's plan.
 /// Upserts for the same reason as [`link_stripe_customer`]: a plan can be assigned before or after the customer id is linked, depending on which webhook lands first.
 ///
-/// The workspace cap that comes with the plan is not written here: it lives on `identity_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
+/// The workspace cap that comes with the plan is not written here: it lives on `tenant_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
 /// The caller applies both.
 pub async fn set_plan(
     conn: &impl ConnectionTrait,

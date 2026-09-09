@@ -1,11 +1,11 @@
 //! A workspace's own embedding provider assignment, for pointing a tenant at a different compute backend than the deployment default.
 //!
-//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `identity_workspace_llm_keys`.
+//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `workspace_llm_keys`.
 //!
 //! A workspace with no row here uses the deployment default (`WorkspaceEmbeddingResolver::resolve` returns `None`); this module never falls back on its own, so the caller (`EmbeddingKeyResolver`) decides that.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::identity_workspace_embedding_keys::{ActiveModel, Column, Entity};
+use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, Entity};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Statement};
 use serde::Serialize;
@@ -100,7 +100,7 @@ async fn create_width_table(
                 "CREATE TABLE {table_name} (\
                  entity_id BLOB PRIMARY KEY, \
                  embedding BLOB, \
-                 FOREIGN KEY (entity_id) REFERENCES content_entities(id) ON DELETE CASCADE)"
+                 FOREIGN KEY (entity_id) REFERENCES entity_entities(id) ON DELETE CASCADE)"
             ),
             [],
         ))
@@ -136,13 +136,13 @@ async fn create_width_table(
 
 /// Stores or replaces a workspace's own embedding provider assignment.
 ///
-/// `expected_dimensions` is the workspace's own stamped `identity_workspaces.embedding_dimensions`,
+/// `expected_dimensions` is the workspace's own stamped `workspace_workspaces.embedding_dimensions`,
 /// or the deployment default's width for a workspace carrying no stamp. Assigning a provider of a
 /// different width would leave old and new vectors at different widths in one column, surfacing only
 /// when `sync_embedding`'s write-time guard (`services/embedding/sync.rs`) rejects a write.
 /// Checking here, at the point an operator assigns the provider, surfaces the same mismatch immediately instead of on the next entity write.
 ///
-/// **Table creation**: if the width-specific table (e.g. `content_entity_embeddings_1024`) does not
+/// **Table creation**: if the width-specific table (e.g. `entity_embeddings_1024`) does not
 /// yet exist, this function creates it within the same transaction.
 /// `yorishiro_app` has no CREATE privilege, so DDL via the request path is impossible
 /// outside the migration-role connection. The controller calls this through `ctx.db`, which

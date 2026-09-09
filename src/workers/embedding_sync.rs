@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::content_entities;
+use crate::models::entity_entities;
 use crate::services::embedding;
 
 /// Which class of worker process a queued job is meant for.
@@ -64,7 +64,7 @@ impl WorkerClass {
         }
     }
 
-    /// The `snake_case` wire form this type already serializes to, usable as a plain string for `ee/`'s `identity_workspace_worker_classes`.
+    /// The `snake_case` wire form this type already serializes to, usable as a plain string for `ee/`'s `workspace_worker_classes`.
     /// Reusing it rather than inventing a second representation keeps a database value and a queue payload byte-identical to an operator inspecting either.
     #[must_use]
     pub fn as_db_str(self) -> &'static str {
@@ -156,7 +156,7 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
         }
     };
 
-    let record = match content_entities::get(&ctx.db, args.workspace_id, args.entity_id).await {
+    let record = match entity_entities::get(&ctx.db, args.workspace_id, args.entity_id).await {
         Ok(record) => record,
         Err(crate::error::YorishiroError::NotFound { .. }) => {
             tracing::debug!(entity_id = %args.entity_id, "embedding sync worker: entity no longer exists, skipping");
@@ -244,7 +244,7 @@ pub async fn enqueue_for_class(ctx: &AppContext, args: EmbeddingSyncArgs) -> loc
 /// Runs on Loco's own `BackgroundQueue` (`pg_loco_queue`), so a process restart, a forced kill, or a provider outage that exhausts its own retries does not silently lose the sync: the job survives in the queue table for the next worker run.
 /// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
 ///
-/// This lives here rather than beside one transport's handlers because both of them need it: every entity write that does not call this leaves `content_entities.embedding` NULL forever, and such an entity is reachable only through the `pg_trgm` fuzzy fallback, so the symptom is search quietly returning worse results rather than any error.
+/// This lives here rather than beside one transport's handlers because both of them need it: every entity write that does not call this leaves `entity_entities.embedding` NULL forever, and such an entity is reachable only through the `pg_trgm` fuzzy fallback, so the symptom is search quietly returning worse results rather than any error.
 pub(crate) async fn enqueue_after_write(ctx: &AppContext, workspace_id: Uuid, entity_id: Uuid) {
     let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
         .await

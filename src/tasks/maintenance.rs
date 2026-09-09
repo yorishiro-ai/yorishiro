@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::models::identity_maintenance::{self, MaintenanceMode};
+use crate::models::system_maintenance::{self, MaintenanceMode};
 
 /// `cargo loco task maintenance mode:full_lock [retry_after:300] [reason:"upgrading"]`
 ///
@@ -31,7 +31,7 @@ impl Task for Maintenance {
         };
         let reason = vars.cli_arg("reason").ok().map(str::to_string);
 
-        let state = identity_maintenance::set(&app_context.db, mode, retry_after, reason)
+        let state = system_maintenance::set(&app_context.db, mode, retry_after, reason)
             .await
             .map_err(|err| Error::Message(err.to_string()))?;
 

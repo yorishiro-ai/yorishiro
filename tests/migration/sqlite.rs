@@ -51,7 +51,7 @@ async fn all_migrations_roll_back_and_reapply_on_sqlite() {
         .expect("connect to sqlite file");
 
     Migrator::up(&db, None).await.expect("run all migrations");
-    // Exercises every down()'s pg_only/sqlite_only guards (content_schemas' DROP TRIGGER/FUNCTION and its own trigger drop, both authenticate_api_key files), not just up()'s.
+    // Exercises every down()'s pg_only/sqlite_only guards (schema_schemas' DROP TRIGGER/FUNCTION and its own trigger drop, both authenticate_api_key files), not just up()'s.
     Migrator::down(&db, None)
         .await
         .expect("roll back all migrations");
