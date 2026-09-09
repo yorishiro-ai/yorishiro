@@ -143,10 +143,7 @@ pub async fn describe(
 pub async fn get(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
-) -> Result<
-    Option<crate::models::_entities::tenant_reindex_schedules::Model>,
-    YorishiroError,
-> {
+) -> Result<Option<crate::models::_entities::tenant_reindex_schedules::Model>, YorishiroError> {
     let row = Entity::find()
         .filter(Column::TenantId.eq(tenant_id))
         .one(conn)

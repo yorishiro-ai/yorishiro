@@ -6,8 +6,8 @@ use yorishiro::app::App;
 use yorishiro::models::_entities::{
     api_keys, template_templates, tenant_tenants, workspace_workspaces,
 };
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {

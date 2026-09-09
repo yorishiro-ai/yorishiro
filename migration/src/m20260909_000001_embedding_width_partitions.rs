@@ -179,10 +179,7 @@ impl MigrationTrait for Migration {
                         .foreign_key(
                             ForeignKey::create()
                                 .name("fk_entity_embeddings_entity_id")
-                                .from(
-                                    Alias::new("entity_embeddings"),
-                                    Alias::new("entity_id"),
-                                )
+                                .from(Alias::new("entity_embeddings"), Alias::new("entity_id"))
                                 .to(Alias::new("entity_entities"), Alias::new("id"))
                                 .on_delete(ForeignKeyAction::Cascade),
                         )
@@ -218,10 +215,7 @@ impl MigrationTrait for Migration {
                         .foreign_key(
                             ForeignKey::create()
                                 .name("fk_entity_embeddings_entity_id")
-                                .from(
-                                    Alias::new("entity_embeddings"),
-                                    Alias::new("entity_id"),
-                                )
+                                .from(Alias::new("entity_embeddings"), Alias::new("entity_id"))
                                 .to(Alias::new("entity_entities"), Alias::new("id"))
                                 .on_delete(ForeignKeyAction::Cascade),
                         )

@@ -7,8 +7,8 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_tenants;
 use crate::models::_entities::workspace_workspaces as workspace_workspaces_entity;
 use crate::models::schema_schemas;
-use crate::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use crate::models::tenancy::{self, MembershipRole};
+use crate::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait,

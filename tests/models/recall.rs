@@ -3,7 +3,7 @@ use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::models::{entity_entities, entity_relations, schema_schemas, recall};
+use yorishiro::models::{entity_entities, entity_relations, recall, schema_schemas};
 
 fn chain_definition() -> serde_json::Value {
     serde_json::json!({

@@ -5,8 +5,8 @@ use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::embedding_resolver::EmbeddingKeyResolver;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 use yorishiro::services::embedding::WorkspaceEmbeddingResolver;
 

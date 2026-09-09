@@ -8,8 +8,8 @@ use yorishiro::db::DbHandle;
 use yorishiro::ee::models::entity_fill;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the test process booted with.
@@ -393,9 +393,7 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
                 yorishiro::models::_entities::entity_snapshots::Column::WorkspaceId
                     .eq(setup.workspace_id),
             )
-            .filter(
-                yorishiro::models::_entities::entity_snapshots::Column::JobId.eq(job_id),
-            )
+            .filter(yorishiro::models::_entities::entity_snapshots::Column::JobId.eq(job_id))
             .count(&txn)
             .await
             .expect("count snapshots");

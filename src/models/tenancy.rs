@@ -13,8 +13,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
-    workspace_invites, tenant_memberships, tenant_tenants, user_users,
-    workspace_workspaces,
+    tenant_memberships, tenant_tenants, user_users, workspace_invites, workspace_workspaces,
 };
 use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
 

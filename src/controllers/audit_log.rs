@@ -17,8 +17,7 @@ pub async fn list_audit_log(
 ) -> Result<Json<Vec<AuditLogRecord>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let records =
-        api_key_audit_log::list_for_workspace(authorized.txn(), workspace_id, page.into())
-            .await?;
+        api_key_audit_log::list_for_workspace(authorized.txn(), workspace_id, page.into()).await?;
     Ok(Json(records))
 }
 

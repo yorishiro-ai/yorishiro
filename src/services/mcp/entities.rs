@@ -82,12 +82,17 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.ctx.workspace_id;
         let created_by = authorized.ctx.user_id;
-        let record =
-            match entity_entities::create(authorized.txn(), workspace_id, input, created_by).await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let record = match entity_entities::create(
+            authorized.txn(),
+            workspace_id,
+            input,
+            created_by,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         authorized.commit().await?;
         // Same enqueue the REST handler does, and for the same reason: an entity written without it keeps `embedding` NULL forever and is reachable only through the `pg_trgm` fuzzy fallback, so the transport a write arrived on must not decide whether it becomes searchable.
         crate::workers::embedding_sync::enqueue_after_write(&self.ctx, workspace_id, record.id)

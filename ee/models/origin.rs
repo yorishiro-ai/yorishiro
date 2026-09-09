@@ -7,8 +7,8 @@
 //! That does not make this base's: the endpoint it serves is enterprise, and an edition is decided by what a feature is rather than by which tables it reads.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::schema_schemas::UpstreamChange;
 use crate::models::pagination::ListParams;
+use crate::models::schema_schemas::UpstreamChange;
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use uuid::Uuid;

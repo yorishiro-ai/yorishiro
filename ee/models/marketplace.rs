@@ -162,8 +162,8 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
-    use crate::models::_entities::template_versions::{Column, Entity, Relation};
     use crate::models::_entities::template_templates::Column as TemplateColumn;
+    use crate::models::_entities::template_versions::{Column, Entity, Relation};
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
 
     let rows = Entity::find()

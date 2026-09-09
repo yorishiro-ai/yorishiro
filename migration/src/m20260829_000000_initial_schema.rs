@@ -144,20 +144,14 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_tenant_memberships_tenant_id")
-                    .from(
-                        Alias::new("tenant_memberships"),
-                        Alias::new("tenant_id"),
-                    )
+                    .from(Alias::new("tenant_memberships"), Alias::new("tenant_id"))
                     .to(Alias::new("tenant_tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_tenant_memberships_user_id")
-                    .from(
-                        Alias::new("tenant_memberships"),
-                        Alias::new("user_id"),
-                    )
+                    .from(Alias::new("tenant_memberships"), Alias::new("user_id"))
                     .to(Alias::new("user_users"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
@@ -390,12 +384,7 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
-        helpers::grant(
-            manager,
-            "SELECT, INSERT, UPDATE, DELETE",
-            "api_keys",
-        )
-        .await?;
+        helpers::grant(manager, "SELECT, INSERT, UPDATE, DELETE", "api_keys").await?;
 
         // workspace_invites
         let table = Table::create()
@@ -915,10 +904,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_entity_embeddings_entity_id")
-                            .from(
-                                Alias::new("entity_embeddings"),
-                                Alias::new("entity_id"),
-                            )
+                            .from(Alias::new("entity_embeddings"), Alias::new("entity_id"))
                             .to(Alias::new("entity_entities"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -1027,12 +1013,7 @@ impl MigrationTrait for Migration {
 
         // Every table is granted individually: all tables share one schema, so a
         // wildcard grant would sweep in tables that must stay ungranted.
-        helpers::grant(
-            manager,
-            "SELECT, INSERT, UPDATE, DELETE",
-            "entity_entities",
-        )
-        .await?;
+        helpers::grant(manager, "SELECT, INSERT, UPDATE, DELETE", "entity_entities").await?;
 
         // entity_relations
         let table = Table::create()
@@ -1173,10 +1154,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_entity_snapshots_workspace_id")
-                            .from(
-                                Alias::new("entity_snapshots"),
-                                Alias::new("workspace_id"),
-                            )
+                            .from(Alias::new("entity_snapshots"), Alias::new("workspace_id"))
                             .to(Alias::new("workspace_workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -1250,10 +1228,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_tenant_billing_tenant_id")
-                            .from(
-                                Alias::new("tenant_billing"),
-                                Alias::new("tenant_id"),
-                            )
+                            .from(Alias::new("tenant_billing"), Alias::new("tenant_id"))
                             .to(Alias::new("tenant_tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -1341,20 +1316,14 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_template_versions_template_id")
-                            .from(
-                                Alias::new("template_versions"),
-                                Alias::new("template_id"),
-                            )
+                            .from(Alias::new("template_versions"), Alias::new("template_id"))
                             .to(Alias::new("template_templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_template_versions_created_by")
-                            .from(
-                                Alias::new("template_versions"),
-                                Alias::new("created_by"),
-                            )
+                            .from(Alias::new("template_versions"), Alias::new("created_by"))
                             .to(Alias::new("user_users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
@@ -1406,30 +1375,21 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_template_reviews_template_id")
-                            .from(
-                                Alias::new("template_reviews"),
-                                Alias::new("template_id"),
-                            )
+                            .from(Alias::new("template_reviews"), Alias::new("template_id"))
                             .to(Alias::new("template_templates"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_template_reviews_tenant_id")
-                            .from(
-                                Alias::new("template_reviews"),
-                                Alias::new("tenant_id"),
-                            )
+                            .from(Alias::new("template_reviews"), Alias::new("tenant_id"))
                             .to(Alias::new("tenant_tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_template_reviews_created_by")
-                            .from(
-                                Alias::new("template_reviews"),
-                                Alias::new("created_by"),
-                            )
+                            .from(Alias::new("template_reviews"), Alias::new("created_by"))
                             .to(Alias::new("user_users"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::SetNull),
                     )
@@ -1469,10 +1429,7 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_workspace_llm_keys_workspace_id")
-                            .from(
-                                Alias::new("workspace_llm_keys"),
-                                Alias::new("workspace_id"),
-                            )
+                            .from(Alias::new("workspace_llm_keys"), Alias::new("workspace_id"))
                             .to(Alias::new("workspace_workspaces"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -1586,20 +1543,14 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_api_key_audit_log_workspace_id")
-                    .from(
-                        Alias::new("api_key_audit_log"),
-                        Alias::new("workspace_id"),
-                    )
+                    .from(Alias::new("api_key_audit_log"), Alias::new("workspace_id"))
                     .to(Alias::new("workspace_workspaces"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_api_key_audit_log_tenant_id")
-                    .from(
-                        Alias::new("api_key_audit_log"),
-                        Alias::new("tenant_id"),
-                    )
+                    .from(Alias::new("api_key_audit_log"), Alias::new("tenant_id"))
                     .to(Alias::new("tenant_tenants"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
@@ -1607,10 +1558,7 @@ impl MigrationTrait for Migration {
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_api_key_audit_log_user_id")
-                    .from(
-                        Alias::new("api_key_audit_log"),
-                        Alias::new("user_id"),
-                    )
+                    .from(Alias::new("api_key_audit_log"), Alias::new("user_id"))
                     .to(Alias::new("user_users"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::SetNull),
             )
@@ -1895,15 +1843,15 @@ impl MigrationTrait for Migration {
         // Step 3: drop remaining tables in dependency order.
         for table in [
             "entity_embeddings",         // → entity_entities; dropped first
-            "entity_relations",                 // → workspace_workspaces, entity_entities ×2
+            "entity_relations",          // → workspace_workspaces, entity_entities ×2
             "entity_snapshots",          // → workspace_workspaces, entity_entities (no FK)
             "entity_column_preferences", // → workspace_workspaces
-            "api_key_audit_log", // → workspace_workspaces, tenant_tenants, user_users
-            "api_keys",          // → workspace_workspaces, tenant_tenants, user_users
-            "workspace_worker_classes", // → workspace_workspaces
-            "tenant_reindex_schedules", // → tenant_tenants
-            "workspace_embedding_keys", // → workspace_workspaces
-            "workspace_llm_keys", // → workspace_workspaces
+            "api_key_audit_log",         // → workspace_workspaces, tenant_tenants, user_users
+            "api_keys",                  // → workspace_workspaces, tenant_tenants, user_users
+            "workspace_worker_classes",  // → workspace_workspaces
+            "tenant_reindex_schedules",  // → tenant_tenants
+            "workspace_embedding_keys",  // → workspace_workspaces
+            "workspace_llm_keys",        // → workspace_workspaces
             "entity_entities",           // → workspace_workspaces, schema_schemas, user_users
             "schema_schemas", // → tenant_tenants, workspace_workspaces, template_templates; dropped after entity_entities
             "tenant_memberships", // → tenant_tenants, user_users

@@ -118,16 +118,11 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match schema_schemas::get_by_id(
-            authorized.txn(),
-            workspace_id,
-            args.schema_id,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let record =
+            match schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(record)
     }
 

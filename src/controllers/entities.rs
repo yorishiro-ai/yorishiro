@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
-use crate::models::entity_entities::{self, EntityRecord, UndoReport};
 use crate::models::api_key_audit_log;
+use crate::models::entity_entities::{self, EntityRecord, UndoReport};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
@@ -51,8 +51,7 @@ pub async fn create_entity(
         data: body.data,
     };
     let created_by = authorized.ctx.user_id;
-    let record =
-        entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
+    let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
     authorized.commit().await?;
     embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id).await;
     Ok((StatusCode::CREATED, Json(record)))

@@ -6,8 +6,8 @@ use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
 /// `shared_store.insert` is keyed by `TypeId` (see `App::after_context`'s own doc comment), so this overwrites the `LicenceState::from_env()` the test process booted with, the same way production code layers a later insert over an earlier one.

@@ -1,9 +1,7 @@
 //! Usage counters for invoicing/dashboard display.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{
-    entity_entities, tenant_memberships, workspace_workspaces,
-};
+use crate::models::_entities::{entity_entities, tenant_memberships, workspace_workspaces};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
