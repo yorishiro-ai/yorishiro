@@ -141,15 +141,10 @@ jobs:
       - uses: ./.github/actions/rust-setup
 
       # rust-cache: each arch needs ~/.cache/ort.pyke.io (embedding cache), separate from
-      # sccache, so it stays as the caller's own step after the composite.
+      # the cargo build cache, so it stays as the caller's own step after the composite.
       - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
-
-      - name: Route rustc through sccache
-        run: |
-          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       # `Cargo.toml` is left alone: its version is this branch's position in the SemVer system,
       # and a prerelease belongs to the other one (see this file's header). Nothing to inject.

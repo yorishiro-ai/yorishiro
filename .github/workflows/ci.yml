@@ -33,8 +33,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTC_WRAPPER: "sccache"
-  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   check:
@@ -45,6 +43,8 @@ jobs:
       - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -69,9 +69,6 @@ jobs:
         # thresholds without failing the build. cognitive_complexity and too_many_lines are
         # both nursery/pedantic lints, off by default, so --force-warn opts them in here.
         run: cargo clippy --locked --workspace --tests -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
-
-      - name: Show sccache stats
-        run: sccache --show-stats
 
   test:
     runs-on: ubuntu-latest
@@ -105,6 +102,12 @@ jobs:
       - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Separate caches for each matrix entry so postgres and sqlite build artifacts don't
+          # collide (they compile different feature combinations).
+          key: ${{ github.job }}-${{ matrix.backend }}
 
       - name: Build workspace
         run: cargo build --locked --workspace
@@ -166,9 +169,4 @@ jobs:
           DATABASE_URL: ${{ matrix.database_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
-          RUSTC_WRAPPER: sccache
-          SCCACHE_GHA_ENABLED: "true"
         run: cargo test --locked --workspace -- --test-threads=1
-
-      - name: Show sccache stats
-        run: sccache --show-stats
