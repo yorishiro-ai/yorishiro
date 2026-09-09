@@ -21,10 +21,6 @@ jobs:
           # A scheduled run's `github.ref` is the default branch, so the condition names develop:
           # pinned to master it was permanently false and this cache was never written.
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - name: Route rustc through sccache
-        run: |
-          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       - name: Install tools
         run: cargo install cargo-audit cargo-outdated
       # `cargo audit` exits 0 when it ran and found nothing, and 1 when it ran and has something

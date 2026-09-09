@@ -1,14 +1,17 @@
 name: Rust toolchain
-description: Shared Rust toolchain + sccache setup (checkout stays in each caller)
+description: Shared Rust toolchain setup (checkout stays in each caller)
 
 inputs:
   components:
     description: Extra rustup components (empty for query-only jobs; "rustfmt, clippy" for check)
     required: false
+    default: ''
+  # Kept as a no-op input for callers that still pass it (windows-weekly.yml).
+  # Sccache was replaced by Swatinem/rust-cache in ci.yml and release.yml.
   use-sccache:
-    description: Whether to install sccache (false for windows-weekly.yml where caching doesn't pay off)
+    description: No-op (sccache removed)
     required: false
-    default: 'true'
+    default: ''
 
 runs:
   using: composite
@@ -17,7 +20,3 @@ runs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: ${{ inputs.components }}
-
-    - name: Run sccache-action
-      if: inputs.use-sccache == 'true'
-      uses: mozilla-actions/sccache-action@v0.0.11
