@@ -47,5 +47,5 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 
 ## 設定
 
-全設定は [docs/ja/configuration.md](configuration.md) を参照してください。
+全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
 production設定ファイルはイメージ内の `/app/config/production.yaml` にあります。

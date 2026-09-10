@@ -1,6 +1,6 @@
 # Configuration
 
-**English** | [日本語](ja/configuration.md)
+**English** | [日本語](../ja/configuration.md)
 
 Yorishiro is configured through environment variables. No config file is needed for the settings below.
 

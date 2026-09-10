@@ -1,6 +1,6 @@
 # Enterprise configuration
 
-[English](../../docs/configuration.md) | [日本語](../../docs/ja/configuration.md)
+[English](../../docs/en/configuration.md) | [日本語](../../docs/ja/configuration.md)
 
 Enterprise edition features that require additional configuration.
 

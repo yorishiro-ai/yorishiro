@@ -92,7 +92,7 @@ The default configuration uses SQLite — no external database required.
 1. Open `http://localhost/` and create an account through the setup wizard.
 2. Generate an API key and start creating entities.
 
-For installation instructions, see [docs/installation.md](docs/installation.md).
+For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
 
 ## Configuration
 
@@ -113,7 +113,7 @@ Most settings come from environment variables:
 | `YORISHIRO_QUEUE_KIND` | Auto-detected | Set to `Redis` for Valkey/Redis queue |
 | `QUEUE_URL` | Shares `DATABASE_URL` | Required for Redis queue |
 
-See [docs/configuration.md](docs/configuration.md) for the full list.
+See [docs/en/configuration.md](docs/en/configuration.md) for the full list.
 
 ## Documentation
 
