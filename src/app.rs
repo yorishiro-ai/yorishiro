@@ -392,6 +392,7 @@ impl Hooks for App {
         tasks.register(crate::ee::tasks::seed_official_templates::SeedOfficialTemplates);
         tasks.register(crate::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
         tasks.register(crate::ee::tasks::reindex_scheduler::TenantReindexScheduler);
+        tasks.register(crate::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark);
         // tasks-inject (do not remove)
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
