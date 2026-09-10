@@ -35,13 +35,13 @@ flowchart LR
     subgraph Server["Yorishiro（単一バイナリ）"]
         Router["Router (Loco)"]
 
-        subgraph CE["ce"]
+        subgraph CE["ce（community edition）<br/>entities, schemas, search, auth"]
             direction TB
-            CEControllers["controllers<br/>entities, schemas, search, auth"]
+            CEControllers["controllers"]
             CEResolvers["デフォルトresolver<br/>（未ライセンス時はNoneを返す）"]
         end
 
-        subgraph EE["ee（ceを覆いかぶす）"]
+        subgraph EE["ee（enterprise edition）<br/>ceを覆いかぶす"]
             direction TB
             EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
             EEResolvers["resolver実装<br/>（ceのデフォルトを置き換える）"]

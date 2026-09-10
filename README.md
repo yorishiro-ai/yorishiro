@@ -35,13 +35,13 @@ flowchart LR
     subgraph Server["Yorishiro (one binary)"]
         Router["Router (Loco)"]
 
-        subgraph CE["ce"]
+        subgraph CE["ce (community edition)<br/>entities, schemas, search, auth"]
             direction TB
-            CEControllers["controllers<br/>entities, schemas, search, auth"]
+            CEControllers["controllers"]
             CEResolvers["default resolvers<br/>(unlicensed: return None)"]
         end
 
-        subgraph EE["ee (overlays ce)"]
+        subgraph EE["ee (enterprise edition)<br/>overlays ce"]
             direction TB
             EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
             EEResolvers["resolver impls<br/>(replace ce's defaults)"]
