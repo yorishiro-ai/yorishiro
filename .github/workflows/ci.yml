@@ -58,6 +58,13 @@ jobs:
             exit 1
           fi
 
+      - name: Check for allow(dead_code)
+        run: |
+          if git grep -n 'allow(dead_code)' -- src ee migration/src; then
+            echo "ERROR: allow(dead_code) found above. Delete the unused item, don't remove it."
+            exit 1
+          fi
+
       - name: Check
         run: cargo check --locked --workspace
 

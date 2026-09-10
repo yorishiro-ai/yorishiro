@@ -101,10 +101,6 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
     architecture: Architecture::XlmRoberta,
 };
 
-/// Every model this provider can be configured to load, in the order `YORISHIRO_LOCAL_MODEL`'s error message lists them.
-#[allow(dead_code)]
-pub(super) const MODELS: &[&LocalModelDef] = &[&MULTILINGUAL_E5_BASE];
-
 /// The default model when `YORISHIRO_LOCAL_MODEL` is unset.
 ///
 /// `multilingual-e5-base`, not `nomic-embed-text-v1.5`: this codebase's search and recall are not English-only, and only the multilingual model serves that well.
