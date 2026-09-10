@@ -206,7 +206,7 @@ pub enum ValidationErrorCode {
     TypeMismatch,
     /// A required field was empty or missing.
     EmptyRequired,
-    /// Object nesting exceeds [`crate::metaschema::validate::MAX_OBJECT_DEPTH`].
+    /// Object nesting exceeds [`crate::metaschema::MAX_OBJECT_DEPTH`].
     DepthExceeded,
     /// A numeric field uses minimum/maximum on a non-numeric type.
     NumericOnNonNumeric,
