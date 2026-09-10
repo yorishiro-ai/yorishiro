@@ -143,6 +143,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             query_vector,
             "match",
             search::SearchQuery::default(),
+            true,
         )
         .await
         .expect("search_by_vector");
@@ -1027,6 +1028,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             vec![0.0_f32; 768],
             "quarterly roadmap",
             search::SearchQuery::default(),
+            true,
         )
         .await
         .expect("search_by_vector");
@@ -1125,6 +1127,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
+                true,
             )
             .await
             .expect("search_by_vector");
@@ -1156,6 +1159,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
+                true,
             )
             .await
             .expect("search_by_vector after update");
@@ -1172,6 +1176,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 vec![0.0_f32; 768],
                 "quarterly board meeting",
                 search::SearchQuery::default(),
+                true,
             )
             .await
             .expect("search_by_vector after update");
