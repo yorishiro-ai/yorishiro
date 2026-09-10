@@ -4,7 +4,6 @@
 //! That pool is also wrapped as a `sea_orm::DatabaseConnection`, which preserves its `after_connect` hook: the hook belongs to the sqlx pool, not to SeaORM's wrapper.
 //!
 //! Requests reach the database through `TenantDb::begin_for_workspace`, whose returned `DatabaseTransaction` carries both the entity API and raw SQL the entity layer can't express (JSONB containment, pgvector search, advisory locks).
-use async_trait::async_trait;
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
@@ -52,20 +51,6 @@ pub fn register_sqlite_extensions() {
     });
 }
 
-/// Where the deployment's data lives, for tenant-scoped request handling.
-#[async_trait]
-pub trait Storage: Send + Sync {
-    /// A connection scoped to `tenant_id`/`workspace_id`, such that row-level security confines it to that workspace's rows.
-    async fn acquire_for_workspace(
-        &self,
-        tenant_id: Uuid,
-        workspace_id: Uuid,
-    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, sqlx::Error>;
-
-    /// The underlying pool, for the control-plane paths that connect as the migration role and so must not be scoped: signup, setup, the admin CLI.
-    fn pool(&self) -> &sqlx::Pool<sqlx::Postgres>;
-}
-
 #[derive(Clone)]
 pub struct TenantDb {
     pool: PgPool,
@@ -73,13 +58,6 @@ pub struct TenantDb {
 }
 
 impl TenantDb {
-    /// Wraps a raw pool as-is.
-    /// Callers must separately guarantee that `app.current_tenant`/`app.current_workspace` get reset when a connection returns to the pool (use `connect` in production).
-    pub fn new(pool: PgPool) -> Self {
-        let orm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
-        Self { pool, orm }
-    }
-
     /// Builds the production pool.
     /// `after_connect` issues `SET ROLE` once per physical connection, so every query runs as `yorishiro_app`, which cannot bypass RLS; a failure to assume that role fails the connection rather than falling back to the connecting role.
     /// `after_release` resets the GUCs before a connection returns to the pool, covering `acquire_for_workspace`'s use outside any transaction.
@@ -108,7 +86,8 @@ impl TenantDb {
                 })
             })
             .connect_lazy(database_url)?;
-        Ok(Self::new(pool))
+        let orm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
+        Ok(TenantDb { pool, orm })
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -161,21 +140,6 @@ impl TenantDb {
             .execute(conn.as_mut())
             .await?;
         Ok(conn)
-    }
-}
-
-#[async_trait]
-impl Storage for TenantDb {
-    async fn acquire_for_workspace(
-        &self,
-        tenant_id: Uuid,
-        workspace_id: Uuid,
-    ) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, sqlx::Error> {
-        TenantDb::acquire_for_workspace(self, tenant_id, workspace_id).await
-    }
-
-    fn pool(&self) -> &sqlx::Pool<sqlx::Postgres> {
-        TenantDb::pool(self)
     }
 }
 
