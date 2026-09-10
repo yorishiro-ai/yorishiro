@@ -35,16 +35,16 @@ flowchart LR
     subgraph Server["Yorishiro（単一バイナリ）"]
         Router["Router (Loco)"]
 
-        subgraph CE["ce: entities, schemas, search, auth<br/>resolverの拡張点を定義"]
+        subgraph CE["ce"]
             direction TB
-            CEControllers["controllers"]
+            CEControllers["controllers<br/>entities, schemas, search, auth"]
             CEResolvers["デフォルトresolver<br/>（未ライセンス時はNoneを返す）"]
         end
 
-        subgraph EE["ee: ceを覆いかぶす<br/>billing, OAuth, marketplace, dashboard,<br/>embedding/worker-classのルーティング"]
+        subgraph EE["ee（ceを覆いかぶす）"]
             direction TB
-            EEControllers["追加のcontrollers<br/>（ライセンスゲート）"]
-            EEResolvers["resolverの実装<br/>（ceのデフォルトを置き換える）"]
+            EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
+            EEResolvers["resolver実装<br/>（ceのデフォルトを置き換える）"]
         end
 
         Embed["Embeddingプロバイダー<br/>(ローカルモデル、または<br/>OpenAI互換エンドポイント)"]
@@ -75,7 +75,7 @@ flowchart LR
 
 ceでできることはeeでもすべて利用可能です。eeはceの上に以下の機能を追加します：
 
-| 機能 | (コミュニティエディション(無料)) | エンタープライズエディション |
+| 機能 | コミュニティエディション(無料) | エンタープライズエディション |
 |---|---|---|
 | ワークスペースごとの埋め込みプロバイダ割り当て | — | 利用可能 |
 | ワークスペースごとのLLM推論キー & fill | — | 利用可能 |
@@ -119,9 +119,6 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 
 | ドキュメント | 内容 |
 |---|---|
-| [docs/en/installation.md](docs/en/installation.md) | Docker、Docker Compose、deb/rpm、ソースからビルド |
-| [docs/en/configuration.md](docs/en/configuration.md) | All settings: embedding, search quotas, logging, queue backends |
-| [docs/en/sqlite.md](docs/en/sqlite.md) | SQLite mode: capabilities and limitations |
 | [docs/ja/installation.md](docs/ja/installation.md) | Docker、Docker Compose、deb/rpm、ソースからビルド |
 | [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
 | [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |

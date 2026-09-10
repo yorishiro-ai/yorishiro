@@ -35,19 +35,19 @@ flowchart LR
     subgraph Server["Yorishiro (one binary)"]
         Router["Router (Loco)"]
 
-        subgraph CE["ce: entities, schemas, search, auth<br/>defines resolver seams"]
+        subgraph CE["ce"]
             direction TB
-            CEControllers["controllers"]
+            CEControllers["controllers<br/>entities, schemas, search, auth"]
             CEResolvers["default resolvers<br/>(unlicensed: return None)"]
         end
 
-        subgraph EE["ee: overlays ce<br/>billing, OAuth, marketplace, dashboard,<br/>embedding/worker-class routing"]
+        subgraph EE["ee (overlays ce)"]
             direction TB
-            EEControllers["additional controllers<br/>(license-gated)"]
-            EEResolvers["resolver implementations<br/>(replace ce's defaults)"]
+            EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
+            EEResolvers["resolver impls<br/>(replace ce's defaults)"]
         end
 
-        Embed["Embedding provider<br/>(local model, or any<br/>OpenAI-compatible endpoint)"]
+        Embed["Embedding provider<br/>local model, or any<br/>OpenAI-compatible endpoint"]
 
         subgraph Workers["Background workers"]
             direction TB
@@ -122,9 +122,6 @@ See [docs/configuration.md](docs/configuration.md) for the full list.
 | [docs/en/installation.md](docs/en/installation.md) | Docker, Docker Compose, deb/rpm, and build from source |
 | [docs/en/configuration.md](docs/en/configuration.md) | All settings: embedding, search quotas, logging, queue backends |
 | [docs/en/sqlite.md](docs/en/sqlite.md) | SQLite mode: capabilities and limitations |
-| [docs/ja/installation.md](docs/ja/installation.md) | Docker, Docker Compose, deb/rpm, ソースからビルド |
-| [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
-| [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributing guidelines |
 | [AGENTS.md](AGENTS.md) | Notes for AI agents |
 
