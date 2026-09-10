@@ -415,8 +415,7 @@ async fn check_vec0_availability(
     #[derive(sea_orm::FromQueryResult)]
     struct MasterRow {
         #[sea_orm(column_name = "type")]
-        #[allow(dead_code)]
-        typ: String,
+        _typ: String,
     }
 
     let row = MasterRow::find_by_statement(Statement::from_sql_and_values(
