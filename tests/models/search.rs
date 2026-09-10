@@ -572,13 +572,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         // first and rejects the write before the model check is reached.
         let provider = FixedWidthProvider(768);
         let result =
-            sync::sync_embedding_for_record(
-                &ctx.db,
-                workspace.id,
-                &entity,
-                &provider,
-                true,
-            ).await;
+            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider, true).await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
