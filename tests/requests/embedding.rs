@@ -186,7 +186,7 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
                 "dimensions": 3072
             }))
             .await;
-        assert_eq!(put.status_code(), 200, "response: {:?}", put.text());
+        assert_eq!(put.status_code(), 204, "response: {:?}", put.text());
 
         // Stored with WidthChanged: GET now returns the new assignment.
         let get = request
