@@ -179,18 +179,13 @@ fn vector_blob_to_f32(blob: Vec<u8>) -> Vec<f32> {
 }
 
 /// Results from one measurement phase.
-#[allow(dead_code)]
 struct PhaseResult {
-    /// Name of the method (e.g. "full-scan", "vec0").
-    method: &'static str,
     /// Median latency in milliseconds across iterations.
     median_ms: f64,
     /// Max latency across iterations.
     max_ms: f64,
     /// Min latency across iterations.
     min_ms: f64,
-    /// Number of entities scanned.
-    entity_count: usize,
     /// Whether this method is available on this deployment.
     available: bool,
 }
@@ -341,11 +336,9 @@ async fn benchmark_phase(
     };
 
     Ok(PhaseResult {
-        method: if use_full_scan { "full-scan" } else { "vec0" },
         median_ms: median,
         max_ms: *latencies.last().unwrap(),
         min_ms: latencies[0],
-        entity_count: 0, // computed externally
         available: true,
     })
 }
@@ -417,13 +410,12 @@ async fn check_vec0_availability(
     let vec0_table = format!("{table_name}_vec0");
 
     // SQLite stores virtual tables in sqlite_master like regular tables.
-    let sql = "SELECT type FROM sqlite_master WHERE name = ? LIMIT 1";
+    let sql = "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1";
 
-    #[allow(dead_code)]
     #[derive(sea_orm::FromQueryResult)]
     struct MasterRow {
         #[sea_orm(column_name = "type")]
-        typ: String,
+        _typ: String,
     }
 
     let row = MasterRow::find_by_statement(Statement::from_sql_and_values(
@@ -436,11 +428,9 @@ async fn check_vec0_availability(
     .internal()?;
 
     Ok(PhaseResult {
-        method: "vec0",
         median_ms: 0.0,
         max_ms: 0.0,
         min_ms: 0.0,
-        entity_count: 0,
         available: row.is_some(),
     })
 }
