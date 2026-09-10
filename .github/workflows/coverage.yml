@@ -1,0 +1,78 @@
+name: Coverage
+
+# Coverage reporting is informational rather than a per-PR gate.
+# Running it weekly on develop keeps PR CI fast (postgres leg is
+# 20-40 minutes shorter with no second test run) while still
+# tracking coverage regressions over time.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # 03:00 UTC Monday
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      db:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: yorishiro
+          POSTGRES_PASSWORD: yorishiro
+          POSTGRES_DB: yorishiro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yorishiro"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/rust-setup
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Build workspace
+        run: cargo build --locked --workspace
+
+      - name: Install sea-orm-cli with postgres-vector feature
+        run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector,sqlx-postgres,sqlx-sqlite
+
+      - name: Install pgvector and pg_trgm
+        run: |
+          docker exec ${{ job.services.db.id }} psql -U yorishiro -d yorishiro \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
+            -c '\c template1' \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          LOCO_ENV: test_postgres
+          DB_CONNECT_TIMEOUT: "5000"
+        run: ./target/debug/yorishiro db migrate
+
+      - name: Run coverage
+        env:
+          DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          LOCO_ENV: test_postgres
+          DB_MAX_CONNECTIONS: 100
+          DB_CONNECT_TIMEOUT: 5000
+        run: cargo llvm-cov --locked --workspace --summary-only

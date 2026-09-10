@@ -196,16 +196,3 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
         run: cargo test --locked --workspace -- --test-threads=1
-
-      - name: Install cargo-llvm-cov
-        if: matrix.backend == 'postgres'
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Coverage report
-        if: matrix.backend == 'postgres'
-        run: cargo llvm-cov --locked --workspace --summary-only
-        env:
-          DATABASE_URL: ${{ matrix.database_url }}
-          LOCO_ENV: ${{ matrix.loco_env }}
