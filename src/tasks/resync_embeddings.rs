@@ -105,11 +105,16 @@ impl Task for ResyncEmbeddings {
                 created_by: candidate.created_by,
                 updated_by: candidate.updated_by,
             };
+            let licenced = app_context
+                .shared_store
+                .get::<crate::ee::services::licence::LicenceState>()
+                .is_some_and(|state| state.is_active());
             let result = embedding::sync::sync_embedding_for_record(
                 &app_context.db,
                 workspace_id,
                 &record,
                 provider.as_ref(),
+                licenced,
             )
             .await;
 

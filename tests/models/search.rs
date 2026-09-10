@@ -143,6 +143,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             query_vector,
             "match",
             search::SearchQuery::default(),
+            true,
         )
         .await
         .expect("search_by_vector");
@@ -223,8 +224,14 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
 
         let mismatched_provider = FixedWidthProvider(1024);
         let result =
-            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &mismatched_provider)
-                .await;
+            sync::sync_embedding_for_record(
+                &ctx.db,
+                workspace.id,
+                &entity,
+                &mismatched_provider,
+                true,
+            )
+            .await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
@@ -354,8 +361,14 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let result =
-            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &mismatched_provider)
-                .await;
+            sync::sync_embedding_for_record(
+                &ctx.db,
+                workspace.id,
+                &entity,
+                &mismatched_provider,
+                true,
+            )
+            .await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
@@ -441,8 +454,14 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let result =
-            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &matching_provider)
-                .await;
+            sync::sync_embedding_for_record(
+                &ctx.db,
+                workspace.id,
+                &entity,
+                &matching_provider,
+                true,
+            )
+            .await;
         assert!(result.is_ok(), "result: {result:?}");
 
         // Verify the embedding was written.
@@ -483,8 +502,14 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let result2 =
-            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity2, &mismatched_provider)
-                .await;
+            sync::sync_embedding_for_record(
+                &ctx.db,
+                workspace.id,
+                &entity2,
+                &mismatched_provider,
+                true,
+            )
+            .await;
         assert!(
             matches!(result2, Err(YorishiroError::ValidationFailed { .. })),
             "result: {result2:?}"
@@ -547,7 +572,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
         // first and rejects the write before the model check is reached.
         let provider = FixedWidthProvider(768);
         let result =
-            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider).await;
+            sync::sync_embedding_for_record(&ctx.db, workspace.id, &entity, &provider, true).await;
 
         assert!(
             matches!(result, Err(YorishiroError::ValidationFailed { .. })),
@@ -853,6 +878,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 workspace.id,
                 &entity_record.into(),
                 &old_provider,
+                true,
             )
             .await
             .expect("embed with old model");
@@ -1027,6 +1053,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             vec![0.0_f32; 768],
             "quarterly roadmap",
             search::SearchQuery::default(),
+            true,
         )
         .await
         .expect("search_by_vector");
@@ -1125,6 +1152,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
+                true,
             )
             .await
             .expect("search_by_vector");
@@ -1156,6 +1184,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 vec![0.0_f32; 768],
                 "quarterly roadmap",
                 search::SearchQuery::default(),
+                true,
             )
             .await
             .expect("search_by_vector after update");
@@ -1172,6 +1201,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
                 vec![0.0_f32; 768],
                 "quarterly board meeting",
                 search::SearchQuery::default(),
+                true,
             )
             .await
             .expect("search_by_vector after update");

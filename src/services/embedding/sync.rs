@@ -45,6 +45,7 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
 /// The three-tier inheritance is: workspace stamp → tenant default → deployment default.
 /// Stamps the workspace on first successful embed (first-write stamping).
 /// See [`embed_and_write`] for the unguarded write this wraps, and why the reindex task calls that directly instead of this.
+#[allow(clippy::too_many_arguments)]
 pub async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -53,6 +54,7 @@ pub async fn sync_embedding(
     entity_type_def: &EntityTypeDef,
     data: &Value,
     provider: &dyn EmbeddingProvider,
+    licenced: bool,
 ) -> Result<(), YorishiroError> {
     let Some(text) = compose_embedding_text(entity_type_def, data) else {
         return Ok(());
@@ -67,7 +69,7 @@ pub async fn sync_embedding(
     // The model stamp check below is the second line: two models of the same width (nomic-embed-text
     // v1.5 and multilingual-e5-base both 768) can coexist in the same table, and this check is the
     // only thing standing between a workspace and a silent write from the wrong model.
-    let chain = resolve_embedding_chain(conn, workspace_id).await?;
+    let chain = resolve_embedding_chain(conn, workspace_id, licenced).await?;
     // Three-tier inheritance: workspace stamp → tenant default → deployment default.
     let effective_dimensions = chain
         .workspace_dimensions
@@ -288,11 +290,16 @@ async fn embed_and_write(
 /// The record's data belongs to the schema version it was validated against (`record.schema_id`), so fetching by ID rather than the active version is correct.
 ///
 /// The intended entry point for controllers to call after `Authorized::commit()`.
+///
+/// `licenced` is `true` when a valid licence key is configured, enabling workspace/tenant
+/// default embedding resolution. `false` (community edition) limits resolution to the
+/// deployment default only.
 pub async fn sync_embedding_for_record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
+    licenced: bool,
 ) -> Result<(), YorishiroError> {
     let schema =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
@@ -315,6 +322,7 @@ pub async fn sync_embedding_for_record(
         entity_type_def,
         &record.data,
         provider,
+        licenced,
     )
     .await
 }
@@ -537,12 +545,17 @@ pub struct StartupReindexRow {
 /// Resolves the full three-tier embedding chain for a workspace in a single query:
 /// workspace stamp → tenant default → deployment default.
 ///
+/// When `licenced` is `false` (community edition or unlicensed), workspace and tenant
+/// defaults are ignored: only the deployment default is returned. Per-workspace embedding
+/// widths are an enterprise-edition feature.
+///
 /// `conn` can be any connection trait: a transaction or a pooled database connection.
 /// Public because the `reindex_embeddings` task and the startup reindex logic both
 /// need to read the workspace's model stamp to decide whether reindex is necessary.
 pub async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
+    licenced: bool,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
     use crate::models::_entities::tenant_tenants::Column as TenantColumn;
     use crate::models::_entities::workspace_workspaces::Column;
@@ -570,9 +583,17 @@ pub async fn resolve_embedding_chain(
 
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,
-        workspace_dimensions: row.embedding_dimensions,
-        tenant_model: row.tenant_model,
-        tenant_dimensions: row.tenant_dimensions,
+        workspace_dimensions: if licenced {
+            row.embedding_dimensions
+        } else {
+            None
+        },
+        tenant_model: if licenced { row.tenant_model } else { None },
+        tenant_dimensions: if licenced {
+            row.tenant_dimensions
+        } else {
+            None
+        },
         deployment_dimensions,
     })
 }

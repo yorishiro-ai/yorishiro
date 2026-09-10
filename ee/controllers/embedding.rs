@@ -48,7 +48,7 @@ async fn set_embedding_key(
             .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-    embedding_keys::set(
+    match embedding_keys::set(
         &ctx.db,
         auth_ctx.workspace_id,
         &body.base_url,
@@ -58,7 +58,28 @@ async fn set_embedding_key(
         body.send_dimensions_param,
         workspace.embedding_dimensions,
     )
-    .await?;
+    .await?
+    {
+        embedding_keys::SetOutcome::Stored => {}
+        embedding_keys::SetOutcome::WidthChanged { .. } => {
+            // Width changed: enqueue a reindex so the workspace's entities are
+            // re-embedded with the new provider's width. Uses the same enqueue
+            // path that the reindex scheduler uses (see #307).
+            use crate::workers::embedding_sync::WorkerClass;
+            use crate::workers::reindex::{ReindexArgs, enqueue_for_class};
+            let args = ReindexArgs {
+                workspace_id: auth_ctx.workspace_id,
+                worker_class: WorkerClass::Shared,
+            };
+            if let Err(err) = enqueue_for_class(&ctx, args).await {
+                tracing::warn!(
+                    workspace_id = %auth_ctx.workspace_id,
+                    error = %err,
+                    "embedding key set: width changed, failed to enqueue reindex"
+                );
+            }
+        }
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

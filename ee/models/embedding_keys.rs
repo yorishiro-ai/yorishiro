@@ -134,13 +134,31 @@ async fn create_width_table(
     Ok(())
 }
 
+/// Outcome of storing an embedding key assignment.
+///
+/// `WidthChanged` is returned when the new provider's width differs from the
+/// workspace's existing vectors: the key is stored successfully, but the caller
+/// must trigger a reindex so the workspace's entities are re-embedded with the new width.
+#[derive(Debug, Clone)]
+pub enum SetOutcome {
+    /// The key was stored and the workspace's width matches the new provider.
+    Stored,
+    /// The key was stored, but the workspace's existing vectors are at a different width.
+    /// The caller should enqueue a reindex for this workspace.
+    WidthChanged {
+        expected_dimensions: i32,
+        new_dimensions: i32,
+    },
+}
+
 /// Stores or replaces a workspace's own embedding provider assignment.
 ///
 /// `expected_dimensions` is the workspace's own stamped `workspace_workspaces.embedding_dimensions`,
-/// or the deployment default's width for a workspace carrying no stamp. Assigning a provider of a
-/// different width would leave old and new vectors at different widths in one column, surfacing only
-/// when `sync_embedding`'s write-time guard (`services/embedding/sync.rs`) rejects a write.
-/// Checking here, at the point an operator assigns the provider, surfaces the same mismatch immediately instead of on the next entity write.
+/// or the deployment default's width for a workspace carrying no stamp.
+/// When the new provider's width differs, the key is stored and `SetOutcome::WidthChanged` is
+/// returned so the caller can enqueue a reindex (the same `reindex_scheduler` enqueue path that
+/// `#307` uses). This is preferable to rejecting outright: the operator's intent is to switch
+/// widths, and reindexing is the mechanism that makes the switch consistent.
 ///
 /// **Table creation**: if the width-specific table (e.g. `entity_embeddings_1024`) does not
 /// yet exist, this function creates it within the same transaction.
@@ -157,7 +175,7 @@ pub async fn set(
     dimensions: i32,
     send_dimensions_param: bool,
     expected_dimensions: Option<i32>,
-) -> Result<(), YorishiroError> {
+) -> Result<SetOutcome, YorishiroError> {
     if api_key.trim().is_empty() {
         return Err(YorishiroError::ValidationFailed {
             message: "api_key must not be empty".into(),
@@ -172,20 +190,16 @@ pub async fn set(
             hint: "set it to the embedding model's own output width".into(),
         });
     }
-    if let Some(expected) = expected_dimensions
+    let outcome = if let Some(expected) = expected_dimensions
         && expected != dimensions
     {
-        return Err(YorishiroError::ValidationFailed {
-            message: format!(
-                "this workspace holds {expected}-dimensional vectors, but the provider being \
-                 assigned produces {dimensions}"
-            ),
-            details: vec![],
-            hint: "assign a provider that matches the workspace's existing vectors, or \
-                   re-embed the workspace after assigning this one"
-                .into(),
-        });
-    }
+        SetOutcome::WidthChanged {
+            expected_dimensions: expected,
+            new_dimensions: dimensions,
+        }
+    } else {
+        SetOutcome::Stored
+    };
 
     // Create the width-specific table if it does not yet exist.
     // This must run inside the same transaction as the key insert so that the
@@ -223,7 +237,7 @@ pub async fn set(
         .exec(conn)
         .await
         .internal()?;
-    Ok(())
+    Ok(outcome)
 }
 
 /// Removes a workspace's own assignment.

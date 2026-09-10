@@ -154,7 +154,7 @@ async fn a_non_http_base_url_is_refused() {
 /// Assigning a provider whose `dimensions` does not match a workspace's own stamped `embedding_dimensions` is refused at configuration time, not discovered only on the next entity write (`sync_embedding`'s own write-time guard, `services/embedding/sync.rs`, is the backstop this is in front of, not a replacement for it).
 #[tokio::test]
 #[serial]
-async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_time() {
+async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_reindex() {
     if super::super::require_sqlite_backend() {
         return;
     }
@@ -186,14 +186,14 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_is_refused_at_config_t
                 "dimensions": 3072
             }))
             .await;
-        assert_eq!(put.status_code(), 422, "response: {:?}", put.text());
+        assert_eq!(put.status_code(), 204, "response: {:?}", put.text());
 
-        // Refused, so nothing was stored: GET still reports unconfigured.
+        // Stored with WidthChanged: GET now returns the new assignment.
         let get = request
             .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(get.status_code(), 404, "response: {:?}", get.text());
+        assert_eq!(get.status_code(), 200, "response: {:?}", get.text());
     })
     .await;
 }
@@ -218,7 +218,7 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "an unassigned workspace must resolve to None so the caller falls back to the deployment default"
         );
 
-        yorishiro::ee::models::embedding_keys::set(
+        let result = yorishiro::ee::models::embedding_keys::set(
             &ctx.db,
             setup.workspace_id,
             "https://embed.example.com/v1",
@@ -230,6 +230,10 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
         )
         .await
         .expect("assign workspace embedding key");
+        assert!(
+            matches!(result, yorishiro::ee::models::embedding_keys::SetOutcome::Stored),
+            "assigning with no expected dimensions must yield Stored"
+        );
 
         let after = resolver
             .resolve(&ctx.db, setup.workspace_id)
