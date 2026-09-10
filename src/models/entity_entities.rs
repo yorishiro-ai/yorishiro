@@ -7,7 +7,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub use super::_entities::entity_entities::{ActiveModel, Entity, Model};
-use crate::error::{ResultExt, ValidationDetail, YorishiroError};
+use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::metaschema;
 
 #[async_trait::async_trait]
@@ -116,6 +116,9 @@ pub fn validate_data(
         .map(|err| ValidationDetail {
             field: error_field_pointer(&err),
             problem: err.to_string(),
+            code: ValidationErrorCode::Other,
+            expected: None,
+            actual: None,
         })
         .collect();
 

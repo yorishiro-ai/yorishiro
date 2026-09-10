@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub use super::_entities::entity_relations::{ActiveModel, Entity, Model};
-use crate::error::{ResultExt, ValidationDetail, YorishiroError};
+use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::entity_entities::{self, EntityRecord};
 
 /// The generated `Model` already matches this API's response shape, so this is an alias rather than a distinct struct.
@@ -182,6 +182,9 @@ pub async fn set_status(
             details: vec![ValidationDetail {
                 field: "/status".to_string(),
                 problem: format!("expected one of {}", RELATION_STATUSES.join(", ")),
+                code: ValidationErrorCode::Other,
+                expected: Some(RELATION_STATUSES.join(", ")),
+                actual: Some(status.to_string()),
             }],
             hint: format!(
                 "use one of {}: traversal follows '{RELATION_STATUS_ACTIVE}' only",

@@ -1,4 +1,4 @@
-use crate::error::{ValidationDetail, YorishiroError};
+use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 
 use super::types::{FieldDef, FieldTypeName, MetaSchemaDefinition};
 
@@ -24,6 +24,9 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
         details.push(ValidationDetail {
             field: "/name".into(),
             problem: "name must not be empty".into(),
+            code: ValidationErrorCode::EmptyRequired,
+            expected: None,
+            actual: None,
         });
     }
 
@@ -31,6 +34,9 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
         details.push(ValidationDetail {
             field: "/entity_types".into(),
             problem: "at least one entity type is required".into(),
+            code: ValidationErrorCode::EmptyRequired,
+            expected: Some("1+".into()),
+            actual: Some("0".into()),
         });
     }
 
@@ -55,6 +61,9 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
                     "source entity type '{}' is not defined in entity_types",
                     relation.source
                 ),
+                code: ValidationErrorCode::UndefinedEntityType,
+                expected: Some("defined in entity_types".into()),
+                actual: Some(relation.source.clone()),
             });
         }
 
@@ -65,6 +74,9 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
                     "target entity type '{}' is not defined in entity_types",
                     relation.target
                 ),
+                code: ValidationErrorCode::UndefinedEntityType,
+                expected: Some("defined in entity_types".into()),
+                actual: Some(relation.target.clone()),
             });
         }
     }
@@ -97,6 +109,9 @@ fn validate_field(
                             problem: format!(
                                 "object nesting exceeds max depth of {MAX_OBJECT_DEPTH}"
                             ),
+                            code: ValidationErrorCode::DepthExceeded,
+                            expected: Some(MAX_OBJECT_DEPTH.to_string()),
+                            actual: Some(depth.to_string()),
                         });
                     } else {
                         for (child_name, child_field) in properties {
@@ -111,6 +126,9 @@ fn validate_field(
                 _ => details.push(ValidationDetail {
                     field: format!("{field_path}/items/properties"),
                     problem: "array items.type = 'object' requires non-empty properties".into(),
+                    code: ValidationErrorCode::EmptyObjectProperties,
+                    expected: Some("non-empty properties".into()),
+                    actual: None,
                 }),
             },
             Some(items) => details.push(ValidationDetail {
@@ -119,10 +137,16 @@ fn validate_field(
                     "array items.type must be 'string' or 'object', got '{}'",
                     items.r#type
                 ),
+                code: ValidationErrorCode::InvalidArrayItemType,
+                expected: Some("'string' or 'object'".into()),
+                actual: Some(items.r#type.clone()),
             }),
             None => details.push(ValidationDetail {
                 field: format!("{field_path}/items"),
                 problem: "array field requires items.type = 'string' or 'object'".into(),
+                code: ValidationErrorCode::EmptyRequired,
+                expected: Some("items.type".into()),
+                actual: None,
             }),
         };
     }
@@ -134,6 +158,9 @@ fn validate_field(
                     details.push(ValidationDetail {
                         field: format!("{field_path}/properties"),
                         problem: format!("object nesting exceeds max depth of {MAX_OBJECT_DEPTH}"),
+                        code: ValidationErrorCode::DepthExceeded,
+                        expected: Some(MAX_OBJECT_DEPTH.to_string()),
+                        actual: Some(depth.to_string()),
                     });
                 } else {
                     for (child_name, child_field) in properties {
@@ -148,6 +175,9 @@ fn validate_field(
             _ => details.push(ValidationDetail {
                 field: field_path.to_string(),
                 problem: "object field requires non-empty properties".into(),
+                code: ValidationErrorCode::EmptyObjectProperties,
+                expected: Some("non-empty properties".into()),
+                actual: None,
             }),
         }
     }
@@ -160,6 +190,9 @@ fn validate_field(
                     "format is only valid for string fields, but field type is {:?}",
                     field.r#type
                 ),
+                code: ValidationErrorCode::TypeMismatch,
+                expected: Some("string".into()),
+                actual: Some(format!("{:?}", field.r#type)),
             });
         } else if !matches!(
             format.as_str(),
@@ -170,6 +203,9 @@ fn validate_field(
                         problem: format!(
                             "unsupported string format '{format}' (expected date / date-time / uri / email / uuid)"
                         ),
+                        code: ValidationErrorCode::UnsupportedFormat,
+                        expected: Some("date / date-time / uri / email / uuid".into()),
+                        actual: Some(format.clone()),
                     });
         }
     }
@@ -182,6 +218,9 @@ fn validate_field(
                 "minimum/maximum are only valid for number/integer fields, but field type is {:?}",
                 field.r#type
             ),
+            code: ValidationErrorCode::NumericOnNonNumeric,
+            expected: Some("number or integer".into()),
+            actual: Some(format!("{:?}", field.r#type)),
         });
     }
     if let (Some(minimum), Some(maximum)) = (field.minimum, field.maximum)
@@ -190,6 +229,9 @@ fn validate_field(
         details.push(ValidationDetail {
             field: field_path.to_string(),
             problem: format!("minimum ({minimum}) must not exceed maximum ({maximum})"),
+            code: ValidationErrorCode::MinExceedsMax,
+            expected: format!("<= {maximum}").into(),
+            actual: Some(minimum.to_string()),
         });
     }
 
@@ -203,6 +245,9 @@ fn validate_field(
                         "minLength/maxLength/pattern are only valid for string fields, but field type is {:?}",
                         field.r#type
                     ),
+                    code: ValidationErrorCode::StringConstraintOnNonString,
+                    expected: Some("string".into()),
+                    actual: Some(format!("{:?}", field.r#type)),
                 });
     }
     if let (Some(min), Some(max)) = (field.min_length, field.max_length)
@@ -211,6 +256,9 @@ fn validate_field(
         details.push(ValidationDetail {
             field: field_path.to_string(),
             problem: format!("minLength ({min}) must not exceed maxLength ({max})"),
+            code: ValidationErrorCode::MinExceedsMax,
+            expected: format!("<= {max}").into(),
+            actual: Some(min.to_string()),
         });
     }
     if let Some(pattern) = &field.pattern
@@ -219,6 +267,9 @@ fn validate_field(
         details.push(ValidationDetail {
             field: format!("{field_path}/pattern"),
             problem: format!("invalid regular expression: '{pattern}'"),
+            code: ValidationErrorCode::InvalidPattern,
+            expected: Some("valid regex".into()),
+            actual: Some(pattern.clone()),
         });
     }
 
@@ -231,6 +282,9 @@ fn validate_field(
                         "minItems/maxItems/uniqueItems are only valid for array fields, but field type is {:?}",
                         field.r#type
                     ),
+                    code: ValidationErrorCode::ArrayConstraintOnNonArray,
+                    expected: Some("array".into()),
+                    actual: Some(format!("{:?}", field.r#type)),
                 });
     }
     if let (Some(min), Some(max)) = (field.min_items, field.max_items)
@@ -239,6 +293,9 @@ fn validate_field(
         details.push(ValidationDetail {
             field: field_path.to_string(),
             problem: format!("minItems ({min}) must not exceed maxItems ({max})"),
+            code: ValidationErrorCode::MinExceedsMax,
+            expected: format!("<= {max}").into(),
+            actual: Some(min.to_string()),
         });
     }
 }

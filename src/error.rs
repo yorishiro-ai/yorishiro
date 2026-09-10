@@ -196,10 +196,55 @@ impl From<YorishiroError> for loco_rs::Error {
     }
 }
 
+/// Machine-readable classification of a validation error.
+///
+/// New branches in `src/metaschema/validate.rs` should get their own variant here.
+/// Use the `Other` catch-all for errors that do not fit a specific classification.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum ValidationErrorCode {
+    /// The field's type does not match the schema's expected type.
+    TypeMismatch,
+    /// A required field was empty or missing.
+    EmptyRequired,
+    /// Object nesting exceeds [`crate::metaschema::MAX_OBJECT_DEPTH`].
+    DepthExceeded,
+    /// A numeric field uses minimum/maximum on a non-numeric type.
+    NumericOnNonNumeric,
+    /// A string-only constraint (format, min_length, max_length, pattern) is used on a non-string type.
+    StringConstraintOnNonString,
+    /// An array constraint (min_items, max_items, unique_items) is used on a non-array type.
+    ArrayConstraintOnNonArray,
+    /// An array items.type is neither 'string' nor 'object'.
+    InvalidArrayItemType,
+    /// An array with items.type = 'object' has empty or missing properties.
+    EmptyObjectProperties,
+    /// A field uses minimum > maximum.
+    MinExceedsMax,
+    /// An invalid regular expression pattern was provided.
+    InvalidPattern,
+    /// A format value is not one of the allowed values.
+    UnsupportedFormat,
+    /// A relation references an entity type that is not defined.
+    UndefinedEntityType,
+    /// Catch-all: a validation branch that does not match a specific variant.
+    Other,
+}
+
+/// A single validation error detail, included in `ValidationFailed.details`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidationDetail {
+    /// JSON pointer to the field being validated (e.g. `/entity_types/foo/fields/bar`).
     pub field: String,
+    /// A human-readable description of the problem.
+    /// Serves as the fallback/log string when no localized message is available.
     pub problem: String,
+    /// Machine-readable classification of the error.
+    /// Clients should switch on this to render localized messages.
+    pub code: ValidationErrorCode,
+    /// The expected value (e.g. "string", "object", "5"), or `None` if not applicable.
+    pub expected: Option<String>,
+    /// The actual value observed (e.g. "number", "array", "10"), or `None` if not applicable.
+    pub actual: Option<String>,
 }
 
 pub trait ResultExt<T> {
