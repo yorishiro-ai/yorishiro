@@ -1,6 +1,6 @@
 # エンタープライズ設定
 
-[English](../../docs/configuration.md) | **日本語**
+[English](../../../docs/en/configuration.md) | **日本語**
 
 ライセンスキーを必要とする追加設定。
 

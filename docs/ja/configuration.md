@@ -1,6 +1,6 @@
 # 設定
 
-[English](../configuration.md) | **日本語**
+[English](../en/configuration.md) | **日本語**
 
 Yorishiro は環境変数で設定します。設定用のファイルは不要です。
 

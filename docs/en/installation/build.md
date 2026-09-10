@@ -11,7 +11,7 @@
 
 ```console
 $ git clone https://github.com/yorishiro-ai/yorishiro && cd yorishiro
-$ make init
+$ make build
 ```
 
 ## Run

@@ -7,8 +7,8 @@ They support Ubuntu 24.04 and AlmaLinux 10 (glibc 2.39+).
 ## Install
 
 ```console
-$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/20260906-1/yorishiro_20260906-1_amd64.deb
-$ sudo dpkg -i yorishiro_20260906-1_amd64.deb
+$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro_<VERSION>_amd64.deb
+$ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
 ```
 
 ## Installed files

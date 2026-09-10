@@ -6,49 +6,82 @@
 
 ## できること
 
-- 自分のデータ構造を定義する
+- **自分のデータ構造を定義する**
   - フィールド、バリデーションルール、エンティティ間のリレーションを持つエンティティ型を作成できます。データモデルが変わってもコード修正は不要。
-- 意味で検索する
+  - APIでスキーマ、エンティティ型、リレーションを管理。
+  - JSONLファイルからデータをインポート。
+
+- **意味で検索する**
   - 「配送に関する顧客クレーム」といった説明を入力すると、正確に同じ言葉がなくても関連するレコードが見つかります。
-- 全文検索
-  - 埋め込みがまだ生成されていないレコードもキーワード検索でカバーします。
-- AIツールに接続
-  - Claude、Cursor、他のMCP対応クライアントが23個の組み込みツールを使ってデータを検索・作成・管理できます。
-- REST API
+  - ローカル埋め込み（multilingual-e5-base）またはOpenAI互換エンドポイントでのベクトル検索対応。
+  - 埋め込みがまだ生成されていないレコードもキーワード検索でカバー。
+
+- **AIツールに接続**
+  - Claude、Cursor、他のMCP対応クライアントが23個の組み込みMCPツールを使ってデータを検索・作成・管理できます。
+
+- **REST API**
   - 標準HTTPエンドポイントで自動化できます。
-- バージョン復元
-  - スナップショットで個別レコードを以前の状態に復元できます。
-- チームで整理する
+
+- **チームで整理する**
   - テナントとワークスペース、ロールベースのアクセス制御でデータを適切に分割・共有できます。
 
 ## アーキテクチャ
 
 ```mermaid
-flowchart TD
-    MCPClient["MCPクライアント<br/>(Claude, Cursor など)"]
-    RESTClient["RESTクライアント<br/>(curl, SDK, ブラウザ)"]
+flowchart LR
+    MCP["MCPクライアント<br/>(Claude, Cursor, など)"]
+    REST["RESTクライアント"]
 
-    subgraph Server["Yorishiro（axum）"]
-        MCP["MCP<br/>(23ツール)"]
-        REST["REST API"]
-        Core["コア + ee/<br/>(スキーマ / エンティティ / 検索 / 認証 / marketplace / billing / OAuth / LLMキー)<br/>ライセンスなしのルートは404を返す"]
+    subgraph Server["Yorishiro（単一バイナリ）"]
+        Router["Router (Loco)"]
+
+        subgraph CE["ce（community edition）<br/>entities, schemas, search, auth"]
+            direction TB
+            CEControllers["controllers"]
+            CEResolvers["デフォルトresolver<br/>（未ライセンス時はNoneを返す）"]
+        end
+
+        subgraph EE["ee（enterprise edition）<br/>ceを覆いかぶす"]
+            direction TB
+            EEControllers["controllers<br/>billing, OAuth, marketplace, dashboard"]
+            EEResolvers["resolver実装<br/>（ceのデフォルトを置き換える）"]
+        end
+
+        Embed["Embeddingプロバイダー<br/>(ローカルモデル、または<br/>OpenAI互換エンドポイント)"]
+
+        subgraph Workers["バックグラウンドワーカー"]
+            direction TB
+            WEmbed["embedding sync"]
+            WReindex["reindex"]
+        end
+
+        DB[("PostgreSQL または SQLite<br/>テナントごとにRLSでスコープ")]
     end
 
-    DB[("PostgreSQL<br/>または SQLite")]
-
-    MCPClient -->|"MCPツール"| MCP
-    RESTClient -->|"HTTP API"| REST
-    MCP --> Core
-    REST --> Core
-    Core --> DB
+    MCP --> Router
+    REST --> Router
+    Router --> CEControllers
+    Router --> EEControllers
+    EEResolvers -.overrides.-> CEResolvers
+    CEControllers --> CEResolvers
+    CEResolvers --> DB
+    EEControllers --> DB
+    CEControllers --> Embed
+    Embed --> Workers
+    Workers --> DB
 ```
 
 ## エディション
 
-| | フリー | エンタープライズ |
+ceでできることはeeでもすべて利用可能です。eeはceの上に以下の機能を追加します：
+
+| 機能 | コミュニティエディション(無料) | エンタープライズエディション |
 |---|---|---|
-| コア機能 | 利用可能 | 利用可能 |
-| エンタープライズ機能（marketplace、ビルド、OAuth、LLM推論） | 利用不可 | 利用可能 |
+| ワークスペースごとの埋め込みプロバイダ割り当て | — | 利用可能 |
+| ワークスペースごとのLLM推論キー & fill | — | 利用可能 |
+| テンプレートマーケットプレイス | — | 利用可能 |
+| OAuth2 / OIDCログイン | — | 利用可能 |
+| Stripe課金 | — | 利用可能 |
 
 1つのバイナリ、1つのリポジトリ。エンタープライズ機能はライセンスキーで有効化します。
 
@@ -67,10 +100,16 @@ flowchart TD
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
 | `YORISHIRO_MAX_TENANTS` | `1` | テナント上限（`0` = 無制限） |
 | `YORISHIRO_LICENSE_KEY` | *(空)* | エンタープライズライセンスキー |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みバックエンド（`none` で無効） |
+| `YORISHIRO_EMBEDDING_BASE_URL` | *(空)* | OpenAI互換埋め込みエンドポイント |
+| `YORISHIRO_EMBEDDING_MODEL` | *(空)* | 埋め込みモデル名 |
+| `YORISHIRO_EMBEDDING_API_KEY` | *(空)* | 埋め込みAPIキー |
+| `YORISHIRO_EMBEDDING_DIMENSIONS` | `768` | ベクトルの次元数 |
+| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | `false` | リクエストに `dimensions` フィールドを含める |
+| `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` 設定済み | — | OpenAI互換プロバイダを使用 |
 | `YORISHIRO_QUEUE_KIND` | 自動検出 | Valkey/Redis キューには `Redis` を設定 |
 | `QUEUE_URL` | `DATABASE_URL` と共有 | Redis キューに必須 |
 
@@ -83,8 +122,8 @@ flowchart TD
 | [docs/ja/installation.md](docs/ja/installation.md) | Docker、Docker Compose、deb/rpm、ソースからビルド |
 | [docs/ja/configuration.md](docs/ja/configuration.md) | 全設定：埋め込み、検索クォータ、ログ、キューバックエンド |
 | [docs/ja/sqlite.md](docs/ja/sqlite.md) | SQLiteモード：機能と制限 |
-| [CONTRIBUTING.md](docs/ja/CONTRIBUTING.md) | 貢献ガイドライン |
-| [AGENTS.md](docs/ja/AGENTS.md) | AIエージェント向け情報 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 貢献ガイドライン |
+| [AGENTS.md](AGENTS.md) | AIエージェント向け情報 |
 
 ## ライセンス
 
