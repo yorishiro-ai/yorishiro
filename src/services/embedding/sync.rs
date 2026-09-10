@@ -45,6 +45,7 @@ pub fn compose_embedding_text(entity_type_def: &EntityTypeDef, data: &Value) -> 
 /// The three-tier inheritance is: workspace stamp → tenant default → deployment default.
 /// Stamps the workspace on first successful embed (first-write stamping).
 /// See [`embed_and_write`] for the unguarded write this wraps, and why the reindex task calls that directly instead of this.
+#[allow(clippy::too_many_arguments)]
 pub async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
