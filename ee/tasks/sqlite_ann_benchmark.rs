@@ -414,7 +414,7 @@ async fn check_vec0_availability(
 
     #[derive(sea_orm::FromQueryResult)]
     struct MasterRow {
-        #[sea_orm(column_name = "type")]
+        #[sea_orm(alias = "type")]
         _typ: String,
     }
 

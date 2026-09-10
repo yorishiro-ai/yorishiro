@@ -312,8 +312,8 @@ struct BatchNeighborRow {
     direction: String,
     properties: Value,
     // Only used to drive the SQL-level ORDER BY; not read on the Rust side.
-    #[allow(dead_code)]
-    relation_created_at: chrono::DateTime<chrono::FixedOffset>,
+    #[sea_orm(alias = "relation_created_at")]
+    _relation_created_at: chrono::DateTime<chrono::FixedOffset>,
     entity_id: Uuid,
     entity_workspace_id: Uuid,
     entity_schema_id: Uuid,
