@@ -70,6 +70,14 @@ jobs:
       - name: Check
         run: cargo check --locked --workspace
 
+      - name: Check doc links
+        run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: >-
+            -D rustdoc::broken_intra_doc_links
+            -D rustdoc::invalid_html_tags
+            -D rustdoc::bare_urls
+
       - name: Clippy
         run: cargo clippy --locked --workspace --tests -- -D warnings
 
@@ -78,6 +86,11 @@ jobs:
         # thresholds without failing the build. cognitive_complexity and too_many_lines are
         # both nursery/pedantic lints, off by default, so --force-warn opts them in here.
         run: cargo clippy --locked --workspace --tests -- --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+
+      - name: Doc coverage report
+        # Warn-only (see clippy.toml): ~200 existing violations of missing_errors_doc
+        # and missing_panics_doc; new/changed code is expected to add those comments.
+        run: cargo clippy --locked --workspace --lib -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
 
   test:
     runs-on: ubuntu-latest
@@ -183,3 +196,16 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
         run: cargo test --locked --workspace -- --test-threads=1
+
+      - name: Install cargo-llvm-cov
+        if: matrix.backend == 'postgres'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Coverage report
+        if: matrix.backend == 'postgres'
+        run: cargo llvm-cov --locked --workspace --summary-only
+        env:
+          DATABASE_URL: ${{ matrix.database_url }}
+          LOCO_ENV: ${{ matrix.loco_env }}

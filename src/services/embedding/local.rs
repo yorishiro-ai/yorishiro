@@ -75,7 +75,7 @@ fn multilingual_e5_base_config() -> XlmRobertaConfig {
 /// Provider that generates embeddings using a local, in-process model.
 /// Has no runtime dependency on external services, making it suitable for closed/offline environments.
 ///
-/// Which model loads is selected by [`super::model_fetch::LocalModelDef`] (see [`super::model_fetch::MODELS`]), read through one of two `candle-transformers` architectures from a `safetensors` checkpoint: a different model here is a different [`LoadedModel`] variant, not a config change.
+/// Which model loads is selected by [`super::model_fetch::LocalModelDef`], read through one of two `candle-transformers` architectures from a `safetensors` checkpoint: a different model here is a different [`LoadedModel`] variant, not a config change.
 ///
 /// Token embeddings are aggregated into a sentence vector via mean pooling weighted by the attention mask, then L2-normalized for stable cosine-distance search: both models this provider loads were trained and evaluated this way, and neither definition carries a pooling field of its own for exactly that reason.
 /// A field with one legal value on every definition so far would encode a future constraint on the field; one arrives the day a model that pools differently does.

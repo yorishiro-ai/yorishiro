@@ -477,7 +477,7 @@ async fn reindex_workspace_inner(
 /// function's batch fetch is reported as a failure rather than silently skipped.
 ///
 /// The caller is responsible for serializing concurrent calls against the same workspace
-/// (the `reindex_embeddings` task uses [`db::acquire_workspace_reindex_lock`] to do this).
+/// (the `reindex_embeddings` task uses [`crate::db::acquire_workspace_reindex_lock`] to do this).
 pub async fn reindex_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

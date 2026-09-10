@@ -5,3 +5,7 @@
 # these; shrink the existing count over time rather than suppressing the warning.
 cognitive-complexity-threshold = 7
 too-many-lines-threshold = 50
+
+# Lints missing_errors_doc and missing_panics_doc are warn-only in CI: the existing
+# codebase has ~200 violations, so enforcing them with -D warnings would break every
+# open PR. New/changed code is expected to add doc comments when fallible/panicking.
