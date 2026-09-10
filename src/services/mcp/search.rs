@@ -104,8 +104,14 @@ impl YorishiroMcpServer {
             }
         };
 
+        let licenced = self
+            .ctx
+            .shared_store
+            .get::<crate::ee::services::licence::LicenceState>()
+            .is_some_and(|state| state.is_active());
+
         let hits =
-            match search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query)
+            match search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query, licenced)
                 .await
             {
                 Ok(value) => value,

@@ -64,7 +64,11 @@ impl Task for ReindexEmbeddings {
             .map(|v| v.parse().unwrap_or(false))
             .unwrap_or(false);
         if !force {
-            let chain = embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id)
+            let licenced = app_context
+                .shared_store
+                .get::<crate::ee::services::licence::LicenceState>()
+                .is_some_and(|state| state.is_active());
+            let chain = embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id, licenced)
                 .await
                 .map_err(|err| Error::Message(err.to_string()))?;
             if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {

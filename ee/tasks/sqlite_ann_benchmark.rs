@@ -82,7 +82,11 @@ impl Task for SqliteAnnBenchmark {
         };
 
         // Resolve the correct width-partitioned table for this workspace.
-        let (_dimension, table_name) = resolve_search_table(&ctx.db, workspace_id)
+        let licenced = ctx
+            .shared_store
+            .get::<crate::ee::services::licence::LicenceState>()
+            .is_some_and(|state| state.is_active());
+        let (_dimension, table_name) = resolve_search_table(&ctx.db, workspace_id, licenced)
             .await
             .map_err(|e| Error::Message(e.to_string()))?;
 
