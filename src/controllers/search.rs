@@ -68,9 +68,15 @@ pub async fn search_entities(
         .get::<crate::ee::services::licence::LicenceState>()
         .is_some_and(|state| state.is_active());
 
-    let hits =
-        search::search_by_vector(&txn, workspace_id, vector, &params.query_text, query, licenced)
-            .await?;
+    let hits = search::search_by_vector(
+        &txn,
+        workspace_id,
+        vector,
+        &params.query_text,
+        query,
+        licenced,
+    )
+    .await?;
     Ok(Json(hits))
 }
 

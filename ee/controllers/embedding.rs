@@ -66,7 +66,7 @@ async fn set_embedding_key(
             // re-embedded with the new provider's width. Uses the same enqueue
             // path that the reindex scheduler uses (see #307).
             use crate::workers::embedding_sync::WorkerClass;
-            use crate::workers::reindex::{enqueue_for_class, ReindexArgs};
+            use crate::workers::reindex::{ReindexArgs, enqueue_for_class};
             let args = ReindexArgs {
                 workspace_id: auth_ctx.workspace_id,
                 worker_class: WorkerClass::Shared,
