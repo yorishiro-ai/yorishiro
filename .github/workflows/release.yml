@@ -128,8 +128,13 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: amd64
+            target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             arch: arm64
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            arch: amd64
+            target: x86_64-unknown-linux-musl
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -139,6 +144,8 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/rust-setup
+        with:
+          targets: ${{ matrix.target }}
 
       # rust-cache: each arch needs ~/.cache/ort.pyke.io (embedding cache), separate from
       # the cargo build cache, so it stays as the caller's own step after the composite.
@@ -160,11 +167,17 @@ jobs:
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: cargo build --release --bin yorishiro
+        run: |
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            cargo build --release --target ${{ matrix.target }} --bin yorishiro
+          else
+            cargo build --release --bin yorishiro
+          fi
 
       # Installed from the release tarball rather than an action: the version is pinned here in
       # plain sight, and nfpm publishes static binaries for both architectures this matrix runs.
       - name: Install nfpm
+        if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
           NFPM_VERSION: 2.47.0
           ARCH: ${{ matrix.arch }}
@@ -199,6 +212,7 @@ jobs:
       # inside them reports the manifest's own version. rpm treats the hyphen the same way, as
       # the release field.
       - name: Package (deb and rpm)
+        if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
           VERSION: ${{ needs.prepare.outputs.tag }}
           ARCH: ${{ matrix.arch }}
@@ -213,11 +227,11 @@ jobs:
       # including the ones they must refuse. This runs in a dry run too: it is the part of a
       # release most worth checking before publishing anything.
       - name: Test the packages
-        if: matrix.arch == 'amd64'
+        if: matrix.arch == 'amd64' && matrix.target != 'x86_64-unknown-linux-musl'
         run: ./packaging/test-install.sh dist
 
       - name: Test the packages under systemd
-        if: matrix.arch == 'amd64'
+        if: matrix.arch == 'amd64' && matrix.target != 'x86_64-unknown-linux-musl'
         run: ./packaging/test-systemd.sh dist
 
       # `!cancelled()` rather than the default `success()`, so a failed package test still
@@ -229,10 +243,16 @@ jobs:
       # `github-release` still gates on the job's own success, so a failed run cannot publish
       # these: they are kept for reading, not for shipping.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.target != 'x86_64-unknown-linux-musl' }}
         with:
           name: binary-linux-${{ matrix.arch }}
           path: dist/*
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() && matrix.target == 'x86_64-unknown-linux-musl' }}
+        with:
+          name: binary-linux-${{ matrix.arch }}-musl
+          path: target/${{ matrix.target }}/release/yorishiro
 
   docker:
     needs: prepare
