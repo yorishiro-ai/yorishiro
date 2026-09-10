@@ -231,6 +231,9 @@ pub fn apply_plan(
                 .map(|f| crate::error::ValidationDetail {
                     field: format!("/{}/{}", f.entity_type, f.field),
                     problem: f.detail.clone(),
+                    code: crate::error::ValidationErrorCode::Other,
+                    expected: None,
+                    actual: None,
                 })
                 .collect(),
             hint: format!(

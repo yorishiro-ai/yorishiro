@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::error::{ResultExt, ValidationDetail, YorishiroError};
+use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole, WorkspaceSummary};
 use crate::services::auth::ApiKeyScope;
@@ -195,6 +195,9 @@ pub async fn login(
                             .map(|w| ValidationDetail {
                                 field: w.id.to_string(),
                                 problem: w.name,
+                                code: ValidationErrorCode::EmptyRequired,
+                                expected: Some("single workspace".into()),
+                                actual: None,
                             })
                             .collect(),
                         hint: "specify workspace_id explicitly".into(),
