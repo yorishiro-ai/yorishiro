@@ -26,5 +26,6 @@ runs:
         components: ${{ inputs.components }}
 
     - name: Add targets
+      if: inputs.targets != ''
       shell: bash
       run: rustup target add ${{ inputs.targets }}
