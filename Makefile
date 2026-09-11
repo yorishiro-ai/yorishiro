@@ -23,10 +23,10 @@ fmt-check:
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace -- --test-threads=1
+	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace -- --test-threads=1
 
 test-sqlite: build
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' LOCO_ENV=test_sqlite cargo test --locked --workspace -- --test-threads=1
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite cargo test --locked --workspace -- --test-threads=1
 
 build:
 	cargo build --locked --workspace
