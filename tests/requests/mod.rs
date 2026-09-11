@@ -5,6 +5,7 @@ mod ee_setup;
 mod embedding;
 mod entities;
 mod entity_columns;
+mod fixtures;
 mod import;
 mod inference;
 mod licence_gate;
