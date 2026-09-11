@@ -20,13 +20,13 @@ use yorishiro::services::auth::ApiKeyScope;
 /// Arguments for shared tenant/workspace/owner setup.
 pub struct TenantArgs {
     /// Tenant name. Defaults to `"acme"`.
-    pub tenant_name: &'static str,
+    pub tenant_name: String,
     /// Workspace name. Defaults to `"main"`.
-    pub workspace_name: &'static str,
+    pub workspace_name: String,
     /// Owner email. Defaults to `"owner@example.com"`.
-    pub owner_email: &'static str,
+    pub owner_email: String,
     /// Owner password. Defaults to `"hunter2-hunter2"`.
-    pub owner_password: &'static str,
+    pub owner_password: String,
     /// API key scope. Defaults to `Migration`.
     pub key_scope: ApiKeyScope,
     /// Whether the audit key is audit-scoped.
@@ -36,10 +36,10 @@ pub struct TenantArgs {
 impl Default for TenantArgs {
     fn default() -> Self {
         Self {
-            tenant_name: "acme",
-            workspace_name: "main",
-            owner_email: "owner@example.com",
-            owner_password: "hunter2-hunter2",
+            tenant_name: "acme".into(),
+            workspace_name: "main".into(),
+            owner_email: "owner@example.com".into(),
+            owner_password: "hunter2-hunter2".into(),
             key_scope: ApiKeyScope::Migration,
             key_audit: false,
         }
@@ -54,7 +54,7 @@ pub async fn create_tenant_workspace_owner(
     args: TenantArgs,
 ) -> (Uuid, Uuid, Uuid, String) {
     let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(args.tenant_name.into()),
+        name: sea_orm::ActiveValue::Set(args.tenant_name),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
@@ -63,7 +63,7 @@ pub async fn create_tenant_workspace_owner(
 
     let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set(args.workspace_name.into()),
+        name: sea_orm::ActiveValue::Set(args.workspace_name),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
         ..Default::default()
     };
@@ -71,7 +71,7 @@ pub async fn create_tenant_workspace_owner(
         .await
         .expect("insert workspace");
 
-    let owner = tenancy::create_user(&ctx.db, args.owner_email, args.owner_password, None)
+    let owner = tenancy::create_user(&ctx.db, &args.owner_email, &args.owner_password, None)
         .await
         .expect("create owner");
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
@@ -90,4 +90,23 @@ pub async fn create_tenant_workspace_owner(
     .plaintext;
 
     (tenant.id, workspace.id, owner.id, plaintext)
+}
+
+/// Issue an API key for an existing user.
+///
+/// Used when a test needs multiple keys (e.g. audit_log needs both a
+/// migration-scope key and an audit-scope key). Call
+/// `create_tenant_workspace_owner` first to get the `owner_id`, then
+/// `issue_api_key` for additional keys.
+pub async fn issue_api_key(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+    user_id: Uuid,
+    scope: ApiKeyScope,
+    audit: bool,
+) -> String {
+    api_keys::Entity::create_api_key(&ctx.db, workspace_id, scope, Some(user_id), audit)
+        .await
+        .expect("issue api key")
+        .plaintext
 }

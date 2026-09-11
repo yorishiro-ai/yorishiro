@@ -1,10 +1,10 @@
 use super::boot_request;
 use serial_test::serial;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
+
+use super::fixtures::{self, TenantArgs, issue_api_key};
 
 struct Setup {
     tenant_id: uuid::Uuid,
@@ -13,44 +13,15 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.to_string()),
+    let args = TenantArgs {
+        tenant_name: name.into(),
+        owner_email: format!("owner-{name}@example.com"),
+        key_scope: ApiKeyScope::Migration,
+        key_audit: false,
         ..Default::default()
     };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-
-    let owner = tenancy::create_user(
-        &ctx.db,
-        &format!("owner-{name}@example.com"),
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
-        .await
-        .expect("add owner");
-    let owner_key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Migration,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue owner key")
-    .plaintext;
+    let (tenant_id, workspace_id, _owner_id, owner_key) =
+        fixtures::create_tenant_workspace_owner(ctx, args).await;
 
     let member = tenancy::create_user(
         &ctx.db,
@@ -60,22 +31,13 @@ async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
     )
     .await
     .expect("create member");
-    tenancy::add_member(&ctx.db, tenant.id, member.id, MembershipRole::Member)
+    tenancy::add_member(&ctx.db, tenant_id, member.id, MembershipRole::Member)
         .await
         .expect("add member");
-    let member_key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Write,
-        Some(member.id),
-        false,
-    )
-    .await
-    .expect("issue member key")
-    .plaintext;
+    let member_key = issue_api_key(ctx, workspace_id, member.id, ApiKeyScope::Write, false).await;
 
     Setup {
-        tenant_id: tenant.id,
+        tenant_id,
         owner_key,
         member_key,
     }
