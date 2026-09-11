@@ -55,14 +55,6 @@ queue:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
 
-mailer:
-  stub: true
-  smtp:
-    enable: true
-    host: <%= get_env(name="MAILER_HOST", default="localhost") %>
-    port: 1025
-    secure: false
-
 database:
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
