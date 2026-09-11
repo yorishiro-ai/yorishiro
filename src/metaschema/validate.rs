@@ -199,14 +199,14 @@ fn validate_field(
             "date" | "date-time" | "uri" | "email" | "uuid"
         ) {
             details.push(ValidationDetail {
-                        field: format!("{field_path}/format"),
-                        problem: format!(
-                            "unsupported string format '{format}' (expected date / date-time / uri / email / uuid)"
-                        ),
-                        code: ValidationErrorCode::UnsupportedFormat,
-                        expected: Some("date / date-time / uri / email / uuid".into()),
-                        actual: Some(format.clone()),
-                    });
+                field: format!("{field_path}/format"),
+                problem: format!(
+                    "unsupported string format '{format}' (expected date / date-time / uri / email / uuid)"
+                ),
+                code: ValidationErrorCode::UnsupportedFormat,
+                expected: Some("date / date-time / uri / email / uuid".into()),
+                actual: Some(format.clone()),
+            });
         }
     }
 
@@ -240,15 +240,15 @@ fn validate_field(
         && (field.min_length.is_some() || field.max_length.is_some() || field.pattern.is_some())
     {
         details.push(ValidationDetail {
-                    field: field_path.to_string(),
-                    problem: format!(
-                        "minLength/maxLength/pattern are only valid for string fields, but field type is {:?}",
-                        field.r#type
-                    ),
-                    code: ValidationErrorCode::StringConstraintOnNonString,
-                    expected: Some("string".into()),
-                    actual: Some(format!("{:?}", field.r#type)),
-                });
+            field: field_path.to_string(),
+            problem: format!(
+                "minLength/maxLength/pattern are only valid for string fields, but field type is {:?}",
+                field.r#type
+            ),
+            code: ValidationErrorCode::StringConstraintOnNonString,
+            expected: Some("string".into()),
+            actual: Some(format!("{:?}", field.r#type)),
+        });
     }
     if let (Some(min), Some(max)) = (field.min_length, field.max_length)
         && min > max
@@ -277,15 +277,15 @@ fn validate_field(
     if !array_type && (field.min_items.is_some() || field.max_items.is_some() || field.unique_items)
     {
         details.push(ValidationDetail {
-                    field: field_path.to_string(),
-                    problem: format!(
-                        "minItems/maxItems/uniqueItems are only valid for array fields, but field type is {:?}",
-                        field.r#type
-                    ),
-                    code: ValidationErrorCode::ArrayConstraintOnNonArray,
-                    expected: Some("array".into()),
-                    actual: Some(format!("{:?}", field.r#type)),
-                });
+            field: field_path.to_string(),
+            problem: format!(
+                "minItems/maxItems/uniqueItems are only valid for array fields, but field type is {:?}",
+                field.r#type
+            ),
+            code: ValidationErrorCode::ArrayConstraintOnNonArray,
+            expected: Some("array".into()),
+            actual: Some(format!("{:?}", field.r#type)),
+        });
     }
     if let (Some(min), Some(max)) = (field.min_items, field.max_items)
         && min > max
@@ -297,5 +297,79 @@ fn validate_field(
             expected: format!("<= {max}").into(),
             actual: Some(min.to_string()),
         });
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::metaschema::types::EntityTypeDef;
+    use proptest::prelude::*;
+    use std::collections::BTreeMap;
+
+    fn any_field_type() -> impl Strategy<Value = FieldTypeName> {
+        prop_oneof![
+            Just(FieldTypeName::String),
+            Just(FieldTypeName::Number),
+            Just(FieldTypeName::Integer),
+            Just(FieldTypeName::Boolean),
+            Just(FieldTypeName::Array),
+            Just(FieldTypeName::Object),
+        ]
+    }
+
+    fn any_field() -> impl Strategy<Value = FieldDef> {
+        any_field_type().prop_map(|r#type| FieldDef {
+            r#type,
+            required: false,
+            description: None,
+            enum_values: None,
+            format: None,
+            minimum: None,
+            maximum: None,
+            min_length: None,
+            max_length: None,
+            pattern: None,
+            min_items: None,
+            max_items: None,
+            unique_items: false,
+            default: None,
+            items: None,
+            properties: None,
+            x_embed: false,
+            x_ui: None,
+            extra: serde_json::Map::new(),
+        })
+    }
+
+    fn any_entity_type() -> impl Strategy<Value = EntityTypeDef> {
+        proptest::collection::btree_map("[a-z]{1,8}", any_field(), 1..4).prop_map(|fields| {
+            EntityTypeDef {
+                description: None,
+                fields,
+            }
+        })
+    }
+
+    fn any_schema_def() -> impl Strategy<Value = MetaSchemaDefinition> {
+        (
+            "[a-z]{1,8}",
+            proptest::collection::btree_map("[a-z]{1,8}", any_entity_type(), 1..3),
+        )
+            .prop_map(|(name, entity_types)| MetaSchemaDefinition {
+                name,
+                description: None,
+                entity_types,
+                relation_types: BTreeMap::new(),
+            })
+    }
+
+    // validate_definition returns Ok/Err for any input — it never panics, even on
+    // adversarial or structurally nonsensical definitions.
+    proptest! {
+        #[test]
+        fn validate_definition_never_panics(def in any_schema_def()) {
+            let _ = validate_definition(&def);
+        }
     }
 }
