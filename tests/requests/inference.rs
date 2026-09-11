@@ -515,3 +515,124 @@ async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
     })
     .await;
 }
+
+/// `infer_job_status` is registered on its own path (`GET /api/inference-jobs/{job_id}`),
+/// not co-registered on `POST /api/schemas/active/{name}/infer-fill` where axum's router
+/// would have handed the schema name to a handler that expects a `job_id`.
+///
+/// This test posts to `infer-fill`, collects the `job_id` from the response, and polls the
+/// dedicated status endpoint with that `job_id`, confirming the status route resolves to a
+/// 200 (the result tracker stores the job and returns it) rather than a 404 or a misrouted
+/// response.
+#[tokio::test]
+#[serial]
+async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+
+        // Set up a workspace LLM key so infer-fill passes its validation gate.
+        let put_key = request
+            .put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "base_url": "https://api.example.com/v1",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-test-key"
+            }))
+            .await;
+        assert_eq!(put_key.status_code(), 204, "response: {:?}", put_key.text());
+
+        // Create a schema with at least one entity so infer-fill has work to do.
+        let create_schema = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "name": "article",
+                "entity_types": {
+                    "article": {
+                        "fields": {
+                            "title": { "type": "string", "required": true },
+                            "body": { "type": "string" }
+                        }
+                    }
+                }
+            }))
+            .await;
+        assert_eq!(
+            create_schema.status_code(),
+            201,
+            "response: {:?}",
+            create_schema.text()
+        );
+
+        let create_entity = request
+            .post("/api/entities")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "schema_name": "article",
+                "entity_type": "article",
+                "data": { "title": "hello", "body": "world" }
+            }))
+            .await;
+        assert_eq!(
+            create_entity.status_code(),
+            201,
+            "response: {:?}",
+            create_entity.text()
+        );
+
+        // POST to infer-fill — the model will reject this (no real LLM), but the handler
+        // returns a job_id even when the queue is busy or the model is unreachable; we only
+        // need a real job_id to prove the status route is on a different path.
+        let infer = request
+            .post("/api/schemas/active/article/infer-fill")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            infer.status_code(),
+            200,
+            "infer-fill must return a job_id: {:?}",
+            infer.text()
+        );
+        let infer_body: serde_json::Value = infer.json();
+        let job_id = infer_body["job_id"]
+            .as_str()
+            .expect("response must contain a job_id string");
+
+        // Poll the dedicated status endpoint with that real job_id.
+        // Before the fix this would have been a 404 because the route was on
+        // `/active/{name}/infer-fill` (the POST path), not `/inference-jobs/{job_id}`.
+        let status = request
+            .get(&format!("/api/inference-jobs/{job_id}"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            status.status_code(),
+            200,
+            "status must resolve on /api/inference-jobs/{{job_id}}: {:?}",
+            status.text()
+        );
+        let status_body: serde_json::Value = status.json();
+        assert_eq!(status_body["job_id"].as_str().unwrap(), job_id);
+
+        // Verify the POST and GET handlers are distinct: a GET on the infer-fill path
+        // should not be handled by infer_job_status (it should be a 405 Method Not Allowed
+        // or a 404, depending on how axum resolves it — the point is it's not the job
+        // status handler).
+        let get_on_infer_fill = request
+            .get("/api/schemas/active/test/infer-fill")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert!(
+            get_on_infer_fill.status_code() != 200
+                || get_on_infer_fill.json::<serde_json::Value>()["job_id"]
+                    != serde_json::json!("test"),
+            "the POST path must not serve job status"
+        );
+    })
+    .await;
+}
