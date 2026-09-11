@@ -2,11 +2,9 @@ use super::boot_request;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::tenancy::{self, MembershipRole};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::{entity_entities, schema_schemas};
-use yorishiro::services::auth::ApiKeyScope;
+
+use super::fixtures::{self, TenantArgs};
 
 struct Setup {
     tenant_id: Uuid,
@@ -15,42 +13,11 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("acme".into()),
-        ..Default::default()
-    };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-    let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
-        .await
-        .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
-        .await
-        .expect("add owner");
-    // Migration scope: undoing a batch is a migration operation, above schema in the ladder.
-    let key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Migration,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue key")
-    .plaintext;
+    let (tenant_id, workspace_id, _, key) =
+        fixtures::create_tenant_workspace_owner(ctx, TenantArgs::default()).await;
     Setup {
-        tenant_id: tenant.id,
-        workspace_id: workspace.id,
+        tenant_id,
+        workspace_id,
         key,
     }
 }

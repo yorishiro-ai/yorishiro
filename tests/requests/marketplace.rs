@@ -5,10 +5,9 @@ use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
-use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
-use yorishiro::models::tenancy::{self, MembershipRole};
-use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
+
+use super::fixtures::{self, TenantArgs};
 
 /// `shared_store.insert` is keyed by `TypeId` (see `App::after_context`'s own doc comment), so this overwrites the `LicenceState::from_env()` the test process booted with, the same way production code layers a later insert over an earlier one.
 /// Simpler than round-tripping a real RSA-signed token through `YORISHIRO_LICENSE_KEY`, which `services::licence`'s own tests already cover.
@@ -28,47 +27,16 @@ struct Setup {
 
 /// Builds a tenant, its one workspace, and an owner with a migration-scope key, directly on `ctx.db`: same shape as base's own `tests/requests/template_library.rs`, and needed here because `POST /setup` refuses a second call once any tenant exists (`setup_bootstraps_once_and_refuses_a_second_call`), which every test below that needs two tenants would otherwise hit.
 async fn setup(ctx: &loco_rs::app::AppContext, name: &str) -> Setup {
-    let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set(name.to_string()),
+    let args = TenantArgs {
+        tenant_name: name.into(),
+        owner_email: format!("owner-{name}@example.com"),
+        key_scope: ApiKeyScope::Migration,
+        key_audit: false,
         ..Default::default()
     };
-    let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
-        .await
-        .expect("insert tenant");
-    let workspace = workspace_workspaces::ActiveModel {
-        tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
-        status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
-        ..Default::default()
-    };
-    let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
-        .await
-        .expect("insert workspace");
-
-    let owner = tenancy::create_user(
-        &ctx.db,
-        &format!("owner-{name}@example.com"),
-        "hunter2-hunter2",
-        None,
-    )
-    .await
-    .expect("create owner");
-    tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
-        .await
-        .expect("add owner");
-    let owner_key = api_keys::Entity::create_api_key(
-        &ctx.db,
-        workspace.id,
-        ApiKeyScope::Migration,
-        Some(owner.id),
-        false,
-    )
-    .await
-    .expect("issue owner key")
-    .plaintext;
-
+    let (tenant_id, _, _, owner_key) = fixtures::create_tenant_workspace_owner(ctx, args).await;
     Setup {
-        tenant_id: tenant.id,
+        tenant_id,
         owner_key,
     }
 }
