@@ -4,6 +4,7 @@ use sea_orm::{FromQueryResult, Statement};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_entities;
 use crate::services::embedding;
 
@@ -61,19 +62,26 @@ impl Task for ResyncEmbeddings {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let workspace_id: Uuid = vars
-            .cli_arg("workspace_id")?
-            .parse()
-            .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
+        let workspace_id: Uuid = vars.cli_arg("workspace_id")?.parse().map_err(|_| {
+            YorishiroError::ValidationFailed {
+                message: "workspace_id is not a valid UUID".into(),
+                details: vec![],
+                hint: "workspace_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                    .into(),
+            }
+        })?;
 
         // An unconfigured embedding provider satisfies the dimension count but errors on every actual call.
         // Probe it once up front so a misconfiguration is one clear failure, not N per-candidate ones that read as an ordinary "N failed" outcome.
-        let provider = embedding::build_embedding_provider()
+        let provider = embedding::build_embedding_provider().await.internal()?;
+        provider
+            .embed_batch(&[])
             .await
-            .map_err(|err| Error::Message(format!("failed to build embedding provider: {err}")))?;
-        provider.embed_batch(&[]).await.map_err(|err| {
-            Error::Message(format!("embedding provider must be configured: {err}"))
-        })?;
+            .map_err(|err| YorishiroError::ValidationFailed {
+                message: format!("embedding provider must be configured: {err}"),
+                details: vec![],
+                hint: "check YORISHIRO_EMBEDDING_PROVIDER and YORISHIRO_LOCAL_MODEL config".into(),
+            })?;
 
         // Single anti-join fetch: gets entity rows that have no embedding row, in one round trip instead of two.
         let candidates = CandidateRow::find_by_statement(Statement::from_sql_and_values(
@@ -88,7 +96,7 @@ impl Task for ResyncEmbeddings {
         ))
         .all(&app_context.db)
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+        .internal()?;
 
         let mut synced = 0;
         let mut failed = 0;

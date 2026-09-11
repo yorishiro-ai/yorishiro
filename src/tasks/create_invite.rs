@@ -3,6 +3,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy::{self, MembershipRole};
 
 /// `cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner`
@@ -22,18 +23,30 @@ impl Task for CreateInvite {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let tenant_id: Uuid = vars
-            .cli_arg("tenant_id")?
-            .parse()
-            .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
+        let tenant_id: Uuid =
+            vars.cli_arg("tenant_id")?
+                .parse()
+                .map_err(|_| YorishiroError::ValidationFailed {
+                    message: "tenant_id is not a valid UUID".into(),
+                    details: vec![],
+                    hint: "tenant_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                        .into(),
+                })?;
         let email = vars.cli_arg("email")?;
         let role_str = vars.cli_arg("role")?;
-        let role = MembershipRole::from_db_str(role_str)
-            .ok_or_else(|| Error::Message(format!("'{role_str}' is not a valid role")))?;
+        let role = MembershipRole::from_db_str(role_str).ok_or_else(|| {
+            YorishiroError::ValidationFailed {
+                message: format!("'{role_str}' is not a valid role"),
+                details: vec![],
+                hint: String::new(),
+            }
+        })?;
         let ttl_hours: i64 = match vars.cli_arg("ttl_hours") {
-            Ok(raw) => raw
-                .parse()
-                .map_err(|_| Error::Message("ttl_hours is not a valid integer".to_string()))?,
+            Ok(raw) => raw.parse().map_err(|_| YorishiroError::ValidationFailed {
+                message: "ttl_hours is not a valid integer".into(),
+                details: vec![],
+                hint: String::new(),
+            })?,
             Err(_) => 72,
         };
 
@@ -45,7 +58,7 @@ impl Task for CreateInvite {
             Duration::hours(ttl_hours),
         )
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+        .internal()?;
 
         println!("invite id: {}", invite.id);
         println!("invite token (shown once): {token}");

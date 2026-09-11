@@ -1,6 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::system_maintenance::{self, MaintenanceMode};
 
 /// `cargo loco task maintenance mode:full_lock [retry_after:300] [reason:"upgrading"]`
@@ -21,19 +22,26 @@ impl Task for Maintenance {
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
         let mode_str = vars.cli_arg("mode")?;
-        let mode = MaintenanceMode::from_db_str(mode_str)
-            .ok_or_else(|| Error::Message(format!("'{mode_str}' is not a maintenance mode")))?;
+        let mode = MaintenanceMode::from_db_str(mode_str).ok_or_else(|| {
+            YorishiroError::ValidationFailed {
+                message: format!("'{mode_str}' is not a maintenance mode"),
+                details: vec![],
+                hint: String::new(),
+            }
+        })?;
         let retry_after: u32 = match vars.cli_arg("retry_after") {
-            Ok(raw) => raw
-                .parse()
-                .map_err(|_| Error::Message("retry_after is not a number".to_string()))?,
+            Ok(raw) => raw.parse().map_err(|_| YorishiroError::ValidationFailed {
+                message: "retry_after is not a number".into(),
+                details: vec![],
+                hint: String::new(),
+            })?,
             Err(_) => 300,
         };
         let reason = vars.cli_arg("reason").ok().map(str::to_string);
 
         let state = system_maintenance::set(&app_context.db, mode, retry_after, reason)
             .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+            .internal()?;
 
         match state.mode {
             MaintenanceMode::Off => println!("maintenance off; serving normally"),

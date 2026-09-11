@@ -2,6 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::Entity as ApiKeys;
 use crate::services::auth::ApiKeyScope;
 
@@ -24,17 +25,31 @@ impl Task for CreateApiKey {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let workspace_id: Uuid = vars
-            .cli_arg("workspace_id")?
-            .parse()
-            .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
+        let workspace_id: Uuid = vars.cli_arg("workspace_id")?.parse().map_err(|_| {
+            YorishiroError::ValidationFailed {
+                message: "workspace_id is not a valid UUID".into(),
+                details: vec![],
+                hint: "workspace_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                    .into(),
+            }
+        })?;
         let scope_str = vars.cli_arg("scope")?;
-        let scope = ApiKeyScope::from_db_str(scope_str)
-            .ok_or_else(|| Error::Message(format!("'{scope_str}' is not a valid scope")))?;
-        let user_id = match vars.cli_arg("user_id") {
+        let scope = ApiKeyScope::from_db_str(scope_str).ok_or_else(|| {
+            YorishiroError::ValidationFailed {
+                message: format!("'{scope_str}' is not a valid scope"),
+                details: vec![],
+                hint: String::new(),
+            }
+        })?;
+        let user_id: Option<Uuid> = match vars.cli_arg("user_id") {
             Ok(raw) => Some(
                 raw.parse::<Uuid>()
-                    .map_err(|_| Error::Message("user_id is not a valid UUID".to_string()))?,
+                    .map_err(|_| YorishiroError::ValidationFailed {
+                        message: "user_id is not a valid UUID".into(),
+                        details: vec![],
+                        hint: "user_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                            .into(),
+                    })?,
             ),
             Err(_) => None,
         };
@@ -42,7 +57,7 @@ impl Task for CreateApiKey {
 
         let created = ApiKeys::create_api_key(&app_context.db, workspace_id, scope, user_id, audit)
             .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+            .internal()?;
 
         println!("api key id: {}", created.id);
         println!("api key (shown once): {}", created.plaintext);

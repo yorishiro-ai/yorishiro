@@ -1,6 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
+use crate::error::ResultExt;
 use crate::models::tenancy;
 
 /// `cargo loco task create_user email:owner@example.com password:hunter2-hunter2 [display_name:Alice]`
@@ -25,7 +26,7 @@ impl Task for CreateUser {
 
         let user = tenancy::create_user(&app_context.db, email, password, display_name)
             .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+            .internal()?;
 
         println!("user id: {}", user.id);
         println!("email:   {}", user.email);
