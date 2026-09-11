@@ -98,7 +98,7 @@ async fn infer_job_status(
 ) -> Result<Json<InferJobStatus>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let _ = auth_ctx.workspace_id; // auth check ensures only authorized callers reach the tracker.
+    let caller_workspace_id = auth_ctx.workspace_id;
     let tracker = ctx
         .shared_store
         .get::<crate::ee::workers::infer_fill::ResultTracker>()
@@ -109,6 +109,15 @@ async fn infer_job_status(
     let result = tracker.get(&job_id).await.ok_or_else(|| {
         YorishiroError::not_found("job not found or still queued — try again shortly")
     })?;
+
+    // Enforce workspace isolation: the caller can only poll jobs belonging to their own workspace.
+    if result.workspace_id != caller_workspace_id {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "cannot access infer-fill jobs for another workspace".into(),
+            hint: "verify the job belongs to your workspace".into(),
+        }
+        .into());
+    }
 
     Ok(Json(InferJobStatus {
         job_id,

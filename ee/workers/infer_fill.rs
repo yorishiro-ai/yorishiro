@@ -33,6 +33,7 @@ pub struct InferFillArgs {
 /// does not expose `get_jobs` publicly).
 #[derive(Clone, Debug, Serialize)]
 pub struct InferFillResult {
+    pub workspace_id: Uuid,
     pub applied: i64,
     pub skipped: i64,
     pub error: Option<String>,
@@ -184,6 +185,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
             .set(
                 job_id.to_string(),
                 InferFillResult {
+                    workspace_id: args.workspace_id,
                     applied: 0,
                     skipped: 0,
                     error: None,
@@ -198,6 +200,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     .set(
                         job_id.to_string(),
                         InferFillResult {
+                            workspace_id: args.workspace_id,
                             applied,
                             skipped,
                             error: None,
@@ -212,6 +215,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     .set(
                         job_id.to_string(),
                         InferFillResult {
+                            workspace_id: args.workspace_id,
                             applied: 0,
                             skipped: 0,
                             error: Some(e.to_string()),
