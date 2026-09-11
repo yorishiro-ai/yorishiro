@@ -182,6 +182,21 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Standalone index for `WHERE user_id = ...` lookups (e.g.,
+        // `list_workspaces_for_user` resolves all memberships for a user
+        // across tenants). The composite unique index on
+        // `(tenant_id, user_id)` does not help when `tenant_id` is not in
+        // the query's WHERE clause.
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_tenant_memberships_user_id")
+                    .table(Alias::new("tenant_memberships"))
+                    .col(Alias::new("user_id"))
+                    .to_owned(),
+            )
+            .await?;
+
         // Strict policy: current_setting('app.current_tenant')::uuid with no `true` (lenient) argument, so a missing setting raises rather than matching nothing.
         helpers::enable_rls_with_policy(
             manager,
