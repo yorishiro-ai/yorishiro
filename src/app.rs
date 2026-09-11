@@ -227,6 +227,8 @@ impl Hooks for App {
         // a gated route is reached, so the operator keeps the choice.
         ctx.shared_store
             .insert(crate::ee::services::licence::LicenceState::from_env());
+        ctx.shared_store
+            .insert(crate::ee::workers::infer_fill::ResultTracker::default());
 
         if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
             // The three ee/ features named here use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, or correlated subqueries with advisory locks) and would otherwise fail at execution time
@@ -367,6 +369,9 @@ impl Hooks for App {
             .await?;
         queue.register(ReindexWorkerOfficial::build(ctx)).await?;
         queue.register(ReindexWorkerShared::build(ctx)).await?;
+        queue
+            .register(crate::ee::workers::infer_fill::InferFillWorker::build(ctx))
+            .await?;
         Ok(())
     }
 
