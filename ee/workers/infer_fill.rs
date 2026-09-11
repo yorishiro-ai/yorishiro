@@ -24,6 +24,7 @@ use crate::models::schema_schemas;
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InferFillArgs {
+    pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub schema_name: String,
 }
@@ -172,27 +173,13 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
-        let job_id = Uuid::new_v4();
+        let job_id = args.job_id;
         let tracker = self
             .ctx
             .shared_store
             .get::<ResultTracker>()
             .expect("ResultTracker should be installed in shared_store")
             .clone();
-
-        // Report queued immediately.
-        tracker
-            .set(
-                job_id.to_string(),
-                InferFillResult {
-                    workspace_id: args.workspace_id,
-                    applied: 0,
-                    skipped: 0,
-                    error: None,
-                    completed: false,
-                },
-            )
-            .await;
 
         match perform_infer_fill(&self.ctx, &args, job_id).await {
             Ok((applied, skipped)) => {
@@ -231,7 +218,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
 
 /// Enqueue an infer-fill job for the given workspace and schema name.
 ///
-/// Returns the job ID assigned by the queue provider.
+/// Returns the job ID that the caller can use to poll status.
 ///
 /// # Errors
 /// Returns `loco_rs::Error` when the queue is configured but the enqueue fails.
@@ -240,21 +227,41 @@ pub async fn enqueue_infer_fill(
     workspace_id: Uuid,
     schema_name: String,
 ) -> loco_rs::Result<String> {
-    let args = InferFillArgs {
-        workspace_id,
-        schema_name,
-    };
-
     if ctx.queue_provider.is_none() {
         return Err(loco_rs::Error::Message(
             "infer-fill requires a queue provider (configure queue: in the server config)".into(),
         ));
     }
 
-    let job_id = InferFillWorker::perform_later(ctx, args)
-        .await
-        .ok()
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let job_id = Uuid::new_v4();
 
-    Ok(job_id)
+    let tracker = ctx
+        .shared_store
+        .get::<ResultTracker>()
+        .expect("ResultTracker should be installed in shared_store")
+        .clone();
+    tracker
+        .set(
+            job_id.to_string(),
+            InferFillResult {
+                workspace_id,
+                applied: 0,
+                skipped: 0,
+                error: None,
+                completed: false,
+            },
+        )
+        .await;
+
+    let args = InferFillArgs {
+        job_id,
+        workspace_id,
+        schema_name,
+    };
+
+    InferFillWorker::perform_later(ctx, args)
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("failed to enqueue infer-fill job: {e}")))?;
+
+    Ok(job_id.to_string())
 }
