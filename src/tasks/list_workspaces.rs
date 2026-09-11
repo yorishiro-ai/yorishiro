@@ -2,6 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces;
 
 /// `cargo loco task list_workspaces tenant_id:<uuid>`
@@ -18,16 +19,21 @@ impl Task for ListWorkspaces {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let tenant_id: Uuid = vars
-            .cli_arg("tenant_id")?
-            .parse()
-            .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
+        let tenant_id: Uuid =
+            vars.cli_arg("tenant_id")?
+                .parse()
+                .map_err(|_| YorishiroError::ValidationFailed {
+                    message: "tenant_id is not a valid UUID".into(),
+                    details: vec![],
+                    hint: "tenant_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                        .into(),
+                })?;
 
         let workspaces = workspace_workspaces::Entity::find()
             .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
             .all(&app_context.db)
             .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+            .internal()?;
 
         if workspaces.is_empty() {
             println!("no workspaces for tenant {tenant_id}");

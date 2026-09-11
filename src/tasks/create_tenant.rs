@@ -1,6 +1,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
+use crate::error::ResultExt;
 use crate::models::_entities::tenant_tenants::ActiveModel;
 
 /// `cargo loco task create_tenant name:acme`
@@ -24,10 +25,7 @@ impl Task for CreateTenant {
             name: ActiveValue::Set(name.to_string()),
             ..Default::default()
         };
-        let tenant = active
-            .insert(&app_context.db)
-            .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+        let tenant = active.insert(&app_context.db).await.internal()?;
 
         println!("tenant id: {}", tenant.id);
         Ok(())

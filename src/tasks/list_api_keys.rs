@@ -2,6 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::Entity as ApiKeys;
 
 /// `cargo loco task list_api_keys workspace_id:<uuid>`
@@ -19,10 +20,14 @@ impl Task for ListApiKeys {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let workspace_id: Uuid = vars
-            .cli_arg("workspace_id")?
-            .parse()
-            .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
+        let workspace_id: Uuid = vars.cli_arg("workspace_id")?.parse().map_err(|_| {
+            YorishiroError::ValidationFailed {
+                message: "workspace_id is not a valid UUID".into(),
+                details: vec![],
+                hint: "workspace_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                    .into(),
+            }
+        })?;
 
         // A CLI listing, not a paged UI: shows up to MAX_LIST_LIMIT rather than truncating
         // silently at the smaller default an operator has no way to override here.
@@ -35,7 +40,7 @@ impl Task for ListApiKeys {
             },
         )
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+        .internal()?;
 
         if keys.is_empty() {
             println!("no api keys for workspace {workspace_id}");

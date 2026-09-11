@@ -2,6 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy;
 
 /// `cargo loco task create_workspace tenant_id:<uuid> name:acme-prod`
@@ -19,24 +20,25 @@ impl Task for CreateWorkspace {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let tenant_id: Uuid = vars
-            .cli_arg("tenant_id")?
-            .parse()
-            .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
+        let tenant_id: Uuid =
+            vars.cli_arg("tenant_id")?
+                .parse()
+                .map_err(|_| YorishiroError::ValidationFailed {
+                    message: "tenant_id is not a valid UUID".into(),
+                    details: vec![],
+                    hint: "tenant_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                        .into(),
+                })?;
         let name = vars.cli_arg("name")?;
 
         let provider = crate::services::embedding::build_embedding_provider()
             .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+            .internal()?;
         let embedding_model = provider.model_name();
         let dimensions = provider.dimensions() as i32;
 
         // `create_workspace` holds a transaction-scoped advisory lock across its count and insert, so it takes a transaction rather than the pool.
-        let txn = app_context
-            .db
-            .begin()
-            .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+        let txn = app_context.db.begin().await.internal()?;
         let workspace = tenancy::create_workspace(
             &txn,
             tenant_id,
@@ -46,10 +48,8 @@ impl Task for CreateWorkspace {
             Some((&embedding_model, dimensions)),
         )
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
-        txn.commit()
-            .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+        .internal()?;
+        txn.commit().await.internal()?;
 
         println!("workspace id: {}", workspace.id);
         Ok(())

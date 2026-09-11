@@ -4,6 +4,7 @@ use sea_orm::{FromQueryResult, Statement};
 use uuid::Uuid;
 
 use crate::db::DbHandle;
+use crate::error::YorishiroError;
 use crate::services::embedding;
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
@@ -38,20 +39,30 @@ impl Task for ReindexEmbeddings {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let workspace_id: Uuid = vars
-            .cli_arg("workspace_id")?
-            .parse()
-            .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
+        let workspace_id: Uuid = vars.cli_arg("workspace_id")?.parse().map_err(|_| {
+            YorishiroError::ValidationFailed {
+                message: "workspace_id is not a valid UUID".into(),
+                details: vec![],
+                hint: "workspace_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                    .to_string(),
+            }
+        })?;
 
         // Mirrors resync_embeddings's own up-front probe: an unconfigured provider satisfies the
         // dimension count but errors on every actual call, so this turns that into one clear
         // failure instead of N per-entity ones that would read as an ordinary "N failed" outcome.
-        let provider = embedding::build_embedding_provider()
-            .await
-            .map_err(|err| Error::Message(format!("failed to build embedding provider: {err}")))?;
-        provider.embed_batch(&[]).await.map_err(|err| {
-            Error::Message(format!("embedding provider must be configured: {err}"))
+        let provider = embedding::build_embedding_provider().await.map_err(|err| {
+            YorishiroError::Internal(anyhow::anyhow!("failed to build embedding provider: {err}"))
         })?;
+        provider
+            .embed_batch(&[])
+            .await
+            .map_err(|err| YorishiroError::ValidationFailed {
+                message: format!("embedding provider must be configured: {err}"),
+                details: vec![],
+                hint: "check YORISHIRO_EMBEDDING_PROVIDER and YORISHIRO_LOCAL_MODEL config"
+                    .to_string(),
+            })?;
 
         // Skip when the workspace already matches and the user didn't ask for force.
         // The REST endpoint (which is the primary entry point) always enqueues to give
@@ -71,7 +82,7 @@ impl Task for ReindexEmbeddings {
             let chain =
                 embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id, licenced)
                     .await
-                    .map_err(|err| Error::Message(err.to_string()))?;
+                    .map_err(|err| YorishiroError::Internal(err.into()))?;
             if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {
                 println!(
                     "workspace {} already stamped with model {:?}; nothing to reindex \
@@ -90,7 +101,7 @@ impl Task for ReindexEmbeddings {
         ))
         .all(&app_context.db)
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+        .map_err(|err| YorishiroError::Internal(err.into()))?;
         let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
 
         // Serialize concurrent reindex runs against the same workspace: two runs with different
@@ -104,9 +115,9 @@ impl Task for ReindexEmbeddings {
         // A missing `DbHandle` on Postgres is a real defect — it means the boot path skipped
         // building the tenant pool, and proceeding without the lock would silently back off.
         let handle = app_context.shared_store.get::<DbHandle>().ok_or_else(|| {
-            Error::Message(
-                "reindex requires the tenant pool, which this deployment did not build".into(),
-            )
+            YorishiroError::Internal(anyhow::anyhow!(
+                "reindex requires the tenant pool, which this deployment did not build"
+            ))
         })?;
         let outcome = crate::db::reindex_workspace_with_lock(
             handle.tenant.pool().clone(),
@@ -116,7 +127,7 @@ impl Task for ReindexEmbeddings {
             provider.as_ref(),
         )
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+        .map_err(|err| YorishiroError::Internal(err.into()))?;
 
         if !outcome.failures.is_empty() {
             for failure in &outcome.failures {
@@ -125,14 +136,15 @@ impl Task for ReindexEmbeddings {
                     failure.entity_id, failure.error
                 );
             }
-            return Err(Error::Message(format!(
+            return Err(YorishiroError::Internal(anyhow::anyhow!(
                 "reindex incomplete: {} entities, {} reindexed, {} failed; the workspace's \
                  stamped model was left unchanged, so the write-time model check keeps refusing \
                  new writes until this task is re-run and every entity succeeds",
                 outcome.total,
                 outcome.reindexed,
                 outcome.failures.len(),
-            )));
+            ))
+            .into());
         }
 
         println!(

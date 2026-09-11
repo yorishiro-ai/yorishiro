@@ -2,6 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy;
 
 /// `cargo loco task list_members tenant_id:<uuid>`
@@ -18,10 +19,15 @@ impl Task for ListMembers {
     }
 
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
-        let tenant_id: Uuid = vars
-            .cli_arg("tenant_id")?
-            .parse()
-            .map_err(|_| Error::Message("tenant_id is not a valid UUID".to_string()))?;
+        let tenant_id: Uuid =
+            vars.cli_arg("tenant_id")?
+                .parse()
+                .map_err(|_| YorishiroError::ValidationFailed {
+                    message: "tenant_id is not a valid UUID".into(),
+                    details: vec![],
+                    hint: "tenant_id must be a UUID, e.g. 00000000-0000-0000-0000-000000000000"
+                        .into(),
+                })?;
 
         // A CLI listing, not a paged UI: shows up to MAX_LIST_LIMIT rather than truncating
         // silently at the smaller default an operator has no way to override here.
@@ -34,7 +40,7 @@ impl Task for ListMembers {
             },
         )
         .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+        .internal()?;
 
         if members.is_empty() {
             println!("no members for tenant {tenant_id}");
