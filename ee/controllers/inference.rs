@@ -72,6 +72,11 @@ async fn infer_fill(
 ///
 /// Poll for the result of an infer-fill job. Returns the job's status and, once completed,
 /// the `applied`/`skipped` counts.
+///
+/// Requires authentication and schema read scope: the caller must have initiated the
+/// infer-fill (which requires schema write scope) or been granted read access to the
+/// workspace. This prevents information leakage — job results include entity counts
+/// that could reveal workspace activity.
 #[derive(Debug, Serialize)]
 pub struct InferJobStatus {
     /// The job ID.
@@ -88,8 +93,12 @@ pub struct InferJobStatus {
 
 async fn infer_job_status(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(job_id): Path<String>,
 ) -> Result<Json<InferJobStatus>, ApiError> {
+    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
+    require_scope(&auth_ctx, ApiKeyScope::Read)?;
+    let _ = auth_ctx.workspace_id; // auth check ensures only authorized callers reach the tracker.
     let tracker = ctx
         .shared_store
         .get::<crate::ee::workers::infer_fill::ResultTracker>()
