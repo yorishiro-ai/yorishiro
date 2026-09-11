@@ -319,6 +319,10 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::entity_columns::routes())
             .add_route(crate::ee::controllers::inference::routes())
             .add_route(crate::ee::controllers::inference::gated_routes().layer(gate.clone()))
+            .add_route(
+                crate::ee::controllers::inference::inference_job_status_routes()
+                    .layer(gate.clone()),
+            )
             .add_route(crate::ee::controllers::marketplace::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::oauth::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::origin::routes())

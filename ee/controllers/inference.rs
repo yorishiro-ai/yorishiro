@@ -70,10 +70,10 @@ async fn infer_fill(
 
 /// `GET /api/inference-jobs/{job_id}`
 ///
-/// Poll for the result of an infer-fill job. Returns the job's status and, once completed,
-/// the `applied`/`skipped` counts.
+/// Poll for the result of an infer-fill job. The route is gated by the licence gate
+/// because results include entity counts that could reveal workspace activity.
 ///
-/// Requires authentication and schema read scope: the caller must have initiated the
+/// Requires authentication and read scope: the caller must have initiated the
 /// infer-fill (which requires schema write scope) or been granted read access to the
 /// workspace. This prevents information leakage — job results include entity counts
 /// that could reveal workspace activity.
@@ -160,10 +160,18 @@ pub fn gated_routes() -> Routes {
     Routes::new()
         .prefix("api/schemas")
         .add("/active/{name}/infer-fill", axum::routing::post(infer_fill))
-        .add(
-            "/active/{name}/infer-fill",
-            axum::routing::get(infer_job_status),
-        )
+}
+
+/// `GET /api/inference-jobs/{job_id}`
+///
+/// Poll for the result of an infer-fill job. Follows the same pattern as
+/// `migration_routes()` (`api/migration-jobs/{job_id}/undo`): a dedicated prefix for
+/// async-job polling, under the licence gate because results include workspace
+/// activity counts that reveal whether a workspace has data to infer.
+pub fn inference_job_status_routes() -> Routes {
+    Routes::new()
+        .prefix("api/inference-jobs")
+        .add("/{job_id}", axum::routing::get(infer_job_status))
 }
 
 /// `PUT /api/workspace/llm-key`
