@@ -156,6 +156,12 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
         }
     };
 
+    // Uses `ctx.db` (the identity pool) rather than `TenantDb::begin_for_workspace()`:
+    // `entity_entities`, `entity_embeddings_*`, and `schema_schemas` have no row-level
+    // security policies; every query scopes by `workspace_id` in its own WHERE clause,
+    // which enforces the boundary regardless of the connection pool used. Switching to
+    // `TenantDb` here would require resolving `tenant_id` from `workspace_id` first and
+    // adds transaction-scoping overhead for zero additional isolation.
     let record = match entity_entities::get(&ctx.db, args.workspace_id, args.entity_id).await {
         Ok(record) => record,
         Err(crate::error::YorishiroError::NotFound { .. }) => {
