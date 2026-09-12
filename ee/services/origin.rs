@@ -6,7 +6,7 @@
 //! These functions take both a schema connection and `ctx`, and the split is not incidental: the schema is workspace content, read over the RLS-scoped connection (the one an `Authorized` extractor's transaction holds), while `template_templates` is control-plane data the request role holds no grant on and can only be reached through `ctx.db`.
 //! Passing `ctx.db` for the schema side would bypass RLS; passing the RLS-scoped connection for the template side would fail with a permission error.
 
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use crate::models::schema_schemas::{self, SchemaRecord};
 use crate::models::template_templates;
@@ -123,7 +123,7 @@ pub async fn merge_apply(
     let plan = merge::three_way(&sides.base, &sides.upstream, &sides.local.definition);
     let merged = merge::apply_plan(&plan, &sides.upstream, &sides.local.definition)?;
 
-    schema_schemas::create_schema(
+    let (schema, diff) = schema_schemas::create_schema(
         schema_conn,
         tenant_id,
         workspace_id,
@@ -131,5 +131,18 @@ pub async fn merge_apply(
         Some(sides.template_id),
         Some(sides.upstream),
     )
-    .await
+    .await?;
+
+    // Clear the origin_updated_at flag on the new active version so the next
+    // upstream-changes poll will not re-report this one until the template moves again.
+    use crate::models::_entities::schema_schemas::{Column, Entity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+    Entity::update_many()
+        .col_expr(Column::OriginUpdatedAt, Expr::val(chrono::Utc::now()))
+        .filter(Column::Id.eq(schema.id))
+        .exec(schema_conn)
+        .await
+        .internal()?;
+
+    Ok((schema, diff))
 }
