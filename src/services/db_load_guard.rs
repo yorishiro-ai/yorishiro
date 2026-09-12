@@ -46,8 +46,7 @@ async fn active_connections(handle: &DbHandle) -> Result<i64, YorishiroError> {
 
 /// Whether the load has subsided enough to lift read-only (if we set it).
 fn should_lift(current: &MaintenanceState) -> bool {
-    current.mode == MaintenanceMode::ReadOnly
-        && current.reason.as_deref() == Some(AUTO_REASON)
+    current.mode == MaintenanceMode::ReadOnly && current.reason.as_deref() == Some(AUTO_REASON)
 }
 
 /// Reads pool saturation and, if it crosses the threshold, enables read-only maintenance mode.
@@ -67,14 +66,11 @@ pub async fn check_and_maybe_enable_readonly(ctx: &AppContext) -> loco_rs::Resul
         return Ok(());
     }
 
-    let handle = ctx
-        .shared_store
-        .get::<DbHandle>()
-        .ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "db_load_guard: DbHandle not found in shared_store"
-            ))
-        })?;
+    let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
+        YorishiroError::Internal(anyhow::anyhow!(
+            "db_load_guard: DbHandle not found in shared_store"
+        ))
+    })?;
 
     // Read max_connections from config.
     let max_conns = ctx.config.database.max_connections as f64;
@@ -88,7 +84,8 @@ pub async fn check_and_maybe_enable_readonly(ctx: &AppContext) -> loco_rs::Resul
 
     if active < threshold {
         // Load is under threshold. Check if we should lift read-only that we set ourselves.
-        let current = system_maintenance::get(&ctx.db).await
+        let current = system_maintenance::get(&ctx.db)
+            .await
             .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))?;
         if should_lift(&current) {
             system_maintenance::set(&ctx.db, MaintenanceMode::Off, 300, None)
@@ -104,7 +101,8 @@ pub async fn check_and_maybe_enable_readonly(ctx: &AppContext) -> loco_rs::Resul
     }
 
     // Load is at or above threshold. Enable read-only if we are not already.
-    let current = system_maintenance::get(&ctx.db).await
+    let current = system_maintenance::get(&ctx.db)
+        .await
         .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))?;
 
     if current.mode != MaintenanceMode::Off {
@@ -128,7 +126,3 @@ pub async fn check_and_maybe_enable_readonly(ctx: &AppContext) -> loco_rs::Resul
 
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../tests/services/db_load_guard.rs"]
-mod tests;

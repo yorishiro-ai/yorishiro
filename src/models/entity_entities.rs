@@ -693,7 +693,10 @@ pub async fn fill_defaults(
 /// Recursively fill missing required fields in a JSON value.
 ///
 /// Returns the count of fields filled (including nested objects).
-fn fill_fields_in_value(data: &mut Value, fields: &std::collections::BTreeMap<String, metaschema::FieldDef>) -> i64 {
+fn fill_fields_in_value(
+    data: &mut Value,
+    fields: &std::collections::BTreeMap<String, metaschema::FieldDef>,
+) -> i64 {
     let mut count = 0i64;
 
     if !data.is_object() {

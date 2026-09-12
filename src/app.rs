@@ -592,7 +592,7 @@ fn spawn_db_load_guard(ctx: AppContext) {
     // the load guard is best-effort and doesn't need test-teardown cleanup
     // like startup_reindex does.
     spawn(async move {
-        use tokio::time::{interval, Duration};
+        use tokio::time::{Duration, interval};
         let mut ticker = interval(Duration::from_secs(5));
         let mut busy_ticks: u32 = 0;
         let mut quiet_ticks: u32 = 0;
@@ -633,7 +633,9 @@ fn spawn_db_load_guard(ctx: AppContext) {
             // Only operate via SeaORM connection for maintenance mode reads/writes.
             match crate::models::system_maintenance::get(&ctx.db).await {
                 Ok(current) => {
-                    if busy_ticks >= SUSTAIN && current.mode == crate::models::system_maintenance::MaintenanceMode::Off {
+                    if busy_ticks >= SUSTAIN
+                        && current.mode == crate::models::system_maintenance::MaintenanceMode::Off
+                    {
                         if let Err(e) = crate::models::system_maintenance::set(
                             &ctx.db,
                             crate::models::system_maintenance::MaintenanceMode::ReadOnly,
@@ -652,8 +654,10 @@ fn spawn_db_load_guard(ctx: AppContext) {
                         }
                         busy_ticks = 0;
                     } else if quiet_ticks >= SUSTAIN
-                        && current.mode == crate::models::system_maintenance::MaintenanceMode::ReadOnly
-                        && current.reason.as_deref() == Some(crate::services::db_load_guard::AUTO_REASON)
+                        && current.mode
+                            == crate::models::system_maintenance::MaintenanceMode::ReadOnly
+                        && current.reason.as_deref()
+                            == Some(crate::services::db_load_guard::AUTO_REASON)
                     {
                         if let Err(e) = crate::models::system_maintenance::set(
                             &ctx.db,
