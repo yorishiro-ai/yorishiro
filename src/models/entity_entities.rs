@@ -710,9 +710,10 @@ fn fill_fields_in_value(
         if obj.contains_key(name) {
             // Field exists; recurse into nested objects.
             if let Some(child) = obj.get_mut(name)
-                && let Some(ref_properties) = &prop_def.properties {
-                    count += fill_fields_in_value(child, ref_properties);
-                }
+                && let Some(ref_properties) = &prop_def.properties
+            {
+                count += fill_fields_in_value(child, ref_properties);
+            }
         } else if prop_def.required {
             // Missing required field — fill it.
             if let Some(ref_val) = &prop_def.default {
