@@ -66,6 +66,22 @@ You can also queue a reindex via the API: `POST /api/migration-jobs/reindex` (re
 |---|---|
 | `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` | Tokens per minute a workspace can spend on search (default: `100000`). Charged per query, shared between API and MCP. The default is very high and only matters for runaway automated queries. Japanese text is charged at roughly half the token cost of English with the default estimate, so the quota allows more Japanese queries per minute |
 
+## Database load guard
+
+The PostgreSQL load guard is disabled by default because it changes the deployment-wide maintenance state automatically.
+Set `YORISHIRO_DB_LOAD_THRESHOLD` to the active-connection count that should be treated as busy to enable it.
+The guard samples `pg_stat_activity` every 5 seconds by default and changes to read-only only after the threshold remains crossed for 30 seconds.
+It returns to normal service after the same quiet period, but only when the guard itself set read-only mode.
+An operator-owned read-only or full-lock state is never cleared by the guard.
+The guard uses the PostgreSQL identity pool and is a no-op on SQLite.
+This is the port of the earlier guard implementation, with its opt-in default retained because automatic maintenance changes require an explicit operational choice.
+
+| Variable | Default | Description |
+|---|---|---|
+| `YORISHIRO_DB_LOAD_THRESHOLD` | Disabled (`0`) | Active PostgreSQL connections at or above which the guard considers the database busy |
+| `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | `30` | Seconds the busy or quiet condition must persist |
+| `YORISHIRO_DB_LOAD_POLL_SECS` | `5` | Seconds between PostgreSQL activity samples; non-positive values fall back to `5` |
+
 ## Production settings (`config/production.yaml`)
 
 An unconfigured `production.yaml` starts with SQLite locally. No external services needed.

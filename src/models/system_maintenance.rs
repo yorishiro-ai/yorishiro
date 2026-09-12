@@ -32,7 +32,7 @@ impl ActiveModel {}
 impl Entity {}
 
 /// What the deployment is currently refusing.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MaintenanceMode {
     /// Serving normally.
