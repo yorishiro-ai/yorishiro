@@ -94,27 +94,6 @@ The default configuration uses SQLite — no external database required.
 
 For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
 
-## Configuration
-
-Most settings come from environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
-| `YORISHIRO_MAX_TENANTS` | `1` | Tenant limit (`0` = unlimited) |
-| `YORISHIRO_LICENSE_KEY` | *(empty)* | Enterprise licence key |
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding backend (`none` disables embeddings) |
-| `YORISHIRO_EMBEDDING_BASE_URL` | *(empty)* | OpenAI-compatible embeddings endpoint |
-| `YORISHIRO_EMBEDDING_MODEL` | *(empty)* | Embeddings model name |
-| `YORISHIRO_EMBEDDING_API_KEY` | *(empty)* | Embeddings API key |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | `768` | Expected vector size |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | `false` | Include `dimensions` in requests |
-| `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` set | — | Uses the OpenAI-compatible provider |
-| `YORISHIRO_QUEUE_KIND` | Auto-detected | Set to `Redis` for Valkey/Redis queue |
-| `QUEUE_URL` | Shares `DATABASE_URL` | Required for Redis queue |
-
-See [docs/en/configuration.md](docs/en/configuration.md) for the full list.
-
 ## Documentation
 
 | Document | Contents |

@@ -94,27 +94,6 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 
 インストール手順は [docs/ja/installation.md](docs/ja/installation.md) を参照してください。
 
-## 設定
-
-設定は環境変数で行います：
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
-| `YORISHIRO_MAX_TENANTS` | `1` | テナント上限（`0` = 無制限） |
-| `YORISHIRO_LICENSE_KEY` | *(空)* | エンタープライズライセンスキー |
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みバックエンド（`none` で無効） |
-| `YORISHIRO_EMBEDDING_BASE_URL` | *(空)* | OpenAI互換埋め込みエンドポイント |
-| `YORISHIRO_EMBEDDING_MODEL` | *(空)* | 埋め込みモデル名 |
-| `YORISHIRO_EMBEDDING_API_KEY` | *(空)* | 埋め込みAPIキー |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | `768` | ベクトルの次元数 |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | `false` | リクエストに `dimensions` フィールドを含める |
-| `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` 設定済み | — | OpenAI互換プロバイダを使用 |
-| `YORISHIRO_QUEUE_KIND` | 自動検出 | Valkey/Redis キューには `Redis` を設定 |
-| `QUEUE_URL` | `DATABASE_URL` と共有 | Redis キューに必須 |
-
-全一覧は [docs/ja/configuration.md](docs/ja/configuration.md) を参照してください。
-
 ## ドキュメント
 
 | ドキュメント | 内容 |
