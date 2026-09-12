@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use migration::{Migrator, MigratorTrait};
-use sea_orm::Database;
+use sea_orm::{ConnectionTrait, Database};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -81,4 +81,45 @@ async fn migration_sqlite_max_connections_10_five_times() {
         drop(db);
         cleanup(&path);
     }
+}
+
+/// A database upgraded from the previous migration must replace the old audit action CHECK,
+/// rather than only accepting `fill_defaults` on a fresh install.
+#[tokio::test]
+async fn fill_defaults_audit_action_upgrades_an_existing_sqlite_schema() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let db_path = dir.path().join("yorishiro_migrate_upgrade.sqlite3");
+    let db = Database::connect(format!("sqlite://{}?mode=rwc", db_path.display()))
+        .await
+        .expect("connect to sqlite file");
+
+    Migrator::up(&db, Some(5))
+        .await
+        .expect("apply migrations through the old schema");
+    db.execute_unprepared("PRAGMA foreign_keys = OFF;")
+        .await
+        .expect("disable foreign keys for check-only insert");
+    let old_insert = db
+        .execute_unprepared(
+            "INSERT INTO api_key_audit_log (id, workspace_id, tenant_id, action, detail) \
+             VALUES (randomblob(16), randomblob(16), randomblob(16), 'fill_defaults', '{}')",
+        )
+        .await;
+    assert!(
+        old_insert.is_err(),
+        "the old CHECK must reject fill_defaults"
+    );
+
+    Migrator::up(&db, None)
+        .await
+        .expect("apply the forward audit CHECK migration");
+    db.execute_unprepared(
+        "INSERT INTO api_key_audit_log (id, workspace_id, tenant_id, action, detail) \
+         VALUES (randomblob(16), randomblob(16), randomblob(16), 'fill_defaults', '{}')",
+    )
+    .await
+    .expect("the upgraded CHECK must accept fill_defaults");
 }
