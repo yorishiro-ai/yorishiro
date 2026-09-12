@@ -10,6 +10,7 @@ mod import;
 mod inference;
 mod licence_gate;
 mod marketplace;
+mod mcp;
 mod members;
 mod oauth;
 mod official_templates;
