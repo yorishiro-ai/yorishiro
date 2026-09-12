@@ -18,14 +18,25 @@ impl MigrationTrait for Migration {
             .if_not_exists()
             .col(uuidv7_pk(manager))
             .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
-            .col(ColumnDef::new(Alias::new("amount")).big_integer().not_null())
-            .col(ColumnDef::new(Alias::new("transaction_type")).text().not_null())
+            .col(
+                ColumnDef::new(Alias::new("amount"))
+                    .big_integer()
+                    .not_null(),
+            )
+            .col(
+                ColumnDef::new(Alias::new("transaction_type"))
+                    .text()
+                    .not_null(),
+            )
             .col(created_at)
             .col(updated_at)
             .foreign_key(
                 ForeignKey::create()
                     .name("fk_compute_credit_ledger_workspace_id")
-                    .from(Alias::new("compute_credit_ledger"), Alias::new("workspace_id"))
+                    .from(
+                        Alias::new("compute_credit_ledger"),
+                        Alias::new("workspace_id"),
+                    )
                     .to(Alias::new("workspace_workspaces"), Alias::new("id"))
                     .on_delete(ForeignKeyAction::Cascade),
             )
@@ -35,7 +46,10 @@ impl MigrationTrait for Migration {
             manager,
             "compute_credit_ledger",
             table,
-            &[("compute_credit_ledger_transaction_type_check", "transaction_type IN ('earn', 'spend')")],
+            &[(
+                "compute_credit_ledger_transaction_type_check",
+                "transaction_type IN ('earn', 'spend')",
+            )],
         )
         .await?;
 
@@ -45,7 +59,10 @@ impl MigrationTrait for Migration {
                     .name("compute_credit_ledger_workspace_id_created_at_idx")
                     .table(Alias::new("compute_credit_ledger"))
                     .col(Alias::new("workspace_id"))
-                    .col((Alias::new("created_at"), sea_orm_migration::sea_orm::sea_query::IndexOrder::Desc))
+                    .col((
+                        Alias::new("created_at"),
+                        sea_orm_migration::sea_orm::sea_query::IndexOrder::Desc,
+                    ))
                     .to_owned(),
             )
             .await?;
@@ -73,7 +90,10 @@ fn uuidv7_pk(manager: &SchemaManager<'_>) -> ColumnDef {
     if manager.get_database_backend() == sea_orm_migration::sea_orm::DbBackend::Sqlite {
         col.blob().not_null().primary_key();
     } else {
-        col.uuid().not_null().primary_key().default(Expr::cust("uuidv7()"));
+        col.uuid()
+            .not_null()
+            .primary_key()
+            .default(Expr::cust("uuidv7()"));
     }
     col.to_owned()
 }
