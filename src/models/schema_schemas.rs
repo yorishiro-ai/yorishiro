@@ -57,6 +57,7 @@ pub struct SchemaRecord {
     pub origin_template_id: Option<Uuid>,
     pub origin_status: String,
     pub origin_snapshot: Option<MetaSchemaDefinition>,
+    pub origin_updated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -79,6 +80,7 @@ impl TryFrom<Model> for SchemaRecord {
                 .map(serde_json::from_value)
                 .transpose()
                 .internal()?,
+            origin_updated_at: row.origin_updated_at.map(|t| t.into()),
             created_at: row.created_at.into(),
         })
     }
@@ -193,6 +195,8 @@ pub struct UpstreamChange {
     pub template_name: String,
     /// When the template was last edited.
     pub changed_at: DateTime<Utc>,
+    /// Whether a push notification has been sent for this schema's upstream change.
+    pub pending_notification: bool,
 }
 
 /// A row in a schema listing.
@@ -237,6 +241,28 @@ pub async fn list(
         .internal()?;
 
     Ok(rows.into_iter().map(SchemaSummary::from).collect())
+}
+
+/// Marks every schema that follows `template_id` as having a pending upstream notification.
+///
+/// Sets `origin_updated_at` to `NULL` for all linked schemas referencing the template.
+/// The merge endpoint clears it back to `Some(NOW())` after applying the upstream change.
+pub async fn notify_upstream_change(
+    conn: &impl ConnectionTrait,
+    template_id: Uuid,
+) -> Result<usize, YorishiroError> {
+    use super::_entities::schema_schemas::{Column, Entity};
+    use sea_orm::EntityTrait;
+
+    let result = Entity::update_many()
+        .col_expr(Column::OriginUpdatedAt, Expr::value(None::<DateTime<Utc>>))
+        .filter(Column::OriginTemplateId.eq(template_id))
+        .filter(Column::OriginStatus.eq(ORIGIN_STATUS_LINKED))
+        .exec(conn)
+        .await
+        .internal()?;
+
+    Ok(result.rows_affected as usize)
 }
 
 pub async fn create_schema(

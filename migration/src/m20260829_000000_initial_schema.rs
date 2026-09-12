@@ -1852,6 +1852,7 @@ impl MigrationTrait for Migration {
             "tenant_reindex_schedules",  // → tenant_tenants
             "workspace_embedding_keys",  // → workspace_workspaces
             "workspace_llm_keys",        // → workspace_workspaces
+            "compute_credit_ledger",     // → workspace_workspaces
             "entity_entities",           // → workspace_workspaces, schema_schemas, user_users
             "schema_schemas", // → tenant_tenants, workspace_workspaces, template_templates; dropped after entity_entities
             "tenant_memberships", // → tenant_tenants, user_users

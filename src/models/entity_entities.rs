@@ -601,6 +601,147 @@ pub async fn migration_dry_run(
     })
 }
 
+/// Result of a fill-defaults operation.
+#[derive(Clone, Serialize)]
+pub struct FillDefaultsReport {
+    pub schema_name: String,
+    pub job_id: Uuid,
+    pub entities_updated: i64,
+    pub fields_filled: i64,
+}
+
+/// Fills absent required fields in entities that fall behind a schema version.
+///
+/// For each entity behind the active version:
+/// 1. Takes a snapshot (so the batch can be undone via `undo_job`).
+/// 2. Reads the entity's current data and the active version's field definitions.
+/// 3. For every required field the active version defines but the entity lacks, fills it with the
+///    field's `default` value, or a type-appropriate empty value if no default is set.
+/// 4. Writes the updated data back.
+///
+/// Returns a report counting entities updated and total fields filled.
+///
+/// `updated_by` is the acting user's ID, or `None` for an unattributed API key.
+pub async fn fill_defaults(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_name: &str,
+    job_id: Uuid,
+    updated_by: Option<Uuid>,
+) -> Result<FillDefaultsReport, YorishiroError> {
+    let active = super::schema_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
+
+    // Fetch all entities behind the active version.
+    use super::_entities::entity_entities::Column;
+
+    let rows: Vec<EntityRecord> = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            super::_entities::entity_entities::Relation::SchemaSchemas.def(),
+        )
+        .filter(super::_entities::schema_schemas::Column::Name.eq(schema_name))
+        .filter(Column::SchemaId.ne(active.id))
+        .into_model::<EntityRecord>()
+        .all(conn)
+        .await
+        .internal()?;
+
+    if rows.is_empty() {
+        return Ok(FillDefaultsReport {
+            schema_name: schema_name.to_string(),
+            job_id,
+            entities_updated: 0,
+            fields_filled: 0,
+        });
+    }
+
+    let mut entities_updated = 0i64;
+    let mut fields_filled = 0i64;
+
+    for record in rows {
+        let entity_type = &record.entity_type;
+
+        // Find the active version's entity type definition.
+        let active_entity = match active.definition.entity_types.get(entity_type.as_str()) {
+            Some(def) => def,
+            None => continue, // Entity type dropped in active version; nothing to fill.
+        };
+
+        // Take a snapshot before modifying.
+        #[allow(clippy::redundant_pattern_matching)]
+        if let Err(_) = snapshot(conn, workspace_id, record.id, job_id).await {
+            continue; // Entity deleted since dry run; skip silently.
+        }
+
+        let mut data = record.data.clone();
+        let filled = fill_fields_in_value(&mut data, &active_entity.fields);
+        if filled > 0 {
+            let _ = update(conn, workspace_id, record.id, data, updated_by).await;
+            entities_updated += 1;
+            fields_filled += filled;
+        }
+    }
+
+    Ok(FillDefaultsReport {
+        schema_name: schema_name.to_string(),
+        job_id,
+        entities_updated,
+        fields_filled,
+    })
+}
+
+/// Recursively fill missing required fields in a JSON value.
+///
+/// Returns the count of fields filled (including nested objects).
+fn fill_fields_in_value(
+    data: &mut Value,
+    fields: &std::collections::BTreeMap<String, metaschema::FieldDef>,
+) -> i64 {
+    let mut count = 0i64;
+
+    if !data.is_object() {
+        return count;
+    }
+
+    let obj = data.as_object_mut().unwrap();
+
+    for (name, prop_def) in fields {
+        if obj.contains_key(name) {
+            // Field exists; recurse into nested objects.
+            if let Some(child) = obj.get_mut(name)
+                && let Some(ref_properties) = &prop_def.properties
+            {
+                count += fill_fields_in_value(child, ref_properties);
+            }
+        } else if prop_def.required {
+            // Missing required field — fill it.
+            if let Some(ref_val) = &prop_def.default {
+                obj.insert(name.clone(), ref_val.clone());
+            } else {
+                let empty = empty_value_for_type(&prop_def.r#type);
+                obj.insert(name.clone(), empty);
+            }
+            count += 1;
+        }
+    }
+
+    count
+}
+
+/// Returns a type-appropriate empty value for a field type.
+fn empty_value_for_type(type_name: &metaschema::FieldTypeName) -> Value {
+    match type_name {
+        metaschema::FieldTypeName::Boolean => Value::Bool(false),
+        metaschema::FieldTypeName::Integer | metaschema::FieldTypeName::Number => {
+            Value::Number(serde_json::Number::from(0))
+        }
+        metaschema::FieldTypeName::String => Value::String(String::new()),
+        metaschema::FieldTypeName::Object => Value::Object(serde_json::Map::new()),
+        metaschema::FieldTypeName::Array => Value::Array(vec![]),
+    }
+}
+
 /// An entity's data as it stood before something overwrote it.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult)]
 pub struct EntitySnapshot {

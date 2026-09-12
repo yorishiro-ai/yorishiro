@@ -158,6 +158,7 @@ impl Hooks for App {
         // `BootResultWrapper::drop` which tries `DROP DATABASE`.
         if !matches!(environment, Environment::Test) {
             spawn_startup_reindex(result.app_context.clone());
+            spawn_db_load_guard(result.app_context.clone());
         }
 
         Ok(result)
@@ -319,6 +320,10 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::entity_columns::routes())
             .add_route(crate::ee::controllers::inference::routes())
             .add_route(crate::ee::controllers::inference::gated_routes().layer(gate.clone()))
+            .add_route(
+                crate::ee::controllers::inference::inference_job_status_routes()
+                    .layer(gate.clone()),
+            )
             .add_route(crate::ee::controllers::marketplace::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::oauth::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::origin::routes())
@@ -392,6 +397,7 @@ impl Hooks for App {
         tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
         tasks.register(tasks::maintenance::Maintenance);
         tasks.register(tasks::maintenance_status::MaintenanceStatus);
+        tasks.register(tasks::db_load_guard::DbLoadGuard);
         // The enterprise edition's tasks. Registering only makes them available to `cargo loco task`;
         // neither runs at boot, so this changes nothing for a deployment that never invokes them.
         tasks.register(crate::ee::tasks::seed_official_templates::SeedOfficialTemplates);
@@ -569,4 +575,116 @@ fn spawn_startup_reindex(ctx: AppContext) {
 
     // Store the JoinHandle so shutdown_and_wait() can await task completion.
     task.lock().unwrap().replace(join_handle);
+}
+
+/// Spawns a background task that periodically checks database load and enables automatic
+/// read-only maintenance mode when sustained above 80% of pool capacity.
+///
+/// Runs every 5 seconds, measuring `pg_stat_activity.state = 'active'` count against
+/// `max_connections * 0.8`. When sustained above for 30 seconds it sets `read_only` mode;
+/// when load falls below for 30 seconds it lifts back to `off` (only if this guard set it).
+///
+/// PostgreSQL only — on SQLite there is no RLS and no multi-tenant pool to protect.
+fn spawn_db_load_guard(ctx: AppContext) {
+    let shut = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shut_for_task = shut.clone();
+    let _handle = StartupReindexHandle {
+        shut,
+        task: std::sync::Arc::new(std::sync::Mutex::new(None)),
+    };
+    // Note: we intentionally don't store this handle in shared_store —
+    // the load guard is best-effort and doesn't need test-teardown cleanup
+    // like startup_reindex does.
+    spawn(async move {
+        use tokio::time::{Duration, interval};
+        let mut ticker = interval(Duration::from_secs(5));
+        let mut busy_ticks: u32 = 0;
+        let mut quiet_ticks: u32 = 0;
+        const SUSTAIN: u32 = 6; // 6 ticks * 5s = 30s
+        ticker.tick().await; // initial skip
+        loop {
+            if shut_for_task.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            ticker.tick().await;
+            // Only run on PostgreSQL — on SQLite the guard is unnecessary.
+            if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                continue;
+            }
+            // Check if DbHandle exists (may not on some edge cases).
+            let Some(handle) = ctx.shared_store.get::<crate::db::DbHandle>() else {
+                continue;
+            };
+            let active = match sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM pg_stat_activity \
+                 WHERE datname = current_database() AND state = 'active'",
+            )
+            .fetch_one(&handle.identity)
+            .await
+            {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            let max_conns = ctx.config.database.max_connections as i64;
+            let threshold = (max_conns as f64 * 0.8).ceil() as i64;
+            if active >= threshold {
+                busy_ticks += 1;
+                quiet_ticks = 0;
+            } else {
+                quiet_ticks += 1;
+                busy_ticks = 0;
+            }
+            // Only operate via SeaORM connection for maintenance mode reads/writes.
+            match crate::models::system_maintenance::get(&ctx.db).await {
+                Ok(current) => {
+                    if busy_ticks >= SUSTAIN
+                        && current.mode == crate::models::system_maintenance::MaintenanceMode::Off
+                    {
+                        if let Err(e) = crate::models::system_maintenance::set(
+                            &ctx.db,
+                            crate::models::system_maintenance::MaintenanceMode::ReadOnly,
+                            300,
+                            Some(crate::services::db_load_guard::AUTO_REASON.to_string()),
+                        )
+                        .await
+                        {
+                            tracing::error!(error = %e, "db_load_guard: failed to set read_only");
+                        } else {
+                            tracing::warn!(
+                                active_connections = active,
+                                threshold = threshold,
+                                "db_load_guard: enabled read-only"
+                            );
+                        }
+                        busy_ticks = 0;
+                    } else if quiet_ticks >= SUSTAIN
+                        && current.mode
+                            == crate::models::system_maintenance::MaintenanceMode::ReadOnly
+                        && current.reason.as_deref()
+                            == Some(crate::services::db_load_guard::AUTO_REASON)
+                    {
+                        if let Err(e) = crate::models::system_maintenance::set(
+                            &ctx.db,
+                            crate::models::system_maintenance::MaintenanceMode::Off,
+                            300,
+                            None,
+                        )
+                        .await
+                        {
+                            tracing::error!(error = %e, "db_load_guard: failed to lift read_only");
+                        } else {
+                            tracing::info!(
+                                active_connections = active,
+                                "db_load_guard: lifted read-only (load subsided)"
+                            );
+                        }
+                        quiet_ticks = 0;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "db_load_guard: could not read maintenance state");
+                }
+            }
+        }
+    });
 }
