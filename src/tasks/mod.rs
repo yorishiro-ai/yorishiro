@@ -4,6 +4,7 @@ pub mod create_invite;
 pub mod create_tenant;
 pub mod create_user;
 pub mod create_workspace;
+pub mod db_load_guard;
 pub mod list_api_keys;
 pub mod list_members;
 pub mod list_tenants;

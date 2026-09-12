@@ -46,6 +46,8 @@ pub enum AuditAction {
     SetMaintenance,
     /// `embedding::reindex_workspace`: a `Migration`-scoped embedding reindex, replacing all vectors in a workspace with those from a new model.
     ReindexEmbeddings,
+    /// `entity_entities::fill_defaults`: a `Migration`-scoped batch fill of absent required fields.
+    FillDefaults,
 }
 
 impl AuditAction {
@@ -54,6 +56,7 @@ impl AuditAction {
             Self::UndoMigrationJob => "undo_migration_job",
             Self::SetMaintenance => "set_maintenance",
             Self::ReindexEmbeddings => "reindex_embeddings",
+            Self::FillDefaults => "fill_defaults",
         }
     }
 }
