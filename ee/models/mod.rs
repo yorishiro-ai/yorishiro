@@ -4,6 +4,7 @@
 //! `origin` is the exception: it owns no table, and reads base's own `schema_schemas`/`template_templates` on `ctx.db`, since the endpoint it serves is enterprise regardless of which tables it happens to read.
 
 pub mod billing;
+pub mod compute_credit_ledger;
 pub mod embedding_keys;
 pub mod entity_columns;
 pub mod entity_fill;

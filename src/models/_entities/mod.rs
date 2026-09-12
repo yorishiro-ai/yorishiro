@@ -4,6 +4,7 @@ pub mod prelude;
 
 pub mod api_key_audit_log;
 pub mod api_keys;
+pub mod compute_credit_ledger;
 pub mod entity_column_preferences;
 pub mod entity_embeddings_1024;
 pub mod entity_embeddings_1536;
