@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::MetaSchemaDefinition;
+use crate::models::schema_schemas;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -232,6 +233,9 @@ pub async fn update_template(
             YorishiroError::not_found(format!("template '{template_id}' was not found"))
         })?;
 
+    // Track whether definition changed before the update moves input.definition.
+    let definition_changed = input.definition.is_some();
+
     let mut active: ActiveModel = existing.into();
     if let Some(name) = input.name {
         active.name = ActiveValue::Set(name);
@@ -249,7 +253,15 @@ pub async fn update_template(
         active.locale = ActiveValue::Set(Some(locale));
     }
 
-    active.update(conn).await.internal()?.try_into()
+    let record = active.update(conn).await.internal()?.try_into()?;
+
+    // If the definition changed, stamp origin_updated_at=NULL on every linked schema
+    // following this template so the workspace knows there is an upstream update available.
+    if definition_changed {
+        schema_schemas::notify_upstream_change(conn, template_id).await?;
+    }
+
+    Ok(record)
 }
 
 /// Deletes a template.

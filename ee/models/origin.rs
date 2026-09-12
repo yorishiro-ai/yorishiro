@@ -21,6 +21,7 @@ struct Row {
     template_id: Uuid,
     template_name: String,
     changed_at: DateTime<Utc>,
+    origin_updated_at: Option<DateTime<Utc>>,
 }
 
 /// Schemas in this workspace whose origin template has changed since the copy was taken.
@@ -40,7 +41,7 @@ pub async fn list_with_upstream_changes(
     let rows = Row::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "SELECT s.id AS schema_id, s.name AS schema_name, s.version, \
-                t.id AS template_id, t.name AS template_name, t.updated_at AS changed_at \
+                t.id AS template_id, t.name AS template_name, t.updated_at AS changed_at, s.origin_updated_at AS origin_updated_at \
            FROM schema_schemas s \
            JOIN template_templates t ON t.id = s.origin_template_id \
           WHERE s.workspace_id = $1 \
@@ -68,6 +69,7 @@ pub async fn list_with_upstream_changes(
             template_id: row.template_id,
             template_name: row.template_name,
             changed_at: row.changed_at,
+            pending_notification: row.origin_updated_at.is_none(),
         })
         .collect())
 }
