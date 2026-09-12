@@ -132,3 +132,6 @@ API リファレンスは、Swagger UI によって `/api/docs` 上で自動的�
 - `GET /api/inference-jobs/{job_id}` — infer-fill ジョブのステータスをポーリングします。
 - `POST /api/migration-jobs/{job_id}/undo` — ワークスペースの最後の infer-fill または migration 書き込みを元に戻します。
 - `POST /api/migration-jobs/reindex` — ワークスペースの埋め込み再インデックスをキューにエンキューします。
+- `POST /api/migration-jobs/fill-defaults`: アクティブなスキーマバージョンで不足している必須フィールドをエンティティに補完します（Migration スコープが必要）。
+
+`fill_defaults` MCP ツールでも同じバッチマイグレーションを実行できます。Migration スコープが必要です。

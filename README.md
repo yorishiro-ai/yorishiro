@@ -17,7 +17,7 @@ A knowledge store where you define your own data structures and search by meanin
   - Full-text fallback when embeddings are not yet available.
 
 - **Connect to AI tools**
-  - 23 built-in MCP tools for Claude, Cursor, and other MCP-compatible clients to search, create, and manage your data.
+  - 24 built-in MCP tools for Claude, Cursor, and other MCP-compatible clients to search, create, and manage your data.
 
 - **REST API**
   - Automate everything with standard HTTP endpoints.

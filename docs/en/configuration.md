@@ -132,3 +132,6 @@ The API reference is served automatically by Swagger UI at `/api/docs`. All REST
 - `GET /api/inference-jobs/{job_id}` — polls the status of an infer-fill job.
 - `POST /api/migration-jobs/{job_id}/undo` — reverses the last infer-fill or migration write for a workspace.
 - `POST /api/migration-jobs/reindex` — queues a workspace embedding reindex.
+- `POST /api/migration-jobs/fill-defaults`: fills absent required fields in entities behind the active schema version (requires Migration scope).
+
+The `fill_defaults` MCP tool provides the same batch migration through MCP and requires Migration scope.
