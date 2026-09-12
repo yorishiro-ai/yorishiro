@@ -8,6 +8,7 @@ pub mod list_api_keys;
 pub mod list_members;
 pub mod list_tenants;
 pub mod list_workspaces;
+pub mod db_load_guard;
 pub mod maintenance;
 pub mod maintenance_status;
 pub mod reindex_embeddings;

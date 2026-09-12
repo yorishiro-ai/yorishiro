@@ -24,6 +24,19 @@ pub struct CreateEntityRequest {
 }
 
 #[derive(Deserialize)]
+pub struct FillDefaultsRequest {
+    pub schema_name: String,
+}
+
+#[derive(Serialize)]
+pub struct FillDefaultsResponse {
+    pub schema_name: String,
+    pub job_id: Uuid,
+    pub entities_updated: i64,
+    pub fields_filled: i64,
+}
+
+#[derive(Deserialize)]
 pub struct UpdateEntityRequest {
     pub data: Value,
 }
@@ -199,6 +212,55 @@ pub struct ReindexResponse {
     pub job_id: String,
 }
 
+/// Fills absent required fields in entities that fall behind the active schema version.
+///
+/// `POST /api/migration-jobs/fill-defaults` runs the same logic `migration_dry_run` describes:
+/// for every entity on an older schema version that is missing a required field the active version
+/// defines, it fills that field with the schema's `default` value or a type-appropriate empty
+/// value, takes a snapshot (so the batch can be undone via `undo_migration_job`), and writes the
+/// updated data.
+///
+/// Returns 409 when the workspace has no entities behind the active version.
+pub async fn fill_defaults(
+    authorized: Authorized<MigrationScope>,
+    Json(body): Json<FillDefaultsRequest>,
+) -> Result<Json<FillDefaultsResponse>, ApiError> {
+    let workspace_id = authorized.ctx.workspace_id;
+    let job_id = Uuid::now_v7();
+    let updated_by = authorized.ctx.user_id;
+
+    let report = entity_entities::fill_defaults(
+        authorized.txn(),
+        workspace_id,
+        &body.schema_name,
+        job_id,
+        updated_by,
+    )
+    .await?;
+
+    // Audit log the batch operation.
+    api_key_audit_log::record(
+        authorized.txn(),
+        api_key_audit_log::AuditActor {
+            workspace_id,
+            tenant_id: authorized.ctx.tenant_id,
+            api_key_id: authorized.ctx.api_key_id,
+            user_id: authorized.ctx.user_id,
+        },
+        api_key_audit_log::AuditAction::FillDefaults,
+        serde_json::json!({ "schema_name": body.schema_name, "job_id": job_id, "entities_updated": report.entities_updated, "fields_filled": report.fields_filled }),
+    )
+    .await?;
+    authorized.commit().await?;
+
+    Ok(Json(FillDefaultsResponse {
+        schema_name: body.schema_name,
+        job_id,
+        entities_updated: report.entities_updated,
+        fields_filled: report.fields_filled,
+    }))
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/entities")
@@ -214,4 +276,5 @@ pub fn migration_routes() -> Routes {
         .prefix("api/migration-jobs")
         .add("/{job_id}/undo", post(undo_migration_job))
         .add("/reindex", post(reindex_workspace))
+        .add("/fill-defaults", post(fill_defaults))
 }
