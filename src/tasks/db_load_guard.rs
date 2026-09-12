@@ -24,7 +24,7 @@ impl Task for DbLoadGuard {
             }
             Err(err) => {
                 tracing::error!(error = %err, "db_load_guard: check failed");
-                Err(err.into())
+                Err(err)
             }
         }
     }
