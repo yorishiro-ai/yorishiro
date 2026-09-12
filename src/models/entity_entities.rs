@@ -677,9 +677,20 @@ pub async fn fill_defaults(
         let mut data = record.data.clone();
         let filled = fill_fields_in_value(&mut data, &active_entity.fields);
         if filled > 0 {
-            let _ = update(conn, workspace_id, record.id, data, updated_by).await;
-            entities_updated += 1;
-            fields_filled += filled;
+            let active = ActiveModel {
+                id: ActiveValue::Unchanged(record.id),
+                data: ActiveValue::Set(data),
+                updated_by: ActiveValue::Set(updated_by),
+                ..Default::default()
+            };
+            match active.update_without_returning(conn).await {
+                Ok(_) => {
+                    entities_updated += 1;
+                    fields_filled += filled;
+                }
+                Err(DbErr::RecordNotUpdated) => {}
+                Err(err) => return Err(err).internal(),
+            }
         }
     }
 

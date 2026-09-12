@@ -123,12 +123,3 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 The task measures median, min, and max latency across five iterations of a vector search query. When the entity count is 1000 or more and the median latency exceeds 200 ms, the task recommends adopting vec0. You can adjust both thresholds with `min_entities` and `max_latency_ms` CLI arguments.
 
 This task is measurement only: it does not change any schema or configuration. It helps you decide whether the vec0 virtual table is worth adopting on your deployment.
-
-## API endpoints
-
-The API reference is served automatically by Swagger UI at `/api/docs`. All REST endpoints, including async infer-fill and its status polling endpoint, are documented there with request and response shapes.
-
-- `POST /api/schemas/active/{name}/infer-fill` — enqueues an async infer-fill job for a schema.
-- `GET /api/inference-jobs/{job_id}` — polls the status of an infer-fill job.
-- `POST /api/migration-jobs/{job_id}/undo` — reverses the last infer-fill or migration write for a workspace.
-- `POST /api/migration-jobs/reindex` — queues a workspace embedding reindex.

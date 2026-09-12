@@ -123,12 +123,3 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 タスクは、ベクトル検索クエリの 5 回反復にわたって中央値、最小値、最大値のレイテンシを測定します。エンティティ数が 1000 以上で中央値レイテンシが 200 ms を超える場合、vec0 の採用を推奨します。`min_entities` と `max_latency_ms` CLI 引数で両方の閾値を変更できます。
 
 このタスクは計測専用です。スキーマや構成を変更しません。vec0 仮想テーブルの採用がデプロイメントにとって価値があるかどうかを判断するのに役立ちます。
-
-## API エンドポイント
-
-API リファレンスは、Swagger UI によって `/api/docs` 上で自動的に提供されます。すべての REST エンドポイント（非同期 infer-fill およびそのステータス polling エンドポイントを含む）が、リクエスト・レスポンスの形状とともに文書化されています。
-
-- `POST /api/schemas/active/{name}/infer-fill` — スキーマの非同期 infer-fill ジョブをキューにエンキューします。
-- `GET /api/inference-jobs/{job_id}` — infer-fill ジョブのステータスをポーリングします。
-- `POST /api/migration-jobs/{job_id}/undo` — ワークスペースの最後の infer-fill または migration 書き込みを元に戻します。
-- `POST /api/migration-jobs/reindex` — ワークスペースの埋め込み再インデックスをキューにエンキューします。

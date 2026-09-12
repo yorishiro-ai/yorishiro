@@ -49,6 +49,12 @@ pub struct MigrationDryRunArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct FillDefaultsArgs {
+    /// Name of the schema whose active version supplies the missing fields.
+    pub schema_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct ListEntitiesArgs {
     pub entity_type: Option<String>,
     /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
@@ -247,6 +253,60 @@ impl YorishiroMcpServer {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
             };
+        ok_json(report)
+    }
+
+    #[tool(
+        description = "Fill absent required fields in entities behind a schema's active version (requires migration scope). Takes a snapshot so the operation can be undone with the migration undo endpoint."
+    )]
+    pub async fn fill_defaults(
+        &self,
+        Parameters(args): Parameters<FillDefaultsArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Migration).await? {
+            AuthzOutcome::Authorized(authorized) => authorized,
+            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+
+        let workspace_id = authorized.ctx.workspace_id;
+        let schema_name = args.schema_name;
+        let job_id = Uuid::now_v7();
+        let report = match entity_entities::fill_defaults(
+            authorized.txn(),
+            workspace_id,
+            &schema_name,
+            job_id,
+            authorized.ctx.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
+
+        if let Err(err) = crate::models::api_key_audit_log::record(
+            authorized.txn(),
+            crate::models::api_key_audit_log::AuditActor {
+                workspace_id,
+                tenant_id: authorized.ctx.tenant_id,
+                api_key_id: authorized.ctx.api_key_id,
+                user_id: authorized.ctx.user_id,
+            },
+            crate::models::api_key_audit_log::AuditAction::FillDefaults,
+            serde_json::json!({
+                "schema_name": schema_name,
+                "job_id": job_id,
+                "entities_updated": report.entities_updated,
+                "fields_filled": report.fields_filled,
+            }),
+        )
+        .await
+        {
+            return Ok(err_to_tool_result(err));
+        }
+
+        authorized.commit().await?;
         ok_json(report)
     }
 }

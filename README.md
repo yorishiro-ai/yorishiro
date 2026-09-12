@@ -17,7 +17,7 @@ A knowledge store where you define your own data structures and search by meanin
   - Full-text fallback when embeddings are not yet available.
 
 - **Connect to AI tools**
-  - 23 built-in MCP tools for Claude, Cursor, and other MCP-compatible clients to search, create, and manage your data.
+  - 24 built-in MCP tools for Claude, Cursor, and other MCP-compatible clients to search, create, and manage your data.
 
 - **REST API**
   - Automate everything with standard HTTP endpoints.
@@ -93,27 +93,6 @@ The default configuration uses SQLite — no external database required.
 2. Generate an API key and start creating entities.
 
 For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
-
-## Configuration
-
-Most settings come from environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
-| `YORISHIRO_MAX_TENANTS` | `1` | Tenant limit (`0` = unlimited) |
-| `YORISHIRO_LICENSE_KEY` | *(empty)* | Enterprise licence key |
-| `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding backend (`none` disables embeddings) |
-| `YORISHIRO_EMBEDDING_BASE_URL` | *(empty)* | OpenAI-compatible embeddings endpoint |
-| `YORISHIRO_EMBEDDING_MODEL` | *(empty)* | Embeddings model name |
-| `YORISHIRO_EMBEDDING_API_KEY` | *(empty)* | Embeddings API key |
-| `YORISHIRO_EMBEDDING_DIMENSIONS` | `768` | Expected vector size |
-| `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | `false` | Include `dimensions` in requests |
-| `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` set | — | Uses the OpenAI-compatible provider |
-| `YORISHIRO_QUEUE_KIND` | Auto-detected | Set to `Redis` for Valkey/Redis queue |
-| `QUEUE_URL` | Shares `DATABASE_URL` | Required for Redis queue |
-
-See [docs/en/configuration.md](docs/en/configuration.md) for the full list.
 
 ## Documentation
 
