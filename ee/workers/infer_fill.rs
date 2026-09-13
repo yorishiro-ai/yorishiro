@@ -10,12 +10,11 @@
 use async_trait::async_trait;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::db::{self, DbHandle};
 use crate::ee::models::entity_fill;
+use crate::ee::models::inference_jobs;
 use crate::ee::models::llm_keys;
 use crate::ee::services::inference::InferenceClient;
 use crate::error::ResultExt;
@@ -27,34 +26,6 @@ pub struct InferFillArgs {
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub schema_name: String,
-}
-
-/// Result of an infer-fill job, stored in `shared_store` so the polling endpoint
-/// can report applied/skipped counts without querying the queue (Loco's `Queue`
-/// does not expose `get_jobs` publicly).
-#[derive(Clone, Debug, Serialize)]
-pub struct InferFillResult {
-    pub workspace_id: Uuid,
-    pub applied: i64,
-    pub skipped: i64,
-    pub error: Option<String>,
-    pub completed: bool,
-}
-
-/// Thread-safe result tracker stored in `shared_store`.
-#[derive(Clone, Default, Debug)]
-pub struct ResultTracker {
-    results: Arc<Mutex<std::collections::HashMap<String, InferFillResult>>>,
-}
-
-impl ResultTracker {
-    pub async fn get(&self, job_id: &str) -> Option<InferFillResult> {
-        self.results.lock().await.get(job_id).cloned()
-    }
-
-    pub async fn set(&self, job_id: String, result: InferFillResult) {
-        self.results.lock().await.insert(job_id, result);
-    }
 }
 
 /// Shared implementation of the infer-fill worker's perform body.
@@ -174,42 +145,29 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
         let job_id = args.job_id;
-        let tracker = self
-            .ctx
-            .shared_store
-            .get::<ResultTracker>()
-            .expect("ResultTracker should be installed in shared_store")
-            .clone();
+        let claimed = inference_jobs::claim(&self.ctx.db, job_id)
+            .await
+            .internal()?;
+        if !claimed {
+            // A duplicate delivery is harmless after the first worker claims the row.
+            // This also makes a reaped delivery harmless while the original worker may
+            // still be running.
+            return Ok(());
+        }
 
         match perform_infer_fill(&self.ctx, &args, job_id).await {
             Ok((applied, skipped)) => {
-                tracker
-                    .set(
-                        job_id.to_string(),
-                        InferFillResult {
-                            workspace_id: args.workspace_id,
-                            applied,
-                            skipped,
-                            error: None,
-                            completed: true,
-                        },
-                    )
-                    .await;
+                inference_jobs::complete(&self.ctx.db, job_id, applied, skipped)
+                    .await
+                    .internal()?;
                 Ok(())
             }
             Err(e) => {
-                tracker
-                    .set(
-                        job_id.to_string(),
-                        InferFillResult {
-                            workspace_id: args.workspace_id,
-                            applied: 0,
-                            skipped: 0,
-                            error: Some(e.to_string()),
-                            completed: true,
-                        },
-                    )
-                    .await;
+                if let Err(update_error) =
+                    inference_jobs::fail(&self.ctx.db, job_id, &e.to_string()).await
+                {
+                    tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
+                }
                 Err(e)
             }
         }
@@ -235,23 +193,9 @@ pub async fn enqueue_infer_fill(
 
     let job_id = Uuid::new_v4();
 
-    let tracker = ctx
-        .shared_store
-        .get::<ResultTracker>()
-        .expect("ResultTracker should be installed in shared_store")
-        .clone();
-    tracker
-        .set(
-            job_id.to_string(),
-            InferFillResult {
-                workspace_id,
-                applied: 0,
-                skipped: 0,
-                error: None,
-                completed: false,
-            },
-        )
-        .await;
+    inference_jobs::create(&ctx.db, job_id, workspace_id, &schema_name)
+        .await
+        .internal()?;
 
     let args = InferFillArgs {
         job_id,
@@ -259,9 +203,13 @@ pub async fn enqueue_infer_fill(
         schema_name,
     };
 
-    InferFillWorker::perform_later(ctx, args)
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("failed to enqueue infer-fill job: {e}")))?;
+    if let Err(error) = InferFillWorker::perform_later(ctx, args).await {
+        let message = format!("failed to enqueue infer-fill job: {error}");
+        inference_jobs::fail(&ctx.db, job_id, &message)
+            .await
+            .internal()?;
+        return Err(loco_rs::Error::Message(message));
+    }
 
     Ok(job_id.to_string())
 }

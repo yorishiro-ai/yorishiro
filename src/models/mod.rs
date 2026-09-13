@@ -9,6 +9,7 @@ pub mod entity_relations;
 pub mod entity_snapshots;
 pub mod export;
 pub mod import;
+pub mod inference_jobs;
 pub mod pagination;
 pub mod recall;
 pub mod schema_schemas;

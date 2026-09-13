@@ -522,7 +522,7 @@ async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
 ///
 /// This test posts to `infer-fill`, collects the `job_id` from the response, and polls the
 /// dedicated status endpoint with that `job_id`, confirming the status route resolves to a
-/// 200 (the result tracker stores the job and returns it) rather than a 404 or a misrouted
+/// 200 (the durable status row stores the job and returns it) rather than a 404 or a misrouted
 /// response.
 #[tokio::test]
 #[serial]

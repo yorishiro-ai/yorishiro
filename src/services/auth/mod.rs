@@ -98,7 +98,7 @@ pub fn hex_encode(bytes: &[u8]) -> String {
 /// Decodes a lowercase- or uppercase-hex string back into bytes.
 /// Returns `None` for an odd-length string or one containing a non-hex-digit character.
 pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if !s.is_ascii() || !s.len().is_multiple_of(2) {
+    if !s.is_ascii() || s.len() % 2 != 0 {
         return None;
     }
     let bytes = s.as_bytes();
