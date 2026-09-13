@@ -149,8 +149,9 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
             .await
             .internal()?;
         if !claimed {
-            // A duplicate delivery is harmless after a terminal update, and a second
-            // worker must not repeat a job another worker already owns.
+            // A duplicate delivery is harmless after the first worker claims the row.
+            // This also makes a reaped delivery harmless while the original worker may
+            // still be running.
             return Ok(());
         }
 

@@ -22,7 +22,9 @@ Configure a workspace LLM key with `PUT /api/workspace/llm-key`, then start a fi
 The response contains a durable `job_id` and the initial `queued` status.
 Poll `GET /api/inference-jobs/{job_id}` with a read-scoped key until the status is `completed` or `failed`.
 The job record stores its status, applied and skipped counts, and a serialized error message, so polling continues to work after a server restart.
-The configured Loco queue reaper requeues a delivery left in progress by a worker restart, so `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` must exceed the longest expected fill run.
+The job is claimed only while it is `queued`.
+If a worker crashes after claiming it, the durable row remains `running` and is not automatically retried, because retrying could start a second inference while the original worker is still active.
+Operators must reconcile a `running` job before retrying it through an operational procedure.
 Job records are retained until a future retention policy is introduced.
 
 ## Per-workspace worker class

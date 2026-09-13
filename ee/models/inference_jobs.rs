@@ -38,14 +38,14 @@ pub async fn get(conn: &impl ConnectionTrait, id: Uuid) -> Result<Option<Model>,
     Entity::find_by_id(id).one(conn).await.internal()
 }
 
-/// Claims a queued job, or a queue delivery reaped after a worker restart.
-/// The queue provider owns delivery exclusivity, while terminal updates remain conditional.
+/// Claims a queued job exactly once.
+/// A running job is never reclaimed because its worker may still be executing an inference.
 pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, YorishiroError> {
     let result = Entity::update_many()
         .col_expr(Column::Status, Expr::value(RUNNING))
         .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(Column::Id.eq(id))
-        .filter(Column::Status.is_in([QUEUED, RUNNING]))
+        .filter(Column::Status.eq(QUEUED))
         .exec(conn)
         .await
         .internal()?;
