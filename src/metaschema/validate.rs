@@ -303,9 +303,13 @@ fn validate_field(
 #[cfg(test)]
 mod proptests {
     use super::*;
-    use crate::metaschema::types::EntityTypeDef;
+    use crate::metaschema::types::{ArrayItems, EntityTypeDef, RelationTypeDef};
     use proptest::prelude::*;
     use std::collections::BTreeMap;
+
+    fn short_string() -> impl Strategy<Value = String> {
+        "[ -~]{0,16}"
+    }
 
     fn any_field_type() -> impl Strategy<Value = FieldTypeName> {
         prop_oneof![
@@ -319,31 +323,109 @@ mod proptests {
     }
 
     fn any_field() -> impl Strategy<Value = FieldDef> {
-        any_field_type().prop_map(|r#type| FieldDef {
-            r#type,
-            required: false,
-            description: None,
-            enum_values: None,
-            format: None,
-            minimum: None,
-            maximum: None,
-            min_length: None,
-            max_length: None,
-            pattern: None,
-            min_items: None,
-            max_items: None,
-            unique_items: false,
-            default: None,
-            items: None,
-            properties: None,
-            x_embed: false,
-            x_ui: None,
-            extra: serde_json::Map::new(),
-        })
+        (
+            any_field_type(),
+            (any::<bool>(), any::<bool>()),
+            prop::option::of(short_string()),
+            prop::option::of(proptest::collection::vec(short_string(), 0..4)),
+            prop::option::of(short_string()),
+            prop::option::of(any::<f64>()),
+            prop::option::of(any::<f64>()),
+            prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
+            prop::option::of(short_string()),
+            prop::option::of(any::<u64>()),
+            prop::option::of(any::<u64>()),
+        )
+            .prop_map(
+                |(
+                    r#type,
+                    (required, unique_items),
+                    description,
+                    enum_values,
+                    format,
+                    minimum,
+                    maximum,
+                    min_length,
+                    max_length,
+                    pattern,
+                    min_items,
+                    max_items,
+                )| FieldDef {
+                    r#type,
+                    required,
+                    description,
+                    enum_values,
+                    format,
+                    minimum,
+                    maximum,
+                    min_length,
+                    max_length,
+                    pattern,
+                    min_items,
+                    max_items,
+                    unique_items,
+                    default: None,
+                    items: None,
+                    properties: None,
+                    x_embed: false,
+                    x_ui: None,
+                    extra: serde_json::Map::new(),
+                },
+            )
+            .prop_recursive(4, 64, 4, |child| {
+                let child = child.boxed();
+                (
+                    prop::option::of(
+                        (
+                            short_string(),
+                            prop::option::of(proptest::collection::btree_map(
+                                short_string(),
+                                child.clone(),
+                                0..4,
+                            )),
+                        )
+                            .prop_map(|(r#type, properties)| ArrayItems { r#type, properties }),
+                    ),
+                    prop::option::of(proptest::collection::btree_map(short_string(), child, 0..4)),
+                )
+                    .prop_map(|(items, properties)| {
+                        let mut field = FieldDef {
+                            r#type: if items.is_some() {
+                                FieldTypeName::Array
+                            } else if properties.is_some() {
+                                FieldTypeName::Object
+                            } else {
+                                FieldTypeName::String
+                            },
+                            required: false,
+                            description: None,
+                            enum_values: None,
+                            format: None,
+                            minimum: None,
+                            maximum: None,
+                            min_length: None,
+                            max_length: None,
+                            pattern: None,
+                            min_items: None,
+                            max_items: None,
+                            unique_items: false,
+                            default: None,
+                            items: None,
+                            properties: None,
+                            x_embed: false,
+                            x_ui: None,
+                            extra: serde_json::Map::new(),
+                        };
+                        field.items = items;
+                        field.properties = properties;
+                        field
+                    })
+            })
     }
 
     fn any_entity_type() -> impl Strategy<Value = EntityTypeDef> {
-        proptest::collection::btree_map("[a-z]{1,8}", any_field(), 1..4).prop_map(|fields| {
+        proptest::collection::btree_map(short_string(), any_field(), 0..4).prop_map(|fields| {
             EntityTypeDef {
                 description: None,
                 fields,
@@ -353,23 +435,57 @@ mod proptests {
 
     fn any_schema_def() -> impl Strategy<Value = MetaSchemaDefinition> {
         (
-            "[a-z]{1,8}",
-            proptest::collection::btree_map("[a-z]{1,8}", any_entity_type(), 1..3),
+            short_string(),
+            prop::option::of(short_string()),
+            proptest::collection::btree_map(short_string(), any_entity_type(), 0..3),
+            proptest::collection::btree_map(
+                short_string(),
+                (short_string(), short_string()).prop_map(|(source, target)| RelationTypeDef {
+                    source,
+                    target,
+                    description: None,
+                }),
+                0..3,
+            ),
         )
-            .prop_map(|(name, entity_types)| MetaSchemaDefinition {
-                name,
-                description: None,
-                entity_types,
-                relation_types: BTreeMap::new(),
+            .prop_map(|(name, description, entity_types, relation_types)| {
+                MetaSchemaDefinition {
+                    name,
+                    description,
+                    entity_types,
+                    relation_types,
+                }
             })
     }
 
-    // validate_definition returns Ok/Err for any input — it never panics, even on
-    // adversarial or structurally nonsensical definitions.
     proptest! {
         #[test]
         fn validate_definition_never_panics(def in any_schema_def()) {
-            let _ = validate_definition(&def);
+            let result = std::panic::catch_unwind(|| validate_definition(&def));
+            prop_assert!(result.is_ok());
+        }
+
+        #[test]
+        fn empty_entity_types_are_always_rejected(
+            name in short_string(),
+            description in prop::option::of(short_string()),
+            relation_types in proptest::collection::btree_map(
+                short_string(),
+                (short_string(), short_string()).prop_map(|(source, target)| RelationTypeDef {
+                    source,
+                    target,
+                    description: None,
+                }),
+                0..3,
+            ),
+        ) {
+            let definition = MetaSchemaDefinition {
+                name,
+                description,
+                entity_types: BTreeMap::new(),
+                relation_types,
+            };
+            prop_assert!(validate_definition(&definition).is_err());
         }
     }
 }

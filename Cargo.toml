@@ -110,4 +110,4 @@ axum-test = { version = "17.3.0" }
 # Required for catch_unwind on non-Send futures in boot_request wrapper.
 futures = "0.3.34"
 # Property-based testing (issue #358).
-proptest = "1"
+proptest = "=1.11.0"

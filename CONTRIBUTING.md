@@ -32,6 +32,8 @@ $ make test
 
 Request tests must call `close_app_pools` before returning. See `tests/requests/mod.rs` for the pattern.
 
+Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
+
 ## Before you push
 
 ```console
