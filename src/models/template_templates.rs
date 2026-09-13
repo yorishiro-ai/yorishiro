@@ -5,7 +5,7 @@
 
 pub use super::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, Condition, QueryOrder, QuerySelect};
+use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
 use serde::Serialize;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -205,11 +205,15 @@ pub async fn create_template(
 /// Updates a template's editable fields.
 /// Only the owning tenant may update its own template (community-visible templates from other tenants are read-only to everyone but their owner).
 pub async fn update_template(
-    conn: &impl ConnectionTrait,
+    conn: &DatabaseTransaction,
     tenant_id: uuid::Uuid,
     template_id: uuid::Uuid,
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
+    // Publication and merge acknowledgement share this transaction-scoped lock.
+    crate::db::lock_for_update(conn, &format!("template-origin:{template_id}"))
+        .await
+        .internal()?;
     if let Some(definition) = &input.definition {
         crate::metaschema::validate_definition(definition)?;
     }

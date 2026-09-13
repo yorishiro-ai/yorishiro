@@ -34,3 +34,28 @@ Job records are retained until a future retention policy is introduced.
 | Field | Description |
 |---|---|
 | `worker_class` | `tenant_private`, `official`, or `shared` |
+
+## Compute policy foundations
+
+This release defines and tests plan-derived policy primitives, but does not activate them in production queue execution.
+Loco Queue does not expose provider-neutral demand observation, and the current compute path has no actual-cost source.
+Therefore this release does not enforce queue priority or SLA objectives, route automatic Official bursts, or charge compute automatically.
+
+| Plan | Priority | Queue-start objective | Official base | Burst ceiling |
+|---|---|---:|---:|---:|
+| Free | low | best effort | 1 | 2 |
+| Pro | normal | 60 seconds | 4 | 6 |
+| Team | high | 15 seconds | 8 | 12 |
+
+The pure burst predicate requires observed official demand above the base limit, within the ceiling, and positive credits.
+The routing hook seam preserves explicit assignments and never implicitly selects TenantPrivate.
+`debit_actual` provides an append-only, no-overdraft debit primitive for a future caller that can provide an actual cost.
+Provider-neutral demand observation, an explicit actual-cost callback, production routing, and post-success charging remain follow-up work.
+
+## Schema origin notifications
+
+Each linked workspace schema is its own subscriber to template updates.
+Updating a template definition sets the linked schema's `origin_updated_at` to `NULL`, and repeating the update is idempotent.
+The MCP upstream-change pull is the discovery surface and includes a computed merge summary with total fields, automatic additions and updates, local fields, conflicts, and a conflict flag.
+Applying a conflict-free merge creates the new schema version and clears the pending flag in the same transaction.
+Conflicted or failed merges leave the notification pending.

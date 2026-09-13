@@ -16,6 +16,19 @@ use uuid::Uuid;
 
 use crate::ee::services::merge::{self, MergePlan};
 
+/// A narrow seam used to coordinate the merge read/acknowledgement race test.
+#[async_trait::async_trait]
+pub trait MergeReadHook: Send + Sync {
+    async fn after_revision_read(&self);
+}
+
+struct NoopMergeReadHook;
+
+#[async_trait::async_trait]
+impl MergeReadHook for NoopMergeReadHook {
+    async fn after_revision_read(&self) {}
+}
+
 /// What following the origin template would do to this schema.
 ///
 /// Reads the three definitions (the snapshot taken when the copy was made, the template as it stands now, and this schema) and classifies every field that differs.
@@ -30,7 +43,15 @@ pub async fn merge_preview(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<MergePlan, YorishiroError> {
-    let sides = merge_sides(schema_conn, ctx, tenant_id, workspace_id, schema_id).await?;
+    let sides = merge_sides(
+        schema_conn,
+        ctx,
+        tenant_id,
+        workspace_id,
+        schema_id,
+        &NoopMergeReadHook,
+    )
+    .await?;
     Ok(merge::three_way(
         &sides.base,
         &sides.upstream,
@@ -52,6 +73,7 @@ async fn merge_sides(
     tenant_id: Uuid,
     workspace_id: Uuid,
     schema_id: Uuid,
+    hook: &dyn MergeReadHook,
 ) -> Result<MergeSides, YorishiroError> {
     let schema = schema_schemas::get_by_id(schema_conn, workspace_id, schema_id).await?;
 
@@ -82,6 +104,12 @@ async fn merge_sides(
         });
     };
 
+    // The publisher takes this same transaction-scoped lock before changing the template and marking subscribers pending.
+    // Holding it until the schema transaction commits prevents acknowledgement of a revision newer than the one read here.
+    crate::db::lock_for_update(schema_conn, &format!("template-origin:{template_id}"))
+        .await
+        .internal()?;
+
     let Some(base) = schema.origin_snapshot.clone() else {
         return Err(YorishiroError::ValidationFailed {
             message: format!("schema '{schema_id}' was copied before its merge base was recorded"),
@@ -93,6 +121,7 @@ async fn merge_sides(
     };
 
     let template = template_templates::get_template(&ctx.db, tenant_id, template_id).await?;
+    hook.after_revision_read().await;
 
     Ok(MergeSides {
         base,
@@ -117,8 +146,43 @@ pub async fn merge_apply(
     tenant_id: Uuid,
     workspace_id: Uuid,
     schema_id: Uuid,
-) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
-    let sides = merge_sides(schema_conn, ctx, tenant_id, workspace_id, schema_id).await?;
+) -> Result<
+    (
+        SchemaRecord,
+        VersioningDiff,
+        crate::models::schema_schemas::MergeDiffSummary,
+    ),
+    YorishiroError,
+> {
+    merge_apply_with_read_hook(
+        schema_conn,
+        ctx,
+        tenant_id,
+        workspace_id,
+        schema_id,
+        &NoopMergeReadHook,
+    )
+    .await
+}
+
+/// Applies a merge with a read barrier for the race regression test.
+/// Production callers use [`merge_apply`], which supplies the no-op hook.
+pub async fn merge_apply_with_read_hook(
+    schema_conn: &impl ConnectionTrait,
+    ctx: &AppContext,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+    hook: &dyn MergeReadHook,
+) -> Result<
+    (
+        SchemaRecord,
+        VersioningDiff,
+        crate::models::schema_schemas::MergeDiffSummary,
+    ),
+    YorishiroError,
+> {
+    let sides = merge_sides(schema_conn, ctx, tenant_id, workspace_id, schema_id, hook).await?;
 
     let plan = merge::three_way(&sides.base, &sides.upstream, &sides.local.definition);
     let merged = merge::apply_plan(&plan, &sides.upstream, &sides.local.definition)?;
@@ -144,5 +208,5 @@ pub async fn merge_apply(
         .await
         .internal()?;
 
-    Ok((schema, diff))
+    Ok((schema, diff, plan.summary))
 }

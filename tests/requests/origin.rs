@@ -1,4 +1,5 @@
 use super::boot_request;
+use sea_orm::TransactionTrait;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
@@ -12,6 +13,7 @@ use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: Uuid,
+    workspace_id: Uuid,
     key: String,
 }
 
@@ -50,6 +52,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     .plaintext;
     Setup {
         tenant_id: tenant.id,
+        workspace_id: workspace.id,
         key,
     }
 }
@@ -170,15 +173,9 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "response: {:?}",
             edit_local.text()
         );
-        let schema_id: Uuid = edit_local.json::<serde_json::Value>()["schema"]["id"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .unwrap();
-
         // Edit the template upstream: add a field the workspace does not have.
-        let mut active: template_templates::ActiveModel = template.clone().into();
-        active.definition = sea_orm::ActiveValue::Set(json!({
+        let updated_definition: yorishiro::metaschema::MetaSchemaDefinition =
+            serde_json::from_value(serde_json::json!({
             "name": "library-note",
             "entity_types": {
                 "note": {
@@ -188,11 +185,68 @@ async fn upstream_changes_preview_and_merge_round_trip() {
                     }
                 }
             }
-        }));
-        active.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-        sea_orm::ActiveModelTrait::update(active, &ctx.db)
-            .await
-            .expect("update template");
+            }))
+            .expect("parse updated definition");
+        let template_txn = ctx.db.begin().await.expect("begin template update");
+        yorishiro::models::template_templates::update_template(
+            &template_txn,
+            setup.tenant_id,
+            template.id,
+            yorishiro::models::template_templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(updated_definition.clone()),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("mark linked schema pending");
+        template_txn.commit().await.expect("commit template update");
+        let repeat_txn = ctx.db.begin().await.expect("begin repeated update");
+        yorishiro::models::template_templates::update_template(
+            &repeat_txn,
+            setup.tenant_id,
+            template.id,
+            yorishiro::models::template_templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(updated_definition),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("repeat pending mark");
+        repeat_txn.commit().await.expect("commit repeated update");
+
+        // A local version created after publication inherits the pending state instead of acknowledging it.
+        let local_after_publication = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&json!({
+                "name": "library-note",
+                "entity_types": {
+                    "note": {
+                        "fields": {
+                            "title": { "type": "string", "required": true },
+                            "internal_ref": { "type": "string" }
+                        }
+                    }
+                }
+            }))
+            .await;
+        assert_eq!(
+            local_after_publication.status_code(),
+            201,
+            "response: {:?}",
+            local_after_publication.text()
+        );
+        let schema_id: Uuid = local_after_publication.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         let after = request
             .get("/api/schemas/upstream-changes")
@@ -205,6 +259,10 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "the edited template must now be reported: {after_body:?}"
         );
         assert_eq!(after_body[0]["schema_id"], schema_id.to_string());
+        assert_eq!(after_body[0]["pending_notification"], true);
+        assert_eq!(after_body[0]["summary"]["total_fields"], 2);
+        assert_eq!(after_body[0]["summary"]["auto_add"], 1);
+        assert_eq!(after_body[0]["summary"]["keep_local"], 1);
 
         let preview = request
             .get(&format!("/api/schemas/{schema_id}/merge-preview"))
@@ -219,6 +277,9 @@ async fn upstream_changes_preview_and_merge_round_trip() {
                 .any(|f| f["field"] == "category" && f["verdict"] == "auto_add"),
             "upstream's addition must be in the plan: {fields:?}"
         );
+        assert_eq!(plan["summary"]["total_fields"], 2);
+        assert_eq!(plan["summary"]["auto_add"], 1);
+        assert_eq!(plan["summary"]["keep_local"], 1);
         assert!(
             fields
                 .iter()
@@ -241,7 +302,168 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             merged_fields.get("internal_ref").is_some(),
             "the workspace's own field must survive: {merged_fields:?}"
         );
-        assert_eq!(merge_body["schema"]["version"], 3);
+        assert_eq!(merge_body["schema"]["version"], 4);
+        assert_eq!(merge_body["summary"]["total_fields"], 2);
+        assert_eq!(merge_body["summary"]["has_conflicts"], false);
+
+        let acknowledged = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert!(acknowledged.json::<Vec<serde_json::Value>>().is_empty());
+    })
+    .await;
+}
+
+/// A publication racing with merge cannot be acknowledged by the merge that read the older revision.
+#[tokio::test]
+#[serial]
+async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        struct ReadBarrier {
+            ready: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+
+        #[async_trait::async_trait]
+        impl yorishiro::ee::services::origin::MergeReadHook for ReadBarrier {
+            async fn after_revision_read(&self) {
+                self.ready.notify_one();
+                self.release.notified().await;
+            }
+        }
+
+        let setup = setup(&ctx).await;
+        let template = insert_template(&ctx, setup.tenant_id, note_definition()).await;
+        let create = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&json!({ "template_id": template.id.to_string() }))
+            .await;
+        assert_eq!(create.status_code(), 201);
+        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        let first_update = ctx.db.begin().await.expect("begin first publication");
+        yorishiro::models::template_templates::update_template(
+            &first_update,
+            setup.tenant_id,
+            template.id,
+            yorishiro::models::template_templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(
+                    serde_json::from_value(json!({
+                        "name": "library-note",
+                        "entity_types": { "note": { "fields": {
+                            "title": { "type": "string", "required": true },
+                            "category": { "type": "string" }
+                        } } }
+                    }))
+                    .unwrap(),
+                ),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("publish first revision");
+        first_update
+            .commit()
+            .await
+            .expect("commit first publication");
+
+        let barrier = std::sync::Arc::new(ReadBarrier {
+            ready: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let merge_db = ctx.db.clone();
+        let merge_ctx = ctx.clone();
+        let tenant_id = setup.tenant_id;
+        let workspace_id = setup.workspace_id;
+        let merge_barrier = barrier.clone();
+        let merge = tokio::spawn(async move {
+            let txn = merge_db.begin().await.expect("begin merge transaction");
+            let result = yorishiro::ee::services::origin::merge_apply_with_read_hook(
+                &txn,
+                &merge_ctx,
+                tenant_id,
+                workspace_id,
+                schema_id,
+                merge_barrier.as_ref(),
+            )
+            .await;
+            if result.is_ok() {
+                txn.commit().await.expect("commit merge acknowledgement");
+            } else {
+                txn.rollback().await.expect("rollback failed merge");
+            }
+            result
+        });
+        barrier.ready.notified().await;
+
+        let update_db = ctx.db.clone();
+        let mut update = tokio::spawn(async move {
+            let txn = update_db
+                .begin()
+                .await
+                .expect("begin concurrent publication");
+            let result = yorishiro::models::template_templates::update_template(
+                &txn,
+                setup.tenant_id,
+                template.id,
+                yorishiro::models::template_templates::UpdateTemplateInput {
+                    name: None,
+                    description: None,
+                    definition: Some(
+                        serde_json::from_value(json!({
+                            "name": "library-note",
+                            "entity_types": { "note": { "fields": {
+                                "title": { "type": "string", "required": true },
+                                "category": { "type": "string" },
+                                "status": { "type": "string" }
+                            } } }
+                        }))
+                        .unwrap(),
+                    ),
+                    tags: None,
+                    locale: None,
+                },
+            )
+            .await;
+            if result.is_ok() {
+                txn.commit().await.expect("commit concurrent publication");
+            }
+            result
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut update)
+                .await
+                .is_err(),
+            "publication must wait while merge owns the revision lock"
+        );
+        barrier.release.notify_one();
+        let merge_result = merge.await.expect("merge task").expect("merge application");
+        assert_eq!(merge_result.0.version, 2);
+        update
+            .await
+            .expect("concurrent publication task")
+            .expect("concurrent publication");
+
+        let changes = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        let body: Vec<serde_json::Value> = changes.json();
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0]["pending_notification"], true);
+        assert_eq!(body[0]["summary"]["auto_add"], 1);
     })
     .await;
 }
@@ -285,23 +507,44 @@ async fn merging_a_conflicting_field_is_refused() {
             }))
             .await;
 
-        let mut active: template_templates::ActiveModel = template.clone().into();
-        active.definition = sea_orm::ActiveValue::Set(json!({
-            "name": "library-note",
-            "entity_types": {
-                "note": { "fields": { "priority": { "type": "integer" } } }
-            }
-        }));
-        active.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-        sea_orm::ActiveModelTrait::update(active, &ctx.db)
-            .await
-            .expect("update template");
+        let template_txn = ctx.db.begin().await.expect("begin template update");
+        yorishiro::models::template_templates::update_template(
+            &template_txn,
+            setup.tenant_id,
+            template.id,
+            yorishiro::models::template_templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(
+                    serde_json::from_value(json!({
+                        "name": "library-note",
+                        "entity_types": {
+                            "note": { "fields": { "priority": { "type": "integer" } } }
+                        }
+                    }))
+                    .unwrap(),
+                ),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("update template");
+        template_txn.commit().await.expect("commit template update");
 
         let merge = request
             .post(&format!("/api/schemas/{schema_id}/merge"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(merge.status_code(), 422, "response: {:?}", merge.text());
+        let pending = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        let pending_body: Vec<serde_json::Value> = pending.json();
+        assert_eq!(pending_body.len(), 1);
+        assert_eq!(pending_body[0]["pending_notification"], true);
+        assert_eq!(pending_body[0]["summary"]["conflict"], 1);
     })
     .await;
 }

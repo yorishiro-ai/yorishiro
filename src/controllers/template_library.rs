@@ -5,12 +5,14 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
+use sea_orm::TransactionTrait;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::members::require_tenant_admin;
+use crate::error::YorishiroError;
 use crate::metaschema::MetaSchemaDefinition;
 use crate::models::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
@@ -87,8 +89,13 @@ pub async fn update_template(
 ) -> Result<Json<TemplateRecord>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
 
+    let txn = ctx
+        .db
+        .begin()
+        .await
+        .map_err(|err| ApiError(YorishiroError::Internal(anyhow::anyhow!(err))))?;
     let template = template_templates::update_template(
-        &ctx.db,
+        &txn,
         auth.tenant_id,
         id,
         UpdateTemplateInput {
@@ -100,6 +107,9 @@ pub async fn update_template(
         },
     )
     .await?;
+    txn.commit()
+        .await
+        .map_err(|err| ApiError(YorishiroError::Internal(anyhow::anyhow!(err))))?;
     Ok(Json(template))
 }
 
