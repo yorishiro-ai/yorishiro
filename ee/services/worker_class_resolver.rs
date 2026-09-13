@@ -1,12 +1,9 @@
 //! This crate's `WorkerClassResolver`: a workspace with its own row in `workspace_worker_classes` pins its embedding-sync jobs to that class instead of `WorkerClass::Shared`.
 
-use crate::ee::models::billing;
-use crate::ee::services::plan::{ComputePolicy, Plan};
-use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::workspace_workspaces;
+use crate::ee::services::plan::ComputePolicy;
+use crate::error::YorishiroError;
 use crate::workers::embedding_sync::{WorkerClass, WorkerClassResolver};
 use async_trait::async_trait;
-use sea_orm::EntityTrait;
 use uuid::Uuid;
 
 use crate::ee::models::worker_classes;
@@ -76,28 +73,12 @@ impl WorkerClassResolver for WorkerClassAssignmentResolver {
         if explicit.is_some() {
             return Ok(explicit);
         }
-        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
-            .one(conn)
-            .await
-            .internal()?
-            .ok_or_else(|| YorishiroError::not_found("workspace was not found"))?;
-        let plan = billing::get_billing(conn, workspace.tenant_id)
-            .await?
-            .and_then(|record| record.plan)
-            .map(|value| Plan::from_db_str(&value))
-            .transpose()?
-            .unwrap_or(Plan::Free);
-        let policy = plan.compute_policy();
-        let recommendation = NoopWasmOffloadHook
-            .recommend(workspace_id, policy, 0, 0)
-            .await?;
-        match route_for(None, policy, recommendation, 0, 0) {
-            WorkerClass::Official => Ok(Some(WorkerClass::Official)),
-            WorkerClass::Shared => Ok(None),
-            WorkerClass::TenantPrivate => {
-                unreachable!("implicit routing never selects tenant private")
-            }
-        }
+        // Provider-neutral demand observation and actual-cost charging are not available through
+        // Loco's queue abstraction yet, so policy-derived routing remains an explicit foundation.
+        // Returning None makes the caller's Shared fallback honest instead of presenting zeros as observations.
+        let _ = conn;
+        let _ = workspace_id;
+        Ok(None)
     }
 }
 

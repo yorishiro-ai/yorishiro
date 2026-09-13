@@ -35,9 +35,11 @@ Job records are retained until a future retention policy is introduced.
 |---|---|
 | `worker_class` | `tenant_private`, `official`, or `shared` |
 
-## Compute policy
+## Compute policy foundations
 
-Priority and queue-start objectives are derived from the tenant plan and cannot be set per job.
+This release defines and tests plan-derived policy primitives, but does not activate them in production queue execution.
+Loco Queue does not expose provider-neutral demand observation, and the current compute path has no actual-cost source.
+Therefore this release does not enforce queue priority or SLA objectives, route automatic Official bursts, or charge compute automatically.
 
 | Plan | Priority | Queue-start objective | Official base | Burst ceiling |
 |---|---|---:|---:|---:|
@@ -45,12 +47,10 @@ Priority and queue-start objectives are derived from the tenant plan and cannot 
 | Pro | normal | 60 seconds | 4 | 6 |
 | Team | high | 15 seconds | 8 | 12 |
 
-Official burst is eligible only when observed official demand exceeds the base limit, stays within the ceiling, and the workspace has positive compute credits.
-An explicit workspace worker-class assignment always wins.
-Without an assignment, the WASM offload hook may recommend official compute within these bounds, and all other cases fall back to shared compute.
-Tenant-private compute is never selected implicitly.
-Actual compute usage is debited from the append-only ledger only after successful work.
-Failed or cancelled work is not charged, and insufficient credits never produce an overdraft.
+The pure burst predicate requires observed official demand above the base limit, within the ceiling, and positive credits.
+The routing hook seam preserves explicit assignments and never implicitly selects TenantPrivate.
+`debit_actual` provides an append-only, no-overdraft debit primitive for a future caller that can provide an actual cost.
+Provider-neutral demand observation, an explicit actual-cost callback, production routing, and post-success charging remain follow-up work.
 
 ## Schema origin notifications
 

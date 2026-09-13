@@ -82,6 +82,12 @@ async fn merge_sides(
         });
     };
 
+    // The publisher takes this same transaction-scoped lock before changing the template and marking subscribers pending.
+    // Holding it until the schema transaction commits prevents acknowledgement of a revision newer than the one read here.
+    crate::db::lock_for_update(schema_conn, &format!("template-origin:{template_id}"))
+        .await
+        .internal()?;
+
     let Some(base) = schema.origin_snapshot.clone() else {
         return Err(YorishiroError::ValidationFailed {
             message: format!("schema '{schema_id}' was copied before its merge base was recorded"),

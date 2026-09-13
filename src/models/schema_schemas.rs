@@ -314,13 +314,23 @@ pub async fn create_schema(
         .transpose()?;
 
     // Only the first version of a name mints an origin from what the caller passed.
-    // Every later one inherits the origin its predecessor already had, unless the caller states a new one: editing a schema does not un-link it from the template it was copied from, and treating an omitted origin as "detach" would silently break that link on every version after the first.
-    let (origin_template_id, origin_snapshot) = match &previous {
+    // Every later one inherits the complete origin state from its predecessor, including a pending notification.
+    // Replacing a pending active version must not acknowledge the update merely because a local version was created.
+    let (origin_template_id, origin_snapshot, origin_updated_at) = match &previous {
         Some(previous) if origin_template_id.is_none() => (
             previous.origin_template_id,
             previous.origin_snapshot.clone(),
+            previous.origin_updated_at,
         ),
-        _ => (origin_template_id, origin_snapshot),
+        _ => (
+            origin_template_id,
+            origin_snapshot,
+            if origin_template_id.is_some() {
+                Some(chrono::Utc::now())
+            } else {
+                None
+            },
+        ),
     };
 
     let (next_version, diff) = match &previous {
@@ -374,6 +384,7 @@ pub async fn create_schema(
         origin_template_id: ActiveValue::Set(origin_template_id),
         origin_status: ActiveValue::Set(origin_status.to_string()),
         origin_snapshot: ActiveValue::Set(origin_snapshot_json),
+        origin_updated_at: ActiveValue::Set(origin_updated_at.map(Into::into)),
         ..Default::default()
     };
     let row = active.insert(conn).await.map_err(|err| {

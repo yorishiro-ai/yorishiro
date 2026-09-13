@@ -37,7 +37,9 @@ struct Row {
 /// A schema whose template was deleted is not reported: the trigger has already detached it, and there is no longer an update to take.
 /// `linked` is the whole population here.
 ///
-/// Stays raw SQL: the filter compares `t.updated_at > s.created_at`, one table's column against the other's, which `ColumnTrait`'s filter methods can't express directly (they compare a column to a value, not to another column) and would need a hand-built `sea_query::Expr` to reach through the entity API for no real gain in drift-safety, since every other column here is already a plain 1:1 projection.
+/// The explicit `origin_updated_at IS NULL` state is the source of truth.
+/// It survives local schema versioning and is cleared only by a successful merge acknowledgement.
+/// Stays raw SQL because this projection joins control-plane and workspace tables and computes its merge summary from both definitions.
 pub async fn list_with_upstream_changes(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -53,7 +55,7 @@ pub async fn list_with_upstream_changes(
           WHERE s.workspace_id = $1 \
             AND s.status = 'active' \
             AND s.origin_status = 'linked' \
-            AND t.updated_at > s.created_at \
+            AND s.origin_updated_at IS NULL \
           ORDER BY t.updated_at DESC \
           LIMIT $2 OFFSET $3",
         [
