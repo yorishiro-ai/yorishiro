@@ -13,6 +13,7 @@ use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: Uuid,
+    workspace_id: Uuid,
     key: String,
 }
 
@@ -51,6 +52,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
     .plaintext;
     Setup {
         tenant_id: tenant.id,
+        workspace_id: workspace.id,
         key,
     }
 }
@@ -321,6 +323,19 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        struct ReadBarrier {
+            ready: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+
+        #[async_trait::async_trait]
+        impl yorishiro::ee::services::origin::MergeReadHook for ReadBarrier {
+            async fn after_revision_read(&self) {
+                self.ready.notify_one();
+                self.release.notified().await;
+            }
+        }
+
         let setup = setup(&ctx).await;
         let template = insert_template(&ctx, setup.tenant_id, note_definition()).await;
         let create = request
@@ -329,6 +344,11 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             .json(&json!({ "template_id": template.id.to_string() }))
             .await;
         assert_eq!(create.status_code(), 201);
+        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         let first_update = ctx.db.begin().await.expect("begin first publication");
         yorishiro::models::template_templates::update_template(
@@ -359,10 +379,34 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             .await
             .expect("commit first publication");
 
-        let merge_txn = ctx.db.begin().await.expect("begin merge transaction");
-        yorishiro::db::lock_for_update(&merge_txn, &format!("template-origin:{}", template.id))
-            .await
-            .expect("lock merge revision");
+        let barrier = std::sync::Arc::new(ReadBarrier {
+            ready: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let merge_db = ctx.db.clone();
+        let merge_ctx = ctx.clone();
+        let tenant_id = setup.tenant_id;
+        let workspace_id = setup.workspace_id;
+        let merge_barrier = barrier.clone();
+        let merge = tokio::spawn(async move {
+            let txn = merge_db.begin().await.expect("begin merge transaction");
+            let result = yorishiro::ee::services::origin::merge_apply_with_read_hook(
+                &txn,
+                &merge_ctx,
+                tenant_id,
+                workspace_id,
+                schema_id,
+                merge_barrier.as_ref(),
+            )
+            .await;
+            if result.is_ok() {
+                txn.commit().await.expect("commit merge acknowledgement");
+            } else {
+                txn.rollback().await.expect("rollback failed merge");
+            }
+            result
+        });
+        barrier.ready.notified().await;
 
         let update_db = ctx.db.clone();
         let mut update = tokio::spawn(async move {
@@ -404,7 +448,9 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
                 .is_err(),
             "publication must wait while merge owns the revision lock"
         );
-        merge_txn.rollback().await.expect("rollback merge barrier");
+        barrier.release.notify_one();
+        let merge_result = merge.await.expect("merge task").expect("merge application");
+        assert_eq!(merge_result.0.version, 2);
         update
             .await
             .expect("concurrent publication task")
@@ -417,7 +463,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         let body: Vec<serde_json::Value> = changes.json();
         assert_eq!(body.len(), 1);
         assert_eq!(body[0]["pending_notification"], true);
-        assert_eq!(body[0]["summary"]["auto_add"], 2);
+        assert_eq!(body[0]["summary"]["auto_add"], 1);
     })
     .await;
 }
