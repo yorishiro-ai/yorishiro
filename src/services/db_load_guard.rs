@@ -1,69 +1,160 @@
-//! Automatic read-only under database load.
+//! Automatic read-only mode under sustained PostgreSQL connection load.
 //!
-//! When the database stays busy past a threshold, the deployment drops to read-only rather than
-//! waiting to become unresponsive: reads keep working, and writes get a 423 with a Retry-After
-//! instead of a timeout. It goes back on its own once the load subsides.
-//!
-//! This was never ported across the Loco rebuild — `src/services/maintenance.rs` only implements
-//! the manual toggle's read/restore. The old `sqlx`-based `db_load_guard` lived in
-//! `crates/yorishiro-core/src/services/db_load_guard.rs` and was dropped in the rebuild commit.
-//!
-//! The implementation is based on the old design: poll `pg_stat_activity` for active connections,
-//! trip when sustained past a threshold, and revert when quiet.
+//! This is an opt-in safeguard because changing a deployment-wide maintenance state without an operator request is a significant operational action.
+//! It ports the pre-Loco guard's threshold, sustain window, ownership marker, and safe polling fallback onto the Loco two-pool architecture.
+
+use std::time::{Duration, Instant};
 
 use loco_rs::app::AppContext;
+use sqlx::PgPool;
+use tokio::time::interval;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
 use crate::models::system_maintenance::{self, MaintenanceMode, MaintenanceState};
 
-/// The threshold at which the guard considers the database busy.
-///
-/// 80% of `max_connections` from the config, so the pool still has headroom for health checks
-/// and the guard's own queries before true saturation.
-const DEFAULT_THRESHOLD_PERCENT: f64 = 0.8;
-
 /// Reason string written when this guard enables maintenance mode.
-///
-/// Used to distinguish guard-driven mode from operator-driven mode: the guard only disables
-/// a mode it itself enabled.
 pub const AUTO_REASON: &str = "database load (automatic)";
 
-/// Reads the current number of active connections from the identity pool.
-///
-/// `state = 'active'` rather than every row: an idle connection holds a slot but is not load.
-/// Runs against the identity pool (`DbHandle::identity`), which the migration role connects with
-/// and which always has access to `pg_stat_activity`.
-async fn active_connections(handle: &DbHandle) -> Result<i64, YorishiroError> {
+/// Runtime settings for the load guard.
+pub struct LoadGuardConfig {
+    /// Active connections at or above which the database counts as busy.
+    pub threshold: i64,
+    /// How long the database must remain busy or quiet before changing mode.
+    pub sustain: Duration,
+    /// Time between activity samples.
+    pub poll: Duration,
+}
+
+impl LoadGuardConfig {
+    /// Reads the opt-in guard settings.
+    ///
+    /// `YORISHIRO_DB_LOAD_THRESHOLD` defaults to zero, which disables the guard.
+    /// `YORISHIRO_DB_LOAD_SUSTAIN_SECS` defaults to 30 and `YORISHIRO_DB_LOAD_POLL_SECS` defaults to 5.
+    pub fn from_env() -> Option<Self> {
+        let threshold = std::env::var("YORISHIRO_DB_LOAD_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        if threshold <= 0 {
+            return None;
+        }
+
+        Some(Self {
+            threshold,
+            sustain: Duration::from_secs(
+                std::env::var("YORISHIRO_DB_LOAD_SUSTAIN_SECS")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(30),
+            ),
+            poll: Duration::from_secs(
+                std::env::var("YORISHIRO_DB_LOAD_POLL_SECS")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .filter(|value| *value > 0)
+                    .unwrap_or(5),
+            ),
+        })
+    }
+}
+
+/// Returns the maintenance transition allowed by the current load history.
+pub fn decide(
+    current: &MaintenanceState,
+    busy_for: Duration,
+    quiet_for: Duration,
+    sustain: Duration,
+) -> Option<MaintenanceMode> {
+    match current.mode {
+        MaintenanceMode::Off if busy_for >= sustain => Some(MaintenanceMode::ReadOnly),
+        MaintenanceMode::ReadOnly
+            if current.reason.as_deref() == Some(AUTO_REASON) && quiet_for >= sustain =>
+        {
+            Some(MaintenanceMode::Off)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct LoadHistory {
+    busy_since: Option<Instant>,
+    quiet_since: Option<Instant>,
+}
+
+impl LoadHistory {
+    fn reset(&mut self) {
+        self.busy_since = None;
+        self.quiet_since = None;
+    }
+
+    fn observe(&mut self, busy: bool, now: Instant) -> (Duration, Duration) {
+        if busy {
+            if self.busy_since.is_none() {
+                self.busy_since = Some(now);
+            }
+            self.quiet_since = None;
+        } else {
+            if self.quiet_since.is_none() {
+                self.quiet_since = Some(now);
+            }
+            self.busy_since = None;
+        }
+
+        (
+            self.busy_since.map_or(Duration::ZERO, |since| now - since),
+            self.quiet_since.map_or(Duration::ZERO, |since| now - since),
+        )
+    }
+}
+
+enum StepOutcome {
+    Continue,
+    Transition {
+        current: MaintenanceState,
+        mode: MaintenanceMode,
+    },
+}
+
+fn run_step(
+    history: &mut LoadHistory,
+    active: Result<i64, ()>,
+    current: Result<MaintenanceState, ()>,
+    threshold: i64,
+    sustain: Duration,
+    now: Instant,
+) -> StepOutcome {
+    let Ok(active) = active else {
+        history.reset();
+        return StepOutcome::Continue;
+    };
+
+    let (busy_for, quiet_for) = history.observe(active >= threshold, now);
+    let Ok(current) = current else {
+        history.reset();
+        return StepOutcome::Continue;
+    };
+
+    let Some(mode) = decide(&current, busy_for, quiet_for, sustain) else {
+        return StepOutcome::Continue;
+    };
+    StepOutcome::Transition { current, mode }
+}
+
+async fn active_connections(pool: &PgPool) -> Result<i64, YorishiroError> {
     sqlx::query_scalar(
         "SELECT count(*) FROM pg_stat_activity \
          WHERE datname = current_database() AND state = 'active'",
     )
-    .fetch_one(&handle.identity)
+    .fetch_one(pool)
     .await
-    .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))
+    .map_err(|error| YorishiroError::Internal(anyhow::anyhow!(error)))
 }
 
-/// Whether the load has subsided enough to lift read-only (if we set it).
-fn should_lift(current: &MaintenanceState) -> bool {
-    current.mode == MaintenanceMode::ReadOnly && current.reason.as_deref() == Some(AUTO_REASON)
-}
-
-/// Reads pool saturation and, if it crosses the threshold, enables read-only maintenance mode.
-///
-/// This is the periodic check that a worker/task calls. It reads the current maintenance state,
-/// measures active connections against the pool's configured max, and calls
-/// `system_maintenance::set` when the threshold is crossed.
-///
-/// Runs on the identity pool (the migration role), never the RLS-scoped tenant pool.
-///
-/// # Errors
-/// Returns an error if it cannot read the maintenance state or connection counts.
-/// These are logged and suppressed in the worker loop, not propagated.
-pub async fn check_and_maybe_enable_readonly(ctx: &AppContext) -> loco_rs::Result<()> {
-    // On SQLite there is no second pool and no RLS — nothing to protect.
+async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
     if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return Ok(());
+        return Ok(0);
     }
 
     let handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
@@ -71,58 +162,308 @@ pub async fn check_and_maybe_enable_readonly(ctx: &AppContext) -> loco_rs::Resul
             "db_load_guard: DbHandle not found in shared_store"
         ))
     })?;
+    let active = active_connections(&handle.identity).await?;
+    Ok(active)
+}
 
-    // Read max_connections from config.
-    let max_conns = ctx.config.database.max_connections as f64;
-    if max_conns <= 0.0 {
-        return Ok(());
-    }
+/// Runs the opt-in guard until the process exits.
+pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
+    let mut ticker = interval(config.poll);
+    let mut history = LoadHistory::default();
 
-    let threshold = (max_conns * DEFAULT_THRESHOLD_PERCENT).ceil() as i64;
-
-    let active = active_connections(&handle).await?;
-
-    if active < threshold {
-        // Load is under threshold. Check if we should lift read-only that we set ourselves.
-        let current = system_maintenance::get(&ctx.db)
-            .await
-            .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))?;
-        if should_lift(&current) {
-            system_maintenance::set(&ctx.db, MaintenanceMode::Off, 300, None)
-                .await
-                .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))?;
-            tracing::info!(
-                active_connections = active,
-                threshold = threshold,
-                "db_load_guard: lifted read-only (load subsided)"
-            );
+    loop {
+        ticker.tick().await;
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            return;
         }
-        return Ok(());
+
+        let Some(handle) = ctx.shared_store.get::<DbHandle>() else {
+            tracing::warn!("db_load_guard: DbHandle not found in shared_store");
+            return;
+        };
+        let active = match active_connections(&handle.identity).await {
+            Ok(active) => Ok(active),
+            Err(error) => {
+                tracing::warn!(error = %error, "db_load_guard: could not read pg_stat_activity");
+                Err(())
+            }
+        };
+        let current = match active {
+            Ok(_) => match system_maintenance::get(&ctx.db).await {
+                Ok(current) => Ok(current),
+                Err(error) => {
+                    tracing::warn!(error = %error, "db_load_guard: could not read maintenance state");
+                    Err(())
+                }
+            },
+            Err(()) => Err(()),
+        };
+        match run_step(
+            &mut history,
+            active,
+            current,
+            config.threshold,
+            config.sustain,
+            Instant::now(),
+        ) {
+            StepOutcome::Continue => {}
+            StepOutcome::Transition { current, mode } => {
+                let reason = (mode == MaintenanceMode::ReadOnly).then(|| AUTO_REASON.to_string());
+                match system_maintenance::set_if_current(
+                    &ctx.db,
+                    &current,
+                    mode,
+                    current.retry_after,
+                    reason,
+                )
+                .await
+                {
+                    Ok(true) => {
+                        tracing::warn!(active_connections = active.unwrap_or_default(), threshold = config.threshold, mode = ?mode, "db_load_guard: switched maintenance mode");
+                        history.reset();
+                    }
+                    Ok(false) => tracing::info!(
+                        "db_load_guard: maintenance state changed concurrently; transition skipped"
+                    ),
+                    Err(error) => {
+                        tracing::error!(error = %error, "db_load_guard: could not switch maintenance mode")
+                    }
+                }
+            }
+        }
     }
+}
 
-    // Load is at or above threshold. Enable read-only if we are not already.
-    let current = system_maintenance::get(&ctx.db)
-        .await
-        .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))?;
-
-    if current.mode != MaintenanceMode::Off {
+/// Performs one diagnostic task invocation without changing maintenance mode.
+pub async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
+    let Some(config) = LoadGuardConfig::from_env() else {
         return Ok(());
-    }
-
-    system_maintenance::set(
-        &ctx.db,
-        MaintenanceMode::ReadOnly,
-        300,
-        Some(AUTO_REASON.to_string()),
-    )
-    .await
-    .map_err(|e| YorishiroError::Internal(anyhow::anyhow!(e.to_string())))?;
-
-    tracing::warn!(
+    };
+    let active = poll(ctx).await?;
+    tracing::info!(
         active_connections = active,
-        threshold = threshold,
-        "db_load_guard: enabled read-only (load sustained)"
+        threshold = config.threshold,
+        "db_load_guard: check completed"
     );
-
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(mode: MaintenanceMode, reason: Option<&str>) -> MaintenanceState {
+        MaintenanceState {
+            mode,
+            retry_after: 300,
+            reason: reason.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn drops_to_read_only_only_after_sustained_load() {
+        let sustain = Duration::from_secs(30);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                Duration::from_secs(5),
+                Duration::ZERO,
+                sustain
+            ),
+            None
+        );
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                sustain,
+                Duration::ZERO,
+                sustain
+            ),
+            Some(MaintenanceMode::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn lifts_only_guard_owned_read_only() {
+        let sustain = Duration::from_secs(30);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::ReadOnly, Some(AUTO_REASON)),
+                Duration::ZERO,
+                sustain,
+                sustain
+            ),
+            Some(MaintenanceMode::Off)
+        );
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::ReadOnly, Some("restore")),
+                Duration::ZERO,
+                sustain,
+                sustain
+            ),
+            None
+        );
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::FullLock, Some(AUTO_REASON)),
+                sustain,
+                sustain,
+                sustain
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn first_sample_does_not_count_as_poll_time() {
+        let sustain = Duration::from_secs(30);
+        let start = Instant::now();
+        let mut history = LoadHistory::default();
+        let (busy_for, quiet_for) = history.observe(true, start);
+        assert_eq!((busy_for, quiet_for), (Duration::ZERO, Duration::ZERO));
+        let (busy_for, quiet_for) = history.observe(true, start + Duration::from_secs(29));
+        assert_eq!(quiet_for, Duration::ZERO);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                busy_for,
+                quiet_for,
+                sustain
+            ),
+            None
+        );
+        let (busy_for, quiet_for) = history.observe(true, start + sustain);
+        assert_eq!(quiet_for, Duration::ZERO);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                busy_for,
+                quiet_for,
+                sustain
+            ),
+            Some(MaintenanceMode::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn measurement_error_resets_the_sustain_window_through_run_step() {
+        let sustain = Duration::from_secs(30);
+        let start = Instant::now();
+        let mut history = LoadHistory::default();
+        let current = state(MaintenanceMode::Off, None);
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start
+            ),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(&mut history, Err(()), Err(()), 10, sustain, start + sustain),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start + sustain + sustain - Duration::from_secs(1)
+            ),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current),
+                10,
+                sustain,
+                start + sustain + sustain + sustain
+            ),
+            StepOutcome::Transition {
+                mode: MaintenanceMode::ReadOnly,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn maintenance_state_error_resets_the_sustain_window_through_run_step() {
+        let sustain = Duration::from_secs(30);
+        let start = Instant::now();
+        let mut history = LoadHistory::default();
+        let current = state(MaintenanceMode::Off, None);
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start
+            ),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(&mut history, Ok(10), Err(()), 10, sustain, start + sustain),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start + sustain + sustain - Duration::from_secs(1)
+            ),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current),
+                10,
+                sustain,
+                start + sustain + sustain + sustain
+            ),
+            StepOutcome::Transition {
+                mode: MaintenanceMode::ReadOnly,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn zero_poll_interval_falls_back_to_safe_default() {
+        let previous_threshold = std::env::var_os("YORISHIRO_DB_LOAD_THRESHOLD");
+        let previous = std::env::var_os("YORISHIRO_DB_LOAD_POLL_SECS");
+        unsafe {
+            std::env::set_var("YORISHIRO_DB_LOAD_THRESHOLD", "10");
+            std::env::set_var("YORISHIRO_DB_LOAD_POLL_SECS", "0");
+        }
+        assert_eq!(
+            LoadGuardConfig::from_env().unwrap().poll,
+            Duration::from_secs(5)
+        );
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("YORISHIRO_DB_LOAD_POLL_SECS", value),
+                None => std::env::remove_var("YORISHIRO_DB_LOAD_POLL_SECS"),
+            }
+            match previous_threshold {
+                Some(value) => std::env::set_var("YORISHIRO_DB_LOAD_THRESHOLD", value),
+                None => std::env::remove_var("YORISHIRO_DB_LOAD_THRESHOLD"),
+            }
+        }
+    }
 }

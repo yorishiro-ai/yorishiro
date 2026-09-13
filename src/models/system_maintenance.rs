@@ -3,7 +3,7 @@
 //! One row, read on every request that could be refused and written only by an operator.
 //! The request role has SELECT only on this table (`migration/src/m20260829_000000_initial_schema.rs`), so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
 
-pub use super::_entities::system_maintenance::{ActiveModel, Entity, Model};
+pub use super::_entities::system_maintenance::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,7 @@ impl ActiveModel {}
 impl Entity {}
 
 /// What the deployment is currently refusing.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MaintenanceMode {
     /// Serving normally.
@@ -152,4 +152,38 @@ pub async fn set(
         retry_after: retry_after.max(1),
         reason,
     })
+}
+
+/// Changes the state only when it still matches the state the caller observed.
+///
+/// This is reserved for automatic transitions, whose read and write are otherwise separate pool operations.
+/// A zero-row update means an operator or another guard changed the state first.
+pub async fn set_if_current(
+    conn: &impl ConnectionTrait,
+    expected: &MaintenanceState,
+    mode: MaintenanceMode,
+    retry_after: u32,
+    reason: Option<String>,
+) -> Result<bool, YorishiroError> {
+    use sea_orm::EntityTrait;
+
+    let mut update = Entity::update_many()
+        .col_expr(Column::Mode, Expr::value(mode.as_db_str().to_string()))
+        .col_expr(
+            Column::RetryAfter,
+            Expr::value(i32::try_from(retry_after.max(1)).unwrap_or(i32::MAX)),
+        )
+        .col_expr(Column::Reason, Expr::value(reason))
+        .col_expr(Column::UpdatedAt, Expr::current_timestamp())
+        .filter(Column::Id.eq(true))
+        .filter(Column::Mode.eq(expected.mode.as_db_str()))
+        .filter(Column::RetryAfter.eq(i32::try_from(expected.retry_after).unwrap_or(i32::MAX)));
+
+    update = match expected.reason.as_deref() {
+        Some(reason) => update.filter(Column::Reason.eq(reason)),
+        None => update.filter(Column::Reason.is_null()),
+    };
+
+    let result = update.exec(conn).await.internal()?;
+    Ok(result.rows_affected == 1)
 }

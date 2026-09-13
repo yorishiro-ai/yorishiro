@@ -1,4 +1,4 @@
-//! Periodic check for database load that triggers automatic read-only mode.
+//! Performs one diagnostic database load check.
 
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
@@ -12,12 +12,12 @@ impl Task for DbLoadGuard {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "db_load_guard".to_string(),
-            detail: "Checks database load and enables automatic read-only when sustained above threshold (80% of max_connections)".to_string(),
+            detail: "Diagnostics only: reports database load for the opt-in automatic read-only guard; does not change maintenance mode".to_string(),
         }
     }
 
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
-        match db_load_guard::check_and_maybe_enable_readonly(app_context).await {
+        match db_load_guard::check_once(app_context).await {
             Ok(()) => {
                 println!("db_load_guard: check completed");
                 Ok(())
