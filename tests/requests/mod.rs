@@ -16,6 +16,7 @@ mod oauth;
 mod official_templates;
 mod origin;
 mod queue;
+mod schema_forks;
 mod schemas;
 mod search;
 mod setup;

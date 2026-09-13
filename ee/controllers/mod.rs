@@ -5,5 +5,6 @@ pub mod inference;
 pub mod marketplace;
 pub mod oauth;
 pub mod origin;
+pub mod schema_forks;
 pub mod stripe;
 pub mod worker_class;

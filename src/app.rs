@@ -328,6 +328,7 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::marketplace::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::oauth::routes().layer(gate.clone()))
             .add_route(crate::ee::controllers::origin::routes())
+            .add_route(crate::ee::controllers::schema_forks::routes())
             .add_route(crate::ee::controllers::stripe::routes().layer(gate))
             .add_route(crate::ee::controllers::worker_class::routes())
     }

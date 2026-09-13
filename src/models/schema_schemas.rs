@@ -333,13 +333,23 @@ pub async fn create_schema(
         ),
     };
 
+    let latest_version = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Name.eq(&name))
+        .order_by_desc(Column::Version)
+        .one(conn)
+        .await
+        .internal()?
+        .map(|row| row.version)
+        .unwrap_or(0);
+
     let (next_version, diff) = match &previous {
         Some(previous) => {
             let diff = metaschema::diff(&previous.definition, &definition);
-            (previous.version + 1, diff)
+            (latest_version + 1, diff)
         }
         None => (
-            1,
+            latest_version + 1,
             VersioningDiff {
                 is_breaking: false,
                 reasons: Vec::new(),
