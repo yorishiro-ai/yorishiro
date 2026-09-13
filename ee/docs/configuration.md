@@ -16,6 +16,15 @@ Each workspace can use its own embedding endpoint. Use `PUT /api/workspace/embed
 | `dimensions` | Vector size the model produces |
 | `send_dimensions_param` | Include dimensions in requests (default: `false`) |
 
+## Asynchronous infer-fill
+
+Configure a workspace LLM key with `PUT /api/workspace/llm-key`, then start a fill with `POST /api/schemas/active/{name}/infer-fill`.
+The response contains a durable `job_id` and the initial `queued` status.
+Poll `GET /api/inference-jobs/{job_id}` with a read-scoped key until the status is `completed` or `failed`.
+The job record stores its status, applied and skipped counts, and a serialized error message, so polling continues to work after a server restart.
+The configured Loco queue reaper requeues a delivery left in progress by a worker restart, so `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` must exceed the longest expected fill run.
+Job records are retained until a future retention policy is introduced.
+
 ## Per-workspace worker class
 
 `PUT /api/workspace/worker-class` assigns a workspace's background jobs to a specific compute pool.

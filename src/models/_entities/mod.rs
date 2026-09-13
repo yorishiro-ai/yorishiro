@@ -12,6 +12,7 @@ pub mod entity_embeddings_768;
 pub mod entity_entities;
 pub mod entity_relations;
 pub mod entity_snapshots;
+pub mod inference_jobs;
 pub mod schema_schemas;
 pub mod stripe_events;
 pub mod system_maintenance;

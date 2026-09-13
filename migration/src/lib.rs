@@ -9,6 +9,7 @@ mod m20260911_000002_add_tenant_memberships_user_id_index;
 mod m20260912_000003_schema_origin_updated_at;
 mod m20260912_000004_compute_credit_ledger;
 mod m20260912_000005_fill_defaults_audit_action;
+mod m20260913_000006_inference_jobs;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -21,6 +22,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260912_000003_schema_origin_updated_at::Migration),
             Box::new(m20260912_000004_compute_credit_ledger::Migration),
             Box::new(m20260912_000005_fill_defaults_audit_action::Migration),
+            Box::new(m20260913_000006_inference_jobs::Migration),
             // inject-above (do not remove this comment)
         ]
     }

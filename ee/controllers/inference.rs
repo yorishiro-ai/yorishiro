@@ -13,6 +13,7 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use serde::{Deserialize, Serialize};
 
+use crate::ee::models::inference_jobs;
 use crate::ee::models::llm_keys;
 use crate::ee::services::authz;
 
@@ -25,7 +26,7 @@ use crate::ee::services::authz;
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
 #[derive(Debug, Serialize)]
 pub struct InferFillRequest {
-    /// The job ID assigned by the queue provider.
+    /// The durable job ID used by the polling endpoint.
     pub job_id: String,
     /// Initial status: always `"queued"`.
     pub status: String,
@@ -70,13 +71,10 @@ async fn infer_fill(
 
 /// `GET /api/inference-jobs/{job_id}`
 ///
-/// Poll for the result of an infer-fill job. The route is gated by the licence gate
-/// because results include entity counts that could reveal workspace activity.
+/// Poll for the durable result of an infer-fill job.
 ///
-/// Requires authentication and read scope: the caller must have initiated the
-/// infer-fill (which requires schema write scope) or been granted read access to the
-/// workspace. This prevents information leakage — job results include entity counts
-/// that could reveal workspace activity.
+/// Requires authentication and read scope, and only returns a job belonging to the
+/// authenticated workspace.
 #[derive(Debug, Serialize)]
 pub struct InferJobStatus {
     /// The job ID.
@@ -99,16 +97,11 @@ async fn infer_job_status(
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let caller_workspace_id = auth_ctx.workspace_id;
-    let tracker = ctx
-        .shared_store
-        .get::<crate::ee::workers::infer_fill::ResultTracker>()
-        .ok_or_else(|| YorishiroError::BackendUnavailable {
-            message: "no result tracker configured".into(),
-        })?;
-
-    let result = tracker.get(&job_id).await.ok_or_else(|| {
-        YorishiroError::not_found("job not found or still queued — try again shortly")
-    })?;
+    let parsed_job_id = uuid::Uuid::parse_str(&job_id)
+        .map_err(|_| YorishiroError::not_found("infer-fill job not found"))?;
+    let result = inference_jobs::get(&ctx.db, parsed_job_id)
+        .await?
+        .ok_or_else(|| YorishiroError::not_found("infer-fill job not found"))?;
 
     // Enforce workspace isolation: the caller can only poll jobs belonging to their own workspace.
     if result.workspace_id != caller_workspace_id {
@@ -119,19 +112,12 @@ async fn infer_job_status(
         .into());
     }
 
+    let status = result.status;
     Ok(Json(InferJobStatus {
         job_id,
-        status: if result.completed {
-            if result.error.is_some() {
-                "failed".to_string()
-            } else {
-                "completed".to_string()
-            }
-        } else {
-            "processing".to_string()
-        },
-        applied: Some(result.applied),
-        skipped: Some(result.skipped),
+        status: status.clone(),
+        applied: (status == inference_jobs::COMPLETED).then_some(result.applied),
+        skipped: (status == inference_jobs::COMPLETED).then_some(result.skipped),
         error: result.error,
     }))
 }
