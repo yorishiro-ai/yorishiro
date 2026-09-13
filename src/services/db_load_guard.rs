@@ -109,6 +109,39 @@ impl LoadHistory {
     }
 }
 
+enum StepOutcome {
+    Continue,
+    Transition {
+        current: MaintenanceState,
+        mode: MaintenanceMode,
+    },
+}
+
+fn run_step(
+    history: &mut LoadHistory,
+    active: Result<i64, ()>,
+    current: Result<MaintenanceState, ()>,
+    threshold: i64,
+    sustain: Duration,
+    now: Instant,
+) -> StepOutcome {
+    let Ok(active) = active else {
+        history.reset();
+        return StepOutcome::Continue;
+    };
+
+    let (busy_for, quiet_for) = history.observe(active >= threshold, now);
+    let Ok(current) = current else {
+        history.reset();
+        return StepOutcome::Continue;
+    };
+
+    let Some(mode) = decide(&current, busy_for, quiet_for, sustain) else {
+        return StepOutcome::Continue;
+    };
+    StepOutcome::Transition { current, mode }
+}
+
 async fn active_connections(pool: &PgPool) -> Result<i64, YorishiroError> {
     sqlx::query_scalar(
         "SELECT count(*) FROM pg_stat_activity \
@@ -149,47 +182,53 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
             return;
         };
         let active = match active_connections(&handle.identity).await {
-            Ok(active) => active,
+            Ok(active) => Ok(active),
             Err(error) => {
                 tracing::warn!(error = %error, "db_load_guard: could not read pg_stat_activity");
-                history.reset();
-                continue;
+                Err(())
             }
         };
-
-        let (busy_for, quiet_for) = history.observe(active >= config.threshold, Instant::now());
-
-        let current = match system_maintenance::get(&ctx.db).await {
-            Ok(current) => current,
-            Err(error) => {
-                tracing::warn!(error = %error, "db_load_guard: could not read maintenance state");
-                history.reset();
-                continue;
-            }
+        let current = match active {
+            Ok(_) => match system_maintenance::get(&ctx.db).await {
+                Ok(current) => Ok(current),
+                Err(error) => {
+                    tracing::warn!(error = %error, "db_load_guard: could not read maintenance state");
+                    Err(())
+                }
+            },
+            Err(()) => Err(()),
         };
-        let Some(mode) = decide(&current, busy_for, quiet_for, config.sustain) else {
-            continue;
-        };
-
-        let reason = (mode == MaintenanceMode::ReadOnly).then(|| AUTO_REASON.to_string());
-        match system_maintenance::set_if_current(
-            &ctx.db,
-            &current,
-            mode,
-            current.retry_after,
-            reason,
-        )
-        .await
-        {
-            Ok(true) => {
-                tracing::warn!(active_connections = active, threshold = config.threshold, mode = ?mode, "db_load_guard: switched maintenance mode");
-                history.reset();
-            }
-            Ok(false) => tracing::info!(
-                "db_load_guard: maintenance state changed concurrently; transition skipped"
-            ),
-            Err(error) => {
-                tracing::error!(error = %error, "db_load_guard: could not switch maintenance mode")
+        match run_step(
+            &mut history,
+            active,
+            current,
+            config.threshold,
+            config.sustain,
+            Instant::now(),
+        ) {
+            StepOutcome::Continue => {}
+            StepOutcome::Transition { current, mode } => {
+                let reason = (mode == MaintenanceMode::ReadOnly).then(|| AUTO_REASON.to_string());
+                match system_maintenance::set_if_current(
+                    &ctx.db,
+                    &current,
+                    mode,
+                    current.retry_after,
+                    reason,
+                )
+                .await
+                {
+                    Ok(true) => {
+                        tracing::warn!(active_connections = active.unwrap_or_default(), threshold = config.threshold, mode = ?mode, "db_load_guard: switched maintenance mode");
+                        history.reset();
+                    }
+                    Ok(false) => tracing::info!(
+                        "db_load_guard: maintenance state changed concurrently; transition skipped"
+                    ),
+                    Err(error) => {
+                        tracing::error!(error = %error, "db_load_guard: could not switch maintenance mode")
+                    }
+                }
             }
         }
     }
@@ -308,36 +347,99 @@ mod tests {
     }
 
     #[test]
-    fn measurement_error_resets_the_sustain_window() {
+    fn measurement_error_resets_the_sustain_window_through_run_step() {
         let sustain = Duration::from_secs(30);
         let start = Instant::now();
         let mut history = LoadHistory::default();
-        history.observe(true, start);
-        history.reset();
-
-        let (busy_for, quiet_for) = history.observe(true, start + sustain);
-        assert_eq!((busy_for, quiet_for), (Duration::ZERO, Duration::ZERO));
-        assert_eq!(
-            decide(
-                &state(MaintenanceMode::Off, None),
-                busy_for,
-                quiet_for,
-                sustain
+        let current = state(MaintenanceMode::Off, None);
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start
             ),
-            None
-        );
-
-        let (busy_for, quiet_for) = history.observe(true, start + sustain + sustain);
-        assert_eq!(quiet_for, Duration::ZERO);
-        assert_eq!(
-            decide(
-                &state(MaintenanceMode::Off, None),
-                busy_for,
-                quiet_for,
-                sustain
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(&mut history, Err(()), Err(()), 10, sustain, start + sustain),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start + sustain + sustain - Duration::from_secs(1)
             ),
-            Some(MaintenanceMode::ReadOnly)
-        );
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current),
+                10,
+                sustain,
+                start + sustain + sustain + sustain
+            ),
+            StepOutcome::Transition {
+                mode: MaintenanceMode::ReadOnly,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn maintenance_state_error_resets_the_sustain_window_through_run_step() {
+        let sustain = Duration::from_secs(30);
+        let start = Instant::now();
+        let mut history = LoadHistory::default();
+        let current = state(MaintenanceMode::Off, None);
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start
+            ),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(&mut history, Ok(10), Err(()), 10, sustain, start + sustain),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current.clone()),
+                10,
+                sustain,
+                start + sustain + sustain - Duration::from_secs(1)
+            ),
+            StepOutcome::Continue
+        ));
+        assert!(matches!(
+            run_step(
+                &mut history,
+                Ok(10),
+                Ok(current),
+                10,
+                sustain,
+                start + sustain + sustain + sustain
+            ),
+            StepOutcome::Transition {
+                mode: MaintenanceMode::ReadOnly,
+                ..
+            }
+        ));
     }
 
     #[test]
