@@ -3,7 +3,7 @@
 //! This is an opt-in safeguard because changing a deployment-wide maintenance state without an operator request is a significant operational action.
 //! It ports the pre-Loco guard's threshold, sustain window, ownership marker, and safe polling fallback onto the Loco two-pool architecture.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use loco_rs::app::AppContext;
 use sqlx::PgPool;
@@ -77,6 +77,33 @@ pub fn decide(
     }
 }
 
+#[derive(Default)]
+struct LoadHistory {
+    busy_since: Option<Instant>,
+    quiet_since: Option<Instant>,
+}
+
+impl LoadHistory {
+    fn observe(&mut self, busy: bool, now: Instant) -> (Duration, Duration) {
+        if busy {
+            if self.busy_since.is_none() {
+                self.busy_since = Some(now);
+            }
+            self.quiet_since = None;
+        } else {
+            if self.quiet_since.is_none() {
+                self.quiet_since = Some(now);
+            }
+            self.busy_since = None;
+        }
+
+        (
+            self.busy_since.map_or(Duration::ZERO, |since| now - since),
+            self.quiet_since.map_or(Duration::ZERO, |since| now - since),
+        )
+    }
+}
+
 async fn active_connections(pool: &PgPool) -> Result<i64, YorishiroError> {
     sqlx::query_scalar(
         "SELECT count(*) FROM pg_stat_activity \
@@ -104,8 +131,7 @@ async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
 /// Runs the opt-in guard until the process exits.
 pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
     let mut ticker = interval(config.poll);
-    let mut busy_for = Duration::ZERO;
-    let mut quiet_for = Duration::ZERO;
+    let mut history = LoadHistory::default();
 
     loop {
         ticker.tick().await;
@@ -125,13 +151,7 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
             }
         };
 
-        if active >= config.threshold {
-            busy_for += config.poll;
-            quiet_for = Duration::ZERO;
-        } else {
-            quiet_for += config.poll;
-            busy_for = Duration::ZERO;
-        }
+        let (busy_for, quiet_for) = history.observe(active >= config.threshold, Instant::now());
 
         let current = match system_maintenance::get(&ctx.db).await {
             Ok(current) => current,
@@ -145,12 +165,22 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
         };
 
         let reason = (mode == MaintenanceMode::ReadOnly).then(|| AUTO_REASON.to_string());
-        match system_maintenance::set(&ctx.db, mode, current.retry_after, reason).await {
-            Ok(_) => {
+        match system_maintenance::set_if_current(
+            &ctx.db,
+            &current,
+            mode,
+            current.retry_after,
+            reason,
+        )
+        .await
+        {
+            Ok(true) => {
                 tracing::warn!(active_connections = active, threshold = config.threshold, mode = ?mode, "db_load_guard: switched maintenance mode");
-                busy_for = Duration::ZERO;
-                quiet_for = Duration::ZERO;
+                history = LoadHistory::default();
             }
+            Ok(false) => tracing::info!(
+                "db_load_guard: maintenance state changed concurrently; transition skipped"
+            ),
             Err(error) => {
                 tracing::error!(error = %error, "db_load_guard: could not switch maintenance mode")
             }
@@ -158,7 +188,7 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
     }
 }
 
-/// Performs one task invocation using the same transition rules as the background runner.
+/// Performs one diagnostic task invocation without changing maintenance mode.
 pub async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
     let Some(config) = LoadGuardConfig::from_env() else {
         return Ok(());
@@ -236,6 +266,37 @@ mod tests {
                 sustain
             ),
             None
+        );
+    }
+
+    #[test]
+    fn first_sample_does_not_count_as_poll_time() {
+        let sustain = Duration::from_secs(30);
+        let start = Instant::now();
+        let mut history = LoadHistory::default();
+        let (busy_for, quiet_for) = history.observe(true, start);
+        assert_eq!((busy_for, quiet_for), (Duration::ZERO, Duration::ZERO));
+        let (busy_for, quiet_for) = history.observe(true, start + Duration::from_secs(29));
+        assert_eq!(quiet_for, Duration::ZERO);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                busy_for,
+                quiet_for,
+                sustain
+            ),
+            None
+        );
+        let (busy_for, quiet_for) = history.observe(true, start + sustain);
+        assert_eq!(quiet_for, Duration::ZERO);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                busy_for,
+                quiet_for,
+                sustain
+            ),
+            Some(MaintenanceMode::ReadOnly)
         );
     }
 

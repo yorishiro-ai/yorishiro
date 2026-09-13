@@ -75,6 +75,7 @@ It returns to normal service after the same quiet period, but only when the guar
 An operator-owned read-only or full-lock state is never cleared by the guard.
 The guard uses the PostgreSQL identity pool and is a no-op on SQLite.
 This is the port of the earlier guard implementation, with its opt-in default retained because automatic maintenance changes require an explicit operational choice.
+`cargo loco task db_load_guard` is diagnostic only and reports one sample without changing maintenance mode.
 
 | Variable | Default | Description |
 |---|---|---|

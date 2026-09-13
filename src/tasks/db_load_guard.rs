@@ -1,4 +1,4 @@
-//! Performs one opt-in database load check.
+//! Performs one diagnostic database load check.
 
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
@@ -12,7 +12,7 @@ impl Task for DbLoadGuard {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "db_load_guard".to_string(),
-            detail: "Checks database load for the automatic read-only guard".to_string(),
+            detail: "Diagnostics only: reports database load for the opt-in automatic read-only guard; does not change maintenance mode".to_string(),
         }
     }
 
