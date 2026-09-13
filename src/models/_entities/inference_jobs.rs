@@ -3,84 +3,34 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Default, Debug, DeriveEntity)]
-pub struct Entity;
-
-impl EntityName for Entity {
-    fn table_name(&self) -> &'static str {
-        "inference_jobs"
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, DeriveModel, DeriveActiveModel, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[sea_orm(table_name = "inference_jobs")]
 pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub workspace_id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub schema_name: String,
+    #[sea_orm(column_type = "Text")]
     pub status: String,
     pub applied: i64,
     pub skipped: i64,
+    #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
-pub enum Column {
-    Id,
-    WorkspaceId,
-    SchemaName,
-    Status,
-    Applied,
-    Skipped,
-    Error,
-    CreatedAt,
-    UpdatedAt,
-}
-
-#[derive(Copy, Clone, Debug, EnumIter, DerivePrimaryKey)]
-pub enum PrimaryKey {
-    Id,
-}
-
-impl PrimaryKeyTrait for PrimaryKey {
-    type ValueType = Uuid;
-    fn auto_increment() -> bool {
-        false
-    }
-}
-
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::workspace_workspaces::Entity",
+        from = "Column::WorkspaceId",
+        to = "super::workspace_workspaces::Column::Id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
     WorkspaceWorkspaces,
-}
-
-impl ColumnTrait for Column {
-    type EntityName = Entity;
-    fn def(&self) -> ColumnDef {
-        match self {
-            Self::Id => ColumnType::Uuid.def(),
-            Self::WorkspaceId => ColumnType::Uuid.def(),
-            Self::SchemaName => ColumnType::Text.def(),
-            Self::Status => ColumnType::Text.def(),
-            Self::Applied => ColumnType::BigInteger.def(),
-            Self::Skipped => ColumnType::BigInteger.def(),
-            Self::Error => ColumnType::Text.def().null(),
-            Self::CreatedAt => ColumnType::TimestampWithTimeZone.def(),
-            Self::UpdatedAt => ColumnType::TimestampWithTimeZone.def(),
-        }
-    }
-}
-
-impl RelationTrait for Relation {
-    fn def(&self) -> RelationDef {
-        match self {
-            Self::WorkspaceWorkspaces => Entity::belongs_to(super::workspace_workspaces::Entity)
-                .from(Column::WorkspaceId)
-                .to(super::workspace_workspaces::Column::Id)
-                .into(),
-        }
-    }
 }
 
 impl Related<super::workspace_workspaces::Entity> for Entity {

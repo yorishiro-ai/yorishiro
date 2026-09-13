@@ -41,6 +41,8 @@ pub enum Relation {
     EntityRelations,
     #[sea_orm(has_many = "super::entity_snapshots::Entity")]
     EntitySnapshots,
+    #[sea_orm(has_many = "super::inference_jobs::Entity")]
+    InferenceJobs,
     #[sea_orm(
         belongs_to = "super::schema_schemas::Entity",
         from = "Column::SchemaId",
@@ -104,6 +106,12 @@ impl Related<super::entity_relations::Entity> for Entity {
 impl Related<super::entity_snapshots::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::EntitySnapshots.def()
+    }
+}
+
+impl Related<super::inference_jobs::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::InferenceJobs.def()
     }
 }
 
