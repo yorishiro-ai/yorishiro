@@ -84,6 +84,11 @@ struct LoadHistory {
 }
 
 impl LoadHistory {
+    fn reset(&mut self) {
+        self.busy_since = None;
+        self.quiet_since = None;
+    }
+
     fn observe(&mut self, busy: bool, now: Instant) -> (Duration, Duration) {
         if busy {
             if self.busy_since.is_none() {
@@ -147,6 +152,7 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
             Ok(active) => active,
             Err(error) => {
                 tracing::warn!(error = %error, "db_load_guard: could not read pg_stat_activity");
+                history.reset();
                 continue;
             }
         };
@@ -157,6 +163,7 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
             Ok(current) => current,
             Err(error) => {
                 tracing::warn!(error = %error, "db_load_guard: could not read maintenance state");
+                history.reset();
                 continue;
             }
         };
@@ -176,7 +183,7 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
         {
             Ok(true) => {
                 tracing::warn!(active_connections = active, threshold = config.threshold, mode = ?mode, "db_load_guard: switched maintenance mode");
-                history = LoadHistory::default();
+                history.reset();
             }
             Ok(false) => tracing::info!(
                 "db_load_guard: maintenance state changed concurrently; transition skipped"
@@ -288,6 +295,39 @@ mod tests {
             None
         );
         let (busy_for, quiet_for) = history.observe(true, start + sustain);
+        assert_eq!(quiet_for, Duration::ZERO);
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                busy_for,
+                quiet_for,
+                sustain
+            ),
+            Some(MaintenanceMode::ReadOnly)
+        );
+    }
+
+    #[test]
+    fn measurement_error_resets_the_sustain_window() {
+        let sustain = Duration::from_secs(30);
+        let start = Instant::now();
+        let mut history = LoadHistory::default();
+        history.observe(true, start);
+        history.reset();
+
+        let (busy_for, quiet_for) = history.observe(true, start + sustain);
+        assert_eq!((busy_for, quiet_for), (Duration::ZERO, Duration::ZERO));
+        assert_eq!(
+            decide(
+                &state(MaintenanceMode::Off, None),
+                busy_for,
+                quiet_for,
+                sustain
+            ),
+            None
+        );
+
+        let (busy_for, quiet_for) = history.observe(true, start + sustain + sustain);
         assert_eq!(quiet_for, Duration::ZERO);
         assert_eq!(
             decide(
