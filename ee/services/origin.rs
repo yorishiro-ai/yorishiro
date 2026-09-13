@@ -117,7 +117,14 @@ pub async fn merge_apply(
     tenant_id: Uuid,
     workspace_id: Uuid,
     schema_id: Uuid,
-) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
+) -> Result<
+    (
+        SchemaRecord,
+        VersioningDiff,
+        crate::models::schema_schemas::MergeDiffSummary,
+    ),
+    YorishiroError,
+> {
     let sides = merge_sides(schema_conn, ctx, tenant_id, workspace_id, schema_id).await?;
 
     let plan = merge::three_way(&sides.base, &sides.upstream, &sides.local.definition);
@@ -144,5 +151,5 @@ pub async fn merge_apply(
         .await
         .internal()?;
 
-    Ok((schema, diff))
+    Ok((schema, diff, plan.summary))
 }

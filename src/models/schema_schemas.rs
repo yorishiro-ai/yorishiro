@@ -197,6 +197,18 @@ pub struct UpstreamChange {
     pub changed_at: DateTime<Utc>,
     /// Whether a push notification has been sent for this schema's upstream change.
     pub pending_notification: bool,
+    pub summary: MergeDiffSummary,
+}
+
+/// Counts the decisions in a computed origin merge plan.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct MergeDiffSummary {
+    pub total_fields: usize,
+    pub auto_add: usize,
+    pub auto_update: usize,
+    pub keep_local: usize,
+    pub conflict: usize,
+    pub has_conflicts: bool,
 }
 
 /// A row in a schema listing.

@@ -133,7 +133,7 @@ impl YorishiroMcpServer {
             .await
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
-        let (schema, diff) = match crate::ee::services::origin::merge_apply(
+        let (schema, diff, summary) = match crate::ee::services::origin::merge_apply(
             &schema_txn,
             &self.ctx,
             authorized.ctx.tenant_id,
@@ -152,6 +152,7 @@ impl YorishiroMcpServer {
         ok_json(serde_json::json!({
             "schema": schema,
             "diff": diff,
+            "summary": summary,
         }))
     }
 }

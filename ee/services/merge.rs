@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::error::YorishiroError;
 use crate::metaschema::{EntityTypeDef, FieldDef, MetaSchemaDefinition};
+use crate::models::schema_schemas::MergeDiffSummary;
 
 /// What should happen to one field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -45,6 +46,7 @@ pub struct FieldMerge {
 #[derive(Debug, Clone, Serialize)]
 pub struct MergePlan {
     pub fields: Vec<FieldMerge>,
+    pub summary: MergeDiffSummary,
 }
 
 impl MergePlan {
@@ -111,7 +113,25 @@ pub fn three_way(
         }
     }
 
-    MergePlan { fields }
+    let summary = summarize(&fields);
+    MergePlan { fields, summary }
+}
+
+fn summarize(fields: &[FieldMerge]) -> MergeDiffSummary {
+    let mut summary = MergeDiffSummary {
+        total_fields: fields.len(),
+        ..Default::default()
+    };
+    for field in fields {
+        match field.verdict {
+            MergeVerdict::AutoAdd => summary.auto_add += 1,
+            MergeVerdict::AutoUpdate => summary.auto_update += 1,
+            MergeVerdict::KeepLocal => summary.keep_local += 1,
+            MergeVerdict::Conflict => summary.conflict += 1,
+        }
+    }
+    summary.has_conflicts = summary.conflict > 0;
+    summary
 }
 
 /// One field's verdict, or `None` when the three agree and there is nothing to decide.

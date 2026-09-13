@@ -34,3 +34,28 @@ Job records are retained until a future retention policy is introduced.
 | Field | Description |
 |---|---|
 | `worker_class` | `tenant_private`, `official`, or `shared` |
+
+## Compute policy
+
+Priority and queue-start objectives are derived from the tenant plan and cannot be set per job.
+
+| Plan | Priority | Queue-start objective | Official base | Burst ceiling |
+|---|---|---:|---:|---:|
+| Free | low | best effort | 1 | 2 |
+| Pro | normal | 60 seconds | 4 | 6 |
+| Team | high | 15 seconds | 8 | 12 |
+
+Official burst is eligible only when observed official demand exceeds the base limit, stays within the ceiling, and the workspace has positive compute credits.
+An explicit workspace worker-class assignment always wins.
+Without an assignment, the WASM offload hook may recommend official compute within these bounds, and all other cases fall back to shared compute.
+Tenant-private compute is never selected implicitly.
+Actual compute usage is debited from the append-only ledger only after successful work.
+Failed or cancelled work is not charged, and insufficient credits never produce an overdraft.
+
+## Schema origin notifications
+
+Each linked workspace schema is its own subscriber to template updates.
+Updating a template definition sets the linked schema's `origin_updated_at` to `NULL`, and repeating the update is idempotent.
+The MCP upstream-change pull is the discovery surface and includes a computed merge summary with total fields, automatic additions and updates, local fields, conflicts, and a conflict flag.
+Applying a conflict-free merge creates the new schema version and clears the pending flag in the same transaction.
+Conflicted or failed merges leave the notification pending.

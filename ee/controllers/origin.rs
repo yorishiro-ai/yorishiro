@@ -8,7 +8,7 @@
 use crate::controllers::ApiError;
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::VersioningDiff;
-use crate::models::schema_schemas::{SchemaRecord, UpstreamChange};
+use crate::models::schema_schemas::{MergeDiffSummary, SchemaRecord, UpstreamChange};
 use crate::services::auth::{ApiKeyScope, require_scope};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -28,6 +28,7 @@ use crate::ee::services::{authz, origin};
 pub struct MergeResponse {
     pub schema: SchemaRecord,
     pub diff: VersioningDiff,
+    pub summary: MergeDiffSummary,
 }
 
 /// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
@@ -95,7 +96,7 @@ async fn merge_apply(
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
         .await
         .internal()?;
-    let (schema, diff) = origin::merge_apply(
+    let (schema, diff, summary) = origin::merge_apply(
         &schema_txn,
         &ctx,
         auth_ctx.tenant_id,
@@ -104,7 +105,14 @@ async fn merge_apply(
     )
     .await?;
     schema_txn.commit().await.internal()?;
-    Ok((StatusCode::CREATED, Json(MergeResponse { schema, diff })))
+    Ok((
+        StatusCode::CREATED,
+        Json(MergeResponse {
+            schema,
+            diff,
+            summary,
+        }),
+    ))
 }
 
 pub fn routes() -> Routes {

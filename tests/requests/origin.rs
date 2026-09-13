@@ -177,8 +177,8 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .unwrap();
 
         // Edit the template upstream: add a field the workspace does not have.
-        let mut active: template_templates::ActiveModel = template.clone().into();
-        active.definition = sea_orm::ActiveValue::Set(json!({
+        let updated_definition: yorishiro::metaschema::MetaSchemaDefinition =
+            serde_json::from_value(serde_json::json!({
             "name": "library-note",
             "entity_types": {
                 "note": {
@@ -188,11 +188,36 @@ async fn upstream_changes_preview_and_merge_round_trip() {
                     }
                 }
             }
-        }));
-        active.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-        sea_orm::ActiveModelTrait::update(active, &ctx.db)
-            .await
-            .expect("update template");
+            }))
+            .expect("parse updated definition");
+        yorishiro::models::template_templates::update_template(
+            &ctx.db,
+            setup.tenant_id,
+            template.id,
+            yorishiro::models::template_templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(updated_definition.clone()),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("mark linked schema pending");
+        yorishiro::models::template_templates::update_template(
+            &ctx.db,
+            setup.tenant_id,
+            template.id,
+            yorishiro::models::template_templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(updated_definition),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("repeat pending mark");
 
         let after = request
             .get("/api/schemas/upstream-changes")
@@ -205,6 +230,10 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "the edited template must now be reported: {after_body:?}"
         );
         assert_eq!(after_body[0]["schema_id"], schema_id.to_string());
+        assert_eq!(after_body[0]["pending_notification"], true);
+        assert_eq!(after_body[0]["summary"]["total_fields"], 2);
+        assert_eq!(after_body[0]["summary"]["auto_add"], 1);
+        assert_eq!(after_body[0]["summary"]["keep_local"], 1);
 
         let preview = request
             .get(&format!("/api/schemas/{schema_id}/merge-preview"))
@@ -219,6 +248,9 @@ async fn upstream_changes_preview_and_merge_round_trip() {
                 .any(|f| f["field"] == "category" && f["verdict"] == "auto_add"),
             "upstream's addition must be in the plan: {fields:?}"
         );
+        assert_eq!(plan["summary"]["total_fields"], 2);
+        assert_eq!(plan["summary"]["auto_add"], 1);
+        assert_eq!(plan["summary"]["keep_local"], 1);
         assert!(
             fields
                 .iter()
@@ -242,6 +274,14 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "the workspace's own field must survive: {merged_fields:?}"
         );
         assert_eq!(merge_body["schema"]["version"], 3);
+        assert_eq!(merge_body["summary"]["total_fields"], 2);
+        assert_eq!(merge_body["summary"]["has_conflicts"], false);
+
+        let acknowledged = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert!(acknowledged.json::<Vec<serde_json::Value>>().is_empty());
     })
     .await;
 }
@@ -302,6 +342,14 @@ async fn merging_a_conflicting_field_is_refused() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(merge.status_code(), 422, "response: {:?}", merge.text());
+        let pending = request
+            .get("/api/schemas/upstream-changes")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        let pending_body: Vec<serde_json::Value> = pending.json();
+        assert_eq!(pending_body.len(), 1);
+        assert_eq!(pending_body[0]["pending_notification"], true);
+        assert_eq!(pending_body[0]["summary"]["conflict"], 1);
     })
     .await;
 }
