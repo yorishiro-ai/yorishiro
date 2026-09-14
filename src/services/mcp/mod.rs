@@ -16,6 +16,7 @@ use rmcp::{ServerHandler, tool_handler};
 use sea_orm::DatabaseTransaction;
 
 use crate::controllers::extractors::{authenticator, db_handle};
+use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::services::auth::{self, ApiKeyScope, AuthContext};
 
@@ -95,27 +96,10 @@ pub(super) enum VerifyOutcome {
 }
 
 /// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
-fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
-    parts
-        .headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_owned(), value.to_owned()))
-        })
-        .collect()
-}
-
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
-    auth::bearer_credential(
-        parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok()),
-    )
-    .ok_or_else(|| ErrorData::invalid_request("missing or malformed Authorization header", None))
+    auth::extract_bearer_key(parts).ok_or_else(|| {
+        ErrorData::invalid_request("missing or malformed Authorization header", None)
+    })
 }
 
 /// The sole entry point for every tool handler.
@@ -128,12 +112,12 @@ pub(super) async fn authorize(
     required: ApiKeyScope,
 ) -> Result<AuthzOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
-    let headers = header_pairs(parts);
+    let headers = auth::header_pairs(parts);
 
     // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
     // directly against ctx.db and opens a plain transaction, mirroring the REST adapter's
     // `Authorized<R>` SQLite extractor.
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+    if ctx.is_sqlite() {
         return match auth::authorize_sqlite(&ctx.db, presented_key, required).await {
             Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized { ctx, txn })),
             Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
@@ -170,12 +154,12 @@ pub(super) async fn verify(
     required: ApiKeyScope,
 ) -> Result<VerifyOutcome, ErrorData> {
     let presented_key = extract_bearer_key(parts)?;
-    let headers = header_pairs(parts);
+    let headers = auth::header_pairs(parts);
 
     // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): this path authenticates
     // directly against ctx.db instead of going through the Authenticator trait, mirroring the REST
     // adapter's `AuthContext` extractor (extractors.rs) and `Verified<R>` extractor.
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+    if ctx.is_sqlite() {
         return match auth::authorize_scope_sqlite(&ctx.db, presented_key, required).await {
             Ok(ctx) => Ok(VerifyOutcome::Verified(ctx)),
             Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
