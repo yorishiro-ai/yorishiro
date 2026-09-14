@@ -110,6 +110,20 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let fork_id = fork["id"].as_str().unwrap().to_owned();
         let original_head_id: Uuid = fork["fork_schema_id"].as_str().unwrap().parse().unwrap();
         let original_head_version = fork["fork_schema_version"].as_i64().unwrap() as i32;
+        let history_update = workspace_schema_fork_heads::Entity::update_many()
+            .col_expr(
+                workspace_schema_fork_heads::Column::SchemaId,
+                sea_orm::sea_query::Expr::value(original_head_id),
+            )
+            .filter(
+                workspace_schema_fork_heads::Column::ForkId.eq(fork_id.parse::<Uuid>().unwrap()),
+            )
+            .exec(&ctx.db)
+            .await;
+        assert!(
+            history_update.is_err(),
+            "fork-head history rows must be immutable"
+        );
 
         let listed = request
             .get("/api/schema-forks")

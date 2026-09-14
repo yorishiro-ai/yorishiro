@@ -286,6 +286,9 @@ impl MigrationTrait for Migration {
             manager,
             "CREATE FUNCTION check_workspace_schema_fork_head_integrity() RETURNS TRIGGER AS $$
              BEGIN
+               IF TG_OP = 'UPDATE' THEN
+                 RAISE EXCEPTION 'workspace_schema_fork_heads rows are immutable' USING ERRCODE = '23514';
+               END IF;
                IF NOT EXISTS (
                  SELECT 1 FROM workspace_schema_forks
                  WHERE id = NEW.fork_id AND tenant_id = NEW.tenant_id
@@ -323,16 +326,7 @@ impl MigrationTrait for Migration {
              CREATE TRIGGER workspace_schema_fork_heads_integrity_update
              BEFORE UPDATE ON workspace_schema_fork_heads
              BEGIN
-               SELECT CASE WHEN NOT EXISTS (
-                 SELECT 1 FROM workspace_schema_forks
-                 WHERE id = NEW.fork_id AND tenant_id = NEW.tenant_id
-                   AND workspace_id = NEW.workspace_id
-               ) THEN RAISE(ABORT, 'workspace_schema_fork_heads fork mismatch') END;
-               SELECT CASE WHEN NOT EXISTS (
-                 SELECT 1 FROM schema_schemas
-                 WHERE id = NEW.schema_id AND tenant_id = NEW.tenant_id
-                   AND workspace_id = NEW.workspace_id
-               ) THEN RAISE(ABORT, 'workspace_schema_fork_heads schema mismatch') END;
+               SELECT RAISE(ABORT, 'workspace_schema_fork_heads rows are immutable');
              END;",
         )
         .await?;
