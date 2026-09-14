@@ -1,3 +1,4 @@
+use axum::http::request::Parts;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -9,6 +10,30 @@ mod authorize;
 pub use authenticate::*;
 pub use authenticator::*;
 pub use authorize::*;
+
+/// Copies readable request headers into the authenticator input shape.
+pub fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
+    parts
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
+/// Extracts the bearer credential from an Authorization header.
+pub fn extract_bearer_key(parts: &Parts) -> Option<&str> {
+    bearer_credential(
+        parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+    )
+}
 
 pub(crate) const KEY_PREFIX_BYTES: usize = 6;
 pub(crate) const KEY_SECRET_BYTES: usize = 24;
