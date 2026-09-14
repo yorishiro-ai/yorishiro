@@ -259,15 +259,13 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("fork head is missing")))?;
-    let source_active = schema_schemas::Entity::find()
-        .filter(SchemaColumn::TenantId.eq(row.tenant_id))
-        .filter(SchemaColumn::WorkspaceId.eq(row.source_workspace_id))
-        .filter(SchemaColumn::Name.eq(&row.source_schema_name))
-        .filter(SchemaColumn::Status.eq("active"))
-        .order_by_desc(SchemaColumn::Version)
-        .one(conn)
-        .await
-        .internal()?;
+    let source_active = latest_source_by_name(
+        conn,
+        row.tenant_id,
+        row.source_workspace_id,
+        &row.source_schema_name,
+    )
+    .await?;
     let upstream_version = source_active
         .filter(|source| source.version > row.source_schema_version)
         .map(|source| source.version);

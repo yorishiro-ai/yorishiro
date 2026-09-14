@@ -236,6 +236,25 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let source_v2: serde_json::Value = source_v2.json();
         let source_v2_id = source_v2["schema"]["id"].as_str().unwrap();
 
+        let before_follow_get = request
+            .get(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        assert_eq!(before_follow_get.status_code(), 200);
+        assert_eq!(
+            before_follow_get.json::<serde_json::Value>()["upstream_version"],
+            source_v2["schema"]["version"]
+        );
+        let before_follow_list = request
+            .get("/api/schema-forks")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        assert_eq!(before_follow_list.status_code(), 200);
+        assert_eq!(
+            before_follow_list.json::<serde_json::Value>()[0]["upstream_version"],
+            source_v2["schema"]["version"]
+        );
+
         let follow = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
@@ -262,6 +281,18 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert_eq!(followed["customized"], false);
         assert_eq!(followed["source_schema_id"], source_v2_id);
         assert_eq!(followed["definition"], source_v2["schema"]["definition"]);
+        let after_follow_get = request
+            .get(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        assert_eq!(after_follow_get.status_code(), 200);
+        assert!(after_follow_get.json::<serde_json::Value>()["upstream_version"].is_null());
+        let after_follow_list = request
+            .get("/api/schema-forks")
+            .add_header("Authorization", format!("Bearer {read_key}"))
+            .await;
+        assert_eq!(after_follow_list.status_code(), 200);
+        assert!(after_follow_list.json::<serde_json::Value>()[0]["upstream_version"].is_null());
         let current_head_id: Uuid = followed["fork_schema_id"]
             .as_str()
             .unwrap()
