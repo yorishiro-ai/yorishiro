@@ -219,10 +219,11 @@ pub async fn resolve_search_table(
     let dimension = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .or(Some(
-            i32::try_from(chain.deployment_dimensions).unwrap_or(768),
-        ))
-        .unwrap_or(768) as usize;
+        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(
+            crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32,
+        )))
+        .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32)
+        as usize;
     Ok((dimension, format!("entity_embeddings_{dimension}")))
 }
 

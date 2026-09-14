@@ -11,6 +11,8 @@ use std::str::FromStr;
 
 use crate::error::{ResultExt, YorishiroError};
 
+pub const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
@@ -125,7 +127,7 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
     let Some(row) = row else {
         return Ok(MaintenanceState {
             mode: MaintenanceMode::Off,
-            retry_after: 300,
+            retry_after: DEFAULT_RETRY_AFTER_SECONDS,
             reason: None,
         });
     };
