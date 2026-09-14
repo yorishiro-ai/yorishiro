@@ -15,21 +15,6 @@ use crate::models::schema_schemas;
 use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
 
-#[async_trait::async_trait]
-impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
-    where
-        C: ConnectionTrait,
-    {
-        let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        if !insert && this.updated_at.is_unchanged() {
-            this.updated_at = ActiveValue::Set(Utc::now().into());
-        }
-        Ok(this)
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct ForkRecord {
     pub id: Uuid,
@@ -287,6 +272,7 @@ pub async fn create<C: ConnectionTrait>(
     .await?
     .0;
     let row = ActiveModel {
+        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         source_workspace_id: ActiveValue::Set(input.source_workspace_id),
