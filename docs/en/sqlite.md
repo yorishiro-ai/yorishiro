@@ -33,11 +33,7 @@ At least 2 connections are required. The server refuses to start if `max_connect
 
 ## Configuration files
 
-A test config exists at `config/test_sqlite.yaml` for manual verification. There is no production SQLite config file; use `production.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
-
-## Testing
-
-SQLite tests run via `make test-sqlite`, using the temporary SQLite database configured by that target. The suite uses Rust's default parallel test execution and its fixtures isolate mutable state where needed. The full test suite (`make test-postgres`) also runs against PostgreSQL.
+There is no separate SQLite production config file; use `production.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
 
 ## Authentication
 

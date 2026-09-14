@@ -6,8 +6,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 
 | Command | What it does | Backend |
 |---|---|---|
-| `make test-postgres` | Full suite (`cargo test --locked --workspace -- --test-threads=1`) | PostgreSQL |
-| `make test-sqlite` | Full suite with `require_sqlite_backend()` gate | SQLite |
+| `cargo test --locked --workspace` with PostgreSQL environment | Full suite with Rust's default parallel execution | PostgreSQL |
+| `cargo test --locked --workspace` with SQLite environment | Full suite with `require_sqlite_backend()` gate and Rust's default parallel execution | SQLite |
 | `make check` | `cargo check --locked --workspace` | — |
 | `make clippy` | `cargo clippy --locked --workspace --tests -- -D warnings` | — |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
@@ -19,15 +19,17 @@ All commands run from the repository root. `make -C . <target>` works from any d
 
 | Variable | Default | Overrides |
 |---|---|---|
-| `DATABASE_URL` | `postgres://yorishiro:yorishiro@localhost:15432/yorishiro` | Target database for any test command |
-| `DB_MAX_CONNECTIONS` | *(none)* | Passed to `test-postgres` and `entities` |
-| `DB_CONNECT_TIMEOUT` | *(none)* | Passed to `test-postgres` and `entities` |
-| `LOCO_ENV` | *(none)* | Passed to `test-postgres` and `entities` (`test_postgres`); or `test_sqlite` for SQLite |
+| `DATABASE_URL` | `postgres://yorishiro:yorishiro@localhost:15432/yorishiro` | Target database for the test command |
+| `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
+| `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
+| `LOCO_ENV` | `test_postgres` or `test_sqlite` | Selects the test configuration |
 
 Custom PostgreSQL:
 
 ```sh
-make test-postgres DATABASE_URL=postgres://user:pass@host:5432/db
+DATABASE_URL=postgres://user:pass@host:5432/db \
+  DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres \
+  cargo test --locked --workspace
 ```
 
 ### `make entities`

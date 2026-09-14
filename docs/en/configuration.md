@@ -143,19 +143,6 @@ With SQLite, dequeueing is serialized, while durable queue recovery still works.
 `YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
 
-## Database connection pools
-
-Database connection pools are unrelated to worker pools and the queue.
-On PostgreSQL, `AppContext.db` is Loco's SeaORM pool using the migration role, `TenantDb` is the separate RLS pool that sets `ROLE yorishiro_app`, and `DbHandle.identity` is a second migration-role raw sqlx pool.
-The Loco queue provider owns another independent pool.
-SQLite has no `DbHandle`; it uses `AppContext.db` plus the queue provider's separate SQLite pool.
-
-Production defaults `database.max_connections` to `100` on either backend unless configuration overrides it.
-The minimum default is `1`.
-CI overrides PostgreSQL `DB_MAX_CONNECTIONS` to `100`, and the SQLite test configuration sets its application pool maximum to `10`.
-These limits apply per independent pool, so aggregate database connections are the sum of the pools a process creates.
-Async waits release the task to do other work, but one physical connection still executes one SQL operation at a time.
-
 ## Tenant reindex schedule
 
 You can configure a deployment to automatically reindex every workspace under a tenant on a regular interval. The schedule runs through the normal reindex flow (same as the manual `reindex_embeddings` task), so it respects the same workspace provider and model version checks.
