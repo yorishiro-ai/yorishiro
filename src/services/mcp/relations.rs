@@ -11,6 +11,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::entity_relations::{self, RelationStatus};
 use crate::services::auth::ApiKeyScope;
 
@@ -140,11 +141,31 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
+        let status = match args.status.as_deref() {
+            Some(value) => match RelationStatus::from_db_str(value) {
+                Some(status) => Some(status),
+                None => {
+                    return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
+                        message: format!("'{value}' is not a relation status"),
+                        details: vec![ValidationDetail {
+                            field: "/status".into(),
+                            problem: "expected active, deprecated, or archived".into(),
+                            code: ValidationErrorCode::Other,
+                            expected: Some("active, deprecated, archived".into()),
+                            actual: Some(value.into()),
+                        }],
+                        hint: "use active, deprecated, or archived".into(),
+                    }));
+                }
+            },
+            None => None,
+        };
+
         let query = entity_relations::ListRelationsQuery {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
-            status: args.status.as_deref().and_then(RelationStatus::from_db_str),
+            status,
             page: crate::models::pagination::ListParams::new(args.limit, args.offset),
         };
 
