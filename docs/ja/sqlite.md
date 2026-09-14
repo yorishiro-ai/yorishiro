@@ -37,7 +37,7 @@ cargo run
 
 ## テスト
 
-`make test-sqlite` で SQLite テストを実行します。並列問題を避けるため `--test-threads=1` でインメモリデータベースに対して実行されます。フルテストスイート（`make test`）は PostgreSQL に対してのみ実行されます。
+`make test-sqlite` で SQLite テストを実行します。このターゲットで設定した一時 SQLite データベースを使い、Rust の既定の並列実行でスイートを実行します。必要な箇所では fixture が変更可能な状態を分離します。フルテストスイートは `make test-postgres` で PostgreSQL に対しても実行できます。
 
 ## 認証
 

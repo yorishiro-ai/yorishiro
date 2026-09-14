@@ -37,7 +37,7 @@ A test config exists at `config/test_sqlite.yaml` for manual verification. There
 
 ## Testing
 
-SQLite tests run via `make test-sqlite`. They execute with `--test-threads=1` against an in-memory database to avoid concurrency issues. The full test suite (`make test`) runs against PostgreSQL only.
+SQLite tests run via `make test-sqlite`, using the temporary SQLite database configured by that target. The suite uses Rust's default parallel test execution and its fixtures isolate mutable state where needed. The full test suite (`make test-postgres`) also runs against PostgreSQL.
 
 ## Authentication
 
