@@ -57,7 +57,7 @@ impl LoadedModel {
 fn multilingual_e5_base_config() -> XlmRobertaConfig {
     XlmRobertaConfig {
         vocab_size: 250_002,
-        hidden_size: 768,
+        hidden_size: crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
         num_hidden_layers: 12,
         num_attention_heads: 12,
         intermediate_size: 3072,

@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope};
 use crate::models::api_key_audit_log;
-use crate::models::system_maintenance::{self, MaintenanceMode, MaintenanceState};
+use crate::models::system_maintenance::{
+    self, DEFAULT_RETRY_AFTER_SECONDS, MaintenanceMode, MaintenanceState,
+};
 
 /// The state as the API reports it.
 /// `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
@@ -51,8 +53,6 @@ pub struct SetMaintenanceRequest {
     pub reason: Option<String>,
 }
 
-pub const DEFAULT_RETRY_AFTER: u32 = 300;
-
 fn deserialize_maintenance_mode<'de, D>(deserializer: D) -> Result<MaintenanceMode, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -78,7 +78,7 @@ pub async fn set_maintenance(
     let updated = system_maintenance::set(
         &ctx.db,
         body.mode,
-        body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER),
+        body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER_SECONDS),
         body.reason,
     )
     .await?;
