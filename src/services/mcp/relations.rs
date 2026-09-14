@@ -11,7 +11,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::models::entity_relations;
+use crate::models::entity_relations::{self, RelationStatus};
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -144,7 +144,7 @@ impl YorishiroMcpServer {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
-            status: args.status,
+            status: args.status.as_deref().and_then(RelationStatus::from_db_str),
             page: crate::models::pagination::ListParams::new(args.limit, args.offset),
         };
 

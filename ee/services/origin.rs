@@ -80,7 +80,7 @@ async fn merge_sides(
     // `get_by_id` fetches any version, archived ones included: it is how a caller reads an old definition.
     // Merging into one is a different matter: `create_schema` archives whatever is currently active and installs the result as the new active version, so merging an archived version would resurrect an abandoned definition as the live one, and entities written against the current active version would find their schema replaced by an older lineage.
     // Refuse instead, and name the schema so the caller can look up the active version.
-    if schema.status != "active" {
+    if schema.status != crate::models::schema_schemas::SchemaStatus::Active {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "schema '{schema_id}' is {} and cannot be merged into",
