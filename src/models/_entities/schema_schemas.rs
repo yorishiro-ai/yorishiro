@@ -52,6 +52,8 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     TenantTenants,
+    #[sea_orm(has_many = "super::workspace_schema_fork_heads::Entity")]
+    WorkspaceSchemaForkHeads,
     #[sea_orm(
         belongs_to = "super::workspace_workspaces::Entity",
         from = "Column::WorkspaceId",
@@ -77,6 +79,12 @@ impl Related<super::template_templates::Entity> for Entity {
 impl Related<super::tenant_tenants::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TenantTenants.def()
+    }
+}
+
+impl Related<super::workspace_schema_fork_heads::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::WorkspaceSchemaForkHeads.def()
     }
 }
 

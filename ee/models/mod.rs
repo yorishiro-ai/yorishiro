@@ -16,3 +16,4 @@ pub mod origin;
 pub mod stripe_events;
 pub mod usage;
 pub mod worker_classes;
+pub mod workspace_schema_forks;

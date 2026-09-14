@@ -59,3 +59,11 @@ Updating a template definition sets the linked schema's `origin_updated_at` to `
 The MCP upstream-change pull is the discovery surface and includes a computed merge summary with total fields, automatic additions and updates, local fields, conflicts, and a conflict flag.
 Applying a conflict-free merge creates the new schema version and clears the pending flag in the same transaction.
 Conflicted or failed merges leave the notification pending.
+
+## Workspace schema forks
+
+Enterprise workspaces can copy an exact active schema version from another workspace in the same tenant with `POST /api/schema-forks`.
+The fork starts detached from template origin tracking and keeps immutable schema history under its own workspace.
+`PUT /api/schema-forks/{fork_id}` accepts either a local definition update or the explicit `action=follow` operation.
+Following is synchronous and requires `force=true` when local edits would be discarded.
+The fork metadata is separate from `template_templates.fork_of`, which describes template-library relationships rather than workspace schema lineage.
