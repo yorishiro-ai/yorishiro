@@ -2,7 +2,6 @@ use super::boot_request;
 use super::fixtures::{self, TenantArgs};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    TransactionTrait,
 };
 use serial_test::serial;
 use uuid::Uuid;
@@ -174,6 +173,50 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             "local customization must not move updated_at backwards"
         );
 
+        let mut renamed_definition = local["definition"].clone();
+        renamed_definition["name"] = serde_json::json!("renamed-fork");
+        let history_before_rename = workspace_schema_fork_heads::Entity::find()
+            .filter(
+                workspace_schema_fork_heads::Column::ForkId.eq(fork_id.parse::<Uuid>().unwrap()),
+            )
+            .count(&ctx.db)
+            .await
+            .unwrap();
+        let renamed = request
+            .put(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {target_key}"))
+            .json(&serde_json::json!({
+                "definition": renamed_definition,
+                "expected_fork_schema_id": local["fork_schema_id"]
+            }))
+            .await;
+        assert_eq!(renamed.status_code(), 422, "{}", renamed.text());
+        assert_eq!(
+            renamed.json::<serde_json::Value>()["error"]["code"],
+            "validation_failed"
+        );
+        let fork_after_rename =
+            workspace_schema_forks::Entity::find_by_id(fork_id.parse::<Uuid>().unwrap())
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            fork_after_rename.fork_schema_id.to_string(),
+            local["fork_schema_id"].as_str().unwrap()
+        );
+        assert_eq!(
+            workspace_schema_fork_heads::Entity::find()
+                .filter(
+                    workspace_schema_fork_heads::Column::ForkId
+                        .eq(fork_id.parse::<Uuid>().unwrap()),
+                )
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            history_before_rename
+        );
+
         let stale = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
@@ -299,6 +342,114 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
 
 #[tokio::test]
 #[serial]
+async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (tenant_a, source_workspace, owner_a, source_key) =
+            fixtures::create_tenant_workspace_owner(
+                &ctx,
+                TenantArgs {
+                    tenant_name: "fork-http-tenant-a".into(),
+                    owner_email: "fork-http-a@example.com".into(),
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
+        let source_response = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {source_key}"))
+            .json(&serde_json::json!({ "template_id": "task-management" }))
+            .await;
+        assert_eq!(source_response.status_code(), 201);
+        let source: serde_json::Value = source_response.json();
+        let source_schema_id = source["schema"]["id"].as_str().unwrap();
+        let target = create_workspace(&ctx, tenant_a, "fork-http-target").await;
+        let target_key =
+            fixtures::issue_api_key(&ctx, target.id, owner_a, ApiKeyScope::Schema, false).await;
+        let created = request
+            .post("/api/schema-forks")
+            .add_header("Authorization", format!("Bearer {target_key}"))
+            .json(&serde_json::json!({
+                "source_workspace_id": source_workspace,
+                "source_schema_id": source_schema_id
+            }))
+            .await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let fork: serde_json::Value = created.json();
+        let fork_id = fork["id"].as_str().unwrap();
+
+        let (_tenant_b, workspace_b, owner_b, _key_b) = fixtures::create_tenant_workspace_owner(
+            &ctx,
+            TenantArgs {
+                tenant_name: "fork-http-tenant-b".into(),
+                workspace_name: "fork-http-b".into(),
+                owner_email: "fork-http-b@example.com".into(),
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        let read_b =
+            fixtures::issue_api_key(&ctx, workspace_b, owner_b, ApiKeyScope::Read, false).await;
+        let schema_b =
+            fixtures::issue_api_key(&ctx, workspace_b, owner_b, ApiKeyScope::Schema, false).await;
+
+        let list_b = request
+            .get("/api/schema-forks")
+            .add_header("Authorization", format!("Bearer {read_b}"))
+            .await;
+        assert_eq!(list_b.status_code(), 200);
+        assert!(
+            list_b
+                .json::<serde_json::Value>()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+
+        let get_b = request
+            .get(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {read_b}"))
+            .await;
+        assert_eq!(get_b.status_code(), 404);
+
+        let create_cross_tenant = request
+            .post("/api/schema-forks")
+            .add_header("Authorization", format!("Bearer {schema_b}"))
+            .json(&serde_json::json!({
+                "source_workspace_id": source_workspace,
+                "source_schema_id": source_schema_id
+            }))
+            .await;
+        assert_eq!(create_cross_tenant.status_code(), 404);
+
+        let update_cross_tenant = request
+            .put(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {schema_b}"))
+            .json(&serde_json::json!({ "action": "follow" }))
+            .await;
+        assert_eq!(update_cross_tenant.status_code(), 404);
+
+        let delete_cross_tenant = request
+            .delete(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {schema_b}"))
+            .await;
+        assert_eq!(delete_cross_tenant.status_code(), 404);
+
+        let still_there = request
+            .get(&format!("/api/schema-forks/{fork_id}"))
+            .add_header("Authorization", format!("Bearer {target_key}"))
+            .await;
+        assert_eq!(still_there.status_code(), 200);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn schema_forks_reject_transitive_workspace_cycles() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_a, owner_id, key_a) = fixtures::create_tenant_workspace_owner(
@@ -416,8 +567,17 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
             .unwrap();
 
         let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-        let txn_a = ctx.db.begin().await.unwrap();
-        let txn_b = ctx.db.begin().await.unwrap();
+        let db = ctx.shared_store.get::<yorishiro::db::DbHandle>().unwrap();
+        let txn_a = db
+            .tenant
+            .begin_for_workspace(tenant_id, workspace_a)
+            .await
+            .unwrap();
+        let txn_b = db
+            .tenant
+            .begin_for_workspace(tenant_id, workspace_b.id)
+            .await
+            .unwrap();
         let barrier_a = barrier.clone();
         let barrier_b = barrier;
         let create_a = async {
@@ -504,16 +664,24 @@ async fn fork_creation_shares_the_schema_version_lock() {
         let definition = serde_json::from_value(source["schema"]["definition"].clone()).unwrap();
         let target = create_workspace(&ctx, tenant_id, "version-race-target").await;
 
-        let first = ctx.db.begin().await.unwrap();
+        let db = ctx.shared_store.get::<yorishiro::db::DbHandle>().unwrap();
+        let first = db
+            .tenant
+            .begin_for_workspace(tenant_id, target.id)
+            .await
+            .unwrap();
         yorishiro::models::schema_schemas::lock_version(&first, target.id, "task-management")
             .await
             .unwrap();
 
         let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
         let second_barrier = barrier.clone();
-        let second_db = ctx.db.clone();
+        let second_db = db.tenant.clone();
         let mut second = tokio::spawn(async move {
-            let txn = second_db.begin().await.unwrap();
+            let txn = second_db
+                .begin_for_workspace(tenant_id, target.id)
+                .await
+                .unwrap();
             second_barrier.wait().await;
             let fork = yorishiro::ee::models::workspace_schema_forks::create(
                 &txn,
@@ -727,6 +895,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
         );
 
         let insert = workspace_schema_forks::ActiveModel {
+            id: ActiveValue::Set(Uuid::new_v4()),
             tenant_id: ActiveValue::Set(tenant_b.id),
             workspace_id: ActiveValue::Set(target.id),
             source_workspace_id: ActiveValue::Set(original.source_workspace_id),
@@ -739,9 +908,12 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
         }
         .insert(&ctx.db)
         .await;
+        let insert_error = insert
+            .expect_err("SQLite trigger must reject mismatched INSERT")
+            .to_string();
         assert!(
-            insert.is_err(),
-            "SQLite trigger must reject mismatched INSERT"
+            insert_error.contains("workspace_schema_forks target workspace mismatch"),
+            "unexpected SQLite integrity error: {insert_error}"
         );
     })
     .await;

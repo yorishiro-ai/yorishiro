@@ -3,7 +3,8 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::{
-    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait,
+    QueryFilter, QueryOrder, Statement,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -50,8 +51,110 @@ pub struct UpdateInput {
     pub expected_source_schema_id: Option<Uuid>,
 }
 
+#[derive(Debug, FromQueryResult)]
+struct ForkEdge {
+    source_workspace_id: Uuid,
+}
+
 fn parse_definition(value: Json) -> Result<MetaSchemaDefinition, YorishiroError> {
     serde_json::from_value(value).internal()
+}
+
+async fn source_by_id<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+    source_workspace_id: Uuid,
+    source_schema_id: Uuid,
+) -> Result<Option<schema_schemas::Model>, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        return schema_schemas::Model::find_by_statement(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT * FROM workspace_schema_fork_source_by_id($1, $2, $3)",
+            [
+                tenant_id.into(),
+                source_workspace_id.into(),
+                source_schema_id.into(),
+            ],
+        ))
+        .one(conn)
+        .await
+        .internal();
+    }
+
+    schema_schemas::Entity::find()
+        .filter(SchemaColumn::Id.eq(source_schema_id))
+        .filter(SchemaColumn::TenantId.eq(tenant_id))
+        .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
+        .one(conn)
+        .await
+        .internal()
+}
+
+async fn latest_source_by_name<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+    source_workspace_id: Uuid,
+    source_schema_name: &str,
+) -> Result<Option<schema_schemas::Model>, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        return schema_schemas::Model::find_by_statement(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT * FROM workspace_schema_fork_latest_source($1, $2, $3)",
+            [
+                tenant_id.into(),
+                source_workspace_id.into(),
+                source_schema_name.into(),
+            ],
+        ))
+        .one(conn)
+        .await
+        .internal();
+    }
+
+    schema_schemas::Entity::find()
+        .filter(SchemaColumn::TenantId.eq(tenant_id))
+        .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
+        .filter(SchemaColumn::Name.eq(source_schema_name))
+        .filter(SchemaColumn::Status.eq("active"))
+        .order_by_desc(SchemaColumn::Version)
+        .one(conn)
+        .await
+        .internal()
+}
+
+async fn fork_edges<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<Vec<Uuid>, YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        return ForkEdge::find_by_statement(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT source_workspace_id FROM workspace_schema_fork_edges($1, $2)",
+            [tenant_id.into(), workspace_id.into()],
+        ))
+        .all(conn)
+        .await
+        .internal()
+        .map(|edges| {
+            edges
+                .into_iter()
+                .map(|edge| edge.source_workspace_id)
+                .collect()
+        });
+    }
+
+    Entity::find()
+        .filter(Column::TenantId.eq(tenant_id))
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .all(conn)
+        .await
+        .internal()
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| row.source_workspace_id)
+                .collect()
+        })
 }
 
 async fn current_source<C: ConnectionTrait>(
@@ -60,13 +163,8 @@ async fn current_source<C: ConnectionTrait>(
     source_workspace_id: Uuid,
     source_schema_id: Uuid,
 ) -> Result<schema_schemas::Model, YorishiroError> {
-    let source = schema_schemas::Entity::find()
-        .filter(SchemaColumn::Id.eq(source_schema_id))
-        .filter(SchemaColumn::TenantId.eq(tenant_id))
-        .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
-        .one(conn)
-        .await
-        .internal()?
+    let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
+        .await?
         .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
     if source.status != "active" {
         return Err(YorishiroError::ValidationFailed {
@@ -84,15 +182,8 @@ async fn latest_source<C: ConnectionTrait>(
     source_workspace_id: Uuid,
     source_schema_name: &str,
 ) -> Result<schema_schemas::Model, YorishiroError> {
-    schema_schemas::Entity::find()
-        .filter(SchemaColumn::TenantId.eq(tenant_id))
-        .filter(SchemaColumn::WorkspaceId.eq(source_workspace_id))
-        .filter(SchemaColumn::Name.eq(source_schema_name))
-        .filter(SchemaColumn::Status.eq("active"))
-        .order_by_desc(SchemaColumn::Version)
-        .one(conn)
-        .await
-        .internal()?
+    latest_source_by_name(conn, tenant_id, source_workspace_id, source_schema_name)
+        .await?
         .ok_or_else(|| YorishiroError::not_found("source schema was not found"))
 }
 
@@ -247,11 +338,6 @@ pub async fn create<C: ConnectionTrait>(
     if target.tenant_id != tenant_id {
         return Err(YorishiroError::not_found("workspace was not found"));
     }
-    let source_workspace =
-        crate::models::tenancy::get_workspace(conn, input.source_workspace_id).await?;
-    if source_workspace.tenant_id != tenant_id {
-        return Err(YorishiroError::not_found("source workspace was not found"));
-    }
     // A single transaction-wide lock makes cycle validation atomic even when
     // two requests try to create opposite edges at the same time.
     crate::db::lock_for_update(conn, "schema-fork-cycle")
@@ -275,13 +361,7 @@ pub async fn create<C: ConnectionTrait>(
                 message: "creating this fork would create a workspace cycle".into(),
             });
         }
-        let outgoing = Entity::find()
-            .filter(Column::TenantId.eq(tenant_id))
-            .filter(Column::WorkspaceId.eq(source_id))
-            .all(conn)
-            .await
-            .internal()?;
-        pending.extend(outgoing.into_iter().map(|row| row.source_workspace_id));
+        pending.extend(fork_edges(conn, tenant_id, source_id).await?);
     }
     let head = insert_fork_head(
         conn,
@@ -356,6 +436,13 @@ pub async fn update<C: ConnectionTrait>(
     }
     let (definition, source_update) = if let Some(definition) = input.definition {
         validate_definition(&definition)?;
+        if definition.name != fork.source_schema_name {
+            return Err(YorishiroError::ValidationFailed {
+                message: "a fork definition cannot rename its source schema".into(),
+                details: vec![],
+                hint: "keep definition.name equal to source_schema_name".into(),
+            });
+        }
         (definition, None)
     } else {
         if input.action.as_deref() != Some("follow") {
