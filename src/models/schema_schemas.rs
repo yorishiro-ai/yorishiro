@@ -115,6 +115,9 @@ impl FromStr for SchemaOriginStatus {
     }
 }
 
+pub const ORIGIN_STATUS_LINKED: &str = SchemaOriginStatus::Linked.as_db_str();
+pub const ORIGIN_STATUS_DETACHED: &str = SchemaOriginStatus::Detached.as_db_str();
+
 /// Serializes every producer of a schema version for one workspace and name.
 /// Fork heads use this same lock as ordinary schema creation, so both paths
 /// observe one version sequence even when they run concurrently.

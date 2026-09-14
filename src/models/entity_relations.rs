@@ -111,6 +111,7 @@ pub const RELATION_STATUSES: [RelationStatus; 3] = [
     RelationStatus::Deprecated,
     RelationStatus::Archived,
 ];
+pub const RELATION_STATUS_ACTIVE: &str = RelationStatus::Active.as_db_str();
 
 /// Whether `status` names a state a relation may hold.
 /// Callers validate before writing so an unknown value is a 422 naming the field, not a constraint violation surfacing as a 500.

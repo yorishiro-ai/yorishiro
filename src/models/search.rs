@@ -18,6 +18,8 @@ use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 const DEFAULT_SEARCH_LIMIT: i64 = 10;
+pub const MIN_SEARCH_LIMIT: i64 = 1;
+pub const MAX_SEARCH_LIMIT: i64 = 200;
 
 pub struct SearchQuery {
     pub entity_type: Option<String>,
@@ -235,7 +237,7 @@ pub async fn search_by_vector(
     query: SearchQuery,
     licenced: bool,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
-    let limit = query.limit.clamp(1, 200);
+    let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
 
     // SQLite has no JSONB containment operator to replace `data @> filter`.
     if query.filter.is_some() && conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
