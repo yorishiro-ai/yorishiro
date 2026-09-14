@@ -1,5 +1,8 @@
 use sea_orm::Statement;
 use sea_orm::entity::prelude::*;
+use serde::Serialize;
+use std::fmt;
+use std::str::FromStr;
 
 pub use super::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
@@ -25,12 +28,43 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// A workspace with no schema yet.
-/// Entity writes are refused with a 422 that says so.
-pub const WORKSPACE_STATUS_SCHEMA_PENDING: &str = "schema_pending";
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceStatus {
+    SchemaPending,
+    Active,
+}
 
-/// A workspace that owns at least one schema.
-pub const WORKSPACE_STATUS_ACTIVE: &str = "active";
+impl WorkspaceStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::SchemaPending => "schema_pending",
+            Self::Active => "active",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
+impl fmt::Display for WorkspaceStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for WorkspaceStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "schema_pending" => Ok(Self::SchemaPending),
+            "active" => Ok(Self::Active),
+            _ => Err(format!("unknown workspace status: {value}")),
+        }
+    }
+}
 
 /// Whether the workspace is still waiting for its first schema.
 ///
@@ -45,7 +79,7 @@ pub async fn is_schema_pending(
         .internal()?
         .map(|model| model.status);
 
-    Ok(status.is_some_and(|s| s == WORKSPACE_STATUS_SCHEMA_PENDING))
+    Ok(status.is_some_and(|s| s == WorkspaceStatus::SchemaPending.as_db_str()))
 }
 
 /// Marks a workspace active and records its first schema, idempotently.
@@ -64,7 +98,7 @@ pub async fn mark_active(
          SET status = $1, schema_id = COALESCE(schema_id, $2) \
          WHERE id = $3",
         [
-            WORKSPACE_STATUS_ACTIVE.into(),
+            WorkspaceStatus::Active.as_db_str().into(),
             schema_id.into(),
             workspace_id.into(),
         ],

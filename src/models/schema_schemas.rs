@@ -3,6 +3,8 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 pub use super::_entities::schema_schemas::{ActiveModel, Entity, Model};
@@ -37,11 +39,81 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// Following a template that still exists.
-pub const ORIGIN_STATUS_LINKED: &str = "linked";
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchemaStatus {
+    Active,
+    Archived,
+}
 
-/// Not following anything: written by hand, or following a template that has since been deleted.
-pub const ORIGIN_STATUS_DETACHED: &str = "detached";
+impl SchemaStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
+impl fmt::Display for SchemaStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for SchemaStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "active" => Ok(Self::Active),
+            "archived" => Ok(Self::Archived),
+            _ => Err(format!("unknown schema status: {value}")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchemaOriginStatus {
+    Linked,
+    Detached,
+}
+
+impl SchemaOriginStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Linked => "linked",
+            Self::Detached => "detached",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
+impl fmt::Display for SchemaOriginStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for SchemaOriginStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "linked" => Ok(Self::Linked),
+            "detached" => Ok(Self::Detached),
+            _ => Err(format!("unknown schema origin status: {value}")),
+        }
+    }
+}
 
 /// Serializes every producer of a schema version for one workspace and name.
 /// Fork heads use this same lock as ordinary schema creation, so both paths
@@ -66,9 +138,9 @@ pub struct SchemaRecord {
     pub name: String,
     pub version: i32,
     pub definition: MetaSchemaDefinition,
-    pub status: String,
+    pub status: SchemaStatus,
     pub origin_template_id: Option<Uuid>,
-    pub origin_status: String,
+    pub origin_status: SchemaOriginStatus,
     pub origin_snapshot: Option<MetaSchemaDefinition>,
     pub origin_updated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -85,9 +157,18 @@ impl TryFrom<Model> for SchemaRecord {
             name: row.name,
             version: row.version,
             definition: serde_json::from_value(row.definition).internal()?,
-            status: row.status,
+            status: SchemaStatus::from_db_str(&row.status).ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("unknown schema status: {}", row.status))
+            })?,
             origin_template_id: row.origin_template_id,
-            origin_status: row.origin_status,
+            origin_status: SchemaOriginStatus::from_db_str(&row.origin_status).ok_or_else(
+                || {
+                    YorishiroError::Internal(anyhow::anyhow!(
+                        "unknown schema origin status: {}",
+                        row.origin_status
+                    ))
+                },
+            )?,
             origin_snapshot: row
                 .origin_snapshot
                 .map(serde_json::from_value)
@@ -231,7 +312,7 @@ pub struct SchemaSummary {
     pub id: Uuid,
     pub name: String,
     pub version: i32,
-    pub status: String,
+    pub status: SchemaStatus,
     pub created_at: DateTime<Utc>,
 }
 
@@ -241,7 +322,7 @@ impl From<Model> for SchemaSummary {
             id: model.id,
             name: model.name,
             version: model.version,
-            status: model.status,
+            status: SchemaStatus::from_db_str(&model.status).unwrap_or(SchemaStatus::Archived),
             created_at: model.created_at.into(),
         }
     }
@@ -282,7 +363,7 @@ pub async fn notify_upstream_change(
     let result = Entity::update_many()
         .col_expr(Column::OriginUpdatedAt, Expr::value(None::<DateTime<Utc>>))
         .filter(Column::OriginTemplateId.eq(template_id))
-        .filter(Column::OriginStatus.eq(ORIGIN_STATUS_LINKED))
+        .filter(Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
         .exec(conn)
         .await
         .internal()?;
@@ -390,9 +471,9 @@ pub async fn create_schema(
         .transpose()
         .internal()?;
     let origin_status = if origin_template_id.is_some() {
-        ORIGIN_STATUS_LINKED
+        SchemaOriginStatus::Linked.as_db_str()
     } else {
-        ORIGIN_STATUS_DETACHED
+        SchemaOriginStatus::Detached.as_db_str()
     };
 
     let active = ActiveModel {
@@ -401,7 +482,7 @@ pub async fn create_schema(
         name: ActiveValue::Set(name.clone()),
         version: ActiveValue::Set(next_version),
         definition: ActiveValue::Set(definition_json),
-        status: ActiveValue::Set("active".to_string()),
+        status: ActiveValue::Set(SchemaStatus::Active.as_db_str().to_string()),
         origin_template_id: ActiveValue::Set(origin_template_id),
         origin_status: ActiveValue::Set(origin_status.to_string()),
         origin_snapshot: ActiveValue::Set(origin_snapshot_json),

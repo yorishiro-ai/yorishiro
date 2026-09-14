@@ -69,6 +69,8 @@ You can also queue a reindex via the API: `POST /api/migration-jobs/reindex` (re
 ## Database load guard
 
 The PostgreSQL load guard is disabled by default because it changes the deployment-wide maintenance state automatically.
+
+Status values are typed internally while preserving their existing string representation on API and database wire formats.
 Set `YORISHIRO_DB_LOAD_THRESHOLD` to the active-connection count that should be treated as busy to enable it.
 The guard samples `pg_stat_activity` every 5 seconds by default and changes to read-only only after the threshold remains crossed for 30 seconds.
 It returns to normal service after the same quiet period, but only when the guard itself set read-only mode.
