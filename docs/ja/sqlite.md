@@ -33,11 +33,7 @@ cargo run
 
 ## 設定ファイル
 
-テスト用の設定が `config/test_sqlite.yaml` にあります（手動検証用）。本番用の SQLite 設定ファイルはありません。`production.yaml` に `sqlite://` URL を設定してください。
-
-## テスト
-
-`make test-sqlite` で SQLite テストを実行します。並列問題を避けるため `--test-threads=1` でインメモリデータベースに対して実行されます。フルテストスイート（`make test`）は PostgreSQL に対してのみ実行されます。
+本番用の SQLite 専用設定ファイルはありません。`production.yaml` に `sqlite://` URL を設定してください。
 
 ## 認証
 

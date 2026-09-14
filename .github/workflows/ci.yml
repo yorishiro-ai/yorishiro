@@ -198,4 +198,4 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
-        run: cargo test --locked --workspace -- --test-threads=1
+        run: cargo test --locked --workspace

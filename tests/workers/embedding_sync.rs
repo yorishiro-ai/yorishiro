@@ -1,6 +1,7 @@
 /// Tests for the embedding sync worker: worker class tags, serialization, and class names.
+use loco_rs::bgworker::BackgroundWorker;
 use yorishiro::workers::embedding_sync::{
-    EmbeddingSyncWorkerTenantPrivate, EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
+    EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared, EmbeddingSyncWorkerTenantPrivate,
     WorkerClass,
 };
 
@@ -9,15 +10,15 @@ use yorishiro::workers::embedding_sync::{
 fn each_worker_type_carries_exactly_its_own_class_tag() {
     assert_eq!(
         EmbeddingSyncWorkerTenantPrivate::tags(),
-        vec![WorkerClass::TenantPrivate.tag().to_string()]
+        vec!["worker-class:tenant-private".to_string()]
     );
     assert_eq!(
         EmbeddingSyncWorkerOfficial::tags(),
-        vec![WorkerClass::Official.tag().to_string()]
+        vec!["worker-class:official".to_string()]
     );
     assert_eq!(
         EmbeddingSyncWorkerShared::tags(),
-        vec![WorkerClass::Shared.tag().to_string()]
+        vec!["worker-class:shared".to_string()]
     );
 }
 

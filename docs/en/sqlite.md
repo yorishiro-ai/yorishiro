@@ -33,11 +33,7 @@ At least 2 connections are required. The server refuses to start if `max_connect
 
 ## Configuration files
 
-A test config exists at `config/test_sqlite.yaml` for manual verification. There is no production SQLite config file; use `production.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
-
-## Testing
-
-SQLite tests run via `make test-sqlite`. They execute with `--test-threads=1` against an in-memory database to avoid concurrency issues. The full test suite (`make test`) runs against PostgreSQL only.
+There is no separate SQLite production config file; use `production.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
 
 ## Authentication
 
