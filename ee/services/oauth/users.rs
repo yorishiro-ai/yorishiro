@@ -8,7 +8,7 @@ use crate::models::_entities::tenant_tenants;
 use crate::models::_entities::workspace_workspaces as workspace_workspaces_entity;
 use crate::models::schema_schemas;
 use crate::models::tenancy::{self, MembershipRole};
-use crate::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
+use crate::models::workspace_workspaces::WorkspaceStatus;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait,
@@ -125,7 +125,7 @@ pub async fn find_or_create(
     let workspace_active = workspace_workspaces_entity::ActiveModel {
         id: ActiveValue::Unchanged(workspace.id),
         schema_id: ActiveValue::Set(Some(schema.id)),
-        status: ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
+        status: ActiveValue::Set(WorkspaceStatus::Active.as_db_str().to_string()),
         ..Default::default()
     };
     let workspace = workspace_active.update(conn).await.internal()?;

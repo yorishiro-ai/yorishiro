@@ -97,7 +97,10 @@ pub async fn recall_context(
     entity_id: Uuid,
     query: RecallQuery,
 ) -> Result<RecallContext, YorishiroError> {
-    let limit = query.limit.clamp(1, 200);
+    let limit = query.limit.clamp(
+        entity_relations::MIN_NEIGHBORS_LIMIT,
+        entity_relations::MAX_NEIGHBORS_LIMIT,
+    );
     let depth = query.depth.clamp(1, MAX_RECALL_DEPTH);
     let full = query.full;
 

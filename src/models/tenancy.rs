@@ -500,9 +500,7 @@ pub async fn create_workspace(
     _embedding: Option<(&str, i32)>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     use crate::models::_entities::tenant_tenants;
-    use crate::models::workspace_workspaces::{
-        WORKSPACE_STATUS_ACTIVE, WORKSPACE_STATUS_SCHEMA_PENDING,
-    };
+    use crate::models::workspace_workspaces::WorkspaceStatus;
 
     let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
         .one(conn)
@@ -536,9 +534,9 @@ pub async fn create_workspace(
         schema_id: ActiveValue::Set(schema_id),
         status: ActiveValue::Set(
             if schema_id.is_some() {
-                WORKSPACE_STATUS_ACTIVE
+                WorkspaceStatus::Active.as_db_str()
             } else {
-                WORKSPACE_STATUS_SCHEMA_PENDING
+                WorkspaceStatus::SchemaPending.as_db_str()
             }
             .to_string(),
         ),

@@ -1,3 +1,4 @@
+use crate::db::AppContextBackend;
 use async_trait::async_trait;
 use loco_rs::{
     Result,
@@ -177,11 +178,11 @@ impl Hooks for App {
     /// On SQLite none of this runs, and the branch must skip it rather than let it fail: `PgPoolOptions::connect` on a `sqlite://` URL hangs indefinitely instead of erroring.
     /// That backend has no second tenant to isolate (see `docs/sqlite.md`), so `DbHandle` and the `Authenticator` trait implementation are not built at all; `controllers::extractors` authenticates against `ctx.db` directly there.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if ctx.is_sqlite() {
             crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
                 .map_err(loco_rs::Error::Message)?;
         }
-        if ctx.db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+        if ctx.is_postgres() {
             let database_url = ctx.config.database.uri.clone();
             let tenant =
                 crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
@@ -232,7 +233,7 @@ impl Hooks for App {
         ctx.shared_store
             .insert(crate::ee::services::licence::LicenceState::from_env());
 
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if ctx.is_sqlite() {
             // The three ee/ features named here use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, or correlated subqueries with advisory locks) and would otherwise fail at execution time
             // naming a query rather than the configuration behind it. Nothing else reports the
             // enterprise edition's state at boot here, since `TenantScopedAuthenticator` below is

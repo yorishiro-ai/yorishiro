@@ -74,9 +74,9 @@ pub async fn sync_embedding(
     let effective_dimensions = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .or(Some(
-            i32::try_from(chain.deployment_dimensions).unwrap_or(768),
-        ));
+        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(
+            crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32,
+        )));
     if let Some(expected) = effective_dimensions
         && vector.len() as usize != expected as usize
     {
@@ -134,8 +134,10 @@ pub async fn sync_embedding(
     let effective_dimension = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .unwrap_or(i32::try_from(chain.deployment_dimensions).unwrap_or(768))
-        as usize;
+        .unwrap_or(
+            i32::try_from(chain.deployment_dimensions)
+                .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
+        ) as usize;
 
     let written = embed_and_write(
         conn,
@@ -577,9 +579,9 @@ pub async fn resolve_embedding_chain(
     // Deployment default: read from the environment variable.
     // The deployment's embedding dimensions are always set (default 768).
     let deployment_dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
-        .unwrap_or_else(|_| "768".into())
+        .unwrap_or_else(|_| crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS.to_string())
         .parse()
-        .unwrap_or(768);
+        .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS);
 
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,

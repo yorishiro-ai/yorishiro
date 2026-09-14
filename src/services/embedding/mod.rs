@@ -5,6 +5,8 @@ mod model_fetch;
 pub mod openai;
 pub mod sync;
 
+pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
+
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
 use std::sync::Arc;
@@ -153,7 +155,7 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
-        .unwrap_or_else(|_| "768".into())
+        .unwrap_or_else(|_| DEFAULT_EMBEDDING_DIMENSIONS.to_string())
         .parse()?;
 
     // Check base_url/model presence before PROVIDER so that the documented

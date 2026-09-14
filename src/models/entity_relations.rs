@@ -1,15 +1,86 @@
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::str::FromStr;
 use uuid::Uuid;
 
 pub use super::_entities::entity_relations::{ActiveModel, Entity, Model};
-use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_entities::{self, EntityRecord};
 
-/// The generated `Model` already matches this API's response shape, so this is an alias rather than a distinct struct.
-pub type RelationRecord = Model;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationStatus {
+    Active,
+    Deprecated,
+    Archived,
+}
+
+impl RelationStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Deprecated => "deprecated",
+            Self::Archived => "archived",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
+impl std::fmt::Display for RelationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for RelationStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "active" => Ok(Self::Active),
+            "deprecated" => Ok(Self::Deprecated),
+            "archived" => Ok(Self::Archived),
+            _ => Err(format!("unknown relation status: {value}")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RelationRecord {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub source_id: Uuid,
+    pub target_id: Uuid,
+    pub relation_type: String,
+    pub properties: Value,
+    pub status: RelationStatus,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+}
+
+impl TryFrom<Model> for RelationRecord {
+    type Error = YorishiroError;
+
+    fn try_from(model: Model) -> Result<Self, Self::Error> {
+        let status = RelationStatus::from_db_str(&model.status).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!("unknown relation status: {}", model.status))
+        })?;
+        Ok(Self {
+            id: model.id,
+            workspace_id: model.workspace_id,
+            source_id: model.source_id,
+            target_id: model.target_id,
+            relation_type: model.relation_type,
+            properties: model.properties,
+            status,
+            created_at: model.created_at,
+        })
+    }
+}
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -34,14 +105,17 @@ impl ActiveModel {}
 impl Entity {}
 
 /// The state a relation is created in, and the only one traversal follows.
-pub const RELATION_STATUS_ACTIVE: &str = "active";
-
 /// Every state a relation may hold, matching the check constraint on `entity_relations`.
-pub const RELATION_STATUSES: [&str; 3] = ["active", "deprecated", "archived"];
+pub const RELATION_STATUSES: [RelationStatus; 3] = [
+    RelationStatus::Active,
+    RelationStatus::Deprecated,
+    RelationStatus::Archived,
+];
+pub const RELATION_STATUS_ACTIVE: &str = RelationStatus::Active.as_db_str();
 
 /// Whether `status` names a state a relation may hold.
 /// Callers validate before writing so an unknown value is a 422 naming the field, not a constraint violation surfacing as a 500.
-pub fn is_valid_relation_status(status: &str) -> bool {
+pub fn is_valid_relation_status(status: RelationStatus) -> bool {
     RELATION_STATUSES.contains(&status)
 }
 
@@ -59,7 +133,7 @@ pub struct ListRelationsQuery {
     pub relation_type: Option<String>,
     /// Restricts the listing to one state.
     /// `None` lists every state, so a caller that does not pass `status` sees deprecated and archived relations along with every other state.
-    pub status: Option<String>,
+    pub status: Option<RelationStatus>,
     pub page: super::pagination::ListParams,
 }
 
@@ -125,28 +199,32 @@ pub async fn create(
         properties: ActiveValue::Set(properties),
         ..Default::default()
     };
-    active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!(
-                    "relation '{}' between '{}' and '{}' already exists",
-                    input.relation_type, input.source_id, input.target_id
-                ),
+    active
+        .insert(conn)
+        .await
+        .map_err(|err| {
+            if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
+                YorishiroError::Conflict {
+                    message: format!(
+                        "relation '{}' between '{}' and '{}' already exists",
+                        input.relation_type, input.source_id, input.target_id
+                    ),
+                }
+            } else if matches!(
+                err.sql_err(),
+                Some(SqlErr::ForeignKeyConstraintViolation(_))
+            ) {
+                // A TOCTOU window between checking source/target existence and the INSERT, during which another transaction could delete the entity.
+                // Treated as NotFound, same as the upfront check.
+                YorishiroError::not_found(format!(
+                    "source '{}' or target '{}' no longer exists",
+                    input.source_id, input.target_id
+                ))
+            } else {
+                YorishiroError::Internal(err.into())
             }
-        } else if matches!(
-            err.sql_err(),
-            Some(SqlErr::ForeignKeyConstraintViolation(_))
-        ) {
-            // A TOCTOU window between checking source/target existence and the INSERT, during which another transaction could delete the entity.
-            // Treated as NotFound, same as the upfront check.
-            YorishiroError::not_found(format!(
-                "source '{}' or target '{}' no longer exists",
-                input.source_id, input.target_id
-            ))
-        } else {
-            YorishiroError::Internal(err.into())
-        }
-    })
+        })
+        .and_then(TryInto::try_into)
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
@@ -164,6 +242,7 @@ pub async fn get(
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
+        .and_then(TryInto::try_into)
 }
 
 /// Moves a relation to another state.
@@ -176,23 +255,6 @@ pub async fn set_status(
     id: Uuid,
     status: &str,
 ) -> Result<RelationRecord, YorishiroError> {
-    if !is_valid_relation_status(status) {
-        return Err(YorishiroError::ValidationFailed {
-            message: format!("'{status}' is not a relation status"),
-            details: vec![ValidationDetail {
-                field: "/status".to_string(),
-                problem: format!("expected one of {}", RELATION_STATUSES.join(", ")),
-                code: ValidationErrorCode::Other,
-                expected: Some(RELATION_STATUSES.join(", ")),
-                actual: Some(status.to_string()),
-            }],
-            hint: format!(
-                "use one of {}: traversal follows '{RELATION_STATUS_ACTIVE}' only",
-                RELATION_STATUSES.join(", ")
-            ),
-        });
-    }
-
     let existing = get(conn, workspace_id, id).await?;
 
     let active = ActiveModel {
@@ -202,12 +264,16 @@ pub async fn set_status(
     };
     // A concurrent delete between `get` above and this update surfaces as `DbErr::RecordNotUpdated`, not a row.
     // Map it to the same 404 the upfront `get` would have returned had it lost the race instead, rather than letting `.internal()` turn it into a 500.
-    active.update(conn).await.map_err(|err| match err {
-        DbErr::RecordNotUpdated => {
-            YorishiroError::not_found(format!("relation '{id}' was not found"))
-        }
-        err => YorishiroError::Internal(err.into()),
-    })
+    active
+        .update(conn)
+        .await
+        .map_err(|err| match err {
+            DbErr::RecordNotUpdated => {
+                YorishiroError::not_found(format!("relation '{id}' was not found"))
+            }
+            err => YorishiroError::Internal(err.into()),
+        })
+        .and_then(TryInto::try_into)
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
@@ -253,7 +319,7 @@ pub async fn list(
         select = select.filter(Column::RelationType.eq(relation_type));
     }
     if let Some(status) = query.status {
-        select = select.filter(Column::Status.eq(status));
+        select = select.filter(Column::Status.eq(status.as_db_str()));
     }
 
     select
@@ -263,6 +329,7 @@ pub async fn list(
         .all(conn)
         .await
         .internal()
+        .and_then(|rows| rows.into_iter().map(TryInto::try_into).collect())
 }
 
 /// Counts how many relations a workspace holds, for workspace-detail summaries.
@@ -292,8 +359,11 @@ pub async fn export_all(
         .all(conn)
         .await
         .internal()
+        .and_then(|rows| rows.into_iter().map(TryInto::try_into).collect())
 }
 
+pub const MIN_NEIGHBORS_LIMIT: i64 = 1;
+pub const MAX_NEIGHBORS_LIMIT: i64 = 200;
 pub const DEFAULT_NEIGHBORS_LIMIT: i64 = 20;
 
 /// A relation together with the entity on the other end of it, relative to the entity `neighbors_batch` was called for.
@@ -364,7 +434,7 @@ pub async fn neighbors_batch(
     pivot_ids: &[Uuid],
     limit: i64,
 ) -> Result<std::collections::HashMap<Uuid, Vec<Neighbor>>, YorishiroError> {
-    let limit = limit.clamp(1, 200);
+    let limit = limit.clamp(MIN_NEIGHBORS_LIMIT, MAX_NEIGHBORS_LIMIT);
     let pivot_ids: Vec<Uuid> = pivot_ids
         .iter()
         .copied()
