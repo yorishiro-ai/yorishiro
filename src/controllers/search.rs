@@ -9,6 +9,7 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{
     ReadScope, Verified, db_handle, resolve_embedding_provider, search_token_limiter,
 };
+use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::models::search::{self, SearchHit};
 use crate::services::rate_limit::charge_search_tokens;
@@ -50,7 +51,7 @@ pub async fn search_entities(
     let workspace_id = verified.ctx.workspace_id;
 
     // A read-only transaction: dropped without committing when this returns, a no-op since nothing was written.
-    let txn = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+    let txn = if ctx.is_sqlite() {
         ctx.db
             .begin()
             .await
