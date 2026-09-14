@@ -28,6 +28,44 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
+/// API-facing workspace record with a typed status.
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkspaceRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub max_entities: Option<i32>,
+    pub status: WorkspaceStatus,
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
+    pub schema_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+}
+
+impl TryFrom<Model> for WorkspaceRecord {
+    type Error = YorishiroError;
+
+    fn try_from(model: Model) -> Result<Self, Self::Error> {
+        let status = WorkspaceStatus::from_db_str(&model.status).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown workspace status: {}",
+                model.status
+            ))
+        })?;
+        Ok(Self {
+            id: model.id,
+            tenant_id: model.tenant_id,
+            name: model.name,
+            max_entities: model.max_entities,
+            status,
+            embedding_model: model.embedding_model,
+            embedding_dimensions: model.embedding_dimensions,
+            schema_id: model.schema_id,
+            created_at: model.created_at,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceStatus {

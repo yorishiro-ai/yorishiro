@@ -17,6 +17,7 @@ use crate::controllers::members::require_tenant_admin;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces;
 use crate::models::tenancy;
+use crate::models::workspace_workspaces::WorkspaceRecord;
 use crate::models::{entity_entities, entity_relations, schema_schemas};
 
 /// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or act on another tenant's workspace by guessing its id.
@@ -38,13 +39,18 @@ async fn get_workspace_in_tenant(
 pub async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-) -> Result<Json<Vec<workspace_workspaces::Model>>, ApiError> {
+) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
     let workspaces = workspace_workspaces::Entity::find()
         .filter(workspace_workspaces::Column::TenantId.eq(auth.tenant_id))
         .all(&ctx.db)
         .await
         .map_err(|err| ApiError::from(YorishiroError::Internal(err.into())))?;
-    Ok(Json(workspaces))
+    Ok(Json(
+        workspaces
+            .into_iter()
+            .map(WorkspaceRecord::try_from)
+            .collect::<Result<_, _>>()?,
+    ))
 }
 
 #[derive(Deserialize)]
