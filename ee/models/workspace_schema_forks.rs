@@ -13,6 +13,7 @@ use crate::metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definitio
 use crate::models::schema_schemas;
 
 use crate::models::_entities::schema_schemas::Column as SchemaColumn;
+use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
 
 #[derive(Clone, Debug, Serialize)]
@@ -136,6 +137,7 @@ async fn insert_fork_head<C: ConnectionTrait>(
 ) -> Result<(schema_schemas::Model, VersioningDiff), YorishiroError> {
     validate_definition(definition)?;
     let name = definition.name.clone();
+    schema_schemas::lock_version(conn, workspace_id, &name).await?;
     let version = next_version(conn, workspace_id, &name).await?;
     let diff = VersioningDiff {
         is_breaking: false,
@@ -250,12 +252,11 @@ pub async fn create<C: ConnectionTrait>(
     if source_workspace.tenant_id != tenant_id {
         return Err(YorishiroError::not_found("source workspace was not found"));
     }
-    crate::db::lock_for_update(
-        conn,
-        &format!("schema-fork:{workspace_id}:{}", input.source_workspace_id),
-    )
-    .await
-    .internal()?;
+    // A single transaction-wide lock makes cycle validation atomic even when
+    // two requests try to create opposite edges at the same time.
+    crate::db::lock_for_update(conn, "schema-fork-cycle")
+        .await
+        .internal()?;
     let source = current_source(
         conn,
         tenant_id,
@@ -263,6 +264,25 @@ pub async fn create<C: ConnectionTrait>(
         input.source_schema_id,
     )
     .await?;
+    let mut pending = vec![input.source_workspace_id];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(source_id) = pending.pop() {
+        if !visited.insert(source_id) {
+            continue;
+        }
+        if source_id == workspace_id {
+            return Err(YorishiroError::Conflict {
+                message: "creating this fork would create a workspace cycle".into(),
+            });
+        }
+        let outgoing = Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::WorkspaceId.eq(source_id))
+            .all(conn)
+            .await
+            .internal()?;
+        pending.extend(outgoing.into_iter().map(|row| row.source_workspace_id));
+    }
     let head = insert_fork_head(
         conn,
         tenant_id,
@@ -295,6 +315,17 @@ pub async fn create<C: ConnectionTrait>(
             YorishiroError::Internal(err.into())
         }
     })?;
+    fork_heads::ActiveModel {
+        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        tenant_id: ActiveValue::Set(tenant_id),
+        workspace_id: ActiveValue::Set(workspace_id),
+        fork_id: ActiveValue::Set(row.id),
+        schema_id: ActiveValue::Set(row.fork_schema_id),
+        ..Default::default()
+    }
+    .insert(conn)
+    .await
+    .internal()?;
     to_record(conn, row).await
 }
 
@@ -362,6 +393,7 @@ pub async fn update<C: ConnectionTrait>(
     let mut active: ActiveModel = fork.into();
     active.fork_schema_id = ActiveValue::Set(head.id);
     active.customized = ActiveValue::Set(source_update.is_none());
+    active.updated_at = ActiveValue::Set(Utc::now().into());
     if let Some(source) = source_update {
         active.source_schema_id = ActiveValue::Set(source.id);
         active.source_schema_version = ActiveValue::Set(source.version);
@@ -378,6 +410,17 @@ pub async fn update<C: ConnectionTrait>(
             message: "the schema fork changed since it was read".into(),
         });
     }
+    fork_heads::ActiveModel {
+        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        tenant_id: ActiveValue::Set(tenant_id),
+        workspace_id: ActiveValue::Set(workspace_id),
+        fork_id: ActiveValue::Set(fork_id),
+        schema_id: ActiveValue::Set(head.id),
+        ..Default::default()
+    }
+    .insert(conn)
+    .await
+    .internal()?;
     get(conn, tenant_id, workspace_id, fork_id).await
 }
 
@@ -391,9 +434,19 @@ pub async fn delete<C: ConnectionTrait>(
         .await
         .internal()?;
     let fork = get_fork(conn, tenant_id, workspace_id, fork_id).await?;
+    let head_ids = fork_heads::Entity::find()
+        .filter(fork_heads::Column::ForkId.eq(fork.id))
+        .filter(fork_heads::Column::TenantId.eq(tenant_id))
+        .filter(fork_heads::Column::WorkspaceId.eq(workspace_id))
+        .all(conn)
+        .await
+        .internal()?
+        .into_iter()
+        .map(|head| head.schema_id)
+        .collect::<Vec<_>>();
     let referenced = crate::models::_entities::entity_entities::Entity::find()
         .filter(crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id))
-        .filter(crate::models::_entities::entity_entities::Column::SchemaId.eq(fork.fork_schema_id))
+        .filter(crate::models::_entities::entity_entities::Column::SchemaId.is_in(head_ids))
         .count(conn)
         .await
         .internal()?

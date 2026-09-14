@@ -43,6 +43,19 @@ pub const ORIGIN_STATUS_LINKED: &str = "linked";
 /// Not following anything: written by hand, or following a template that has since been deleted.
 pub const ORIGIN_STATUS_DETACHED: &str = "detached";
 
+/// Serializes every producer of a schema version for one workspace and name.
+/// Fork heads use this same lock as ordinary schema creation, so both paths
+/// observe one version sequence even when they run concurrently.
+pub async fn lock_version(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    name: &str,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
+        .await
+        .internal()
+}
+
 /// Represents a row in the `schema_schemas` table.
 /// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -298,9 +311,7 @@ pub async fn create_schema(
         tenant_id
     );
 
-    crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
-        .await
-        .internal()?;
+    lock_version(conn, workspace_id, &name).await?;
 
     let previous = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))

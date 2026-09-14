@@ -34,6 +34,9 @@ pub(crate) async fn authenticate_workspace(
     headers: &HeaderMap,
 ) -> Result<auth::AuthContext, YorishiroError> {
     let token = bearer_token(headers)?;
+    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return auth::authenticate_sqlite(&ctx.db, token).await;
+    }
     let db = db_handle(ctx)?;
     let forwarded: Vec<(String, String)> = headers
         .iter()

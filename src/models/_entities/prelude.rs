@@ -25,6 +25,7 @@ pub use super::user_users::Entity as UserUsers;
 pub use super::workspace_embedding_keys::Entity as WorkspaceEmbeddingKeys;
 pub use super::workspace_invites::Entity as WorkspaceInvites;
 pub use super::workspace_llm_keys::Entity as WorkspaceLlmKeys;
+pub use super::workspace_schema_fork_heads::Entity as WorkspaceSchemaForkHeads;
 pub use super::workspace_schema_forks::Entity as WorkspaceSchemaForks;
 pub use super::workspace_worker_classes::Entity as WorkspaceWorkerClasses;
 pub use super::workspace_workspaces::Entity as WorkspaceWorkspaces;
