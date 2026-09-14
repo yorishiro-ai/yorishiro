@@ -205,9 +205,25 @@ impl Task for TenantReindexScheduler {
                 .map_err(|e| Error::Message(e.to_string()))?;
 
             for ws in workspaces {
+                let worker_class = match crate::controllers::extractors::resolve_worker_class(
+                    app_context,
+                    ws.id,
+                )
+                .await
+                {
+                    Ok(worker_class) => worker_class,
+                    Err(err) => {
+                        tracing::warn!(
+                            workspace_id = %ws.id,
+                            error = %err.0,
+                            "reindex scheduler: failed to resolve worker class, defaulting to shared"
+                        );
+                        WorkerClass::Shared
+                    }
+                };
                 let args = ReindexArgs {
                     workspace_id: ws.id,
-                    worker_class: WorkerClass::Shared,
+                    worker_class,
                 };
                 if let Err(err) =
                     crate::workers::reindex::enqueue_for_class(app_context, args).await

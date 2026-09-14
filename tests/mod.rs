@@ -5,6 +5,7 @@ mod models;
 mod requests;
 mod services;
 mod tasks;
+mod workers;
 
 /// Returns `true` when `DATABASE_URL` points to SQLite, `false` otherwise.
 /// Callers should do `if !require_sqlite_backend() { return; }` to skip

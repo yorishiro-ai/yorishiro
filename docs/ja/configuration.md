@@ -105,21 +105,58 @@ Yorishiro はメールを送信しません。`MAILER_HOST` を設定した場�
 
 `LOG_LEVEL` 環境変数でログの出力レベルを指定します（`debug`、`info`、`warn`、`error`）。`RUST_LOG` 変数でも設定でき、そちらが優先されます。
 
-## ワーカー（バックグラウンドジョブ）
+## ワーカーとキュー（バックグラウンドジョブ）
 
-Yorishiro は埋め込み生成などの作業をバックグラウンドジョブとして処理します。デフォルトではリクエストを処理するプロセスと同じものがジョブも処理します。
+ワーカーは、バックグラウンドジョブを取り出して実行する実行プロセスです。
+ワーカープールは `WorkerClass` で選ぶ対象グループで、`TenantPrivate`、`Official`、`Shared` のいずれかです。
+キューは永続化されたジョブのバックログであり、ワーカープールやデータベース接続プールとは別のものです。
 
-ワーカーを別プロセスで動かす場合：
+HTTP サーバとワーカーは別プロセスで起動します。
+すべてのジョブを処理するワーカーは次のコマンドです。
 
 ```
-cargo loco start --worker
+cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
 ```
 
-このワーカープロセスにも、メインのサーバと同じ設定（データベース URL、埋め込み設定など）が必要です。
+特定の埋め込み・再インデックス対象グループだけを処理する場合は、プールごとに起動します。
 
-デフォルトでは 2 つのワーカーが並列に動きます。`YORISHIRO_QUEUE_WORKERS` で数を変更できます。クラッシュしたワーカーのジョブを回復するためのリカバリは、既定で 30 分ごとに動作します（`YORISHIRO_QUEUE_REAPER_AGE_MINUTES` で変更可）。
+```
+cargo loco start --worker=worker-class:shared
+cargo loco start --worker=worker-class:official
+cargo loco start --worker=worker-class:tenant-private
+```
 
-ワーカーは別のマシンでも動かせます。同じデータベースとキュー URL を指すようにするだけです。PostgreSQL を使うと複数のワーカーが並列に動作しますが、SQLite の場合は一度に 1 つずつ処理されます。
+`infer-fill` は別のタグ付きジョブです。
+infer-fill 専用プロセスは `cargo loco start --worker=infer-fill` を使います。
+すべてのジョブを処理するコマンドには、3 つのワーカープールタグと `infer-fill` を含めます。
+
+Yorishiro のバックグラウンドジョブには、タグなしの `cargo loco start --worker`、`--server-and-worker`、`--all` を使わないでください。
+これらのモードでは Loco に空のタグ一覧が渡され、タグなしジョブだけが対象になります。
+Yorishiro が登録するジョブにはタグが付くため、これらのモードでは処理されません。
+
+各ワーカープロセスには、同じキュー設定と、そのジョブに必要な埋め込みまたは推論の設定が必要です。
+ワーカーは HTTP サーバと同じホストでも別サーバでも動かせます。
+別サーバのワーカーは、サーバと同じ `QUEUE_URL` を必ず使ってください。
+SQLite ファイルを共有キューにする場合は絶対パスを使ってください。
+相対パスはホストごとに別々に解決され、共有キューになりません。
+PostgreSQL では複数のワーカープロセスが並列にジョブを取り出せます。
+SQLite では取り出し処理は直列ですが、永続キューによる障害回復は利用できます。
+
+`YORISHIRO_QUEUE_WORKERS` は 1 ワーカープロセス内の並列取り出しループ数を設定します。
+`YORISHIRO_QUEUE_REAPER_AGE_MINUTES` は、reaper が処理中ジョブを回復するまでの時間を設定します。
+
+## データベース接続プール
+
+データベース接続プールは、ワーカープールやキューとは別のものです。
+PostgreSQL では、`AppContext.db` は migration role を使う Loco の SeaORM プール、`TenantDb` は `ROLE yorishiro_app` を設定する RLS 用の別プール、`DbHandle.identity` は migration role を使うもう一つの raw sqlx プールです。
+Loco のキュープロバイダも独立したプールを持ちます。
+SQLite には `DbHandle` はなく、`AppContext.db` とキュープロバイダの別 SQLite プールを使います。
+
+本番の `database.max_connections` の既定値は、設定で上書きしない限り両バックエンドで `100` です。
+最小接続数の既定値は `1` です。
+CI は PostgreSQL の `DB_MAX_CONNECTIONS` を `100` に上書きし、SQLite のテスト設定ではアプリケーションプールの最大値を `10` にしています。
+これらの上限は独立したプールごとの値なので、データベース接続の合計は 1 プロセスが作る各プールの合計です。
+非同期の待機中はタスクが他の処理へ譲られますが、1 本の物理接続が同時に複数の SQL を実行できるわけではありません。
 
 ## テナント再インデックススケジュール
 

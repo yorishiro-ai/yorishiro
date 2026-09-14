@@ -105,21 +105,56 @@ Email is not used by Yorishiro. The mailer block is optional and only renders wh
 
 Yorishiro uses the `LOG_LEVEL` environment variable to set logging verbosity (`debug`, `info`, `warn`, `error`). The `RUST_LOG` variable also works and takes priority over everything else.
 
-## Workers (background jobs)
+## Workers and queues (background jobs)
 
-Yorishiro processes embedding generation and other tasks as background jobs. By default, the same process that serves requests also handles jobs.
+A worker is an executable process that dequeues and runs background jobs.
+A worker pool is a target group selected by `WorkerClass`: `TenantPrivate`, `Official`, or `Shared`.
+The queue is durable job backlog storage, not a worker pool or a database connection pool.
 
-To run workers in a separate process:
+Run the HTTP server and workers as separate processes.
+The supported all-job worker command is:
 
 ```
-cargo loco start --worker
+cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
 ```
 
-This process still needs the same configuration (database URL, embedding settings, etc.) as the main server.
+Run a pool-specific worker when that process should consume only one embedding and reindex target group:
 
-By default, 2 workers run in parallel. You can control this with `YORISHIRO_QUEUE_WORKERS`. The reaper (which recovers jobs from crashed workers) runs every 30 minutes by default and can be tuned with `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`.
+```
+cargo loco start --worker=worker-class:shared
+cargo loco start --worker=worker-class:official
+cargo loco start --worker=worker-class:tenant-private
+```
 
-Workers can run on a separate machine pointing at the same database and queue URL. With PostgreSQL, multiple worker processes truly run in parallel. With SQLite, they run one at a time (but still provide crash recovery).
+`infer-fill` is a separate tagged job type, so an infer-fill-only process uses `cargo loco start --worker=infer-fill`.
+The all-job command includes it as well as every worker-pool tag.
+
+Do not use a bare `cargo loco start --worker`, `--server-and-worker`, or `--all` for Yorishiro background jobs.
+Loco passes an empty tag list for those modes, which consumes only untagged jobs.
+Yorishiro's registered jobs are tagged, so those modes do not consume them.
+
+Every worker process needs the same queue configuration and embedding or inference configuration that its jobs require.
+Workers may run on the same host as the HTTP server or on a separate server.
+Separate-server workers must use the same `QUEUE_URL` as the server.
+When that URL names a shared SQLite file, use an absolute path because a relative path is resolved independently on each host and is not a shared queue.
+With PostgreSQL, multiple worker processes can dequeue in parallel.
+With SQLite, dequeueing is serialized, while durable queue recovery still works.
+
+`YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
+`YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
+
+## Database connection pools
+
+Database connection pools are unrelated to worker pools and the queue.
+On PostgreSQL, `AppContext.db` is Loco's SeaORM pool using the migration role, `TenantDb` is the separate RLS pool that sets `ROLE yorishiro_app`, and `DbHandle.identity` is a second migration-role raw sqlx pool.
+The Loco queue provider owns another independent pool.
+SQLite has no `DbHandle`; it uses `AppContext.db` plus the queue provider's separate SQLite pool.
+
+Production defaults `database.max_connections` to `100` on either backend unless configuration overrides it.
+The minimum default is `1`.
+CI overrides PostgreSQL `DB_MAX_CONNECTIONS` to `100`, and the SQLite test configuration sets its application pool maximum to `10`.
+These limits apply per independent pool, so aggregate database connections are the sum of the pools a process creates.
+Async waits release the task to do other work, but one physical connection still executes one SQL operation at a time.
 
 ## Tenant reindex schedule
 

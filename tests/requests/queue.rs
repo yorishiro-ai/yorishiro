@@ -3,12 +3,8 @@
 //! Nothing else in this suite exercises a queue backend.
 //! `config/test.yaml` sets `workers.mode: ForegroundBlocking`, under which `perform_later` calls `perform` inline and never touches a queue, so every job body is covered on every run and the enqueue path would otherwise be covered by nothing: a change breaking it ships through a green suite.
 //!
-//! **What this does not cover: the dequeue-side tag filter.**
-//! A change can break both the enqueue join tested here and the `WHERE` clause that decides which tags a running worker takes, and only the first is reachable from a test.
-//! `Queue::run(tags)` is the sole public entry to the dequeue side and it is a loop with no one-shot, so asserting on it means running a worker for a bounded interval and checking what happened, which is a timing test.
-//! `SqliteDriver::dequeue` is the primitive that would express it exactly, and it is unreachable: the `Driver` trait lives in `bgworker::sql`, which is `pub(crate)`.
-//! **Do not close this gap by re-running loco's own filter SQL against the queue table.** A copy of an implementation passes whether or not the implementation still behaves that way: it would keep passing after a loco upgrade changed the real filter, while appearing to cover exactly what changed.
-//! If loco ever makes `Driver` public, that assertion becomes writable and belongs here.
+//! `tests/workers/queue_routing.rs` covers the dequeue-side tag filter through `Queue::run(tags)`.
+//! It uses a probe worker and both SQL providers rather than copying Loco's filter SQL into this crate.
 //!
 //! The application database is PostgreSQL (`request_with_create_db`) while the queue is a SQLite file in a `TempDir`, which is a pairing no deployment runs.
 //! It is inert with respect to what is asserted rather than merely tolerated: the queue provider opens its own `sqlx::SqlitePool` against its own URI (`bgworker/mod.rs`) and has no view of `ctx.db` at all, which is the same independence that lets the database and queue share one file in `config/development.yaml`.
