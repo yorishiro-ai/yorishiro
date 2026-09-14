@@ -3,7 +3,7 @@
 # CI mirrors this structure: check / clippy / fmt-check run once, then test runs.
 # SQLite tests are gated by require_sqlite_backend() (DATABASE_URL scheme check).
 # Default database URL for PostgreSQL tests.
-# Override with: make test DATABASE_URL=postgres://user:pass@host:port/db
+# Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 

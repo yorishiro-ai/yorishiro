@@ -35,6 +35,11 @@ workers:
   #   - BackgroundAsync - Workers operate asynchronously in the background, processing tasks with async capabilities.
   mode: BackgroundQueue
 
+# Yorishiro's registered jobs use tags. Run HTTP and worker processes separately, and start
+# workers with the tags they should consume: worker-class:tenant-private, worker-class:official,
+# worker-class:shared, and/or infer-fill. Bare --worker, --server-and-worker, and --all pass an
+# empty tag list and are unsupported for these jobs.
+
 
 # Queue Configuration
 #

@@ -8,6 +8,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 |---|---|---|
 | `cargo test --locked --workspace` with PostgreSQL environment | Full suite with Rust's default parallel execution | PostgreSQL |
 | `cargo test --locked --workspace` with SQLite environment | Full suite with `require_sqlite_backend()` gate and Rust's default parallel execution | SQLite |
+| `make test-postgres` | Convenience wrapper for the PostgreSQL command above | PostgreSQL |
+| `make test-sqlite` | Convenience wrapper for the SQLite command above | SQLite |
 | `make check` | `cargo check --locked --workspace` | — |
 | `make clippy` | `cargo clippy --locked --workspace --tests -- -D warnings` | — |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |

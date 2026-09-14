@@ -1,8 +1,6 @@
-# Test environment for the SQLite backend (see docs/sqlite.md): boots the app against a
-# SQLite file directly, LOCO_ENV=test_sqlite. Not wired into any test suite — `tests/` stays
-# PostgreSQL-only (request_with_create_db issues `CREATE DATABASE`, which SQLite has no
-# equivalent for) — this file exists for `cargo loco start -e test_sqlite`-style manual
-# verification and for whenever a SQLite-boot test suite gets written later.
+# Test environment for the SQLite backend: boots the app against a SQLite file directly with
+# LOCO_ENV=test_sqlite. SQLite-specific tests use this environment; request_with_create_db
+# remains PostgreSQL-only because it issues CREATE DATABASE, which SQLite does not support.
 #
 # YORISHIRO_MAX_TENANTS must still be set (to any value) for POST /setup to answer as enabled:
 # setup.rs's wizard_enabled() checks only that the variable is set, not its value: the SQLite cap
