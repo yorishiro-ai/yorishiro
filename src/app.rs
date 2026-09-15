@@ -436,8 +436,23 @@ impl Hooks for App {
     /// That tenant is `INFRASTRUCTURE_TENANT_ID` (the nil UUID), which `models::tenancy` already
     /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
     /// so seeding it cannot consume a single-tenant deployment's one slot.
-    async fn seed(ctx: &AppContext, _base: &Path) -> Result<()> {
+    async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
+        // Seed from YAML fixtures (Loco db::seed)
+        if base.join("tenant_tenants.yaml").exists() {
+            loco_rs::db::seed::<crate::models::tenant_tenants::ActiveModel>(
+                &ctx.db,
+                &base.join("tenant_tenants.yaml").display().to_string(),
+            )
+            .await?;
+        }
+        if base.join("workspaces.yaml").exists() {
+            loco_rs::db::seed::<crate::models::workspace_workspaces::ActiveModel>(
+                &ctx.db,
+                &base.join("workspaces.yaml").display().to_string(),
+            )
+            .await?;
+        }
         Ok(())
     }
 }
