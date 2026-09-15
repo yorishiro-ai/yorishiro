@@ -1,0 +1,49 @@
+{
+  "id": "general-notes",
+  "name": "general-notes",
+  "description": "A general-purpose note-taking schema with tags and links",
+  "entity_types": {
+    "note": {
+      "description": "A free-form note with optional tags for categorization",
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Short title summarizing the note",
+          "x-embed": true,
+          "maxLength": 200
+        },
+        "body": {
+          "type": "string",
+          "description": "The main content of the note",
+          "x-embed": true,
+          "x-ui": { "widget": "textarea" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tags for categorization and filtering",
+          "uniqueItems": true
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the original source, if applicable"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "active", "archived"],
+          "default": "active",
+          "description": "Lifecycle status of the note"
+        }
+      }
+    }
+  },
+  "relation_types": {
+    "references": {
+      "source": "note",
+      "target": "note",
+      "description": "This note references or cites another note"
+    }
+  }
+}

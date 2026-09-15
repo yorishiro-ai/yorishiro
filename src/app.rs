@@ -411,42 +411,14 @@ impl Hooks for App {
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())
     }
-    /// Seeds the official-tenant row and all built-in marketplace templates from YAML fixtures,
-    /// then publishes version rows for any template that lacks one.
-    ///
-    /// Tenant and template rows come from `src/fixtures/` via Loco's `db::seed`, so `cargo loco
-    /// db seed --dump` can round-trip them.  Version numbers use the task's own `insert_next_version`
-    /// because that relies on a raw `INSERT ... SELECT COALESCE(max(version), 0) + 1` for
-    /// concurrency safety — a fixture cannot express that.
+    /// Ensures the infrastructure tenant exists; template publishing is handled by the
+    /// `seed_official_templates` task (invoked via `cargo loco task seed_official_templates`).
     ///
     /// That tenant is `INFRASTRUCTURE_TENANT_ID` (the nil UUID), which `models::tenancy` already
     /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
     /// so seeding it cannot consume a single-tenant deployment's one slot.
     async fn seed(ctx: &AppContext, _base: &Path) -> Result<()> {
-        use loco_rs::db;
-        use crate::models::_entities::{tenant_tenants, template_templates};
-
-        // Tenant row (id is the nil UUID, fixed).
-        db::seed::<tenant_tenants::ActiveModel>(&ctx.db, "src/fixtures/tenant_tenants.yaml")
-            .await?;
-
-        // Template rows (UUID ids, no auto-increment to reset).
-        db::seed::<template_templates::ActiveModel>(&ctx.db, "src/fixtures/template_templates.yaml")
-            .await?;
-
-        // Publish a version row for every built-in template that has none yet.
-        // This still uses the raw-INSERT path because the version number is
-        // computed by the statement itself (`max(version) + 1`) for concurrency safety.
-        let outcome = crate::ee::services::official_templates::seed_official_templates(ctx)
-            .await
-            .map_err(|err| loco_rs::Error::Message(err.to_string()))?;
-        println!(
-            "seed: {} published, {} updated, {} unchanged",
-            outcome.published.len(),
-            outcome.updated.len(),
-            outcome.unchanged.len()
-        );
-
+        crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
         Ok(())
     }
 }
