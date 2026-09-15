@@ -28,10 +28,14 @@ server:
       enable: true
 
 # Worker Configuration
+# Scheduler Configuration (disabled in test)
+scheduler:
+
 workers:
   # specifies the worker mode. Options:
   #   - BackgroundQueue - Workers operate asynchronously in the background, processing queued. Requires queue: below (Loco's own register_workers errors with QueueProviderMissing otherwise).
   #   - ForegroundBlocking - Workers operate in the foreground and block until tasks are completed.
+#   output: silent
   #   - BackgroundAsync - Workers operate asynchronously in the background, processing tasks with async capabilities.
   mode: BackgroundQueue
 
