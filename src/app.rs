@@ -333,9 +333,18 @@ impl Hooks for App {
             .add_route(crate::ee::controllers::worker_class::routes())
     }
 
-    /// Mounts the MCP server under `/mcp` and layers the maintenance guard and the auth rate limiter over everything, REST and MCP alike.
-    /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here instead: this hook runs after Loco's own routes are built, which is where Loco itself says custom Axum logic belongs.
-    /// The middleware layers must come after the MCP mount, not before: `.layer` wraps everything already on the router at the point it's called.
+    /// Mounts the MCP server under `/mcp` and the swagger docs.
+    ///
+    /// Rate limiting and the maintenance guard remain in `after_routes` because
+    /// Loco's `MiddlewareLayer` trait requires `tower::Layer` implementations
+    /// that `from_fn_with_state` does not provide (axum 0.8).  The
+    /// `server.middlewares:` config block is used only for Loco's built-in
+    /// middleware (`request_id`, `logger`).
+    ///
+    /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
+    /// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here
+    /// instead: this hook runs after Loco's own routes are built, which is where
+    /// Loco itself says custom Axum logic belongs.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
         let router = controllers::swagger::mount(router);
         let router = controllers::mcp::mount(router, ctx);
@@ -349,6 +358,16 @@ impl Hooks for App {
             ctx.clone(),
             crate::services::maintenance::maintenance_guard,
         )))
+    }
+
+    /// Enables Loco's built-in middleware stack (`request_id`, `logger`, etc.).
+    /// Custom middleware (rate limiter, maintenance guard) stays in `after_routes`
+    /// because Loco's `MiddlewareLayer` trait requires `tower::Layer`
+    /// implementations that `from_fn_with_state` does not provide (axum 0.8).
+    fn middlewares(
+        _ctx: &AppContext,
+    ) -> Vec<Box<dyn loco_rs::controller::middleware::MiddlewareLayer>> {
+        loco_rs::controller::middleware::default_middleware_stack(_ctx)
     }
 
     /// Registers all three `WorkerClass` worker types and the reindex worker:
@@ -417,8 +436,23 @@ impl Hooks for App {
     /// That tenant is `INFRASTRUCTURE_TENANT_ID` (the nil UUID), which `models::tenancy` already
     /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
     /// so seeding it cannot consume a single-tenant deployment's one slot.
-    async fn seed(ctx: &AppContext, _base: &Path) -> Result<()> {
+    async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
+        // Seed from YAML fixtures (Loco db::seed)
+        if base.join("tenant_tenants.yaml").exists() {
+            loco_rs::db::seed::<crate::models::tenant_tenants::ActiveModel>(
+                &ctx.db,
+                &base.join("tenant_tenants.yaml").display().to_string(),
+            )
+            .await?;
+        }
+        if base.join("workspaces.yaml").exists() {
+            loco_rs::db::seed::<crate::models::workspace_workspaces::ActiveModel>(
+                &ctx.db,
+                &base.join("workspaces.yaml").display().to_string(),
+            )
+            .await?;
+        }
         Ok(())
     }
 }

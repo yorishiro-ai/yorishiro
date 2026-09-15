@@ -22,39 +22,32 @@ server:
     logger:
       enable: true
 
-# BackgroundQueue, matching development.yaml/production.yaml: loco-rs's SQLite queue provider
-# (bgworker::sqlt) is under the same `worker` feature as the Postgres provider (`pg.rs`).
-# Empirically confirmed (`sqlt_loco_queue` auto-creates on `setup()`, enqueue/dequeue round-trip)
-# against a real SQLite file, including the contention case: this provider opens its own
-# `sqlx::SqlitePool` independent of the application's own SQLite connection (`ctx.db`), so
-# writing a job while the app holds an open write transaction on the same file is a real
-# possibility. A concurrent write from the queue pool waits out sqlx's 5-second `busy_timeout`
-# and succeeds once the app's transaction releases the lock. In this codebase specifically, the
-# actual call site (`controllers::entities::enqueue_embedding_sync`) runs after
-# `Authorized::commit()` has already returned, so the write it triggers never overlaps a still-open
-# app transaction from the same request.
+# Scheduler Configuration (disabled in test)
+scheduler:
+
+# Worker Configuration
 workers:
   mode: BackgroundQueue
 
 # Queue Configuration
-#
-# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
-# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
-# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
-# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
-# non-SQLite queue), matching this file's own no-silent-fallback convention.
 queue:
   kind: Sqlite
-  uri: '<%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>'
+
+  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc")) %>
+  # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
+
+  # Workers dequeuing in parallel, tunable per deployment.
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+
+  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
 
+# Database Configuration
 database:
-  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
+  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: 500
   idle_timeout: 500
@@ -64,7 +57,8 @@ database:
   dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
   dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
 
+# Authentication Configuration
 auth:
   jwt:
     secret: sqliteTierManualVerification
-    expiration: 604800
+    expiration: 604800 # 7 days
