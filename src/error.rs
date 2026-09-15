@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum YorishiroError {
     #[error("validation failed: {message}")]
     ValidationFailed {
