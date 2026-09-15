@@ -33,6 +33,9 @@ server:
 # actual call site (`controllers::entities::enqueue_embedding_sync`) runs after
 # `Authorized::commit()` has already returned, so the write it triggers never overlaps a still-open
 # app transaction from the same request.
+# Scheduler Configuration (disabled in test)
+scheduler:
+
 workers:
   mode: BackgroundQueue
 

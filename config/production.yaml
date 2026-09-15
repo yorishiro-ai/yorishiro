@@ -58,6 +58,19 @@ server:
     logger:
       enable: true
 
+# Scheduler Configuration
+#
+# Runs registered tasks on a recurring schedule.
+# `cargo loco scheduler` starts the scheduler daemon.
+# scheduler:
+#   output: stdout
+#   jobs:
+#     reindex_daily:
+#       run: "reindex_embeddings"
+#       schedule: "0 3 * * * * 2030"
+#       tags: ["infer-fill"]
+#       run_on_start: false
+
 # Worker Configuration
 workers:
   # specifies the worker mode. Options:
