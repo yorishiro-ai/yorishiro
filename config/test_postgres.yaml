@@ -27,6 +27,9 @@ server:
     logger:
       enable: true
 
+# Scheduler Configuration (disabled in test)
+scheduler:
+
 # Worker Configuration
 workers:
   # specifies the worker mode. Options:

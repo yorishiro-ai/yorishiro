@@ -46,4 +46,18 @@ impl ListParams {
     pub fn offset(&self) -> i64 {
         self.offset.max(0)
     }
+
+    /// Builds from Loco's `PaginationQuery` (1-based page + page_size), converting
+    /// to the internal 0-based offset/limit representation.
+    ///
+    /// `page` is clamped to `>= 1` (no page 0), and `page_size` to `[1, MAX_LIST_LIMIT]`.
+    pub fn from_pagination_query(page: u64, page_size: u64) -> Self {
+        let page = page.max(1) as i64;
+        let page_size = page_size.clamp(1, MAX_LIST_LIMIT as u64) as i64;
+        let offset = (page - 1) * page_size;
+        Self {
+            limit: page_size,
+            offset,
+        }
+    }
 }

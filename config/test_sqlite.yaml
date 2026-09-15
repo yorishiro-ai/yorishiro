@@ -33,6 +33,9 @@ server:
 # actual call site (`controllers::entities::enqueue_embedding_sync`) runs after
 # `Authorized::commit()` has already returned, so the write it triggers never overlaps a still-open
 # app transaction from the same request.
+# Scheduler Configuration (disabled in test)
+scheduler:
+
 workers:
   mode: BackgroundQueue
 
@@ -48,7 +51,10 @@ queue:
   kind: Sqlite
   uri: '<%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>'
   dangerously_flush: false
-  num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+  num_# Scheduler Configuration (disabled in test)
+scheduler:
+
+workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60

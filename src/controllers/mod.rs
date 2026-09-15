@@ -21,18 +21,19 @@ pub use error::ApiError;
 
 use crate::error::YorishiroError;
 
-/// The `limit`/`offset` query-string pair every list endpoint accepts.
-/// `#[serde(flatten)]` this into a request's own `Params` struct alongside its filters, the same
-/// way `models::pagination::ListParams` is embedded into a table's own `ListXQuery`.
+/// The `page`/`page_size` query-string pair every list endpoint accepts.
+/// `#[serde(flatten)]` this into a request's own `Params` struct alongside its filters.
+///
+/// Wraps Loco's `query::PaginationQuery` (1-based page + page_size).  Loco's own
+/// query-string deserializer maps `?page=&page_size=` into the struct fields, so
+/// all existing API callers work without changes.  The `From` impl converts to the
+/// internal 0-based offset/limit representation that every list function expects.
 #[derive(Default, serde::Deserialize)]
-pub struct PageParams {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
+pub struct PageParams(pub(crate) loco_rs::model::query::PaginationQuery);
 
 impl From<PageParams> for crate::models::pagination::ListParams {
     fn from(params: PageParams) -> Self {
-        Self::new(params.limit, params.offset)
+        Self::from_pagination_query(params.0.page, params.0.page_size)
     }
 }
 
