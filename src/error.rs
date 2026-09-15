@@ -88,38 +88,43 @@ impl YorishiroError {
         }
     }
 
-    /// Maps this error to an HTTP status code and JSON response body.
-    /// Every axum error wrapper built on `YorishiroError` delegates here so the status/body mapping is defined once and never duplicated as a second `match`.
+    /// Maps this error to an `axum::http::StatusCode` and JSON response body.
+    /// Every axum error wrapper built on `YorishiroError` delegates here so the
+    /// status/body mapping is defined once and never duplicated as a second `match`.
     /// Internal errors are logged here; the caller should not log them again.
-    pub fn into_http_parts(self) -> (u16, serde_json::Value) {
+    ///
+    /// Status codes conform to [RFC 7231](https://datatracker.ietf.org/doc/html/rfc7231)
+    /// and [RFC 4918](https://datatracker.ietf.org/doc/html/rfc4918) as documented
+    /// at <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status>.
+    pub fn into_http_parts(self) -> (axum::http::StatusCode, serde_json::Value) {
         let code = self.code();
-        match self {
+        let (status, body) = match self {
             Self::ValidationFailed {
                 message,
                 details,
                 hint,
             } => (
-                422,
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
                 serde_json::json!({ "error": { "code": code, "message": message, "details": details, "hint": hint } }),
             ),
             Self::NotFound { message } => (
-                404,
+                axum::http::StatusCode::NOT_FOUND,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::ScopeInsufficient { message, hint } => (
-                403,
+                axum::http::StatusCode::FORBIDDEN,
                 serde_json::json!({ "error": { "code": code, "message": message, "hint": hint } }),
             ),
             Self::Conflict { message } => (
-                409,
+                axum::http::StatusCode::CONFLICT,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::RelationTypeMismatch { message } => (
-                422,
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::Unauthenticated => (
-                401,
+                axum::http::StatusCode::UNAUTHORIZED,
                 serde_json::json!({ "error": { "code": code, "message": "authentication required" } }),
             ),
             Self::Maintenance {
@@ -127,7 +132,11 @@ impl YorishiroError {
                 read_only,
                 retry_after,
             } => (
-                if read_only { 423 } else { 503 },
+                if read_only {
+                    axum::http::StatusCode::LOCKED // 423 (RFC 4918)
+                } else {
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE // 503
+                },
                 serde_json::json!({
                     "error": {
                         "code": code,
@@ -140,7 +149,7 @@ impl YorishiroError {
                 message,
                 retry_after,
             } => (
-                503,
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
                 serde_json::json!({
                     "error": {
                         "code": code,
@@ -150,7 +159,7 @@ impl YorishiroError {
                 }),
             ),
             Self::ProviderUnreachable { url, message } => (
-                502,
+                axum::http::StatusCode::BAD_GATEWAY,
                 serde_json::json!({
                     "error": {
                         "code": code,
@@ -160,21 +169,22 @@ impl YorishiroError {
                 }),
             ),
             Self::BackendUnsupported { message } => (
-                501,
+                axum::http::StatusCode::NOT_IMPLEMENTED,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::BackendUnavailable { message } => (
-                503,
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
                 serde_json::json!({ "error": { "code": code, "message": message } }),
             ),
             Self::Internal(err) => {
                 tracing::error!(error = %err, "internal error");
                 (
-                    500,
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     serde_json::json!({ "error": { "code": code, "message": "internal server error" } }),
                 )
             }
-        }
+        };
+        (status, body)
     }
 }
 
@@ -183,12 +193,10 @@ impl YorishiroError {
 impl From<YorishiroError> for loco_rs::Error {
     fn from(err: YorishiroError) -> Self {
         let (status, body) = err.into_http_parts();
-        let status_code = axum::http::StatusCode::from_u16(status)
-            .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
         loco_rs::Error::CustomError(
-            status_code,
+            status,
             loco_rs::controller::ErrorDetail {
-                error: Some(status_code.to_string()),
+                error: Some(status.to_string()),
                 description: None,
                 errors: Some(body),
             },
