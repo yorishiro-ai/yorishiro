@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -63,7 +64,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .json(&serde_json::json!({ "name": "staging" }))
             .await;
-        assert_eq!(response.status_code(), 201);
+        assert_eq!(response.status_code(), StatusCode::CREATED);
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "staging");
         assert_eq!(body["tenant_id"], tenant_id.to_string());
@@ -73,7 +74,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         let names: Vec<&str> = body
             .as_array()
@@ -88,7 +89,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .get(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["entity_count"], 0);
         assert_eq!(body["relation_count"], 0);
@@ -98,13 +99,13 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             .delete(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 204);
+        assert_eq!(response.status_code(), StatusCode::NO_CONTENT);
 
         let response = request
             .get(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -126,7 +127,7 @@ async fn cannot_delete_a_tenants_only_workspace() {
             .delete(&format!("/api/workspaces/{main_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 409);
+        assert_eq!(response.status_code(), StatusCode::CONFLICT);
     })
     .await;
 }
@@ -149,20 +150,20 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             .add_header("Authorization", format!("Bearer {member_key}"))
             .json(&serde_json::json!({ "name": "staging" }))
             .await;
-        assert_eq!(response.status_code(), 403);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
 
         let response = request
             .delete(&format!("/api/workspaces/{main_id}"))
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
-        assert_eq!(response.status_code(), 403);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
 
         // A Member-role key can still list/view workspaces, just not create/delete them.
         let response = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
     })
     .await;
 }
@@ -172,7 +173,7 @@ async fn member_role_cannot_create_or_delete_workspaces() {
 async fn workspaces_endpoints_require_authentication() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
-        assert_eq!(response.status_code(), 401);
+        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     })
     .await;
 }
@@ -197,13 +198,13 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
             .get(&format!("/api/workspaces/{workspace_b}"))
             .add_header("Authorization", format!("Bearer {owner_a_key}"))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 
         let response = request
             .delete(&format!("/api/workspaces/{workspace_b}"))
             .add_header("Authorization", format!("Bearer {owner_a_key}"))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }

@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -82,7 +83,7 @@ async fn search_requires_authentication() {
     }
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/search?query_text=hello").await;
-        assert_eq!(response.status_code(), 401);
+        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     })
     .await;
 }

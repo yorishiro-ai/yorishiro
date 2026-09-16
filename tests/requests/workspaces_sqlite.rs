@@ -3,6 +3,7 @@
 /// These exercise the same workspace create/list/delete flow as `workspaces.rs`
 /// but boot against a SQLite backend.
 use serial_test::serial;
+use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
@@ -75,7 +76,7 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .json(&serde_json::json!({ "name": "staging" }))
             .await;
-        assert_eq!(response.status_code(), 201);
+        assert_eq!(response.status_code(), StatusCode::CREATED);
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "staging");
         assert_eq!(body["tenant_id"], tenant_id.to_string());
@@ -85,7 +86,7 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         let names: Vec<&str> = body
             .as_array()
@@ -100,7 +101,7 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .get(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["entity_count"], 0);
         assert_eq!(body["relation_count"], 0);
@@ -110,13 +111,13 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
             .delete(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 204);
+        assert_eq!(response.status_code(), StatusCode::NO_CONTENT);
 
         let response = request
             .get(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -135,7 +136,7 @@ async fn workspaces_endpoints_require_authentication_sqlite() {
     let db_path = db_path.to_str().expect("valid utf-8 path").to_string();
     super::boot_request_sqlite::<App, _, _>(db_path.clone(), |request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
-        assert_eq!(response.status_code(), 401);
+        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     })
     .await;
 }

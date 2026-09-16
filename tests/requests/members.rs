@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -73,7 +74,7 @@ async fn owner_can_list_and_add_members() {
                 "role": "member",
             }))
             .await;
-        assert_eq!(response.status_code(), 201);
+        assert_eq!(response.status_code(), StatusCode::CREATED);
         let body: serde_json::Value = response.json();
         assert_eq!(body["user_id"], invitee.id.to_string());
         assert_eq!(body["role"], "member");
@@ -82,7 +83,7 @@ async fn owner_can_list_and_add_members() {
             .get("/api/members")
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         let emails: Vec<&str> = body
             .as_array()
@@ -118,7 +119,7 @@ async fn add_member_rejects_an_email_with_no_account() {
                 "role": "member",
             }))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -141,7 +142,7 @@ async fn member_role_cannot_manage_members() {
             .get("/api/members")
             .add_header("Authorization", format!("Bearer {member_key}"))
             .await;
-        assert_eq!(response.status_code(), 403);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
     })
     .await;
 }
@@ -151,7 +152,7 @@ async fn member_role_cannot_manage_members() {
 async fn members_endpoints_require_authentication() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/members").await;
-        assert_eq!(response.status_code(), 401);
+        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     })
     .await;
 }

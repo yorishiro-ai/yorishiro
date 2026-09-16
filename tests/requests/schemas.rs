@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
@@ -30,7 +31,7 @@ async fn create_schema_from_a_builtin_template() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
-        assert_eq!(response.status_code(), 201);
+        assert_eq!(response.status_code(), StatusCode::CREATED);
         let body: serde_json::Value = response.json();
         assert_eq!(body["schema"]["name"], "task-management");
         assert!(
@@ -72,7 +73,7 @@ async fn list_templates_and_get_template_over_rest() {
             .get("/api/templates")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         let ids: Vec<&str> = body
             .as_array()
@@ -86,7 +87,7 @@ async fn list_templates_and_get_template_over_rest() {
             .get("/api/templates/task-management")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "task-management");
     })

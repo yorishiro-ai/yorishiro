@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -60,7 +61,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .get("/api/workspace/entity-columns")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(before.status_code(), 200, "response: {:?}", before.text());
+        assert_eq!(before.status_code(), StatusCode::OK, "response: {:?}", before.text());
         assert!(before.json::<Vec<serde_json::Value>>().is_empty());
 
         let put = request
@@ -68,7 +69,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "columns": ["priority", "title", "done"] }))
             .await;
-        assert_eq!(put.status_code(), 200, "response: {:?}", put.text());
+        assert_eq!(put.status_code(), StatusCode::OK, "response: {:?}", put.text());
         let body: serde_json::Value = put.json();
         assert_eq!(
             body["columns"],
@@ -93,7 +94,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "columns": ["done", "title"] }))
             .await;
-        assert_eq!(put_again.status_code(), 200);
+        assert_eq!(put_again.status_code(), StatusCode::OK);
         let after_again = request
             .get("/api/workspace/entity-columns")
             .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -113,7 +114,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .delete("/api/workspace/entity-columns/task")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(reset.status_code(), 204, "response: {:?}", reset.text());
+        assert_eq!(reset.status_code(), StatusCode::NO_CONTENT, "response: {:?}", reset.text());
 
         let after_reset = request
             .get("/api/workspace/entity-columns")
@@ -190,7 +191,7 @@ async fn an_empty_selection_is_stored_as_a_choice() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "columns": [] }))
             .await;
-        assert_eq!(put.status_code(), 200, "response: {:?}", put.text());
+        assert_eq!(put.status_code(), StatusCode::OK, "response: {:?}", put.text());
 
         let after = request
             .get("/api/workspace/entity-columns")

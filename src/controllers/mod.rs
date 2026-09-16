@@ -29,6 +29,7 @@ use crate::error::YorishiroError;
 /// all existing API callers work without changes.  The `From` impl converts to the
 /// internal 0-based offset/limit representation that every list function expects.
 #[derive(Default, serde::Deserialize)]
+#[serde(transparent)]
 pub struct PageParams(pub(crate) loco_rs::model::query::PaginationQuery);
 
 impl From<PageParams> for crate::models::pagination::ListParams {

@@ -2,6 +2,7 @@
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
 use super::boot_request;
+use axum::http::StatusCode;
 use axum::http::header;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
@@ -76,7 +77,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
-        assert_eq!(disabled.status_code(), 200);
+        assert_eq!(disabled.status_code(), StatusCode::OK);
         assert_eq!(
             disabled.json::<serde_json::Value>(),
             serde_json::json!({ "enabled": false })
@@ -84,7 +85,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 
         with_oauth_env(async {
             let enabled = request.get("/auth/oauth/status").await;
-            assert_eq!(enabled.status_code(), 200);
+            assert_eq!(enabled.status_code(), StatusCode::OK);
             assert_eq!(
                 enabled.json::<serde_json::Value>(),
                 serde_json::json!({ "enabled": true })
@@ -225,14 +226,14 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let missing_state = request.get("/auth/oauth/callback?code=abc").await;
-            assert_eq!(missing_state.status_code(), 302);
+            assert_eq!(missing_state.status_code(), StatusCode::FOUND);
             assert_eq!(
                 missing_state.header(header::LOCATION),
                 "/#/login?error=oauth_failed"
             );
 
             let missing_code = request.get("/auth/oauth/callback?state=xyz").await;
-            assert_eq!(missing_code.status_code(), 302);
+            assert_eq!(missing_code.status_code(), StatusCode::FOUND);
             assert_eq!(
                 missing_code.header(header::LOCATION),
                 "/#/login?error=oauth_failed"
@@ -257,7 +258,7 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
                 .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
                 .await;
 
-            assert_eq!(response.status_code(), 401, "response: {:?}", response.text());
+            assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED, "response: {:?}", response.text());
 
         })
         .await;

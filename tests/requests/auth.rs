@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -45,7 +46,7 @@ async fn signup_then_login_round_trip() {
                 "display_name": "Round Trip",
             }))
             .await;
-        assert_eq!(signup_response.status_code(), 201);
+        assert_eq!(signup_response.status_code(), StatusCode::CREATED);
         let signup_body: serde_json::Value = signup_response.json();
         assert_eq!(signup_body["email"], "round-trip@example.com");
         assert_eq!(signup_body["role"], "owner");
@@ -57,7 +58,7 @@ async fn signup_then_login_round_trip() {
                 "password": "correct-horse-battery-staple",
             }))
             .await;
-        assert_eq!(login_response.status_code(), 200);
+        assert_eq!(login_response.status_code(), StatusCode::OK);
         let login_body: serde_json::Value = login_response.json();
         assert!(login_body["api_key"].as_str().unwrap().starts_with("ysr_"));
         assert_eq!(login_body["scope"], "migration");
@@ -71,7 +72,7 @@ async fn signup_then_login_round_trip() {
                 "display_name": null,
             }))
             .await;
-        assert_eq!(replay_response.status_code(), 422);
+        assert_eq!(replay_response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
 
         // A wrong password on an otherwise-valid account must not leak whether
         // the account exists differently than a truly unknown email would.
@@ -82,7 +83,7 @@ async fn signup_then_login_round_trip() {
                 "password": "not-the-password",
             }))
             .await;
-        assert_eq!(bad_password_response.status_code(), 401);
+        assert_eq!(bad_password_response.status_code(), StatusCode::UNAUTHORIZED);
     })
     .await;
 }
@@ -184,7 +185,7 @@ async fn signup_without_invite_respects_the_tenant_cap() {
                     "password": "correct-horse-battery-staple",
                 }))
                 .await;
-            assert_eq!(first.status_code(), 201, "response: {:?}", first.text());
+            assert_eq!(first.status_code(), StatusCode::CREATED, "response: {:?}", first.text());
 
             let second = request
                 .post("/auth/signup")
@@ -193,7 +194,7 @@ async fn signup_without_invite_respects_the_tenant_cap() {
                     "password": "correct-horse-battery-staple",
                 }))
                 .await;
-            assert_eq!(second.status_code(), 409, "response: {:?}", second.text());
+            assert_eq!(second.status_code(), StatusCode::CONFLICT, "response: {:?}", second.text());
         })
         .await;
     })

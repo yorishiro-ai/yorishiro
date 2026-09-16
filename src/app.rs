@@ -438,18 +438,21 @@ impl Hooks for App {
     /// so seeding it cannot consume a single-tenant deployment's one slot.
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
-        // Seed from YAML fixtures (Loco db::seed)
-        if base.join("tenant_tenants.yaml").exists() {
+        // Seed from YAML fixtures (Loco db::seed).
+        // Locates fixture files under the `src/fixtures/` directory and feeds
+        // each to `loco_rs::db::seed::<T>()` which expects a file path string.
+        let fixtures = base.join("fixtures");
+        if fixtures.join("tenant_tenants.yaml").exists() {
             loco_rs::db::seed::<crate::models::tenant_tenants::ActiveModel>(
                 &ctx.db,
-                &base.join("tenant_tenants.yaml").display().to_string(),
+                &fixtures.join("tenant_tenants.yaml").display().to_string(),
             )
             .await?;
         }
-        if base.join("workspaces.yaml").exists() {
+        if fixtures.join("workspaces.yaml").exists() {
             loco_rs::db::seed::<crate::models::workspace_workspaces::ActiveModel>(
                 &ctx.db,
-                &base.join("workspaces.yaml").display().to_string(),
+                &fixtures.join("workspaces.yaml").display().to_string(),
             )
             .await?;
         }

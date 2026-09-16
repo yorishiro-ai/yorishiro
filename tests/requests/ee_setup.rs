@@ -1,6 +1,7 @@
 //! Verifies `App::seed`'s official-templates publisher tenant does not make base's `/setup` wizard read as already set up.
 
 use super::boot_request;
+use axum::http::StatusCode;
 use loco_rs::app::Hooks;
 use serial_test::serial;
 use yorishiro::app::App;
@@ -32,7 +33,7 @@ async fn setup_still_works_after_hooks_seed_has_run() {
                 .expect("Hooks::seed");
 
             let status = request.get("/setup/status").await;
-            assert_eq!(status.status_code(), 200);
+            assert_eq!(status.status_code(), StatusCode::OK);
             let body: serde_json::Value = status.json();
             assert_eq!(
                 body["setup_required"], true,

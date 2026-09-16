@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use chrono::Utc;
 use serde_json::json;
 use serial_test::serial;
@@ -137,7 +138,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"definition": note_definition()}))
             .await;
-        assert_eq!(draft.status_code(), 404, "response: {:?}", draft.text());
+        assert_eq!(draft.status_code(), StatusCode::NOT_FOUND, "response: {:?}", draft.text());
 
         // Create a template via base's own template library, then publish it visible.
         let create_template = request
@@ -177,7 +178,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .get("/api/marketplace")
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .await;
-        assert_eq!(empty_listing.status_code(), 200);
+        assert_eq!(empty_listing.status_code(), StatusCode::OK);
         let empty_body: Vec<serde_json::Value> = empty_listing.json();
         assert!(
             empty_body.is_empty(),
@@ -228,7 +229,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .post(&format!("/api/marketplace/{template_id}/fork"))
             .add_header("Authorization", format!("Bearer {}", forker.owner_key))
             .await;
-        assert_eq!(fork.status_code(), 201, "response: {:?}", fork.text());
+        assert_eq!(fork.status_code(), StatusCode::CREATED, "response: {:?}", fork.text());
         let forked_id: Uuid = fork.json::<serde_json::Value>()["template_id"]
             .as_str()
             .unwrap()
@@ -258,7 +259,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .add_header("Authorization", format!("Bearer {}", forker.owner_key))
             .json(&json!({"rating": 5, "comment": "does the job"}))
             .await;
-        assert_eq!(review.status_code(), 200, "response: {:?}", review.text());
+        assert_eq!(review.status_code(), StatusCode::OK, "response: {:?}", review.text());
 
         let listing_with_review = request
             .get("/api/marketplace")
@@ -280,7 +281,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"visibility": "tenant"}))
             .await;
-        assert_eq!(take_down.status_code(), 204);
+        assert_eq!(take_down.status_code(), StatusCode::NO_CONTENT);
 
         let fork_after_takedown = request
             .post(&format!("/api/marketplace/{template_id}/fork"))

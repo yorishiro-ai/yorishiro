@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use serial_test::serial;
 use uuid::Uuid;
@@ -68,20 +69,20 @@ async fn worker_class_set_get_and_clear_round_trip() {
             .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(missing.status_code(), 404, "response: {:?}", missing.text());
+        assert_eq!(missing.status_code(), StatusCode::NOT_FOUND, "response: {:?}", missing.text());
 
         let put = request
             .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "worker_class": "tenant_private" }))
             .await;
-        assert_eq!(put.status_code(), 204, "response: {:?}", put.text());
+        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "response: {:?}", put.text());
 
         let get = request
             .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(get.status_code(), 200, "response: {:?}", get.text());
+        assert_eq!(get.status_code(), StatusCode::OK, "response: {:?}", get.text());
         let body: serde_json::Value = get.json();
         assert_eq!(body["worker_class"], "tenant_private");
 
@@ -89,13 +90,13 @@ async fn worker_class_set_get_and_clear_round_trip() {
             .delete("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(delete.status_code(), 204, "response: {:?}", delete.text());
+        assert_eq!(delete.status_code(), StatusCode::NO_CONTENT, "response: {:?}", delete.text());
 
         let after_delete = request
             .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(after_delete.status_code(), 404);
+        assert_eq!(after_delete.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -115,14 +116,14 @@ async fn setting_a_new_class_replaces_the_old_one() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "worker_class": "tenant_private" }))
             .await;
-        assert_eq!(first.status_code(), 204, "response: {:?}", first.text());
+        assert_eq!(first.status_code(), StatusCode::NO_CONTENT, "response: {:?}", first.text());
 
         let second = request
             .put("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&serde_json::json!({ "worker_class": "official" }))
             .await;
-        assert_eq!(second.status_code(), 204, "response: {:?}", second.text());
+        assert_eq!(second.status_code(), StatusCode::NO_CONTENT, "response: {:?}", second.text());
 
         let get = request
             .get("/api/workspace/worker-class")
