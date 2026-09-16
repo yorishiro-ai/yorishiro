@@ -1,5 +1,5 @@
-use axum_test::{TestResponse, TestServer};
 use axum::http::StatusCode;
+use axum_test::{TestResponse, TestServer};
 use serde_json::{Value, json};
 use serial_test::serial;
 use uuid::Uuid;
@@ -35,7 +35,12 @@ async fn initialize(request: &TestServer) -> String {
             }
         }))
         .await;
-    assert_eq!(response.status_code(), StatusCode::OK, "response: {}", response.text());
+    assert_eq!(
+        response.status_code(),
+        StatusCode::OK,
+        "response: {}",
+        response.text()
+    );
     let _ = rpc_body(&response);
     let session = response
         .headers()
@@ -52,7 +57,12 @@ async fn initialize(request: &TestServer) -> String {
         .add_header("MCP-Protocol-Version", "2025-03-26")
         .json(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
         .await;
-    assert_eq!(response.status_code(), StatusCode::ACCEPTED, "response: {}", response.text());
+    assert_eq!(
+        response.status_code(),
+        StatusCode::ACCEPTED,
+        "response: {}",
+        response.text()
+    );
     session
 }
 
@@ -72,7 +82,12 @@ async fn mcp_call(
         .add_header("Authorization", format!("Bearer {api_key}"))
         .json(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
         .await;
-    assert_eq!(response.status_code(), StatusCode::OK, "response: {}", response.text());
+    assert_eq!(
+        response.status_code(),
+        StatusCode::OK,
+        "response: {}",
+        response.text()
+    );
     rpc_body(&response)
 }
 
@@ -197,7 +212,12 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
             .add_header("Authorization", format!("Bearer {migration_key}"))
             .await;
-        assert_eq!(undo.status_code(), StatusCode::OK, "response: {}", undo.text());
+        assert_eq!(
+            undo.status_code(),
+            StatusCode::OK,
+            "response: {}",
+            undo.text()
+        );
         let restored = entity_entities::get(&ctx.db, workspace_id, entity.id)
             .await
             .expect("read undone entity");
@@ -208,7 +228,12 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {audit_key}"))
             .await;
-        assert_eq!(audit.status_code(), StatusCode::OK, "response: {}", audit.text());
+        assert_eq!(
+            audit.status_code(),
+            StatusCode::OK,
+            "response: {}",
+            audit.text()
+        );
         let entries: Vec<Value> = audit.json();
         let fill_entry = entries
             .iter()

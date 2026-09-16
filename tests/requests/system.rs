@@ -166,7 +166,11 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(served.status_code(), StatusCode::OK, "and the deployment is back");
+        assert_eq!(
+            served.status_code(),
+            StatusCode::OK,
+            "and the deployment is back"
+        );
     })
     .await;
 }

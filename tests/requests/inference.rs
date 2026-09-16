@@ -89,7 +89,12 @@ async fn llm_key_set_get_and_clear_round_trip() {
             .get("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(missing.status_code(), StatusCode::NOT_FOUND, "response: {:?}", missing.text());
+        assert_eq!(
+            missing.status_code(),
+            StatusCode::NOT_FOUND,
+            "response: {:?}",
+            missing.text()
+        );
 
         let put = request
             .put("/api/workspace/llm-key")
@@ -100,13 +105,23 @@ async fn llm_key_set_get_and_clear_round_trip() {
                 "api_key": "sk-secret-value"
             }))
             .await;
-        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "response: {:?}", put.text());
+        assert_eq!(
+            put.status_code(),
+            StatusCode::NO_CONTENT,
+            "response: {:?}",
+            put.text()
+        );
 
         let get = request
             .get("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(get.status_code(), StatusCode::OK, "response: {:?}", get.text());
+        assert_eq!(
+            get.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            get.text()
+        );
         let body: serde_json::Value = get.json();
         // The trailing slash is trimmed once at write time.
         assert_eq!(body["base_url"], "https://api.example.com/v1");
@@ -122,7 +137,12 @@ async fn llm_key_set_get_and_clear_round_trip() {
             .delete("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(delete.status_code(), StatusCode::NO_CONTENT, "response: {:?}", delete.text());
+        assert_eq!(
+            delete.status_code(),
+            StatusCode::NO_CONTENT,
+            "response: {:?}",
+            delete.text()
+        );
 
         let after_delete = request
             .get("/api/workspace/llm-key")
@@ -200,7 +220,12 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             .post("/api/schemas/active/note/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(infer.status_code(), StatusCode::UNPROCESSABLE_ENTITY, "response: {:?}", infer.text());
+        assert_eq!(
+            infer.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "response: {:?}",
+            infer.text()
+        );
     })
     .await;
 }
@@ -339,7 +364,12 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(undo.status_code(), StatusCode::OK, "response: {:?}", undo.text());
+        assert_eq!(
+            undo.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            undo.text()
+        );
         let undo_report: serde_json::Value = undo.json();
         assert_eq!(undo_report["restored"], 1, "undo report: {undo_report:?}");
 
@@ -545,7 +575,12 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
                 "api_key": "sk-test-key"
             }))
             .await;
-        assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT, "response: {:?}", put_key.text());
+        assert_eq!(
+            put_key.status_code(),
+            StatusCode::NO_CONTENT,
+            "response: {:?}",
+            put_key.text()
+        );
 
         // Create a schema with at least one entity so infer-fill has work to do.
         let create_schema = request

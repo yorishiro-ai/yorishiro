@@ -70,7 +70,12 @@ async fn embedding_key_set_get_and_clear_round_trip() {
             .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(missing.status_code(), StatusCode::NOT_FOUND, "response: {:?}", missing.text());
+        assert_eq!(
+            missing.status_code(),
+            StatusCode::NOT_FOUND,
+            "response: {:?}",
+            missing.text()
+        );
 
         let put = request
             .put("/api/workspace/embedding-key")
@@ -82,13 +87,23 @@ async fn embedding_key_set_get_and_clear_round_trip() {
                 "dimensions": 1536
             }))
             .await;
-        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "response: {:?}", put.text());
+        assert_eq!(
+            put.status_code(),
+            StatusCode::NO_CONTENT,
+            "response: {:?}",
+            put.text()
+        );
 
         let get = request
             .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(get.status_code(), StatusCode::OK, "response: {:?}", get.text());
+        assert_eq!(
+            get.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            get.text()
+        );
         let body: serde_json::Value = get.json();
         // The trailing slash is trimmed once at write time, matching llm-key.
         assert_eq!(body["base_url"], "https://embed.example.com/v1");
@@ -105,7 +120,12 @@ async fn embedding_key_set_get_and_clear_round_trip() {
             .delete("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(delete.status_code(), StatusCode::NO_CONTENT, "response: {:?}", delete.text());
+        assert_eq!(
+            delete.status_code(),
+            StatusCode::NO_CONTENT,
+            "response: {:?}",
+            delete.text()
+        );
 
         let after_delete = request
             .get("/api/workspace/embedding-key")
@@ -187,14 +207,24 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
                 "dimensions": 3072
             }))
             .await;
-        assert_eq!(put.status_code(), StatusCode::NO_CONTENT, "response: {:?}", put.text());
+        assert_eq!(
+            put.status_code(),
+            StatusCode::NO_CONTENT,
+            "response: {:?}",
+            put.text()
+        );
 
         // Stored with WidthChanged: GET now returns the new assignment.
         let get = request
             .get("/api/workspace/embedding-key")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(get.status_code(), StatusCode::OK, "response: {:?}", get.text());
+        assert_eq!(
+            get.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            get.text()
+        );
     })
     .await;
 }

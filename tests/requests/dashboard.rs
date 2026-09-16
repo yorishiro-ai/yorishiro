@@ -37,7 +37,12 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
                     "display_name": "Owner",
                 }))
                 .await;
-            assert_eq!(setup.status_code(), StatusCode::CREATED, "response: {:?}", setup.text());
+            assert_eq!(
+                setup.status_code(),
+                StatusCode::CREATED,
+                "response: {:?}",
+                setup.text()
+            );
             let setup_body: serde_json::Value = setup.json();
             let api_key = setup_body["api_key"].as_str().unwrap();
 

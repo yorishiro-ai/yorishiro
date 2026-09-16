@@ -1,6 +1,6 @@
 use super::boot_request;
-use axum::http::StatusCode;
 use super::fixtures::{self, TenantArgs};
+use axum::http::StatusCode;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
@@ -98,7 +98,12 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
                 "source_schema_id": source_schema_id
             }))
             .await;
-        assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
+        assert_eq!(
+            created.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            created.text()
+        );
         let fork: serde_json::Value = created.json();
         assert_eq!(
             fork["source_schema_id"].as_str().unwrap(),
@@ -191,7 +196,12 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
                 "expected_fork_schema_id": local["fork_schema_id"]
             }))
             .await;
-        assert_eq!(renamed.status_code(), StatusCode::UNPROCESSABLE_ENTITY, "{}", renamed.text());
+        assert_eq!(
+            renamed.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            renamed.text()
+        );
         assert_eq!(
             renamed.json::<serde_json::Value>()["error"]["code"],
             "validation_failed"
@@ -233,7 +243,12 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             .add_header("Authorization", format!("Bearer {source_key}"))
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
-        assert_eq!(source_v2.status_code(), StatusCode::CREATED, "{}", source_v2.text());
+        assert_eq!(
+            source_v2.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            source_v2.text()
+        );
         let source_v2: serde_json::Value = source_v2.json();
         let source_v2_id = source_v2["schema"]["id"].as_str().unwrap();
 
@@ -277,7 +292,12 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
                 "expected_source_schema_id": source_v2_id
             }))
             .await;
-        assert_eq!(followed.status_code(), StatusCode::OK, "{}", followed.text());
+        assert_eq!(
+            followed.status_code(),
+            StatusCode::OK,
+            "{}",
+            followed.text()
+        );
         let followed: serde_json::Value = followed.json();
         assert_eq!(followed["customized"], false);
         assert_eq!(followed["source_schema_id"], source_v2_id);
@@ -319,7 +339,10 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             .delete(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
             .await;
-        assert_eq!(delete_current_referenced.status_code(), StatusCode::CONFLICT);
+        assert_eq!(
+            delete_current_referenced.status_code(),
+            StatusCode::CONFLICT
+        );
         entity_entities::Entity::delete_by_id(current_reference)
             .exec(&ctx.db)
             .await
@@ -409,7 +432,12 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
                 "source_schema_id": source_schema_id
             }))
             .await;
-        assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
+        assert_eq!(
+            created.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            created.text()
+        );
         let fork: serde_json::Value = created.json();
         let fork_id = fork["id"].as_str().unwrap();
 
@@ -508,7 +536,12 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
                 .add_header("Authorization", format!("Bearer {key}"))
                 .json(&serde_json::json!({ "template_id": "task-management" }))
                 .await;
-            assert_eq!(response.status_code(), StatusCode::CREATED, "{}", response.text());
+            assert_eq!(
+                response.status_code(),
+                StatusCode::CREATED,
+                "{}",
+                response.text()
+            );
             let body: serde_json::Value = response.json();
             schemas.push(
                 body["schema"]["id"]
@@ -527,7 +560,12 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
                 "source_schema_id": schemas[0]
             }))
             .await;
-        assert_eq!(b_follows_a.status_code(), StatusCode::CREATED, "{}", b_follows_a.text());
+        assert_eq!(
+            b_follows_a.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            b_follows_a.text()
+        );
 
         let c_follows_b = request
             .post("/api/schema-forks")
@@ -537,7 +575,12 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
                 "source_schema_id": schemas[1]
             }))
             .await;
-        assert_eq!(c_follows_b.status_code(), StatusCode::CREATED, "{}", c_follows_b.text());
+        assert_eq!(
+            c_follows_b.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            c_follows_b.text()
+        );
 
         let cycle = request
             .post("/api/schema-forks")
@@ -547,7 +590,12 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
                 "source_schema_id": schemas[2]
             }))
             .await;
-        assert_eq!(cycle.status_code(), StatusCode::CONFLICT, "{}", cycle.text());
+        assert_eq!(
+            cycle.status_code(),
+            StatusCode::CONFLICT,
+            "{}",
+            cycle.text()
+        );
     })
     .await;
 }
@@ -787,7 +835,12 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
                 "source_schema_id": source_schema_id
             }))
             .await;
-        assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
+        assert_eq!(
+            created.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            created.text()
+        );
         let fork: serde_json::Value = created.json();
         let fork_id = fork["id"].as_str().unwrap().parse::<Uuid>().unwrap();
 
@@ -896,7 +949,12 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
                 "source_schema_id": source["schema"]["id"]
             }))
             .await;
-        assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
+        assert_eq!(
+            created.status_code(),
+            StatusCode::CREATED,
+            "{}",
+            created.text()
+        );
         let fork: serde_json::Value = created.json();
         let fork_id = fork["id"].as_str().unwrap().parse::<Uuid>().unwrap();
         let original = workspace_schema_forks::Entity::find_by_id(fork_id)

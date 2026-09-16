@@ -1,5 +1,5 @@
-use serial_test::serial;
 use axum::http::StatusCode;
+use serial_test::serial;
 use yorishiro::app::App;
 
 use super::boot_request;
@@ -89,7 +89,12 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                     "password": "hunter2-hunter2",
                 }))
                 .await;
-            assert_eq!(second.status_code(), StatusCode::CONFLICT, "response: {:?}", second.text());
+            assert_eq!(
+                second.status_code(),
+                StatusCode::CONFLICT,
+                "response: {:?}",
+                second.text()
+            );
         })
         .await;
     })

@@ -52,7 +52,12 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
             .add_header("Authorization", format!("Bearer {}", setup.migration_key))
             .json(&serde_json::json!({ "mode": "read-only", "reason": "audit-log test" }))
             .await;
-        assert_eq!(set.status_code(), StatusCode::OK, "response: {:?}", set.text());
+        assert_eq!(
+            set.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            set.text()
+        );
 
         // Restore off so a leaked mode doesn't affect an unrelated test on the same throwaway
         // database.
@@ -66,7 +71,12 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {}", setup.audit_key))
             .await;
-        assert_eq!(log.status_code(), StatusCode::OK, "response: {:?}", log.text());
+        assert_eq!(
+            log.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            log.text()
+        );
         let body: Vec<serde_json::Value> = log.json();
         // Both the read-only switch and the restore-to-off are set_maintenance calls; the most
         // recent (restore) is first.
@@ -141,7 +151,12 @@ async fn undo_migration_job_is_recorded() {
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
             .add_header("Authorization", format!("Bearer {}", setup.migration_key))
             .await;
-        assert_eq!(undo.status_code(), StatusCode::OK, "response: {:?}", undo.text());
+        assert_eq!(
+            undo.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            undo.text()
+        );
 
         let log = request
             .get("/api/audit-log")
@@ -205,7 +220,12 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
             )
             .json(&serde_json::json!({ "mode": "read-only", "reason": "tenant a only" }))
             .await;
-        assert_eq!(set.status_code(), StatusCode::OK, "response: {:?}", set.text());
+        assert_eq!(
+            set.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            set.text()
+        );
         request
             .put("/api/system/maintenance")
             .add_header(

@@ -124,7 +124,12 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 .add_header("stripe-signature", format!("t={now},v1={signature}"))
                 .bytes(body.clone().into())
                 .await;
-            assert_eq!(first.status_code(), StatusCode::OK, "response: {:?}", first.text());
+            assert_eq!(
+                first.status_code(),
+                StatusCode::OK,
+                "response: {:?}",
+                first.text()
+            );
             let after_first = billing::get_billing(&ctx.db, tenant_id)
                 .await
                 .unwrap()
@@ -185,7 +190,12 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 .add_header("stripe-signature", format!("t={now},v1={up_sig}"))
                 .bytes(up_body.into())
                 .await;
-            assert_eq!(up.status_code(), StatusCode::OK, "response: {:?}", up.text());
+            assert_eq!(
+                up.status_code(),
+                StatusCode::OK,
+                "response: {:?}",
+                up.text()
+            );
 
             let del_body = subscription_deleted_body("evt_del", 2_000, "cus_cancel");
             let now = Utc::now().timestamp();
@@ -195,7 +205,12 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 .add_header("stripe-signature", format!("t={now},v1={del_sig}"))
                 .bytes(del_body.into())
                 .await;
-            assert_eq!(del.status_code(), StatusCode::OK, "response: {:?}", del.text());
+            assert_eq!(
+                del.status_code(),
+                StatusCode::OK,
+                "response: {:?}",
+                del.text()
+            );
 
             let billing_record = billing::get_billing(&ctx.db, tenant_id)
                 .await
