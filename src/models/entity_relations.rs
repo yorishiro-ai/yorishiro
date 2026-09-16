@@ -253,13 +253,13 @@ pub async fn set_status(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     id: Uuid,
-    status: &str,
+    status: RelationStatus,
 ) -> Result<RelationRecord, YorishiroError> {
     let existing = get(conn, workspace_id, id).await?;
 
     let active = ActiveModel {
         id: ActiveValue::Unchanged(existing.id),
-        status: ActiveValue::Set(status.to_string()),
+        status: ActiveValue::Set(status.as_db_str().to_string()),
         ..Default::default()
     };
     // A concurrent delete between `get` above and this update surfaces as `DbErr::RecordNotUpdated`, not a row.

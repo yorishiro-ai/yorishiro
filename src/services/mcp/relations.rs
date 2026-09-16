@@ -194,17 +194,29 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let record = match entity_relations::set_status(
-            authorized.txn(),
-            workspace_id,
-            args.id,
-            &args.status,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
+        let status = match RelationStatus::from_db_str(&args.status) {
+            Some(status) => status,
+            None => {
+                return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
+                    message: format!("'{}' is not a relation status", args.status),
+                    details: vec![ValidationDetail {
+                        field: "/status".into(),
+                        problem: "expected active, deprecated, or archived".into(),
+                        code: ValidationErrorCode::Other,
+                        expected: Some("active, deprecated, archived".into()),
+                        actual: Some(args.status),
+                    }],
+                    hint: "use active, deprecated, or archived".into(),
+                }));
+            }
         };
+        let record =
+            match entity_relations::set_status(authorized.txn(), workspace_id, args.id, status)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         authorized.commit().await?;
         ok_json(record)
     }

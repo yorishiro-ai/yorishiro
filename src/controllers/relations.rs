@@ -97,8 +97,7 @@ pub async fn set_relation_status(
 ) -> Result<Json<RelationRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let record =
-        entity_relations::set_status(authorized.txn(), workspace_id, id, body.status.as_db_str())
-            .await?;
+        entity_relations::set_status(authorized.txn(), workspace_id, id, body.status).await?;
     authorized.commit().await?;
     Ok(Json(record))
 }
