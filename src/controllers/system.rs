@@ -5,6 +5,7 @@
 
 use axum::Json;
 use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
 use axum::routing::{get, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope};
+use crate::error::YorishiroError;
 use crate::models::api_key_audit_log;
 use crate::models::system_maintenance::{
     self, DEFAULT_RETRY_AFTER_SECONDS, MaintenanceMode, MaintenanceState,
@@ -72,8 +74,15 @@ pub async fn get_maintenance(
 pub async fn set_maintenance(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
-    Json(body): Json<SetMaintenanceRequest>,
+    body: Result<Json<SetMaintenanceRequest>, JsonRejection>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
+    let Json(body) = body.map_err(|err| {
+        ApiError(YorishiroError::ValidationFailed {
+            message: err.body_text(),
+            details: vec![],
+            hint: "one of: off, read-only, full-lock".into(),
+        })
+    })?;
     let mode = body.mode;
     let updated = system_maintenance::set(
         &ctx.db,
