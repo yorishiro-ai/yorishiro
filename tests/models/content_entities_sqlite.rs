@@ -2,6 +2,7 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, Database};
 use yorishiro::models::entity_entities::{self, CreateEntityInput, ListEntitiesQuery};
 use yorishiro::models::schema_schemas;
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 async fn seeded_sqlite_db() -> (sea_orm::DatabaseConnection, uuid::Uuid) {
     yorishiro::db::register_sqlite_extensions();
@@ -22,7 +23,7 @@ async fn seeded_sqlite_db() -> (sea_orm::DatabaseConnection, uuid::Uuid) {
     let workspace = yorishiro::models::_entities::workspace_workspaces::ActiveModel {
         tenant_id: ActiveValue::Set(tenant.id),
         name: ActiveValue::Set("ws".into()),
-        status: ActiveValue::Set("active".into()),
+        status: ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
         ..Default::default()
     };
     let workspace = workspace.insert(&db).await.expect("insert workspace");
