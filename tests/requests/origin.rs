@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use sea_orm::TransactionTrait;
 use serde_json::json;
 use serial_test::serial;
@@ -99,7 +100,12 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&note_definition())
             .await;
-        assert_eq!(create.status_code(), 201, "response: {:?}", create.text());
+        assert_eq!(
+            create.status_code(),
+            StatusCode::CREATED,
+            "response: {:?}",
+            create.text()
+        );
         let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
             .as_str()
             .unwrap()
@@ -110,7 +116,7 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             .get("/api/schemas/upstream-changes")
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(changes.status_code(), 200);
+        assert_eq!(changes.status_code(), StatusCode::OK);
         assert!(
             changes.json::<Vec<serde_json::Value>>().is_empty(),
             "a schema with no origin template must never be reported"
@@ -120,7 +126,12 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             .get(&format!("/api/schemas/{schema_id}/merge-preview"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(preview.status_code(), 422, "response: {:?}", preview.text());
+        assert_eq!(
+            preview.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "response: {:?}",
+            preview.text()
+        );
     })
     .await;
 }
@@ -141,7 +152,12 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&json!({ "template_id": template.id.to_string() }))
             .await;
-        assert_eq!(create.status_code(), 201, "response: {:?}", create.text());
+        assert_eq!(
+            create.status_code(),
+            StatusCode::CREATED,
+            "response: {:?}",
+            create.text()
+        );
 
         // Not yet reported: the template has not moved since the copy was taken.
         let before = request
@@ -268,7 +284,12 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .get(&format!("/api/schemas/{schema_id}/merge-preview"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(preview.status_code(), 200, "response: {:?}", preview.text());
+        assert_eq!(
+            preview.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            preview.text()
+        );
         let plan: serde_json::Value = preview.json();
         let fields = plan["fields"].as_array().unwrap();
         assert!(
@@ -291,7 +312,12 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .post(&format!("/api/schemas/{schema_id}/merge"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(merge.status_code(), 201, "response: {:?}", merge.text());
+        assert_eq!(
+            merge.status_code(),
+            StatusCode::CREATED,
+            "response: {:?}",
+            merge.text()
+        );
         let merge_body: serde_json::Value = merge.json();
         let merged_fields = &merge_body["schema"]["definition"]["entity_types"]["note"]["fields"];
         assert!(
@@ -343,7 +369,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .json(&json!({ "template_id": template.id.to_string() }))
             .await;
-        assert_eq!(create.status_code(), 201);
+        assert_eq!(create.status_code(), StatusCode::CREATED);
         let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
             .as_str()
             .unwrap()
@@ -536,7 +562,12 @@ async fn merging_a_conflicting_field_is_refused() {
             .post(&format!("/api/schemas/{schema_id}/merge"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
-        assert_eq!(merge.status_code(), 422, "response: {:?}", merge.text());
+        assert_eq!(
+            merge.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "response: {:?}",
+            merge.text()
+        );
         let pending = request
             .get("/api/schemas/upstream-changes")
             .add_header("Authorization", format!("Bearer {}", setup.key))

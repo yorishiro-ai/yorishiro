@@ -1,5 +1,4 @@
 use axum::Json;
-use axum::http::StatusCode;
 use axum::routing::post;
 use loco_rs::controller::Routes;
 
@@ -14,7 +13,7 @@ use crate::models::import::{self, ImportResult};
 pub async fn import_jsonl(
     authorized: Authorized<SchemaScope>,
     body: String,
-) -> Result<(StatusCode, Json<ImportResult>), ApiError> {
+) -> Result<Json<ImportResult>, ApiError> {
     let tenant_id = authorized.ctx.tenant_id;
     let workspace_id = authorized.ctx.workspace_id;
     let imported_by = authorized.ctx.user_id;
@@ -27,7 +26,7 @@ pub async fn import_jsonl(
     )
     .await?;
     authorized.commit().await?;
-    Ok((StatusCode::OK, Json(result)))
+    Ok(Json(result))
 }
 
 pub fn routes() -> Routes {

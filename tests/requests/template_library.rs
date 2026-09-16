@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -86,7 +87,7 @@ async fn owner_can_create_update_and_delete_a_template() {
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .json(&serde_json::json!({ "description": "now with a description" }))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["description"], "now with a description");
         // A field not named in the update request must survive unchanged.
@@ -96,13 +97,13 @@ async fn owner_can_create_update_and_delete_a_template() {
             .delete(&format!("/api/template-library/{id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 204);
+        assert_eq!(response.status_code(), StatusCode::NO_CONTENT);
 
         let response = request
             .get(&format!("/api/template-library/{id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
     })
     .await;
 }
@@ -124,7 +125,7 @@ async fn member_role_cannot_manage_the_template_library() {
                 "definition": note_definition(),
             }))
             .await;
-        assert_eq!(response.status_code(), 403);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
     })
     .await;
 }
@@ -157,7 +158,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
             .get(&format!("/api/template-library/{}", community.id))
             .add_header("Authorization", format!("Bearer {}", owner_b.owner_key))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
 
         // ...but not update it...
         let response = request
@@ -177,7 +178,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
             .delete(&format!("/api/template-library/{}", community.id))
             .add_header("Authorization", format!("Bearer {}", owner_b.owner_key))
             .await;
-        assert_eq!(response.status_code(), 404);
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 
         // The owning tenant still can.
         let response = request
@@ -185,7 +186,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
             .add_header("Authorization", format!("Bearer {}", owner_a.owner_key))
             .json(&serde_json::json!({ "description": "edited by the owner" }))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
     })
     .await;
 }
@@ -236,7 +237,7 @@ async fn fork_copies_a_community_template_into_the_forking_tenants_own_library()
             .add_header("Authorization", format!("Bearer {}", owner_b.owner_key))
             .json(&serde_json::json!({ "description": "tenant b's own copy" }))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
     })
     .await;
 }

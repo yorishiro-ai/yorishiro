@@ -1,5 +1,4 @@
 use axum::Json;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::error::YorishiroError;
@@ -17,7 +16,6 @@ impl From<YorishiroError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, body) = self.0.into_http_parts();
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         (status, Json(body)).into_response()
     }
 }

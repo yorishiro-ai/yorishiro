@@ -3,6 +3,7 @@
 /// Exercises the same schema creation flow as `schemas.rs` but boot against a
 /// SQLite backend.
 use serial_test::serial;
+use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
@@ -91,7 +92,7 @@ async fn create_schema_from_a_builtin_template_sqlite() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
-        assert_eq!(response.status_code(), 201);
+        assert_eq!(response.status_code(), StatusCode::CREATED);
         let body: serde_json::Value = response.json();
         assert_eq!(body["schema"]["name"], "task-management");
         assert!(

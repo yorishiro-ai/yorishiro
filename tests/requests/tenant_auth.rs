@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
@@ -37,7 +38,12 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
                     "password": "hunter2-hunter2",
                 }))
                 .await;
-            assert_eq!(setup.status_code(), 201, "response: {:?}", setup.text());
+            assert_eq!(
+                setup.status_code(),
+                StatusCode::CREATED,
+                "response: {:?}",
+                setup.text()
+            );
             let api_key = setup.json::<serde_json::Value>()["api_key"]
                 .as_str()
                 .unwrap()
@@ -75,7 +81,12 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                     "password": "hunter2-hunter2",
                 }))
                 .await;
-            assert_eq!(setup.status_code(), 201, "response: {:?}", setup.text());
+            assert_eq!(
+                setup.status_code(),
+                StatusCode::CREATED,
+                "response: {:?}",
+                setup.text()
+            );
             let setup_body: serde_json::Value = setup.json();
             let tenant_id: uuid::Uuid = setup_body["tenant_id"].as_str().unwrap().parse().unwrap();
             let workspace_id: uuid::Uuid = setup_body["workspace_id"]

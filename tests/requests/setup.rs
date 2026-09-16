@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 
@@ -15,7 +16,7 @@ use super::with_max_tenants;
 async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
-        assert_eq!(status.status_code(), 200);
+        assert_eq!(status.status_code(), StatusCode::OK);
         let body: serde_json::Value = status.json();
         assert_eq!(body["setup_required"], false);
 
@@ -44,7 +45,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {
             let status = request.get("/setup/status").await;
-            assert_eq!(status.status_code(), 200);
+            assert_eq!(status.status_code(), StatusCode::OK);
             let body: serde_json::Value = status.json();
             assert_eq!(body["setup_required"], true, "body: {body}");
 
@@ -71,7 +72,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await;
-            assert_eq!(whoami.status_code(), 200);
+            assert_eq!(whoami.status_code(), StatusCode::OK);
 
             let status = request.get("/setup/status").await;
             let body: serde_json::Value = status.json();
@@ -88,7 +89,12 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                     "password": "hunter2-hunter2",
                 }))
                 .await;
-            assert_eq!(second.status_code(), 409, "response: {:?}", second.text());
+            assert_eq!(
+                second.status_code(),
+                StatusCode::CONFLICT,
+                "response: {:?}",
+                second.text()
+            );
         })
         .await;
     })

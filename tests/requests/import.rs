@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
@@ -39,7 +40,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .add_header("Authorization", auth.clone())
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
-        assert_eq!(schema_response.status_code(), 201);
+        assert_eq!(schema_response.status_code(), StatusCode::CREATED);
         let schema_id = schema_response.json::<serde_json::Value>()["schema"]["id"]
             .as_str()
             .expect("schema id")
@@ -98,7 +99,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .get("/api/entities?entity_type=project")
             .add_header("Authorization", auth)
             .await;
-        assert_eq!(list_response.status_code(), 200);
+        assert_eq!(list_response.status_code(), StatusCode::OK);
         let items: Vec<serde_json::Value> = list_response.json();
         assert_eq!(items.len(), 2, "items: {items:?}");
         let titles: std::collections::BTreeSet<_> = items

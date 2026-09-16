@@ -1,4 +1,5 @@
 use super::boot_request;
+use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -90,7 +91,7 @@ async fn maintenance_is_readable_and_settable_over_rest() {
             .get("/api/system/maintenance")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["mode"], "off", "a fresh deployment serves normally");
 
@@ -99,7 +100,7 @@ async fn maintenance_is_readable_and_settable_over_rest() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "mode": "read-only", "reason": "restoring a backup" }))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
         let body: serde_json::Value = response.json();
         assert_eq!(body["mode"], "read_only");
         assert_eq!(body["reason"], "restoring a backup");
@@ -138,14 +139,14 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "mode": "full-lock" }))
             .await;
-        assert_eq!(response.status_code(), 200);
+        assert_eq!(response.status_code(), StatusCode::OK);
 
         // Everything else is refused now, which is what full lock means.
         let locked = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(locked.status_code(), 503);
+        assert_eq!(locked.status_code(), StatusCode::SERVICE_UNAVAILABLE);
 
         // The switch itself still answers, or there would be no way back.
         let response = request
@@ -165,7 +166,11 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(served.status_code(), 200, "and the deployment is back");
+        assert_eq!(
+            served.status_code(),
+            StatusCode::OK,
+            "and the deployment is back"
+        );
     })
     .await;
 }
@@ -185,14 +190,14 @@ async fn a_member_key_cannot_touch_maintenance() {
             .get("/api/system/maintenance")
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
-        assert_eq!(response.status_code(), 403);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
 
         let response = request
             .put("/api/system/maintenance")
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "mode": "full-lock" }))
             .await;
-        assert_eq!(response.status_code(), 403);
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
     })
     .await;
 }
@@ -213,7 +218,7 @@ async fn an_unknown_mode_is_refused() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({ "mode": "readonly" }))
             .await;
-        assert_eq!(response.status_code(), 422);
+        assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
         let body: serde_json::Value = response.json();
         assert!(
             body["error"]["hint"]
