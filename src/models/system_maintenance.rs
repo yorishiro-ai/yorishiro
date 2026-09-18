@@ -6,8 +6,12 @@
 pub use super::_entities::system_maintenance::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 use crate::error::{ResultExt, YorishiroError};
+
+pub const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -55,11 +59,25 @@ impl MaintenanceMode {
     /// Parses the stored value.
     /// Unknown values are rejected rather than treated as `Off`: reading a row this crate does not understand and concluding "serve everything" would turn a corrupt row into an outage of the protection itself.
     pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
+impl fmt::Display for MaintenanceMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for MaintenanceMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "off" => Some(Self::Off),
-            "read_only" => Some(Self::ReadOnly),
-            "full_lock" => Some(Self::FullLock),
-            _ => None,
+            "off" => Ok(Self::Off),
+            "read_only" | "read-only" => Ok(Self::ReadOnly),
+            "full_lock" | "full-lock" => Ok(Self::FullLock),
+            _ => Err(format!("unknown maintenance mode: {value}")),
         }
     }
 }
@@ -109,7 +127,7 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
     let Some(row) = row else {
         return Ok(MaintenanceState {
             mode: MaintenanceMode::Off,
-            retry_after: 300,
+            retry_after: DEFAULT_RETRY_AFTER_SECONDS,
             reason: None,
         });
     };

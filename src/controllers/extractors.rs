@@ -3,12 +3,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{ConnectInfo, FromRef, FromRequestParts};
-use axum::http::header;
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
-use crate::db::DbHandle;
+use crate::db::{AppContextBackend, DbHandle};
 use crate::error::YorishiroError;
 use crate::services::auth;
 use crate::services::auth::{ApiKeyScope, Authenticator};
@@ -28,28 +27,9 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
 
 /// Copies the request's headers into the shape [`auth::Authenticator`] takes.
 /// Headers whose value cannot be read as UTF-8 are dropped rather than failing the request.
-fn header_pairs(parts: &Parts) -> Vec<(String, String)> {
-    parts
-        .headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_owned(), value.to_owned()))
-        })
-        .collect()
-}
-
 /// Shared by every extractor in this file.
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
-    auth::bearer_credential(
-        parts
-            .headers
-            .get(header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok()),
-    )
-    .ok_or_else(|| {
+    auth::extract_bearer_key(parts).ok_or_else(|| {
         let err = YorishiroError::Unauthenticated;
         log_auth_rejection(parts, &err);
         ApiError(err)
@@ -167,7 +147,7 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
-        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if app_ctx.is_sqlite() {
             let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
@@ -175,7 +155,7 @@ where
             return Ok(AuthContext(ctx));
         }
 
-        let headers = header_pairs(parts);
+        let headers = auth::header_pairs(parts);
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
@@ -255,7 +235,7 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         // See AuthContext's own SQLite branch: no DbHandle/Authenticator is built for that backend, so this authenticates and begins a plain transaction on ctx.db directly (auth::authorize_sqlite).
-        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if app_ctx.is_sqlite() {
             let (ctx, txn) = auth::authorize_sqlite(&app_ctx.db, presented_key, R::SCOPE)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
@@ -266,7 +246,7 @@ where
             });
         }
 
-        let headers = header_pairs(parts);
+        let headers = auth::header_pairs(parts);
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
@@ -309,14 +289,14 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         // See Authorized<R>'s own SQLite branch.
-        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if app_ctx.is_sqlite() {
             let (ctx, txn) = auth::authorize_audit_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
             return Ok(AuditAuthorized { ctx, txn });
         }
 
-        let headers = header_pairs(parts);
+        let headers = auth::header_pairs(parts);
         let db = db_handle(&app_ctx)?;
         let auth_impl = authenticator(&app_ctx)?;
 
@@ -345,12 +325,12 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let presented_key = extract_bearer_key(parts)?;
-        let headers = header_pairs(parts);
+        let headers = auth::header_pairs(parts);
 
         let app_ctx = AppContext::from_ref(state);
 
         // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
-        if app_ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        if app_ctx.is_sqlite() {
             let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;

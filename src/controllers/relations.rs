@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, WriteScope};
-use crate::models::entity_relations::{self, RelationRecord};
+use crate::models::entity_relations::{self, RelationRecord, RelationStatus};
 
 #[derive(Deserialize)]
 pub struct CreateRelationRequest {
@@ -27,7 +27,7 @@ pub struct ListRelationsParams {
     pub relation_type: Option<String>,
     /// Restricts the listing to one state.
     /// Omitted, every state is listed.
-    pub status: Option<String>,
+    pub status: Option<RelationStatus>,
     #[serde(flatten)]
     pub page: crate::controllers::PageParams,
 }
@@ -35,7 +35,7 @@ pub struct ListRelationsParams {
 #[derive(Deserialize)]
 pub struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
-    pub status: String,
+    pub status: RelationStatus,
 }
 
 pub async fn create_relation(
@@ -97,7 +97,7 @@ pub async fn set_relation_status(
 ) -> Result<Json<RelationRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let record =
-        entity_relations::set_status(authorized.txn(), workspace_id, id, &body.status).await?;
+        entity_relations::set_status(authorized.txn(), workspace_id, id, body.status).await?;
     authorized.commit().await?;
     Ok(Json(record))
 }

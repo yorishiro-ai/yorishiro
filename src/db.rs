@@ -13,6 +13,22 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
+/// Common backend predicates for request and service code.
+pub trait AppContextBackend {
+    fn is_sqlite(&self) -> bool;
+    fn is_postgres(&self) -> bool;
+}
+
+impl AppContextBackend for loco_rs::app::AppContext {
+    fn is_sqlite(&self) -> bool {
+        self.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite
+    }
+
+    fn is_postgres(&self) -> bool {
+        self.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres
+    }
+}
+
 /// Registers SQLite extensions (sqlite-vec) so every connection opened on a SQLite URL
 /// auto-loads them.
 ///

@@ -1,5 +1,8 @@
 use sea_orm::Statement;
 use sea_orm::entity::prelude::*;
+use serde::Serialize;
+use std::fmt;
+use std::str::FromStr;
 
 pub use super::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
@@ -25,12 +28,84 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// A workspace with no schema yet.
-/// Entity writes are refused with a 422 that says so.
-pub const WORKSPACE_STATUS_SCHEMA_PENDING: &str = "schema_pending";
+/// API-facing workspace record with a typed status.
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkspaceRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub max_entities: Option<i32>,
+    pub status: WorkspaceStatus,
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<i32>,
+    pub schema_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::FixedOffset>,
+}
 
-/// A workspace that owns at least one schema.
-pub const WORKSPACE_STATUS_ACTIVE: &str = "active";
+impl TryFrom<Model> for WorkspaceRecord {
+    type Error = YorishiroError;
+
+    fn try_from(model: Model) -> Result<Self, Self::Error> {
+        let status = WorkspaceStatus::from_db_str(&model.status).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown workspace status: {}",
+                model.status
+            ))
+        })?;
+        Ok(Self {
+            id: model.id,
+            tenant_id: model.tenant_id,
+            name: model.name,
+            max_entities: model.max_entities,
+            status,
+            embedding_model: model.embedding_model,
+            embedding_dimensions: model.embedding_dimensions,
+            schema_id: model.schema_id,
+            created_at: model.created_at,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceStatus {
+    SchemaPending,
+    Active,
+}
+
+impl WorkspaceStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::SchemaPending => "schema_pending",
+            Self::Active => "active",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+}
+
+impl fmt::Display for WorkspaceStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for WorkspaceStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "schema_pending" => Ok(Self::SchemaPending),
+            "active" => Ok(Self::Active),
+            _ => Err(format!("unknown workspace status: {value}")),
+        }
+    }
+}
+
+pub const WORKSPACE_STATUS_SCHEMA_PENDING: &str = WorkspaceStatus::SchemaPending.as_db_str();
+pub const WORKSPACE_STATUS_ACTIVE: &str = WorkspaceStatus::Active.as_db_str();
 
 /// Whether the workspace is still waiting for its first schema.
 ///
@@ -45,7 +120,7 @@ pub async fn is_schema_pending(
         .internal()?
         .map(|model| model.status);
 
-    Ok(status.is_some_and(|s| s == WORKSPACE_STATUS_SCHEMA_PENDING))
+    Ok(status.is_some_and(|s| s == WorkspaceStatus::SchemaPending.as_db_str()))
 }
 
 /// Marks a workspace active and records its first schema, idempotently.
@@ -64,7 +139,7 @@ pub async fn mark_active(
          SET status = $1, schema_id = COALESCE(schema_id, $2) \
          WHERE id = $3",
         [
-            WORKSPACE_STATUS_ACTIVE.into(),
+            WorkspaceStatus::Active.as_db_str().into(),
             schema_id.into(),
             workspace_id.into(),
         ],

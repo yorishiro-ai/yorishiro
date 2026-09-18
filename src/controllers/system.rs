@@ -5,6 +5,7 @@
 
 use axum::Json;
 use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
 use axum::routing::{get, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -14,7 +15,9 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope};
 use crate::error::YorishiroError;
 use crate::models::api_key_audit_log;
-use crate::models::system_maintenance::{self, MaintenanceMode, MaintenanceState};
+use crate::models::system_maintenance::{
+    self, DEFAULT_RETRY_AFTER_SECONDS, MaintenanceMode, MaintenanceState,
+};
 
 /// The state as the API reports it.
 /// `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
@@ -42,7 +45,8 @@ impl From<MaintenanceState> for MaintenanceResponse {
 #[derive(Deserialize)]
 pub struct SetMaintenanceRequest {
     /// `off`, `read-only` or `full-lock`, spelled as the CLI spells them.
-    pub mode: String,
+    #[serde(deserialize_with = "deserialize_maintenance_mode")]
+    pub mode: MaintenanceMode,
     /// Defaults to the same 300 seconds the CLI uses.
     #[serde(default)]
     pub retry_after: Option<u32>,
@@ -51,18 +55,12 @@ pub struct SetMaintenanceRequest {
     pub reason: Option<String>,
 }
 
-const DEFAULT_RETRY_AFTER: u32 = 300;
-
-/// Accepts what an operator types at the CLI.
-/// `MaintenanceMode::from_db_str` parses the stored spelling (`read_only`), while an operator typing at this endpoint spells it kebab-cased (`read-only`), same as clap would render it.
-/// Both spellings are taken; anything else is refused rather than read as `off`.
-pub(crate) fn parse_mode(value: &str) -> Option<MaintenanceMode> {
-    match value {
-        "off" => Some(MaintenanceMode::Off),
-        "read-only" | "read_only" => Some(MaintenanceMode::ReadOnly),
-        "full-lock" | "full_lock" => Some(MaintenanceMode::FullLock),
-        _ => None,
-    }
+fn deserialize_maintenance_mode<'de, D>(deserializer: D) -> Result<MaintenanceMode, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    value.parse().map_err(serde::de::Error::custom)
 }
 
 pub async fn get_maintenance(
@@ -76,18 +74,20 @@ pub async fn get_maintenance(
 pub async fn set_maintenance(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
-    Json(body): Json<SetMaintenanceRequest>,
+    body: Result<Json<SetMaintenanceRequest>, JsonRejection>,
 ) -> Result<Json<MaintenanceResponse>, ApiError> {
-    let mode = parse_mode(&body.mode).ok_or_else(|| YorishiroError::ValidationFailed {
-        message: format!("unknown maintenance mode '{}'", body.mode),
-        details: vec![],
-        hint: "one of: off, read-only, full-lock".into(),
+    let Json(body) = body.map_err(|err| {
+        ApiError(YorishiroError::ValidationFailed {
+            message: err.body_text(),
+            details: vec![],
+            hint: "one of: off, read-only, full-lock".into(),
+        })
     })?;
-
+    let mode = body.mode;
     let updated = system_maintenance::set(
         &ctx.db,
-        mode,
-        body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER),
+        body.mode,
+        body.retry_after.unwrap_or(DEFAULT_RETRY_AFTER_SECONDS),
         body.reason,
     )
     .await?;

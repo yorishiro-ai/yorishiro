@@ -242,7 +242,11 @@ async fn insert_fork_head<C: ConnectionTrait>(
         definition: ActiveValue::Set(serde_json::to_value(definition).internal()?),
         status: ActiveValue::Set("archived".into()),
         origin_template_id: ActiveValue::Set(None),
-        origin_status: ActiveValue::Set(schema_schemas::ORIGIN_STATUS_DETACHED.into()),
+        origin_status: ActiveValue::Set(
+            schema_schemas::SchemaOriginStatus::Detached
+                .as_db_str()
+                .into(),
+        ),
         origin_snapshot: ActiveValue::Set(None),
         origin_updated_at: ActiveValue::Set(None),
         ..Default::default()

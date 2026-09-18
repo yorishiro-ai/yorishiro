@@ -91,7 +91,7 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
         size: 17_082_660,
         description: "tokenizer",
     },
-    dimensions: 768,
+    dimensions: crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
     // `sentence_bert_config.json`'s `max_seq_length`, not `config.json`'s `max_position_embeddings` (514): XLM-RoBERTa reserves two position ids (bos/pad, offset from `pad_token_id`), so only 512 of the 514 are actually usable.
     // 514 - 2 = 512, confirmed against both files at this revision; do not switch this back to the raw `max_position_embeddings` value.
     max_sequence_length: 512,
