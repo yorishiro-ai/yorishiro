@@ -6,9 +6,8 @@ name: Release (prerelease)
 # Prereleases are numbered by date and run: `YYYYMMDD-N`, which is outside SemVer entirely. A
 # prerelease tag has no `v` prefix, so it never looks like a version in a `docker images` listing.
 #
-# Releases and prereleases share the repository, but their tagging systems are separate. A release
-# uses `vX.Y.Z` and bumps `Cargo.toml`; a prerelease does neither. See `.github/workflows/release.yml`
-# for the SemVer release path.
+# Releases use `vX.Y.Z` and bump `Cargo.toml`; a prerelease does neither. See
+# `.github/workflows/release.yml` for the SemVer release path.
 
 on:
   workflow_dispatch:
@@ -25,9 +24,6 @@ env:
 permissions:
   contents: write
   packages: write
-  # Build provenance: `id-token` mints the short-lived OIDC token that identifies this workflow
-  # to the transparency log, `attestations` records the result. Both are required by
-  # actions/attest-build-provenance and neither is used anywhere else here.
   id-token: write
   attestations: write
 
@@ -39,10 +35,6 @@ jobs:
       ref: ${{ steps.plan.outputs.ref }}
 
     steps:
-      # A real release comes from `develop`; a dry run may come from anywhere. That exemption is
-      # the point of `dry_run`: it is what lets this workflow be checked from a pull request
-      # branch before it is merged, which is otherwise impossible for a `workflow_dispatch`
-      # workflow whose every other path writes something public.
       - name: Check the dispatch ref
         env:
           DRY_RUN: ${{ inputs.dry_run }}
@@ -58,25 +50,6 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # The tag names the day and the run within it: `20260830-1`, then `20260830-2`. There is
-      # no version input, because a prerelease is not claiming a version: see this file's
-      # header on why `develop` stays at its Cargo.toml version.
-      #
-      # The date is UTC, which is what the runner's clock reads. A prerelease cut late in the
-      # evening in Asia/Tokyo therefore carries the following day's date, and the Release's own
-      # creation time will look a day ahead of its tag for that window. Stated because the
-      # alternative reading is that something is wrong.
-      #
-      # Numbering reads `git ls-remote` rather than the tags API, because the API pages and this
-      # must not. `gh api repos/.../tags?per_page=100` returns a single page, so once this
-      # repository passes 100 tags the oldest stop appearing, and today's tags are the newest:
-      # they would be the first to vanish from the answer, numbering would restart at 1, and the
-      # tag it produced would already exist. `ls-remote` has no paging, so it cannot drift that
-      # way regardless of how many tags accumulate.
-      #
-      # (Not because the two disagree today: they report the same 72 tags. The 13-ref difference
-      # in raw `ls-remote` output is the peeled `^{}` entries annotated tags carry, which is what
-      # `grep -v` below removes, not evidence of anything missing.)
       - name: Plan the release
         id: plan
         env:
@@ -87,17 +60,10 @@ jobs:
             | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' \
             | grep -E "^${DATE}-[0-9]+$" | sed "s|^${DATE}-||" | sort -n | tail -1)"
           TAG="${DATE}-$(( ${existing:-0} + 1 ))"
-
-          # The version compiled into the binary. A prerelease tag is not a SemVer version and
-          # `Cargo.toml` will not take it, so the manifest keeps the version it already has and
-          # only the build metadata says which prerelease this is.
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
           if [ "$DRY_RUN" = "true" ]; then
             echo "dry run: would tag ${TAG}, building from ${GITHUB_SHA}"
-            # Every downstream job checks out this, not the tag: in a dry run the tag does not
-            # exist, and `ref:` pointing at a missing tag fails the checkout rather than the
-            # release.
             echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -132,23 +98,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # rust-cache: each arch needs ~/.cache/ort.pyke.io (embedding cache), separate from
-      # the cargo build cache, so it stays as the caller's own step after the composite.
       - uses: Swatinem/rust-cache@v2
         with:
           cache-directories: ~/.cache/ort.pyke.io
 
-      # `Cargo.toml` is left alone: its version is this branch's position in the SemVer system,
-      # and a prerelease belongs to the other one (see this file's header). Nothing to inject.
-      #
-      # `BUILD_SHA` carries the tag rather than the commit sha, so `yorishiro version` answers
-      # `0.1.0 (20260830-1)` and both systems are legible in one string: where the branch sits,
-      # and which prerelease this binary is. The commit is in the release body for anyone who
-      # needs it.
-      #
-      # There is no separate community build. `ee/` compiles into this crate as a module and
-      # the licence layer decides at runtime what serves, so there is one binary and one
-      # package; `packaging/nfpm-yorishiro.yaml` records the same reasoning.
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
@@ -159,15 +112,12 @@ jobs:
             cargo build --release --bin yorishiro
           fi
 
-      # Installed from the release tarball rather than an action: the version is pinned here in
-      # plain sight, and nfpm publishes static binaries for both architectures this matrix runs.
       - name: Install nfpm
         if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
           NFPM_VERSION: 2.47.0
           ARCH: ${{ matrix.arch }}
         run: |
-          # nfpm names its amd64 asset `x86_64`, which is not what this matrix calls the arch.
           case "$ARCH" in
             amd64) asset_arch=x86_64 ;;
             arm64) asset_arch=arm64 ;;
@@ -177,9 +127,6 @@ jobs:
           asset="nfpm_${NFPM_VERSION}_Linux_${asset_arch}.tar.gz"
 
           curl -fsSL -o /tmp/nfpm.tar.gz "${base}/${asset}"
-          # A tool that writes the artifacts a release publishes is verified before it runs.
-          # The checksum file is published alongside; `--ignore-missing` narrows it to the one
-          # asset downloaded, and `-c` fails on a mismatch.
           curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
           ( cd /tmp && cp nfpm.tar.gz "$asset" \
             && sha256sum --check --ignore-missing --strict nfpm-checksums.txt \
@@ -188,14 +135,6 @@ jobs:
           sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           nfpm --version
 
-      # Built in CI rather than from a developer's machine, and this is the reason: the package
-      # declares a glibc floor of 2.39, and a binary linked against a newer host glibc raises the
-      # real requirement above the declared one, so the package installs on systems it cannot run
-      # on. The runner's glibc is what holds the floor down.
-      # `VERSION` is the tag. `20260830-1` is a well-formed Debian version (`20260830` upstream,
-      # `1` revision), so the packages carry the prerelease identity even though the binary
-      # inside them reports the manifest's own version. rpm treats the hyphen the same way, as
-      # the release field.
       - name: Package (deb and rpm)
         if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
@@ -208,9 +147,6 @@ jobs:
           done
           ls -1 dist/
 
-      # The packages are installed and started in the distributions they claim to support,
-      # including the ones they must refuse. This runs in a dry run too: it is the part of a
-      # release most worth checking before publishing anything.
       - name: Test the packages
         if: matrix.arch == 'amd64' && matrix.target != 'x86_64-unknown-linux-musl'
         run: ./packaging/test-install.sh dist
@@ -219,14 +155,6 @@ jobs:
         if: matrix.arch == 'amd64' && matrix.target != 'x86_64-unknown-linux-musl'
         run: ./packaging/test-systemd.sh dist
 
-      # `!cancelled()` rather than the default `success()`, so a failed package test still
-      # leaves the packages behind. The tests above run after the build, so a failure there
-      # meant the artifacts were never uploaded, and the one thing needed to diagnose the
-      # failure was the thing the failure destroyed. Diagnosing it then needs a second run with
-      # the tests removed, which is a worse position than simply keeping the output.
-      #
-      # `github-release` still gates on the job's own success, so a failed run cannot publish
-      # these: they are kept for reading, not for shipping.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ !cancelled() && matrix.target != 'x86_64-unknown-linux-musl' }}
         with:
@@ -265,8 +193,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # A dry run builds the image and does not push it, which is what makes the Dockerfile
-      # itself checkable without a registry write.
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -278,8 +204,6 @@ jobs:
 
   docker-manifest:
     needs: [docker, prepare]
-    # Skipped entirely in a dry run: it merges tags that were never pushed, so there is nothing
-    # for it to read. This is the one job a dry run cannot exercise at all.
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
 
@@ -292,17 +216,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Each arch was pushed as its own tag by the (native, no-QEMU) `docker` job above; this
-      # merges them into one multi-arch manifest.
-      #
-      # The image tag is the bare prerelease tag, `20260830-1`, with no leading `v`. The
-      # released images carry one (`:v0.50.0` exists, `:0.50.0` does not), and that convention
-      # holds for versions; a date is not a version, so prefixing it would only make the two
-      # kinds of tag look alike in a listing where telling them apart is the point.
-      #
-      # No `latest`. That is what an unqualified `docker pull` takes, and moving it here would
-      # point it at a prerelease newer than the newest release, so anyone who did not name a tag
-      # would silently get one.
       - name: Create multi-arch manifest
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
@@ -313,12 +226,6 @@ jobs:
             "${IMAGE}:${TAG}-amd64" \
             "${IMAGE}:${TAG}-arm64"
 
-  # Pulls the manifest that was just published and boots it against a real database. Nothing
-  # before this point runs the actual release image: a release-profile-only fault, or a
-  # Dockerfile stage that only breaks in the published image, would otherwise ship unnoticed.
-  #
-  # Runs before github-release deliberately, so a failure here leaves a tag and images but no
-  # Release, which is the state that reads as "did not finish" rather than as "shipped".
   smoke:
     needs: [docker-manifest, prepare]
     if: ${{ !inputs.dry_run }}
@@ -385,12 +292,6 @@ jobs:
           pattern: binary-*
           merge-multiple: true
 
-      # Count what is about to be published, before publishing it.
-      #
-      # A glob matching nothing is not an error to the upload action, which is precisely why a
-      # list of files cannot prove its own coverage, and this counts instead. One package per
-      # format per architecture, and nothing else: two, not master's four, because there is no
-      # community package.
       - name: Every documented artifact is present
         run: |
           status=0
@@ -407,17 +308,11 @@ jobs:
           expect '*.rpm' 2
           exit "$status"
 
-      # One checksum file over everything published, so a download can be verified without a
-      # signing key to distribute, rotate and have people trust. The same mechanism this
-      # workflow already relies on for nfpm itself.
       - name: Checksums
         run: |
           ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
           cat dist/checksums.txt
 
-      # What the packages are and where they came from, without a signing key to distribute,
-      # rotate or have anyone trust. `gh attestation verify <file> --repo yorishiro-ai/yorishiro`
-      # answers "this artifact was built by this workflow, from this commit".
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'dist/*.deb, dist/*.rpm'
@@ -430,24 +325,8 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
-          # The version mismatch, stated where the people who meet it will be: someone who
-          # downloads a prerelease, checks out its tag and rebuilds. They get `0.1.0`, and
-          # nothing else in the repository would tell them why.
           body: |
-            Prerelease built from `develop`.
-
-            Prereleases are numbered by date and run, `YYYYMMDD-N`, which is a different system
-            from the `vX.Y.Z` releases use. A prerelease is not a version, so it does not
-            appear in one:
-
-            ```
-            $ yorishiro version
-            0.1.0 (${{ needs.prepare.outputs.tag }})
-            ```
-
-            `0.1.0` is where `develop` sits in the release numbering, compiled in from its
-            `Cargo.toml`; the second half is this prerelease. The packages are versioned
-            `${{ needs.prepare.outputs.tag }}`, so `dpkg -l` and `rpm -q` name it directly.
+            Prerelease ${{ needs.prepare.outputs.tag }} built from `develop`.
 
             Commit: ${{ github.sha }}
 
