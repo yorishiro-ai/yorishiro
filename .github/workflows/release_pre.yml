@@ -1,21 +1,17 @@
-name: Release (SemVer)
+name: Release (prerelease)
 
-# One dispatch cuts a SemVer release from `develop`: bumps `Cargo.toml`, builds, packages,
-# publishes images, and publishes a GitHub Release.
+# One dispatch cuts a prerelease from `develop`: build, package, publish images, publish a
+# GitHub Release marked prerelease.
 #
-# SemVer releases use `vX.Y.Z` tags and are what `Cargo.toml`'s version field represents. A
-# SemVer release bumps the manifest, tags the commit, then runs the full build pipeline.
+# Prereleases are numbered by date and run: `YYYYMMDD-N`, which is outside SemVer entirely. A
+# prerelease tag has no `v` prefix, so it never looks like a version in a `docker images` listing.
 #
-# Prereleases use a different workflow (`release_pre.yml`) with date-based tags (`YYYYMMDD-N`)
-# and do not modify `Cargo.toml`.
+# Releases use `vX.Y.Z` and bump `Cargo.toml`; a prerelease does neither. See
+# `.github/workflows/release.yml` for the SemVer release path.
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'SemVer version without v prefix (e.g. 0.100.0)'
-        required: true
-        type: string
       dry_run:
         description: 'Build and package without publishing anything'
         type: boolean
@@ -54,61 +50,26 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Validate version format
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Version must match X.Y.Z (no v prefix): '$VERSION'" >&2
-            exit 1
-          fi
-
       - name: Plan the release
         id: plan
         env:
           DRY_RUN: ${{ inputs.dry_run }}
-          VERSION: ${{ inputs.version }}
         run: |
-          TAG="v${VERSION}"
-
-          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "$TAG"; then
-            echo "Tag ${TAG} already exists on remote." >&2
-            exit 1
-          fi
-
-          BRANCH="release/prepare-${TAG}"
-          git checkout -b "$BRANCH" develop
-
-          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-
-          cargo generate-lockfile 2>/dev/null || true
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
-          if git diff --cached --quiet; then
-            echo "No changes to commit (version may already be set)." >&2
-            git checkout develop
-            git branch -D "$BRANCH"
-          else
-            git commit -m "Bump version to ${TAG}"
-          fi
-
+          DATE="$(date -u +%Y%m%d)"
+          existing="$(git ls-remote --tags origin \
+            | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' \
+            | grep -E "^${DATE}-[0-9]+$" | sed "s|^${DATE}-||" | sort -n | tail -1)"
+          TAG="${DATE}-$(( ${existing:-0} + 1 ))"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
           if [ "$DRY_RUN" = "true" ]; then
-            echo "dry run: would tag ${TAG}, building from $(git rev-parse HEAD)"
-            echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-            git checkout develop
-            git branch -D "$BRANCH"
+            echo "dry run: would tag ${TAG}, building from ${GITHUB_SHA}"
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git push origin "$BRANCH"
           git tag "$TAG"
           git push origin "$TAG"
-          git push origin "$BRANCH:develop"
-          git branch -D "$BRANCH"
           echo "ref=${TAG}" >> "$GITHUB_OUTPUT"
 
   binary:
@@ -177,7 +138,7 @@ jobs:
       - name: Package (deb and rpm)
         if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.prepare.outputs.tag }}
           ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist
@@ -258,7 +219,7 @@ jobs:
       - name: Create multi-arch manifest
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
-          TAG: ${{ inputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           docker buildx imagetools create \
             -t "${IMAGE}:${TAG}" \
@@ -359,13 +320,13 @@ jobs:
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          prerelease: false
+          prerelease: true
           files: |
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
           body: |
-            Release ${{ needs.prepare.outputs.tag }} built from `develop`.
+            Prerelease ${{ needs.prepare.outputs.tag }} built from `develop`.
 
             Commit: ${{ github.sha }}
 
