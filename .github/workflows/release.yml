@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       ref: ${{ steps.plan.outputs.ref }}
@@ -116,15 +116,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             arch: amd64
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             arch: arm64
             target: aarch64-unknown-linux-gnu
-          - os: ubuntu-latest
-            arch: amd64
-            target: x86_64-unknown-linux-musl
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -144,15 +141,9 @@ jobs:
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
-            cargo build --release --target ${{ matrix.target }} --bin yorishiro
-          else
-            cargo build --release --bin yorishiro
-          fi
+        run: cargo build --release --bin yorishiro
 
       - name: Install nfpm
-        if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
           NFPM_VERSION: 2.47.0
           ARCH: ${{ matrix.arch }}
@@ -175,7 +166,6 @@ jobs:
           nfpm --version
 
       - name: Package (deb and rpm)
-        if: matrix.target != 'x86_64-unknown-linux-musl'
         env:
           VERSION: ${{ inputs.version }}
           ARCH: ${{ matrix.arch }}
@@ -187,33 +177,25 @@ jobs:
           ls -1 dist/
 
       - name: Test the packages
-        if: matrix.arch == 'amd64' && matrix.target != 'x86_64-unknown-linux-musl'
         run: ./packaging/test-install.sh dist
 
       - name: Test the packages under systemd
-        if: matrix.arch == 'amd64' && matrix.target != 'x86_64-unknown-linux-musl'
         run: ./packaging/test-systemd.sh dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{ !cancelled() && matrix.target != 'x86_64-unknown-linux-musl' }}
+        if: ${{ !cancelled() }}
         with:
           name: binary-linux-${{ matrix.arch }}
           path: dist/*
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{ !cancelled() && matrix.target == 'x86_64-unknown-linux-musl' }}
-        with:
-          name: binary-linux-${{ matrix.arch }}-musl
-          path: target/${{ matrix.target }}/release/yorishiro
 
   docker:
     needs: prepare
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             arch: amd64
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             arch: arm64
     runs-on: ${{ matrix.os }}
 
@@ -244,7 +226,7 @@ jobs:
   docker-manifest:
     needs: [docker, prepare]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
@@ -268,7 +250,7 @@ jobs:
   smoke:
     needs: [docker-manifest, prepare]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     services:
       postgres:
@@ -322,7 +304,7 @@ jobs:
   github-release:
     needs: [binary, smoke, prepare]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

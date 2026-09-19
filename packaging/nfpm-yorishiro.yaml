@@ -42,13 +42,11 @@ depends:
 # up as the floor to test against instead of the one actually declared below. This paragraph
 # avoids writing that exact pattern for that reason.)
 #
-# Re-measured against the candle-based binary from a real CI build (release.yml, dry_run,
-# binary/amd64 job): `readelf -V` on the amd64 .deb's extracted binary shows GLIBC_2.39 as the
-# highest versioned symbol required, the same figure the ort-based binary needed. Removing `ort`
-# changed what the binary links (no more libstdc++, no more openssl) but did not move this floor:
-# both binaries were built by the same toolchain image (rust:1.97-slim / the GitHub Actions
-# ubuntu-latest runner's glibc), and the versioned libc symbols this codebase's own Rust code and
-# its remaining dependencies pull in did not change with the embedding provider.
+# Re-measured against the candle-based binary from a real CI build on the former Ubuntu 24.04
+# runner (release.yml, dry_run, binary/amd64 job): `readelf -V` on the extracted binary shows
+# GLIBC_2.39 as the highest versioned symbol required, the same figure the ort-based binary
+# needed. Removing `ort` changed what the binary links (no more libstdc++, no more openssl) but
+# did not move this floor on that runner.
 #
 # That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
 # produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
@@ -56,7 +54,8 @@ depends:
 # compiler selects.
 #
 # `2.39` matches what this project supports: Ubuntu 24.04 and AlmaLinux 10,
-# both of which ship glibc 2.39. The build host and the support target agree.
+# both of which ship glibc 2.39. Package tests enforce compatibility with both targets even when
+# the GitHub-hosted build runner uses a newer Ubuntu release.
 #
 # Read this from the binary rather than from its symbol table. `objdump -T` shows the two
 # `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol
@@ -96,29 +95,24 @@ contents:
     dst: /usr/bin/yorishiro
   - src: ./packaging/yorishiro.service
     dst: /lib/systemd/system/yorishiro.service
-  # The application resolves `config/{LOCO_ENV}.yaml` relative to its working directory, so
-  # these ship as package-owned files rather than as editable configuration: an operator's
-  # settings go in /etc/yorishiro/yorishiro.env, which the unit reads as the environment these
-  # files interpolate from. Marking them `config` would prompt on upgrade for files nobody is
-  # meant to hand-edit.
+  # The systemd unit loads this editable YAML template from /etc/yorishiro.
+  # `config|noreplace` preserves an operator's changes during package upgrades.
   - src: ./config/production.yaml
-    dst: /usr/share/yorishiro/config/production.yaml
-  - src: ./config/development.yaml
-    dst: /usr/share/yorishiro/config/development.yaml
-  # In /usr/share/yorishiro rather than /usr/share/doc: the same dpkg `path-exclude` that drops
-  # LICENSE would drop this, and the settings reference is what the environment file points at.
-  - src: ./docs/configuration.md
-    dst: /usr/share/yorishiro/docs/configuration.md
+    dst: /etc/yorishiro/production.yaml
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: yorishiro
   # `copyright` rather than `LICENSE`: Debian policy names it that, and minimal images
   # (including the official ubuntu/debian containers) carry a dpkg `path-exclude` for
   # `/usr/share/doc/*` with a `path-include` for `copyright` alone -- a file called LICENSE is
   # silently dropped on exactly the systems most likely to be used for a deployment.
   - src: ./LICENSE
     dst: /usr/share/doc/yorishiro/copyright
-  # The enterprise licence in /etc for the same reason as the environment file above, and not as
-  # `copyright.ee`: the `path-include` covers the name `copyright` exactly, so this shipped
-  # inside the package and was deleted at unpack on every minimal image -- the enterprise
-  # edition delivering everything except the licence it is distributed under.
+  # The enterprise licence stays outside /usr/share/doc.
+  # A minimal image's `path-include` covers the name `copyright` exactly, so a file named
+  # `copyright.ee` is deleted at unpack time.
   - src: ./ee/LICENSE
     dst: /etc/yorishiro/LICENSE.enterprise
 

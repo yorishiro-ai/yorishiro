@@ -53,12 +53,11 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   getent passwd yorishiro >/dev/null && echo "USER"
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "EE_LICENCE"
-  [ -f /usr/share/yorishiro/config/production.yaml ] && echo "CONFIG"
-  [ -f /usr/share/yorishiro/docs/configuration.md ] && echo "DOCS"
-  [ "$(stat -c "%a %U:%G" /etc/yorishiro/yorishiro.env)" = "640 root:yorishiro" ] && echo "ENVPERM"
+  [ -f /etc/yorishiro/production.yaml ] && echo "CONFIG"
+  [ "$(stat -c "%a %U:%G" /etc/yorishiro/production.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEOWNER"
 ' 2>&1)
-for want in RUNS USER COPYRIGHT EE_LICENCE CONFIG DOCS ENVPERM STATEOWNER; do
+for want in RUNS USER COPYRIGHT EE_LICENCE CONFIG CONFIGPERM STATEOWNER; do
   case "$out" in
     *"$want"*) ok "$want" ;;
     *) bad "$want (install output: $(echo "$out" | tr '\n' ' '))" ;;
@@ -162,44 +161,6 @@ else
 fi
 
 # --------------------------------------------------------------------------------------------
-note "an unconfigured start fails on the thing that is missing"
-# --------------------------------------------------------------------------------------------
-# There is no exit-code assertion here: the unit no longer carries
-# `RestartPreventExitStatus=78` and this binary does not produce exit 78.
-#
-# What is still worth asserting is that the failure names the variable an operator has to set,
-# and does not hand them a Rust panic.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
-  apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-  cd /var/lib/yorishiro
-  su -s /bin/sh yorishiro -c "LOCO_ENV=production LOCO_CONFIG_FOLDER=/usr/share/yorishiro/config /usr/bin/yorishiro start" 2>&1
-  echo "EXIT:$?"' 2>&1)
-if grep -q 'EXIT:0' <<<"$out"; then
-  bad "an unconfigured start exited 0: $(echo "$out" | tail -3 | tr '\n' ' ')"
-else
-  ok "an unconfigured start fails rather than starting"
-fi
-# Whichever of the three it stops on, not `DATABASE_URL` specifically. The config file is a
-# Tera template rendered top to bottom, so the first unset variable is the one reported, and
-# `host:` sits above `database:` in `config/production.yaml`: with nothing set at all this fails
-# on HOST. Measured, after asserting DATABASE_URL here and watching it not appear.
-if grep -qE 'HOST|DATABASE_URL|QUEUE_URL' <<<"$out"; then
-  ok "names the variable it stopped on"
-else
-  bad "names none of HOST/DATABASE_URL/QUEUE_URL: $(echo "$out" | head -3 | tr '\n' ' ')"
-fi
-# `panicked at` only. `RUST_BACKTRACE` was in this pattern and had to come out: a config error
-# prints the whole rendered template, and `config/production.yaml` mentions that variable in a
-# comment about `pretty_backtrace`, so the pattern matched the configuration file rather than a
-# panic and reported a failure on a run that behaved correctly.
-if grep -q 'panicked at' <<<"$out"; then
-  bad "still prints a Rust panic at an operator"
-else
-  ok "no panic"
-fi
-
-# --------------------------------------------------------------------------------------------
 note "the systemd unit is valid"
 # --------------------------------------------------------------------------------------------
 # `systemd-analyze` resolves ExecStart, so a unit checked without its binary reports a missing
@@ -272,22 +233,49 @@ else
   docker exec "app-$$" bash -c "
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1
-    cat >> /etc/yorishiro/yorishiro.env <<EOF
-DATABASE_URL=postgres://yorishiro:secret@pg-$$:5432/yorishiro
-QUEUE_URL=postgres://yorishiro:secret@pg-$$:5432/yorishiro
-HOST=http://127.0.0.1:5150
-YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1
-YORISHIRO_EMBEDDING_MODEL=unused
+    cat > /etc/yorishiro/production.yaml <<EOF
+logger:
+  enable: true
+  pretty_backtrace: false
+  level: info
+  format: json
+server:
+  port: 5150
+  binding: 0.0.0.0
+  host: http://127.0.0.1:5150
+  middlewares:
+    request_id:
+      enable: true
+    logger:
+      enable: true
+workers:
+  mode: BackgroundQueue
+queue:
+  kind: Postgres
+  uri: postgres://yorishiro:secret@pg-$$:5432/yorishiro
+  dangerously_flush: false
+  num_workers: 2
+  reaper:
+    age_minutes: 30
+    interval_seconds: 60
+database:
+  uri: postgres://yorishiro:secret@pg-$$:5432/yorishiro
+  enable_logging: false
+  connect_timeout: 5000
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 100
+  auto_migrate: true
+  dangerously_truncate: false
+  dangerously_recreate: false
 EOF
   " >/dev/null 2>&1
-  # Started the way the unit does, since there is no systemd here: the same environment file,
-  # the same LOCO_ENV and config folder.
+  # Started the way the unit does, since there is no systemd here: the same LOCO_ENV and
+  # editable configuration folder.
   docker exec -d "app-$$" bash -c \
-    'cd /var/lib/yorishiro && set -a && . /etc/yorishiro/yorishiro.env && set +a &&
-     exec su -s /bin/sh yorishiro -c "env LOCO_ENV=production LOCO_CONFIG_FOLDER=/usr/share/yorishiro/config \
-       DATABASE_URL=$DATABASE_URL QUEUE_URL=$QUEUE_URL HOST=$HOST \
-       YORISHIRO_EMBEDDING_BASE_URL=$YORISHIRO_EMBEDDING_BASE_URL \
-       YORISHIRO_EMBEDDING_MODEL=$YORISHIRO_EMBEDDING_MODEL /usr/bin/yorishiro start"'
+    'cd /var/lib/yorishiro && exec su -s /bin/sh yorishiro -c \
+      "env LOCO_ENV=production LOCO_CONFIG_FOLDER=/etc/yorishiro \
+      YORISHIRO_EMBEDDING_PROVIDER=none /usr/bin/yorishiro start"'
 
   up=
   for _ in $(seq 1 60); do
