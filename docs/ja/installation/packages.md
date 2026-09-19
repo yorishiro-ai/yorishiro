@@ -17,19 +17,22 @@ $ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
 |---|---|
 | `/usr/bin/yorishiro` | バイナリ |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
-| `/etc/yorishiro/yorishiro.env` | 環境設定ファイル |
-| `/usr/share/yorishiro/config/` | 設定ファイル（直接編集するものではありません） |
+| `/etc/yorishiro/production.yaml` | 編集可能な本番設定テンプレート |
 | `/etc/yorishiro/LICENSE.enterprise` | エンタープライズライセンス |
 
 ## 設定
 
-設定は環境ファイル `/etc/yorishiro/yorishiro.env` で行います：
+パッケージ版サービスの設定は `/etc/yorishiro/production.yaml` を編集します。
+パッケージを更新しても、このファイルに加えた変更は保持されます。
 
 ```yaml
-DATABASE_URL=postgres://user:pass@host:5432/yorishiro
-YORISHIRO_QUEUE_KIND=Redis
-QUEUE_URL=redis://host:6379
-YORISHIRO_LICENSE_KEY=...
+database:
+  uri: postgres://user:pass@host:5432/yorishiro
+queue:
+  kind: Postgres
+  uri: postgres://user:pass@host:5432/yorishiro
+server:
+  host: https://yorishiro.example.com
 ```
 
 全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。

@@ -19,7 +19,7 @@
 # sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
 # queue derives from DATABASE_URL's scheme), so an unconfigured install starts successfully
 # and serves a single-tenant trial instance. Embeddings are disabled to avoid fetching the
-# ~1 GiB model in CI. The later phase sets DATABASE_URL/QUEUE_URL to Postgres explicitly
+# ~1 GiB model in CI. The later phase writes PostgreSQL settings to the installed YAML template
 # to verify that path as well.
 
 set -uo pipefail
@@ -76,11 +76,9 @@ docker exec "$APP" bash -c "apt-get install -y -qq /pkg/$DEB >/dev/null 2>&1" ||
 }
 
 # Disable embeddings to avoid the ~1 GiB model fetch in CI.
-# The zero-config defaults are SQLite + local provider, but fetching a gigabyte is
-# impractical for a smoke test that should complete in under a minute.
-docker exec "$APP" bash -c "cat > /etc/yorishiro/yorishiro.env <<EOF
-YORISHIRO_EMBEDDING_PROVIDER=none
-EOF"
+# This setting has no Loco YAML field, so the test injects it into systemd's process environment
+# without creating a package-owned environment file.
+docker exec "$APP" systemctl set-environment YORISHIRO_EMBEDDING_PROVIDER=none
 
 docker exec "$APP" systemctl reset-failed yorishiro >/dev/null 2>&1
 docker exec "$APP" systemctl start yorishiro >/dev/null 2>&1
@@ -116,11 +114,41 @@ docker exec "$PG" psql -U yorishiro -d yorishiro \
 # lookups stop working: an artefact of running systemd in Docker, not something an operator meets
 # on a real host.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-docker exec "$APP" bash -c "cat > /etc/yorishiro/yorishiro.env <<EOF
-DATABASE_URL=postgres://yorishiro:secret@$PGIP:5432/yorishiro
-QUEUE_URL=postgres://yorishiro:secret@$PGIP:5432/yorishiro
-HOST=http://127.0.0.1:5150
-YORISHIRO_EMBEDDING_PROVIDER=none
+docker exec "$APP" bash -c "cat > /etc/yorishiro/production.yaml <<EOF
+logger:
+  enable: true
+  pretty_backtrace: false
+  level: info
+  format: json
+server:
+  port: 5150
+  binding: 0.0.0.0
+  host: http://127.0.0.1:5150
+  middlewares:
+    request_id:
+      enable: true
+    logger:
+      enable: true
+workers:
+  mode: BackgroundQueue
+queue:
+  kind: Postgres
+  uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro
+  dangerously_flush: false
+  num_workers: 2
+  reaper:
+    age_minutes: 30
+    interval_seconds: 60
+database:
+  uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro
+  enable_logging: false
+  connect_timeout: 5000
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 100
+  auto_migrate: true
+  dangerously_truncate: false
+  dangerously_recreate: false
 EOF"
 
 docker exec "$APP" bash -c '

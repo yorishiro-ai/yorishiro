@@ -17,19 +17,22 @@ $ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
 |---|---|
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
-| `/etc/yorishiro/yorishiro.env` | Environment file for runtime settings |
-| `/usr/share/yorishiro/config/` | Configuration files (not meant to be edited directly) |
+| `/etc/yorishiro/production.yaml` | Editable production configuration template |
 | `/etc/yorishiro/LICENSE.enterprise` | Enterprise licence |
 
 ## Configuration
 
-Configuration comes from the environment file `/etc/yorishiro/yorishiro.env`:
+Edit `/etc/yorishiro/production.yaml` to configure the packaged service.
+Package upgrades preserve local changes to this file.
 
 ```yaml
-DATABASE_URL=postgres://user:pass@host:5432/yorishiro
-YORISHIRO_QUEUE_KIND=Redis
-QUEUE_URL=redis://host:6379
-YORISHIRO_LICENSE_KEY=...
+database:
+  uri: postgres://user:pass@host:5432/yorishiro
+queue:
+  kind: Postgres
+  uri: postgres://user:pass@host:5432/yorishiro
+server:
+  host: https://yorishiro.example.com
 ```
 
 See [docs/configuration.md](../configuration.md) for all settings.
