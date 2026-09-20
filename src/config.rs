@@ -124,10 +124,18 @@ pub fn init(force: bool) -> Result<()> {
 }
 
 fn init_at(path: &Path, force: bool) -> Result<()> {
-    if path
-        .try_exists()
-        .map_err(|err| Error::Message(format!("failed to inspect {}: {err}", path.display())))?
-    {
+    let existing = match fs::symlink_metadata(path) {
+        Ok(metadata) => Some(metadata),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => {
+            return Err(Error::Message(format!(
+                "failed to inspect {}: {err}",
+                path.display()
+            )));
+        }
+    };
+
+    if let Some(metadata) = existing {
         if !force {
             return Err(Error::Message(format!(
                 "refusing to overwrite {}; rerun with --force to replace it",
@@ -135,11 +143,33 @@ fn init_at(path: &Path, force: bool) -> Result<()> {
             )));
         }
         eprintln!("overwriting {}", path.display());
+        if metadata.file_type().is_symlink() {
+            fs::remove_file(path).map_err(|err| {
+                Error::Message(format!("failed to remove {}: {err}", path.display()))
+            })?;
+            write_new_skeleton(path)?;
+        } else {
+            fs::write(path, CONFIG_SKELETON).map_err(|err| {
+                Error::Message(format!("failed to write {}: {err}", path.display()))
+            })?;
+        }
+    } else {
+        write_new_skeleton(path)?;
     }
-    fs::write(path, CONFIG_SKELETON)
-        .map_err(|err| Error::Message(format!("failed to write {}: {err}", path.display())))?;
     println!("created {}", path.display());
     Ok(())
+}
+
+fn write_new_skeleton(path: &Path) -> Result<()> {
+    use std::io::Write;
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|err| Error::Message(format!("failed to create {}: {err}", path.display())))?;
+    file.write_all(CONFIG_SKELETON.as_bytes())
+        .map_err(|err| Error::Message(format!("failed to write {}: {err}", path.display())))
 }
 
 fn test_environment(environment: &Environment) -> Environment {
@@ -807,5 +837,37 @@ mod tests {
         let path = directory.path().join(CANONICAL_CONFIG_FILE);
         init_at(&path, true).unwrap();
         assert!(path.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn init_without_force_refuses_a_dangling_symlink() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join(CANONICAL_CONFIG_FILE);
+        let target = directory.path().join("missing.yaml");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+
+        let error = init_at(&path, false).unwrap_err().to_string();
+
+        assert!(error.contains("refusing to overwrite"));
+        assert!(path.is_symlink());
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn init_force_replaces_a_dangling_symlink_without_following_it() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join(CANONICAL_CONFIG_FILE);
+        let target = directory.path().join("missing.yaml");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+
+        init_at(&path, true).unwrap();
+
+        assert!(!path.is_symlink());
+        assert_eq!(fs::read_to_string(&path).unwrap(), CONFIG_SKELETON);
+        assert!(!target.exists());
     }
 }
