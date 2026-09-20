@@ -142,17 +142,25 @@ fn init_at(path: &Path, force: bool) -> Result<()> {
                 path.display()
             )));
         }
-        eprintln!("overwriting {}", path.display());
-        if metadata.file_type().is_symlink() {
-            fs::remove_file(path).map_err(|err| {
-                Error::Message(format!("failed to remove {}: {err}", path.display()))
-            })?;
-            write_new_skeleton(path)?;
-        } else {
-            fs::write(path, CONFIG_SKELETON).map_err(|err| {
-                Error::Message(format!("failed to write {}: {err}", path.display()))
-            })?;
+        let file_type = metadata.file_type();
+        if file_type.is_dir() {
+            return Err(Error::Message(format!(
+                "refusing to replace directory {}; choose a file path",
+                path.display()
+            )));
         }
+        if !file_type.is_file() && !file_type.is_symlink() {
+            return Err(Error::Message(format!(
+                "refusing to replace unsupported path {}; choose a regular file",
+                path.display()
+            )));
+        }
+        eprintln!("overwriting {}", path.display());
+        // Remove the directory entry before create_new so force never follows an entry that
+        // changes into a symlink between inspection and opening.
+        fs::remove_file(path)
+            .map_err(|err| Error::Message(format!("failed to remove {}: {err}", path.display())))?;
+        write_new_skeleton(path)?;
     } else {
         write_new_skeleton(path)?;
     }
@@ -837,6 +845,31 @@ mod tests {
         let path = directory.path().join(CANONICAL_CONFIG_FILE);
         init_at(&path, true).unwrap();
         assert!(path.is_file());
+    }
+
+    #[test]
+    #[serial]
+    fn init_force_replaces_an_existing_regular_file_with_create_new() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join(CANONICAL_CONFIG_FILE);
+        fs::write(&path, "old\n").unwrap();
+
+        init_at(&path, true).unwrap();
+
+        assert_eq!(fs::read_to_string(path).unwrap(), CONFIG_SKELETON);
+    }
+
+    #[test]
+    #[serial]
+    fn init_force_rejects_a_directory() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join(CANONICAL_CONFIG_FILE);
+        fs::create_dir(&path).unwrap();
+
+        let error = init_at(&path, true).unwrap_err().to_string();
+
+        assert!(error.contains("refusing to replace directory"));
+        assert!(path.is_dir());
     }
 
     #[cfg(unix)]
