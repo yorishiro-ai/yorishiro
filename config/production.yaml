@@ -1,5 +1,8 @@
 # Loco configuration file documentation
 #
+# Legacy migration fallback only. New deployments should use ./yorishiro.yaml or
+# set YORISHIRO_CONFIG_PATH to the canonical plain-YAML file.
+#
 # This is the production environment.
 #
 # Nothing is required: an unconfigured start boots against a local SQLite file with no
@@ -21,7 +24,7 @@
 # directly via `std::env::var` in `ee/`), but listed here for completeness so this
 # document is the single reference for every configuration option:
 #   YORISHIRO_BIND          - Network bind address used by `ee/`'s OAuth redirect URI logic
-#   YORISHIRO_CONFIG_PATH   - Path to a config file for licence key resolution (unused in production)
+#   YORISHIRO_CONFIG_PATH   - Strict path to the canonical Yorishiro configuration file
 #   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
 
 # Application logging configuration

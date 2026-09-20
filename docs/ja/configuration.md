@@ -84,23 +84,40 @@ PostgreSQL の負荷ガードは、デプロイメント全体のメンテナン
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | `30` | 負荷が高い、または低い状態を維持する秒数 |
 | `YORISHIRO_DB_LOAD_POLL_SECS` | `5` | PostgreSQL の状態を確認する間隔。0 以下の場合は `5` |
 
-## 本番環境の設定（`config/production.yaml`）
+## メイン設定（`yorishiro.yaml`）
 
-設定を何もしなくても SQLite で起動します。外部サービスは不要です。
+`yorishiro.yaml` が正規の設定ファイルです。
+カレントディレクトリにコメント付きの雛形を作成するには `yorishiro config init` を実行します。
+既存のファイルは `--force` なしでは置き換えません。
+`--force` で既存ファイルを置き換える場合は、書き込み前にそのことをログへ出力します。
+
+`YORISHIRO_CONFIG_PATH` が設定されている場合、Yorishiro はまずそのパスを読みます。
+このパスは厳密に扱われます。
+ファイルがない、読めない、または無効な場合はエラーとなり、フォールバックしません。
+未設定の場合は `./yorishiro.yaml` があれば読みます。
+両方ともない場合に限り、移行用として `config/{environment}.yaml` を読みます。
+移行期間中は従来ファイルで Loco の Tera 構文を使えますが、`yorishiro.yaml` に追加してはいけません。
+
+正規ファイルはプレーン YAML です。
+デプロイ時のシークレットやアドレスにテンプレート展開は不要です。
+次の環境変数が明示的に YAML の値を上書きします: `DATABASE_URL`, `DB_LOGGING`, `DB_CONNECT_TIMEOUT`, `DB_IDLE_TIMEOUT`, `DB_MIN_CONNECTIONS`, `DB_MAX_CONNECTIONS`, `DB_AUTO_MIGRATE`, `PORT`, `BINDING`, `HOST`, `LOG_LEVEL`, `QUEUE_URL`, `YORISHIRO_QUEUE_KIND`, `YORISHIRO_QUEUE_WORKERS`, `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, `MAILER_PASSWORD`。
+
+雛形の既定値では SQLite で起動します。外部サービスは不要です。
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
 | `HOST` | `http://localhost` | サーバのホスト名またはアドレス |
-| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から自動判定 | キューを分離する場合のみ `Redis` を設定 |
-| `QUEUE_URL` | `DATABASE_URL` と共有 | Redis を使う場合のみ必須 |
+| `YORISHIRO_QUEUE_KIND` | YAML の値 | `Sqlite`、`Postgres`、`Redis` |
+| `QUEUE_URL` | YAML の値 | キュー接続 URI |
 | `YORISHIRO_EMBEDDING_BASE_URL` | 未設定 | 埋め込みエンドポイントの URL |
 | `YORISHIRO_EMBEDDING_MODEL` | 未設定 | 埋め込みモデル名 |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みプロバイダ（`none` で無効、`local` でローカル、未設定でローカル） |
 
 ### メール
 
-Yorishiro はメールを送信しません。`MAILER_HOST` を設定した場合だけメール機能が有効になります。
+Yorishiro は既定ではメールを送信しません。
+必要な場合は `mailer:` ブロックを追加し、デプロイ時には `MAILER_HOST`、`MAILER_PORT`、`MAILER_USER`、`MAILER_PASSWORD` で上書きします。
 
 ### ログ出力
 
@@ -152,7 +169,7 @@ SQLite では取り出し処理は直列ですが、永続キューによる障�
 
 API エンドポイント（`POST /api/identity/tenants/schedule` など）で ISO 8601 形式の期間（`P1D` で毎日、`P1W` で毎週）と任意の IANA タイムゾーン名（デフォルト：UTC）を指定します。5 分間のグラースウィンドウ内で次の実行を拾う仕組みなので、再起動しても実行が失われることはありません。
 
-`config/*.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
+`yorishiro.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
 
 ## SQLite ANN ベンチマーク
 

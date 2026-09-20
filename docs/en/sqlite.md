@@ -25,7 +25,7 @@ Do not use SQLite for multi-tenant hosting. It stores all data in a single file 
 Yorishiro uses the database URL scheme to detect SQLite:
 
 ```sh
-export DATABASE_URL='sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc'
+export DATABASE_URL='sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc'
 cargo run
 ```
 
@@ -33,7 +33,7 @@ At least 2 connections are required. The server refuses to start if `max_connect
 
 ## Configuration files
 
-There is no separate SQLite production config file; use `production.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
+There is no separate SQLite production config file; use `yorishiro.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
 
 ## Authentication
 

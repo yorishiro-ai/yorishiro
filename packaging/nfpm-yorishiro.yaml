@@ -95,10 +95,10 @@ contents:
     dst: /usr/bin/yorishiro
   - src: ./packaging/yorishiro.service
     dst: /lib/systemd/system/yorishiro.service
-  # The systemd unit loads this editable YAML template from /etc/yorishiro.
+  # The systemd unit loads this editable canonical YAML file from /etc/yorishiro.
   # `config|noreplace` preserves an operator's changes during package upgrades.
-  - src: ./config/production.yaml
-    dst: /etc/yorishiro/production.yaml
+  - src: ./packaging/yorishiro.yaml
+    dst: /etc/yorishiro/yorishiro.yaml
     type: config|noreplace
     file_info:
       mode: 0640

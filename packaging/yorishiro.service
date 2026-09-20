@@ -1,6 +1,6 @@
 # Enable with `systemctl enable --now yorishiro`.
 #
-# Settings go in /etc/yorishiro/production.yaml.
+# Settings go in /etc/yorishiro/yorishiro.yaml.
 # The package installs it as an editable template and preserves local changes on upgrade.
 [Unit]
 Description=Yorishiro server
@@ -25,14 +25,8 @@ Type=simple
 User=yorishiro
 Group=yorishiro
 WorkingDirectory=/var/lib/yorishiro
-# The packaged YAML template is the production configuration.
-# Without this setting the CLI defaults to `development`.
-Environment=LOCO_ENV=production
-# Loco looks for `config/{LOCO_ENV}.yaml` relative to the working directory unless this names a
-# folder (`loco_rs::environment::Environment::load`). The working directory here is the state
-# directory, which holds no config, so this is required rather than a tidiness: without it the
-# service starts in /var/lib/yorishiro, finds no `config/`, and fails.
-Environment=LOCO_CONFIG_FOLDER=/etc/yorishiro
+# The canonical configuration has no environment-specific filename.
+Environment=YORISHIRO_CONFIG_PATH=/etc/yorishiro/yorishiro.yaml
 ExecStart=/usr/bin/yorishiro start
 Restart=on-failure
 RestartSec=5s
