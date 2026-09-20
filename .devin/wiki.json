@@ -1,0 +1,148 @@
+{
+  "repo_notes": [],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "What Yorishiro is: a single-binary Rust knowledge store built with Loco and SeaORM, with entities, schemas, vector and full-text search, an MCP interface, multi-tenancy, and a CE/EE split. Links to child pages."
+    },
+    {
+      "title": "Getting Started & Installation",
+      "purpose": "Build from source, install packages, use Docker or Docker Compose, complete first-run setup, and understand repository layout conventions.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Configuration & Environment Variables",
+      "purpose": "Configuration under config/*.yaml, LOCO_ENV, DATABASE_URL, YORISHIRO_* variables, and queue and worker configuration.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Community vs Enterprise Editions",
+      "purpose": "How ee/ overlays the core crate, licence gating at the route level, and which features require a licence or PostgreSQL.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Application Architecture",
+      "purpose": "Boot sequence, Loco hooks, routing, shared state, and cross-cutting services. Links to child pages."
+    },
+    {
+      "title": "Boot & Lifecycle (App::boot, after_context)",
+      "purpose": "Configuration loading, backend detection, connection pool wiring, embedding provider initialization, worker and task registration, seeds, and startup reindexing.",
+      "parent": "Application Architecture"
+    },
+    {
+      "title": "Database Layer & Multi-Tenancy",
+      "purpose": "TenantDb, DbHandle, RLS session GUCs, advisory locks, SQLite extensions, and connection pool topology.",
+      "parent": "Application Architecture"
+    },
+    {
+      "title": "Migrations & Generated Entities",
+      "purpose": "The migration crate and Migrator sequence, migration helpers, and the make entities SeaORM regeneration flow under src/models/_entities.",
+      "parent": "Application Architecture"
+    },
+    {
+      "title": "SQLite Backend Mode",
+      "purpose": "Single-tenant SQLite mode, including sqlite-vec, FTS5 trigram search, feature limitations, connection minimums, and migration tests.",
+      "parent": "Application Architecture"
+    },
+    {
+      "title": "Error Handling & Cross-Cutting Services",
+      "purpose": "src/error.rs, maintenance mode, rate limiting, database load guard behavior, and system endpoints.",
+      "parent": "Application Architecture"
+    },
+    {
+      "title": "Domain Model",
+      "purpose": "Core data concepts: tenants, workspaces, schemas, entities, relations, snapshots, and templates. Links to child pages."
+    },
+    {
+      "title": "Entities, Relations & Snapshots",
+      "purpose": "entity_entities CRUD, drift, fill_defaults, relations, snapshots and undo, audit logs, and column preferences.",
+      "parent": "Domain Model"
+    },
+    {
+      "title": "Schemas & Metaschema",
+      "purpose": "schema_schemas, versioning, validation, projection, nesting, migration dry runs, and fill-defaults semantics.",
+      "parent": "Domain Model"
+    },
+    {
+      "title": "Tenancy, Users & Workspaces",
+      "purpose": "tenant_tenants, memberships, invites, workspace_workspaces, worker classes, and per-workspace keys.",
+      "parent": "Domain Model"
+    },
+    {
+      "title": "Templates & Template Library",
+      "purpose": "Bundled JSON templates, template_templates, versions and reviews, the template library controller, and seeding.",
+      "parent": "Domain Model"
+    },
+    {
+      "title": "Schema Forks",
+      "purpose": "workspace_schema_forks and fork_heads models, the EE fork controller, merge service, and fork migration.",
+      "parent": "Domain Model"
+    },
+    {
+      "title": "Search & Embeddings",
+      "purpose": "Hybrid vector and text search and the embedding pipeline. Links to child pages."
+    },
+    {
+      "title": "Vector & Full-Text Search",
+      "purpose": "search_by_vector, recall, PostgreSQL pgvector and SQLite sqlite-vec paths, dimension and model matching, the search controller, and MCP search.",
+      "parent": "Search & Embeddings"
+    },
+    {
+      "title": "Embedding Providers",
+      "purpose": "The local candle-based multilingual-e5-base provider, model fetching, the OpenAI-compatible HTTP provider, and the EE per-workspace resolver.",
+      "parent": "Search & Embeddings"
+    },
+    {
+      "title": "Embedding Sync & Reindexing",
+      "purpose": "The embedding_sync worker, enqueue_after_write, reindex worker and tasks, resync behavior, tenant reindex schedules, and advisory locks.",
+      "parent": "Search & Embeddings"
+    },
+    {
+      "title": "API & Interfaces",
+      "purpose": "The HTTP REST surface, authentication, authorization, and MCP server. Links to child pages."
+    },
+    {
+      "title": "REST Controllers",
+      "purpose": "Controller inventory for entities, schemas, search, workspaces, members, import and export, setup, system, and Swagger, including pagination and filter parameters.",
+      "parent": "API & Interfaces"
+    },
+    {
+      "title": "Authentication & Authorization",
+      "purpose": "API keys and scopes, extractors, authentication and authorization, the RLS authenticator, whoami, setup flow, and EE tenant authentication and authorization.",
+      "parent": "API & Interfaces"
+    },
+    {
+      "title": "MCP Server & Tools",
+      "purpose": "The YorishiroMcpServer tool router at /mcp, registered tools, authorization, and per-domain tool modules.",
+      "parent": "API & Interfaces"
+    },
+    {
+      "title": "Background Jobs & Operations",
+      "purpose": "Workers, queues, administrative tasks, and operational safeguards. Links to child pages."
+    },
+    {
+      "title": "Worker Classes & Queue Routing",
+      "purpose": "WorkerClass pools for tenant-private, official, and shared work, the infer-fill runner, queue providers, the reaper, and tag routing.",
+      "parent": "Background Jobs & Operations"
+    },
+    {
+      "title": "Admin CLI Tasks",
+      "purpose": "Tasks under src/tasks and ee/tasks for creating tenants, workspaces, users, and API keys, plus listing, maintenance, benchmark, and doctor tasks.",
+      "parent": "Background Jobs & Operations"
+    },
+    {
+      "title": "Database Load Guard & Maintenance Mode",
+      "purpose": "pg_stat_activity sampling, automatic read-only switching, the system_maintenance model, and the status task.",
+      "parent": "Background Jobs & Operations"
+    },
+    {
+      "title": "Enterprise Edition (ee/)",
+      "purpose": "Overview of the licensed overlay, including licence gating, billing, OAuth, the marketplace, and inference. Links to child pages."
+    },
+    {
+      "title": "Licensing & Licence Gate",
+      "purpose": "JWT licence keys, LicenceState, licence_gate middleware behavior, ee/keys, and the EE setup flow.",
+      "parent": "Enterprise Edition (ee/)"
+    }
+  ]
+}
