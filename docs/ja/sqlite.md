@@ -25,7 +25,7 @@ Yorishiro は PostgreSQL の代わりに SQLite で動作できます。ロー�
 Yorishiro はデータベース URL のスキームで SQLite を検出します。
 
 ```sh
-export DATABASE_URL='sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc'
+export DATABASE_URL='sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc'
 cargo run
 ```
 
@@ -33,7 +33,7 @@ cargo run
 
 ## 設定ファイル
 
-本番用の SQLite 専用設定ファイルはありません。`production.yaml` に `sqlite://` URL を設定してください。
+本番用の SQLite 専用設定ファイルはありません。`yorishiro.yaml` に `sqlite://` URL を設定してください。
 
 ## 認証
 

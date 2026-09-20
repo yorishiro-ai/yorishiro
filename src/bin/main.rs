@@ -19,6 +19,25 @@ use yorishiro::app::App;
 /// A hosted deployment wanting more than one tenant sets `YORISHIRO_MAX_TENANTS` explicitly, which
 /// is cheap for an operator who is provisioning the deployment anyway.
 fn main() -> loco_rs::Result<()> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    if args.get(1).is_some_and(|arg| arg == "config") {
+        match args.as_slice() {
+            [_, command, init] if command == "config" && init == "init" => {
+                return yorishiro::config::init(false);
+            }
+            [_, command, init, force]
+                if command == "config" && init == "init" && force == "--force" =>
+            {
+                return yorishiro::config::init(true);
+            }
+            _ => {
+                return Err(loco_rs::Error::Message(
+                    "usage: yorishiro config init [--force]".into(),
+                ));
+            }
+        }
+    }
+
     // Register sqlite-vec before any SQLite connection opens: every CLI subcommand
     // (task, db, scheduler) and the test harness open ctx.db before App::boot runs,
     // so the registration must happen here as well as in boot.

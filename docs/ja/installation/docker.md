@@ -41,11 +41,13 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
-    -v yorishiro-data:/home/yorishiro/.cache/yorishiro \
+    -v yorishiro-data:/var/lib/yorishiro \
+    -v yorishiro-model-cache:/home/yorishiro/.cache/yorishiro \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
 ## 設定
 
 全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
-production設定ファイルはイメージ内の `/app/config/production.yaml` にあります。
+正規の設定ファイルはイメージ内の `/app/yorishiro.yaml` にあります。
+このパスへ置き換えファイルをマウントするか、読み取り可能なファイルを `YORISHIRO_CONFIG_PATH` に設定してください。

@@ -41,11 +41,13 @@ By default Docker stores data inside the container. To persist data:
 
 ```console
 $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
-    -v yorishiro-data:/home/yorishiro/.cache/yorishiro \
+    -v yorishiro-data:/var/lib/yorishiro \
+    -v yorishiro-model-cache:/home/yorishiro/.cache/yorishiro \
     ghcr.io/yorishiro-ai/yorishiro:latest
 ```
 
 ## Configuration
 
 See [docs/en/configuration.md](../configuration.md) for all settings.
-The production config file is at `/app/config/production.yaml` inside the image.
+The canonical configuration file is at `/app/yorishiro.yaml` inside the image.
+Mount a replacement there or set `YORISHIRO_CONFIG_PATH` to a readable file.

@@ -94,6 +94,18 @@ The default configuration uses SQLite — no external database required.
 
 For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
 
+## Configuration
+
+The public configuration file is `yorishiro.yaml`, written as plain YAML. Run
+`yorishiro config init` to create a fully commented local skeleton; use
+`--force` only when replacing an existing file intentionally. Configuration is
+resolved in this order: `YORISHIRO_CONFIG_PATH` when set (a missing, unreadable,
+or invalid file is an error), `./yorishiro.yaml`, then the legacy
+`config/{environment}.yaml` files as a migration fallback. Environment variables
+explicitly override supported fields; Tera and `get_env` expressions are not
+accepted in the canonical file. The generated local skeleton uses a relative
+SQLite path, while package and Docker installations use `/var/lib/yorishiro`.
+
 ## Documentation
 
 | Document | Contents |

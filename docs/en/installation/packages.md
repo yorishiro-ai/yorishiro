@@ -17,12 +17,12 @@ $ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
 |---|---|
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
-| `/etc/yorishiro/production.yaml` | Editable production configuration template |
+| `/etc/yorishiro/yorishiro.yaml` | Editable canonical configuration template |
 | `/etc/yorishiro/LICENSE.enterprise` | Enterprise licence |
 
 ## Configuration
 
-Edit `/etc/yorishiro/production.yaml` to configure the packaged service.
+Edit `/etc/yorishiro/yorishiro.yaml` to configure the packaged service.
 Package upgrades preserve local changes to this file.
 
 ```yaml

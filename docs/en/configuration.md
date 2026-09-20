@@ -85,23 +85,38 @@ This is the port of the earlier guard implementation, with its opt-in default re
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | `30` | Seconds the busy or quiet condition must persist |
 | `YORISHIRO_DB_LOAD_POLL_SECS` | `5` | Seconds between PostgreSQL activity samples; non-positive values fall back to `5` |
 
-## Production settings (`config/production.yaml`)
+## Main configuration (`yorishiro.yaml`)
 
-An unconfigured `production.yaml` starts with SQLite locally. No external services needed.
+`yorishiro.yaml` is the canonical configuration file.
+Create a documented skeleton in the current directory with `yorishiro config init`.
+The command refuses to replace an existing file unless you pass `--force`.
+It logs the replacement before writing when `--force` replaces an existing file.
+
+Yorishiro reads `YORISHIRO_CONFIG_PATH` first when it is set.
+That path is strict: a missing, unreadable, or invalid file is an error and does not fall back.
+Otherwise Yorishiro reads `./yorishiro.yaml` when present.
+Only when neither exists does it use the transitional Loco file at `config/{environment}.yaml`.
+Legacy files can still use Loco's Tera syntax during this migration, but do not add that syntax to `yorishiro.yaml`.
+
+The canonical file is plain YAML.
+The following environment variables explicitly override its fields, so deploy-time secrets and addresses do not need template interpolation: `DATABASE_URL`, `DB_LOGGING`, `DB_CONNECT_TIMEOUT`, `DB_IDLE_TIMEOUT`, `DB_MIN_CONNECTIONS`, `DB_MAX_CONNECTIONS`, `DB_AUTO_MIGRATE`, `PORT`, `BINDING`, `HOST`, `LOG_LEVEL`, `QUEUE_URL`, `YORISHIRO_QUEUE_KIND`, `YORISHIRO_QUEUE_WORKERS`, `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, and `MAILER_PASSWORD`.
+
+An unconfigured skeleton starts with SQLite locally. No external services are needed.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///var/lib/yotsunagi/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
+| `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
 | `HOST` | `http://localhost` | Your server's hostname or address |
-| `YORISHIRO_QUEUE_KIND` | Auto-detected from `DATABASE_URL` | Set to `Redis` only if you need a separate queue backend |
-| `QUEUE_URL` | Shares `DATABASE_URL` | Required only for Redis |
+| `YORISHIRO_QUEUE_KIND` | YAML value | `Sqlite`, `Postgres`, or `Redis` |
+| `QUEUE_URL` | YAML value | Queue connection URI |
 | `YORISHIRO_EMBEDDING_BASE_URL` | Unset | Embeddings endpoint URL |
 | `YORISHIRO_EMBEDDING_MODEL` | Unset | Embeddings model name |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding provider (`none`, `local`, or unset for local) |
 
 ### Mailer
 
-Email is not used by Yorishiro. The mailer block is optional and only renders when `MAILER_HOST` is set.
+Email is not used by Yorishiro by default.
+Add a `mailer:` block when required, then use `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, and `MAILER_PASSWORD` for deploy-time overrides.
 
 ### Logging
 
@@ -151,7 +166,7 @@ You can configure a deployment to automatically reindex every workspace under a 
 
 Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC). The scheduler picks up the next tick within a five-minute grace window, so a missed run is not lost if the process restarts during that window.
 
-To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to your `config/*.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
+To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to `yorishiro.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
 
 ## SQLite ANN benchmark
 

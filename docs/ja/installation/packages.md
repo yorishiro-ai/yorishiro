@@ -17,12 +17,12 @@ $ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
 |---|---|
 | `/usr/bin/yorishiro` | バイナリ |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
-| `/etc/yorishiro/production.yaml` | 編集可能な本番設定テンプレート |
+| `/etc/yorishiro/yorishiro.yaml` | 編集可能な正規設定テンプレート |
 | `/etc/yorishiro/LICENSE.enterprise` | エンタープライズライセンス |
 
 ## 設定
 
-パッケージ版サービスの設定は `/etc/yorishiro/production.yaml` を編集します。
+パッケージ版サービスの設定は `/etc/yorishiro/yorishiro.yaml` を編集します。
 パッケージを更新しても、このファイルに加えた変更は保持されます。
 
 ```yaml

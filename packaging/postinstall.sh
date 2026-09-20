@@ -1,6 +1,6 @@
 #!/bin/sh
 # The mutable state directory is created at install time.
-# The editable production YAML template is installed by nfpm as config|noreplace.
+# The editable canonical YAML template is installed by nfpm as config|noreplace.
 set -e
 mkdir -p /var/lib/yorishiro
 chown yorishiro:yorishiro /var/lib/yorishiro

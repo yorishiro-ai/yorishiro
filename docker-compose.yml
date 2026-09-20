@@ -63,8 +63,7 @@ services:
     # start for about 522 MiB. Both files or neither, though: exactly one present is a startup
     # error rather than a partial fetch.
     environment:
-      # The three `production` requires. `get_env` with no default fails at startup rather than
-      # falling back, so all three are spelled out even where the value looks obvious.
+      # These override their documented counterparts in /app/yorishiro.yaml.
       DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
       QUEUE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
       HOST: http://localhost:5150

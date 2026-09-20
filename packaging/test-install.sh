@@ -53,8 +53,8 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   getent passwd yorishiro >/dev/null && echo "USER"
   [ -f /usr/share/doc/yorishiro/copyright ] && echo "COPYRIGHT"
   [ -f /etc/yorishiro/LICENSE.enterprise ] && echo "EE_LICENCE"
-  [ -f /etc/yorishiro/production.yaml ] && echo "CONFIG"
-  [ "$(stat -c "%a %U:%G" /etc/yorishiro/production.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
+  [ -f /etc/yorishiro/yorishiro.yaml ] && echo "CONFIG"
+  [ "$(stat -c "%a %U:%G" /etc/yorishiro/yorishiro.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEOWNER"
 ' 2>&1)
 for want in RUNS USER COPYRIGHT EE_LICENCE CONFIG CONFIGPERM STATEOWNER; do
@@ -233,7 +233,7 @@ else
   docker exec "app-$$" bash -c "
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y -qq /pkg/$(basename "$(deb)") curl >/dev/null 2>&1
-    cat > /etc/yorishiro/production.yaml <<EOF
+    cat > /etc/yorishiro/yorishiro.yaml <<EOF
 logger:
   enable: true
   pretty_backtrace: false
@@ -270,11 +270,11 @@ database:
   dangerously_recreate: false
 EOF
   " >/dev/null 2>&1
-  # Started the way the unit does, since there is no systemd here: the same LOCO_ENV and
-  # editable configuration folder.
+  # Started the way the unit does, since there is no systemd here: the same explicit path
+  # selects the editable configuration file.
   docker exec -d "app-$$" bash -c \
     'cd /var/lib/yorishiro && exec su -s /bin/sh yorishiro -c \
-      "env LOCO_ENV=production LOCO_CONFIG_FOLDER=/etc/yorishiro \
+      "env YORISHIRO_CONFIG_PATH=/etc/yorishiro/yorishiro.yaml \
       YORISHIRO_EMBEDDING_PROVIDER=none /usr/bin/yorishiro start"'
 
   up=
