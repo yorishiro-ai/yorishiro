@@ -8,7 +8,7 @@ use crate::YorishiroError;
 
 use crate::ee::services::non_empty_env;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OAuthConfig {
     /// The identity provider's issuer URL, e.g. `https://accounts.google.com`.
     /// OIDC discovery is fetched from this at request time, not cached at startup.
@@ -21,6 +21,18 @@ pub struct OAuthConfig {
     /// HMAC key used to sign the `state` parameter that round-trips through the provider.
     /// Derived from `client_secret` so no separate secret needs provisioning.
     pub state_signing_key: Vec<u8>,
+}
+
+impl std::fmt::Debug for OAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthConfig")
+            .field("issuer_url", &self.issuer_url)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("redirect_uri", &self.redirect_uri)
+            .field("state_signing_key", &"<redacted>")
+            .finish()
+    }
 }
 
 impl OAuthConfig {
@@ -94,6 +106,23 @@ pub fn rewrite_unspecified_host(bind: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_redacts_client_secret_and_state_signing_key() {
+        let config = OAuthConfig {
+            issuer_url: "https://issuer.example".into(),
+            client_id: "client-id".into(),
+            client_secret: "do-not-render-oauth-value".into(),
+            redirect_uri: "https://app.example/callback".into(),
+            state_signing_key: b"do-not-render-state-value".to_vec(),
+        };
+
+        let rendered = format!("{config:?}");
+
+        assert!(!rendered.contains("do-not-render-oauth-value"));
+        assert!(!rendered.contains("do-not-render-state-value"));
+        assert!(rendered.contains("issuer.example"));
+    }
 
     #[test]
     fn require_non_empty_accepts_a_present_value() {

@@ -25,10 +25,22 @@ const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
 /// Configuration for the Stripe integration.
 /// Both fields are absent by default: a deployment with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of silently accepting unverifiable requests.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct StripeConfig {
     pub webhook_secret: Option<String>,
     pub price_mapping: StripePriceMapping,
+}
+
+impl std::fmt::Debug for StripeConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StripeConfig")
+            .field(
+                "webhook_secret",
+                &self.webhook_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("price_mapping", &self.price_mapping)
+            .finish()
+    }
 }
 
 impl StripeConfig {
@@ -294,4 +306,22 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/stripe")
         .add("/webhook", post(stripe_webhook))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_webhook_secret() {
+        let config = StripeConfig {
+            webhook_secret: Some("do-not-render-stripe-value".into()),
+            price_mapping: StripePriceMapping::default(),
+        };
+
+        let rendered = format!("{config:?}");
+
+        assert!(!rendered.contains("do-not-render-stripe-value"));
+        assert!(rendered.contains("<redacted>"));
+    }
 }

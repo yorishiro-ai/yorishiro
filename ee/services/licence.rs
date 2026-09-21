@@ -22,7 +22,7 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../keys/licence-public.pem");
 /// What a licence key asserts.
 ///
 /// `plan` is recorded and logged but gates nothing yet: every valid, unexpired key unlocks every enterprise feature.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
     /// Who the licence was issued to.
     /// Free-form, and routinely an email address, so it is deliberately not logged, see `from_env`.
@@ -31,6 +31,16 @@ pub struct LicenceClaims {
     /// Expiry, as a Unix timestamp.
     /// Checked at verification *and* again at each gate, so a key that lapses while the process runs stops working without a restart.
     pub exp: i64,
+}
+
+impl std::fmt::Debug for LicenceClaims {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LicenceClaims")
+            .field("sub", &"<redacted>")
+            .field("plan", &self.plan)
+            .field("exp", &self.exp)
+            .finish()
+    }
 }
 
 /// The licence key from `YORISHIRO_LICENSE_KEY`, or `None` when absent or empty.
@@ -135,5 +145,25 @@ impl LicenceState {
 impl crate::services::edition::EnterpriseEdition for LicenceState {
     fn is_active(&self) -> bool {
         Self::is_active(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_licence_subject_directly_and_when_nested() {
+        let claims = LicenceClaims {
+            sub: "licence-owner@example.invalid".into(),
+            plan: "team".into(),
+            exp: 1_900_000_000,
+        };
+        let direct = format!("{claims:?}");
+        let nested = format!("{:?}", LicenceState::licensed(claims));
+
+        assert!(!direct.contains("licence-owner@example.invalid"));
+        assert!(!nested.contains("licence-owner@example.invalid"));
+        assert!(nested.contains("team"));
     }
 }

@@ -8,7 +8,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
 
 /// The claims this integration needs; unknown fields from the provider are ignored.
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct IdTokenClaims {
     pub sub: String,
     pub email: Option<String>,

@@ -182,3 +182,9 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 タスクは、ベクトル検索クエリの 5 回反復にわたって中央値、最小値、最大値のレイテンシを測定します。エンティティ数が 1000 以上で中央値レイテンシが 200 ms を超える場合、vec0 の採用を推奨します。`min_entities` と `max_latency_ms` CLI 引数で両方の閾値を変更できます。
 
 このタスクは計測専用です。スキーマや構成を変更しません。vec0 仮想テーブルの採用がデプロイメントにとって価値があるかどうかを判断するのに役立ちます。
+
+## ログでの秘密情報の扱い
+
+API キー、webhook secret、OAuth 認証情報、OIDC token、ライセンス所有者情報は debug ログに出力されません。
+外部 provider のエラー本文も、認証情報や token が含まれる可能性があるためログに出力しません。
+対象には、デプロイメントとワークスペースの embedding または LLM API キー、Stripe webhook secret、OAuth client と state signing の認証情報、OIDC ID token、ライセンス claim の subject が含まれます。

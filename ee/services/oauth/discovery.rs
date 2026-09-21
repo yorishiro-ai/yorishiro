@@ -91,7 +91,7 @@ pub async fn fetch_jwks(jwks_uri: &str) -> Result<JwkSet, YorishiroError> {
     get_json(jwks_uri).await
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct TokenResponse {
     pub id_token: String,
 }
@@ -125,8 +125,7 @@ pub async fn exchange_code_for_tokens(
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        tracing::warn!(%status, body, "OAuth token exchange rejected by provider");
+        tracing::warn!(%status, "OAuth token exchange rejected by provider");
         return Err(YorishiroError::Unauthenticated);
     }
 
