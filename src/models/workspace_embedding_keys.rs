@@ -1,4 +1,4 @@
-pub use super::_entities::workspace_embedding_keys::{ActiveModel, Entity};
+pub use super::_entities::workspace_embedding_keys::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
 #[async_trait::async_trait]
