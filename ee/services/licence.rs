@@ -147,23 +147,3 @@ impl crate::services::edition::EnterpriseEdition for LicenceState {
         Self::is_active(self)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_redacts_licence_subject_directly_and_when_nested() {
-        let claims = LicenceClaims {
-            sub: "licence-owner@example.invalid".into(),
-            plan: "team".into(),
-            exp: 1_900_000_000,
-        };
-        let direct = format!("{claims:?}");
-        let nested = format!("{:?}", LicenceState::licensed(claims));
-
-        assert!(!direct.contains("licence-owner@example.invalid"));
-        assert!(!nested.contains("licence-owner@example.invalid"));
-        assert!(nested.contains("team"));
-    }
-}

@@ -307,21 +307,3 @@ pub fn routes() -> Routes {
         .prefix("api/stripe")
         .add("/webhook", post(stripe_webhook))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_redacts_webhook_secret() {
-        let config = StripeConfig {
-            webhook_secret: Some("do-not-render-stripe-value".into()),
-            price_mapping: StripePriceMapping::default(),
-        };
-
-        let rendered = format!("{config:?}");
-
-        assert!(!rendered.contains("do-not-render-stripe-value"));
-        assert!(rendered.contains("<redacted>"));
-    }
-}

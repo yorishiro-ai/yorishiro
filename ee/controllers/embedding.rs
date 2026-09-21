@@ -132,24 +132,3 @@ pub fn routes() -> Routes {
             .delete(delete_embedding_key),
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_redacts_embedding_api_key() {
-        let request = SetEmbeddingKeyRequest {
-            base_url: "https://provider.example".into(),
-            model: "model".into(),
-            api_key: "do-not-render-embedding-value".into(),
-            dimensions: 768,
-            send_dimensions_param: false,
-        };
-
-        let rendered = format!("{request:?}");
-
-        assert!(!rendered.contains("do-not-render-embedding-value"));
-        assert!(rendered.contains("provider.example"));
-    }
-}

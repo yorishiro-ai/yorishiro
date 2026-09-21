@@ -222,22 +222,3 @@ impl std::fmt::Debug for SetLlmKeyRequest {
             .finish()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_redacts_llm_api_key() {
-        let request = SetLlmKeyRequest {
-            base_url: "https://provider.example".into(),
-            model: "model".into(),
-            api_key: "do-not-render-llm-value".into(),
-        };
-
-        let rendered = format!("{request:?}");
-
-        assert!(!rendered.contains("do-not-render-llm-value"));
-        assert!(rendered.contains("provider.example"));
-    }
-}

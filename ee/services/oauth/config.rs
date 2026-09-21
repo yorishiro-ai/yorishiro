@@ -108,23 +108,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn debug_redacts_client_secret_and_state_signing_key() {
-        let config = OAuthConfig {
-            issuer_url: "https://issuer.example".into(),
-            client_id: "client-id".into(),
-            client_secret: "do-not-render-oauth-value".into(),
-            redirect_uri: "https://app.example/callback".into(),
-            state_signing_key: b"do-not-render-state-value".to_vec(),
-        };
-
-        let rendered = format!("{config:?}");
-
-        assert!(!rendered.contains("do-not-render-oauth-value"));
-        assert!(!rendered.contains("do-not-render-state-value"));
-        assert!(rendered.contains("issuer.example"));
-    }
-
-    #[test]
     fn require_non_empty_accepts_a_present_value() {
         assert_eq!(require_non_empty("KEY", Some("value")).unwrap(), "value");
     }

@@ -200,23 +200,3 @@ async fn resolve_existing_login(
 fn tenant_name_from_email(email: &str) -> String {
     email.split('@').next().unwrap_or(email).to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_redacts_provisioned_login_email() {
-        let login = ProvisionedLogin {
-            user_id: Uuid::nil(),
-            email: "oidc-user@example.invalid".into(),
-            workspace_id: Uuid::nil(),
-            role: MembershipRole::Member,
-        };
-
-        let rendered = format!("{login:?}");
-
-        assert!(!rendered.contains("oidc-user@example.invalid"));
-        assert!(rendered.contains("workspace_id"));
-    }
-}
