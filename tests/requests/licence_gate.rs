@@ -40,7 +40,7 @@ use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 
-/// Overwrites the `LicenceState::from_env()` the test process booted with.
+/// Overwrites the enterprise-edition state the test process booted with.
 ///
 /// `shared_store.insert` is keyed by `TypeId`, so the later insert wins, and the gate reads the
 /// state per request rather than capturing it at boot, which is the property that makes this
@@ -48,11 +48,14 @@ use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 /// restart.
 fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
     ctx.shared_store
-        .insert(LicenceState::licensed(LicenceClaims {
+        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: chrono::Utc::now().timestamp() + expires_in_secs,
-        }));
+        }))
+            as std::sync::Arc<
+                dyn yorishiro::services::edition::EnterpriseEdition,
+            >);
 }
 
 /// One representative gated route, with a method that reaches the layer.

@@ -1,6 +1,5 @@
 mod entities;
 mod import;
-mod origin;
 mod recall;
 mod relations;
 mod schemas;
@@ -20,9 +19,7 @@ use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::services::auth::{self, ApiKeyScope, AuthContext};
 
-/// Yorishiro MCP server, assembled from each domain's `#[tool_router]` implementation.
-///
-/// `ee/` composes against this type directly by calling it, so a grep for callers finds the dependency without needing this type to carry any special stability guarantee of its own.
+/// Yorishiro MCP server, assembled from each edition's `#[tool_router]` implementations.
 #[derive(Clone)]
 pub struct YorishiroMcpServer {
     ctx: AppContext,
@@ -30,19 +27,24 @@ pub struct YorishiroMcpServer {
 }
 
 impl YorishiroMcpServer {
-    pub fn new(ctx: AppContext) -> Self {
-        Self {
-            ctx,
-            tool_router: Self::tool_router_entities()
-                + Self::tool_router_import()
-                + Self::tool_router_recall()
-                + Self::tool_router_relations()
-                + Self::tool_router_schemas()
-                + Self::tool_router_search()
-                + Self::tool_router_origin()
-                + Self::tool_router_template_library(),
-        }
+    pub(crate) fn new(ctx: AppContext, tool_router: ToolRouter<Self>) -> Self {
+        Self { ctx, tool_router }
     }
+
+    pub(crate) fn app_context(&self) -> &AppContext {
+        &self.ctx
+    }
+}
+
+/// The complete community-edition tool set.
+pub(crate) fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
+    YorishiroMcpServer::tool_router_entities()
+        + YorishiroMcpServer::tool_router_import()
+        + YorishiroMcpServer::tool_router_recall()
+        + YorishiroMcpServer::tool_router_relations()
+        + YorishiroMcpServer::tool_router_schemas()
+        + YorishiroMcpServer::tool_router_search()
+        + YorishiroMcpServer::tool_router_template_library()
 }
 
 #[tool_handler(router = self.tool_router.clone())]
@@ -58,8 +60,8 @@ impl ServerHandler for YorishiroMcpServer {
 }
 
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
-pub(super) struct Authorized {
-    pub(super) ctx: AuthContext,
+pub(crate) struct Authorized {
+    ctx: AuthContext,
     txn: DatabaseTransaction,
 }
 
@@ -76,6 +78,10 @@ impl Authorized {
             .await
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))
     }
+
+    pub(crate) fn auth_context(&self) -> &AuthContext {
+        &self.ctx
+    }
 }
 
 /// `authorize` splits its outcome into two kinds rather than a single failure case: a protocol-level failure (`Err`) and a scope-insufficient business outcome (`Ok` variant).
@@ -83,7 +89,7 @@ impl Authorized {
 ///
 /// Handlers match on this directly rather than through a macro, so the `return` that ends the call on a denial is visible where it happens.
 /// It cannot collapse into the `Err` side of the handler's own `Result`: `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.0.1`, `handler/server/router/tool.rs:202`), and `ErrorData` is the protocol-level failure, which is not what a denial is.
-pub(super) enum AuthzOutcome {
+pub(crate) enum AuthzOutcome {
     Authorized(Authorized),
     ScopeDenied(CallToolResult),
 }
@@ -106,7 +112,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
 /// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
 /// Shares `services::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
-pub(super) async fn authorize(
+pub(crate) async fn authorize(
     ctx: &AppContext,
     parts: &Parts,
     required: ApiKeyScope,
@@ -190,7 +196,7 @@ pub(super) async fn verify(
 
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
-pub(super) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
+pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let message = match err {
         YorishiroError::Internal(err) => {
             tracing::error!(error = %err, "internal error in mcp tool handler");
@@ -219,8 +225,53 @@ pub(super) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message)])
 }
 
-pub(super) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
+pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
     let text = serde_json::to_string(&value)
         .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::community_tool_router;
+
+    #[test]
+    fn community_tool_inventory_is_exact() {
+        let names: Vec<_> = community_tool_router()
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "create_entity",
+                "create_relation",
+                "create_schema",
+                "delete_entity",
+                "delete_relation",
+                "fill_defaults",
+                "get_active_schema",
+                "get_entity",
+                "get_entity_drift",
+                "get_entity_type_json_schema",
+                "get_relation",
+                "get_schema_by_id",
+                "get_template_library_item",
+                "import_jsonl",
+                "list_entities",
+                "list_relations",
+                "list_schemas",
+                "list_template_library",
+                "list_templates",
+                "migration_dry_run",
+                "recall_context",
+                "search_entities",
+                "set_relation_status",
+                "update_entity",
+            ]
+            .map(str::to_owned)
+            .to_vec()
+        );
+    }
 }

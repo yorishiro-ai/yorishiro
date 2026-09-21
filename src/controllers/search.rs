@@ -64,10 +64,7 @@ pub async fn search_entities(
             .map_err(|err| YorishiroError::Internal(err.into()))?
     };
 
-    let licenced = ctx
-        .shared_store
-        .get::<crate::ee::services::licence::LicenceState>()
-        .is_some_and(|state| state.is_active());
+    let licenced = crate::services::edition::is_active(&ctx);
 
     let hits = search::search_by_vector(
         &txn,

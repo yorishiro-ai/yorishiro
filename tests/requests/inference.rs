@@ -13,15 +13,18 @@ use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::services::auth::ApiKeyScope;
 
-/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the test process booted with.
+/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the test process booted with.
 /// See `marketplace.rs`'s own copy of this helper.
 fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
-        .insert(LicenceState::licensed(LicenceClaims {
+        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: Utc::now().timestamp() + 60 * 60,
-        }));
+        }))
+            as std::sync::Arc<
+                dyn yorishiro::services::edition::EnterpriseEdition,
+            >);
 }
 
 struct Setup {

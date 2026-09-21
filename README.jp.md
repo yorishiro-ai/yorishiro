@@ -17,7 +17,8 @@
   - 埋め込みがまだ生成されていないレコードもキーワード検索でカバー。
 
 - **AIツールに接続**
-  - Claude、Cursor、他のMCP対応クライアントが24個の組み込みMCPツールを使ってデータを検索・作成・管理できます。
+  - コミュニティモードでは、Claude、Cursor、他のMCP対応クライアントが24個の組み込みMCPツールを使ってデータを検索・作成・管理できます。
+  - ライセンスが有効なエンタープライズ環境では、originテンプレートの更新検出、プレビュー、マージを加えた27個のツールを利用できます。
 
 - **REST API**
   - 標準HTTPエンドポイントで自動化できます。
@@ -85,6 +86,13 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 
 1つのバイナリ、1つのリポジトリ。エンタープライズ機能はライセンスキーで有効化します。
 
+### MCPツール一覧
+
+コミュニティモードでは、次の24個のツールを公開します：`create_entity`、`create_relation`、`create_schema`、`delete_entity`、`delete_relation`、`fill_defaults`、`get_active_schema`、`get_entity`、`get_entity_drift`、`get_entity_type_json_schema`、`get_relation`、`get_schema_by_id`、`get_template_library_item`、`import_jsonl`、`list_entities`、`list_relations`、`list_schemas`、`list_template_library`、`list_templates`、`migration_dry_run`、`recall_context`、`search_entities`、`set_relation_status`、`update_entity`。
+
+ライセンスが有効なエンタープライズ環境では、コミュニティ版の24個に`list_upstream_changes`、`merge_preview`、`merge_apply`を加えた合計27個のツールを公開します。
+コミュニティモードでは、この3個のoriginツールはMCP上に表示されず、呼び出すこともできません。
+
 ## クイックスタート
 
 デフォルト設定はSQLiteを使用しており、外部データベースは不要です。
@@ -93,6 +101,17 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 2. APIキーを生成し、エンティティの作成を開始。
 
 インストール手順は [docs/ja/installation.md](docs/ja/installation.md) を参照してください。
+
+## 設定
+
+公開設定ファイルは、プレーンな YAML の `yorishiro.yaml` です。
+`yorishiro config init` でコメント付きのローカル用ひな形を作成できます。
+既存ファイルを置き換える場合だけ `--force` を指定してください。
+設定の解決順序は、`YORISHIRO_CONFIG_PATH`（指定時は存在しない・読めない・不正なファイルをエラーにする）、
+`./yorishiro.yaml`、最後に移行用の旧 `config/{environment}.yaml` です。
+対応する環境変数は YAML の値を明示的に上書きします。
+canonical ファイルでは Tera や `get_env` 式は使用できません。
+CLI が生成するローカルひな形は相対 SQLite パスを使い、パッケージと Docker の設定は `/var/lib/yorishiro` を使います。
 
 ## ドキュメント
 

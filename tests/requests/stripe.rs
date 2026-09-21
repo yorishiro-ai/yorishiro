@@ -19,16 +19,19 @@ const WEBHOOK_SECRET: &str = "whsec_test";
 /// The webhook carries the licence gate, so an unlicensed process answers 404 to every request in
 /// this file before any of it reaches the handler.
 /// Each test installs a licence for the same reason `marketplace.rs` does, and by the same means:
-/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the `LicenceState::from_env()` the
+/// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the
 /// test process booted with.
 /// What the gate itself does is asserted in `licence_gate.rs`, not here.
 fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
-        .insert(LicenceState::licensed(LicenceClaims {
+        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: Utc::now().timestamp() + 60 * 60,
-        }));
+        }))
+            as std::sync::Arc<
+                dyn yorishiro::services::edition::EnterpriseEdition,
+            >);
 }
 
 /// `StripeConfig::from_env` reads process env vars directly, with no DI seam for it, so tests configure the webhook the same way production does: by setting the vars for the duration of the request.

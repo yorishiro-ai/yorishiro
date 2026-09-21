@@ -1,7 +1,7 @@
 //! MCP tools for schema upstream-change detection and merge.
 //!
-//! Exposes the three origin operations — list pending upstream changes, preview a merge,
-//! and apply the merge — so MCP clients (agents) can discover and act on template updates.
+//! Exposes the three origin operations: list pending upstream changes, preview a merge,
+//! and apply the merge, so MCP clients can discover and act on template updates.
 
 use axum::http::request::Parts;
 use rmcp::ErrorData;
@@ -14,8 +14,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::services::auth::ApiKeyScope;
+use crate::services::mcp::{
+    AuthzOutcome, YorishiroMcpServer, authorize, err_to_tool_result, ok_json,
+};
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ListUpstreamChangesArgs {
@@ -50,15 +52,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+        let authorized = match authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let workspace_id = authorized.ctx.workspace_id;
+        let workspace_id = authorized.auth_context().workspace_id;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let changes = match crate::ee::models::origin::list_with_upstream_changes(
-            &self.ctx.db,
+            &self.app_context().db,
             workspace_id,
             page,
         )
@@ -80,24 +82,25 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Read).await? {
+        let authorized = match authorize(self.app_context(), &parts, ApiKeyScope::Read).await? {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let db = crate::controllers::extractors::db_handle(&self.ctx)
+        let db = crate::controllers::extractors::db_handle(self.app_context())
             .map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
+        let auth_ctx = authorized.auth_context();
         let schema_txn = db
             .tenant
-            .begin_for_workspace(authorized.ctx.tenant_id, authorized.ctx.workspace_id)
+            .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
             .await
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
         let plan = match crate::ee::services::origin::merge_preview(
             &schema_txn,
-            &self.ctx,
-            authorized.ctx.tenant_id,
-            authorized.ctx.workspace_id,
+            self.app_context(),
+            auth_ctx.tenant_id,
+            auth_ctx.workspace_id,
             args.schema_id,
         )
         .await
@@ -120,24 +123,25 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let authorized = match super::authorize(&self.ctx, &parts, ApiKeyScope::Schema).await? {
+        let authorized = match authorize(self.app_context(), &parts, ApiKeyScope::Schema).await? {
             AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let db = crate::controllers::extractors::db_handle(&self.ctx)
+        let db = crate::controllers::extractors::db_handle(self.app_context())
             .map_err(|err| ErrorData::internal_error(err.0.to_string(), None))?;
+        let auth_ctx = authorized.auth_context();
         let schema_txn = db
             .tenant
-            .begin_for_workspace(authorized.ctx.tenant_id, authorized.ctx.workspace_id)
+            .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
             .await
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))?;
 
         let (schema, diff, summary) = match crate::ee::services::origin::merge_apply(
             &schema_txn,
-            &self.ctx,
-            authorized.ctx.tenant_id,
-            authorized.ctx.workspace_id,
+            self.app_context(),
+            auth_ctx.tenant_id,
+            auth_ctx.workspace_id,
             args.schema_id,
         )
         .await
