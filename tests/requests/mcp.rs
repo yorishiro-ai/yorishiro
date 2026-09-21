@@ -1,10 +1,14 @@
 use axum::http::StatusCode;
 use axum_test::{TestResponse, TestServer};
+use chrono::Utc;
+use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
 use serde_json::{Value, json};
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::models::{entity_entities, schema_schemas};
+use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::models::_entities::template_templates;
+use yorishiro::models::{entity_entities, schema_schemas, template_templates as templates};
 use yorishiro::services::auth::ApiKeyScope;
 
 use super::boot_request;
@@ -89,6 +93,253 @@ async fn mcp_call(
         response.text()
     );
     rpc_body(&response)
+}
+
+fn tool_inventory(response: &Value) -> Vec<Value> {
+    response["result"]["tools"]
+        .as_array()
+        .expect("tools/list result")
+        .clone()
+}
+
+fn install_licence(ctx: &loco_rs::app::AppContext, active: bool) {
+    let state = if active {
+        LicenceState::licensed(LicenceClaims {
+            sub: "acme-corp".into(),
+            plan: "enterprise".into(),
+            exp: Utc::now().timestamp() + 60 * 60,
+        })
+    } else {
+        LicenceState::default()
+    };
+    ctx.shared_store.insert(std::sync::Arc::new(state)
+        as std::sync::Arc<dyn yorishiro::services::edition::EnterpriseEdition>);
+}
+
+fn tool_result_json(response: &Value) -> Value {
+    serde_json::from_str(
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("tool result text"),
+    )
+    .expect("JSON tool result")
+}
+
+/// A server instance is retained by rmcp for the whole session.
+/// Licence changes must therefore gate discovery and dispatch dynamically, not only at construction.
+#[tokio::test]
+#[serial]
+async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        install_licence(&ctx, true);
+        let (_tenant_id, workspace_id, owner_id, _schema_key) =
+            fixtures::create_tenant_workspace_owner(
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
+        let key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Schema, false).await;
+        let session = initialize(&request).await;
+
+        let licensed = mcp_call(&request, &session, &key, 2, "tools/list", json!({})).await;
+        let licensed_tools = tool_inventory(&licensed);
+        assert_eq!(licensed_tools.len(), 27);
+        for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
+            assert!(licensed_tools.iter().any(|tool| tool["name"] == name));
+        }
+        for tool in &licensed_tools {
+            assert_eq!(tool["inputSchema"]["type"], "object");
+        }
+
+        install_licence(&ctx, false);
+        let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
+        let community_tools = tool_inventory(&community);
+        assert_eq!(community_tools.len(), 24);
+        for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
+            assert!(!community_tools.iter().any(|tool| tool["name"] == name));
+            let denied = mcp_call(
+                &request,
+                &session,
+                &key,
+                10,
+                "tools/call",
+                json!({ "name": name, "arguments": {} }),
+            )
+            .await;
+            assert!(denied.get("error").is_some(), "tool executed: {denied}");
+        }
+    })
+    .await;
+}
+
+/// Origin tools read templates through the control-plane connection, keep schema work on an
+/// RLS-scoped transaction, enforce read/schema scopes, and explicitly commit a successful merge.
+#[tokio::test]
+#[serial]
+async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        install_licence(&ctx, true);
+        let (tenant_id, workspace_id, owner_id, schema_key) =
+            fixtures::create_tenant_workspace_owner(
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
+        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+
+        let original = json!({
+            "name": "library-note",
+            "entity_types": {
+                "note": { "fields": { "title": { "type": "string", "required": true } } }
+            }
+        });
+        let template = template_templates::ActiveModel {
+            tenant_id: ActiveValue::Set(tenant_id),
+            name: ActiveValue::Set("library-note".into()),
+            definition: ActiveValue::Set(original),
+            visibility: ActiveValue::Set("tenant".into()),
+            tags: ActiveValue::Set(vec![]),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("insert library template");
+
+        let create = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {schema_key}"))
+            .json(&json!({ "template_id": template.id.to_string() }))
+            .await;
+        assert_eq!(
+            create.status_code(),
+            StatusCode::CREATED,
+            "response: {}",
+            create.text()
+        );
+        let schema_id: Uuid = create.json::<Value>()["schema"]["id"]
+            .as_str()
+            .expect("schema id")
+            .parse()
+            .expect("schema UUID");
+
+        let updated = serde_json::from_value(json!({
+            "name": "library-note",
+            "entity_types": {
+                "note": { "fields": {
+                    "title": { "type": "string", "required": true },
+                    "category": { "type": "string" }
+                } }
+            }
+        }))
+        .expect("parse updated definition");
+        let template_txn = ctx.db.begin().await.expect("begin template update");
+        templates::update_template(
+            &template_txn,
+            tenant_id,
+            template.id,
+            templates::UpdateTemplateInput {
+                name: None,
+                description: None,
+                definition: Some(updated),
+                tags: None,
+                locale: None,
+            },
+        )
+        .await
+        .expect("update template");
+        template_txn.commit().await.expect("commit template update");
+
+        let session = initialize(&request).await;
+        let changes = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            2,
+            "tools/call",
+            json!({
+                "name": "list_upstream_changes",
+                "arguments": { "limit": 10, "offset": 0 }
+            }),
+        )
+        .await;
+        assert_eq!(changes["result"]["isError"], false, "MCP call: {changes}");
+        let changes = tool_result_json(&changes);
+        assert_eq!(changes.as_array().expect("change list").len(), 1);
+
+        let preview = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({
+                "name": "merge_preview",
+                "arguments": { "schema_id": schema_id }
+            }),
+        )
+        .await;
+        assert_eq!(preview["result"]["isError"], false, "MCP call: {preview}");
+        assert_eq!(tool_result_json(&preview)["summary"]["auto_add"], 1);
+
+        let denied = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            4,
+            "tools/call",
+            json!({
+                "name": "merge_apply",
+                "arguments": { "schema_id": schema_id }
+            }),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true, "MCP call: {denied}");
+        assert_eq!(
+            schema_schemas::get_active_schema(&ctx.db, workspace_id, "library-note")
+                .await
+                .expect("active schema after denial")
+                .version,
+            1
+        );
+
+        let merged = mcp_call(
+            &request,
+            &session,
+            &schema_key,
+            5,
+            "tools/call",
+            json!({
+                "name": "merge_apply",
+                "arguments": { "schema_id": schema_id }
+            }),
+        )
+        .await;
+        assert_eq!(merged["result"]["isError"], false, "MCP call: {merged}");
+        assert_eq!(tool_result_json(&merged)["schema"]["version"], 2);
+
+        let persisted = schema_schemas::get_active_schema(&ctx.db, workspace_id, "library-note")
+            .await
+            .expect("persisted merged schema");
+        assert_eq!(persisted.version, 2);
+        assert!(
+            persisted.definition.entity_types["note"]
+                .fields
+                .contains_key("category")
+        );
+    })
+    .await;
 }
 
 /// The fill_defaults MCP path must be discoverable, execute with Migration scope, persist its

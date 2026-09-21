@@ -75,10 +75,7 @@ impl Task for ReindexEmbeddings {
             .map(|v| v.parse().unwrap_or(false))
             .unwrap_or(false);
         if !force {
-            let licenced = app_context
-                .shared_store
-                .get::<crate::ee::services::licence::LicenceState>()
-                .is_some_and(|state| state.is_active());
+            let licenced = crate::services::edition::is_active(app_context);
             let chain =
                 embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id, licenced)
                     .await

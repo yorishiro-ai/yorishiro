@@ -17,15 +17,18 @@ use yorishiro::models::_entities::tenant_tenants;
 /// any handler runs.
 /// Every test here installs a licence for the same reason `marketplace.rs` and `stripe.rs` do, and by
 /// the same means: `shared_store.insert` is keyed by `TypeId`, so this overwrites the
-/// `LicenceState::from_env()` the test process booted with.
+/// enterprise-edition state the test process booted with.
 /// What the gate itself does is asserted in `licence_gate.rs`, not here.
 fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
-        .insert(LicenceState::licensed(LicenceClaims {
+        .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: chrono::Utc::now().timestamp() + 60 * 60,
-        }));
+        }))
+            as std::sync::Arc<
+                dyn yorishiro::services::edition::EnterpriseEdition,
+            >);
 }
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.

@@ -12,6 +12,7 @@ use loco_rs::{
 };
 use migration::Migrator;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::task::spawn;
 
 /// A handle for the startup reindex background task, stored in `shared_store` so that
@@ -77,10 +78,7 @@ async fn licence_gate(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
 
-    let active = ctx
-        .shared_store
-        .get::<crate::ee::services::licence::LicenceState>()
-        .is_some_and(|state| state.is_active());
+    let active = crate::services::edition::is_active(&ctx);
 
     if active {
         return next.run(request).await;
@@ -212,8 +210,10 @@ impl Hooks for App {
         // An absent or invalid licence key warns and continues rather than failing boot: unlike
         // `require_min_sqlite_connections` above, this misconfiguration announces itself the moment
         // a gated route is reached, so the operator keeps the choice.
-        ctx.shared_store
-            .insert(crate::ee::services::licence::LicenceState::from_env());
+        ctx.shared_store.insert(
+            Arc::new(crate::ee::services::licence::LicenceState::from_env())
+                as Arc<dyn crate::services::edition::EnterpriseEdition>,
+        );
 
         if ctx.is_sqlite() {
             // The three ee/ features named here use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, or correlated subqueries with advisory locks) and would otherwise fail at execution time
@@ -330,7 +330,13 @@ impl Hooks for App {
     /// Loco itself says custom Axum logic belongs.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
         let router = controllers::swagger::mount(router);
-        let router = controllers::mcp::mount(router, ctx);
+        let router = controllers::mcp::mount(router, ctx, |ctx| {
+            let mut tool_router = crate::services::mcp::community_tool_router();
+            if crate::services::edition::is_active(&ctx) {
+                tool_router += crate::ee::services::mcp::tool_router();
+            }
+            crate::services::mcp::YorishiroMcpServer::new(ctx, tool_router)
+        });
         let rate_limiter =
             std::sync::Arc::new(crate::services::rate_limit::RateLimiter::from_env());
         let router = router.layer(axum::middleware::from_fn_with_state(
@@ -481,11 +487,7 @@ fn spawn_startup_reindex(ctx: AppContext) {
             do_work = false;
 
             // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
-            if ctx
-                .shared_store
-                .get::<crate::ee::services::licence::LicenceState>()
-                .is_some_and(|state| state.is_active())
-            {
+            if crate::services::edition::is_active(&ctx) {
                 tracing::debug!("startup reindex: enterprise licence active, skipping");
                 return;
             }

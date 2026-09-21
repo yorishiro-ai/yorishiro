@@ -131,3 +131,9 @@ impl LicenceState {
         self.claims.as_ref().is_some_and(|c| c.exp > now)
     }
 }
+
+impl crate::services::edition::EnterpriseEdition for LicenceState {
+    fn is_active(&self) -> bool {
+        Self::is_active(self)
+    }
+}
