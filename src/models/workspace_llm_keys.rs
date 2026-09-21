@@ -13,9 +13,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
-
 // implement your write-oriented logic here
 impl ActiveModel {}
 

@@ -20,7 +20,6 @@ use crate::ee::models::oauth_users::{
 };
 
 /// The workspace an OAuth login should issue its API key for, alongside the tenant/membership role that key's scope is derived from: everything the callback controller needs to call `IdentityApiKeys::create_api_key` exactly the way `POST /auth/login` does.
-#[derive(Debug)]
 pub struct ProvisionedLogin {
     pub user_id: Uuid,
     pub email: String,

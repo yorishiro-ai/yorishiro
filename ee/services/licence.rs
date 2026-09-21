@@ -22,7 +22,7 @@ const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../keys/licence-public.pem");
 /// What a licence key asserts.
 ///
 /// `plan` is recorded and logged but gates nothing yet: every valid, unexpired key unlocks every enterprise feature.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LicenceClaims {
     /// Who the licence was issued to.
     /// Free-form, and routinely an email address, so it is deliberately not logged, see `from_env`.
@@ -73,7 +73,7 @@ pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, Yoris
 ///
 /// Verification happens at startup so a malformed key is reported then rather than on the first request that needs it.
 /// Expiry is *not* frozen at startup: [`Self::is_active`] compares against the current time, so a long-running process stops serving enterprise features when the key lapses.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct LicenceState {
     claims: Option<LicenceClaims>,
 }

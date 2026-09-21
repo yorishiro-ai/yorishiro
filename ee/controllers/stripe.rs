@@ -25,7 +25,7 @@ const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
 /// Configuration for the Stripe integration.
 /// Both fields are absent by default: a deployment with no `YORISHIRO_STRIPE_WEBHOOK_SECRET` set gets a 501 from the webhook endpoint instead of silently accepting unverifiable requests.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct StripeConfig {
     pub webhook_secret: Option<String>,
     pub price_mapping: StripePriceMapping,
@@ -77,7 +77,7 @@ fn verify_stripe_signature(
     Err("no v1 signature matched the computed HMAC")
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct StripeEvent {
     id: String,
     #[serde(rename = "type")]
@@ -87,7 +87,7 @@ struct StripeEvent {
     data: StripeEventData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct StripeEventData {
     object: serde_json::Value,
 }

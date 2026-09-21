@@ -8,7 +8,7 @@ use crate::YorishiroError;
 
 use crate::ee::services::non_empty_env;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OAuthConfig {
     /// The identity provider's issuer URL, e.g. `https://accounts.google.com`.
     /// OIDC discovery is fetched from this at request time, not cached at startup.

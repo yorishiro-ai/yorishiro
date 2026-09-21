@@ -101,15 +101,13 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             // A provider saying "too many requests" or "temporarily unavailable" is saying to come back, different from a request it will never accept.
             // Told apart here so the caller can wait instead of dropping the work.
             if let Some(after) = retry_after(status.as_u16(), response.headers()) {
-                let body = response.text().await.unwrap_or_default();
                 return Err(YorishiroError::ProviderBusy {
-                    message: format!("embedding provider returned HTTP {status}: {body}"),
+                    message: format!("embedding provider returned HTTP {status}"),
                     retry_after: after,
                 });
             }
-            let body = response.text().await.unwrap_or_default();
             return Err(YorishiroError::Internal(anyhow::anyhow!(
-                "embedding provider returned HTTP {status}: {body}"
+                "embedding provider returned HTTP {status}"
             )));
         }
 

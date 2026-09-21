@@ -203,7 +203,7 @@ async fn delete_llm_key(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SetLlmKeyRequest {
     /// An OpenAI-compatible chat-completions endpoint, e.g. `https://api.openai.com/v1`.
     pub base_url: String,

@@ -179,3 +179,10 @@ cargo loco task sqlite_ann_benchmark workspace_id:<uuid>
 The task measures median, min, and max latency across five iterations of a vector search query. When the entity count is 1000 or more and the median latency exceeds 200 ms, the task recommends adopting vec0. You can adjust both thresholds with `min_entities` and `max_latency_ms` CLI arguments.
 
 This task is measurement only: it does not change any schema or configuration. It helps you decide whether the vec0 virtual table is worth adopting on your deployment.
+
+## Secret handling in logs
+
+API keys, webhook secrets, OAuth credentials, OIDC tokens, and licence owner information are hidden from debug logs.
+Provider error responses are also omitted from logs because they may echo credentials or tokens.
+This covers deployment and workspace embedding or LLM API keys, Stripe webhook secrets, OAuth client and state-signing credentials, OIDC ID tokens, and the subject in a licence claim.
+HTTP access logs record only the request path, never its query string, so OAuth callback codes and state values are not logged.

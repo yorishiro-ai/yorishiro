@@ -354,9 +354,26 @@ impl Hooks for App {
     /// because Loco's `MiddlewareLayer` trait requires `tower::Layer`
     /// implementations that `from_fn_with_state` does not provide (axum 0.8).
     fn middlewares(
-        _ctx: &AppContext,
+        ctx: &AppContext,
     ) -> Vec<Box<dyn loco_rs::controller::middleware::MiddlewareLayer>> {
-        loco_rs::controller::middleware::default_middleware_stack(_ctx)
+        use loco_rs::controller::middleware::MiddlewareStackExt;
+
+        let logger_config = ctx
+            .config
+            .server
+            .middlewares
+            .logger
+            .clone()
+            .unwrap_or(loco_rs::controller::middleware::logger::Config { enable: true });
+        let mut stack = loco_rs::controller::middleware::default_middleware_stack(ctx);
+        stack.replace(
+            "logger",
+            Box::new(crate::services::access_log::Middleware::new(
+                &logger_config,
+                &ctx.environment,
+            )),
+        );
+        stack
     }
 
     /// Registers all three `WorkerClass` worker types and the reindex worker:

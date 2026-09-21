@@ -18,7 +18,7 @@ use crate::ee::models::embedding_keys::{self, EmbeddingKeyDescription};
 use crate::ee::services::authz;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly, matching `inference.rs`'s own `require_scope`.
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct SetEmbeddingKeyRequest {
     /// An OpenAI-compatible embeddings endpoint, e.g. `https://api.openai.com/v1`.
     pub base_url: String,
