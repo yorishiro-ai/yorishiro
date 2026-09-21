@@ -212,13 +212,3 @@ pub struct SetLlmKeyRequest {
     /// `GET` reports only that one is configured.
     pub api_key: String,
 }
-
-impl std::fmt::Debug for SetLlmKeyRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SetLlmKeyRequest")
-            .field("base_url", &self.base_url)
-            .field("model", &self.model)
-            .field("api_key", &"<redacted>")
-            .finish()
-    }
-}

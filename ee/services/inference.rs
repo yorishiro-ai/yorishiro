@@ -28,18 +28,6 @@ pub struct InferenceConfig {
     pub api_key: String,
 }
 
-/// Written out rather than derived, because a derived `Debug` prints `api_key` in clear text and anything that formats this (a tracing field, an error context, one `dbg!` left behind) would put a workspace's credential into a log.
-/// The endpoint and model still show, since those are what a reader is usually trying to identify.
-impl std::fmt::Debug for InferenceConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InferenceConfig")
-            .field("base_url", &self.base_url)
-            .field("model", &self.model)
-            .field("api_key", &"<redacted>")
-            .finish()
-    }
-}
-
 pub struct InferenceClient {
     client: reqwest::Client,
     base_url: String,
@@ -247,27 +235,5 @@ mod tests {
             !rendered.contains("ysr-secret-value"),
             "the api key must never appear in an error: {rendered}"
         );
-    }
-
-    /// `InferenceConfig` holds a workspace's API key, and a derived `Debug` would print it in clear text into any log formatting the struct.
-    ///
-    /// Asserted rather than left to the hand-written impl staying hand-written: adding `Debug` back to the derive list is a one-word edit that reads as tidying up.
-    #[test]
-    fn debug_does_not_render_the_api_key() {
-        let config = InferenceConfig {
-            base_url: "https://api.example.com/v1".into(),
-            model: "gpt-4o-mini".into(),
-            api_key: "sk-must-not-appear".into(),
-        };
-
-        let rendered = format!("{config:?}");
-
-        assert!(
-            !rendered.contains("sk-must-not-appear"),
-            "the key reached Debug output: {rendered}"
-        );
-        // The endpoint and model still show: redaction should not cost the fields a reader wants.
-        assert!(rendered.contains("api.example.com"));
-        assert!(rendered.contains("gpt-4o-mini"));
     }
 }

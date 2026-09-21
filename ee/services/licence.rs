@@ -33,16 +33,6 @@ pub struct LicenceClaims {
     pub exp: i64,
 }
 
-impl std::fmt::Debug for LicenceClaims {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LicenceClaims")
-            .field("sub", &"<redacted>")
-            .field("plan", &self.plan)
-            .field("exp", &self.exp)
-            .finish()
-    }
-}
-
 /// The licence key from `YORISHIRO_LICENSE_KEY`, or `None` when absent or empty.
 ///
 /// `YORISHIRO_LICENSE_KEY=` (set-but-empty) means "no licence" rather than
@@ -83,7 +73,7 @@ pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, Yoris
 ///
 /// Verification happens at startup so a malformed key is reported then rather than on the first request that needs it.
 /// Expiry is *not* frozen at startup: [`Self::is_active`] compares against the current time, so a long-running process stops serving enterprise features when the key lapses.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct LicenceState {
     claims: Option<LicenceClaims>,
 }

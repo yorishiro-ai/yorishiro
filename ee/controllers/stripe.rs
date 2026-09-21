@@ -31,18 +31,6 @@ pub struct StripeConfig {
     pub price_mapping: StripePriceMapping,
 }
 
-impl std::fmt::Debug for StripeConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StripeConfig")
-            .field(
-                "webhook_secret",
-                &self.webhook_secret.as_ref().map(|_| "<redacted>"),
-            )
-            .field("price_mapping", &self.price_mapping)
-            .finish()
-    }
-}
-
 impl StripeConfig {
     pub fn from_env() -> Self {
         Self {

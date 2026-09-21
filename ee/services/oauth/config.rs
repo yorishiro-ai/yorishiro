@@ -23,18 +23,6 @@ pub struct OAuthConfig {
     pub state_signing_key: Vec<u8>,
 }
 
-impl std::fmt::Debug for OAuthConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OAuthConfig")
-            .field("issuer_url", &self.issuer_url)
-            .field("client_id", &self.client_id)
-            .field("client_secret", &"<redacted>")
-            .field("redirect_uri", &self.redirect_uri)
-            .field("state_signing_key", &"<redacted>")
-            .finish()
-    }
-}
-
 impl OAuthConfig {
     /// Reads the four `YORISHIRO_OAUTH_*` variables.
     /// Returns `Ok(None)` when `YORISHIRO_OAUTH_ISSUER_URL` is unset or empty: OAuth login is opt-in, and every other variable is meaningless without an issuer to talk to.

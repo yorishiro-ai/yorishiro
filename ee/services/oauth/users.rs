@@ -27,17 +27,6 @@ pub struct ProvisionedLogin {
     pub role: MembershipRole,
 }
 
-impl std::fmt::Debug for ProvisionedLogin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProvisionedLogin")
-            .field("user_id", &self.user_id)
-            .field("email", &"<redacted>")
-            .field("workspace_id", &self.workspace_id)
-            .field("role", &self.role)
-            .finish()
-    }
-}
-
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
 /// `email` is required (the design's whole point is looking users up by the ID token's `email` claim); a provider that omits it fails with `ValidationFailed` rather than silently provisioning an unusable account.
 ///
