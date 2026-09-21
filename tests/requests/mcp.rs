@@ -95,6 +95,13 @@ async fn mcp_call(
     rpc_body(&response)
 }
 
+fn tool_inventory(response: &Value) -> Vec<Value> {
+    response["result"]["tools"]
+        .as_array()
+        .expect("tools/list result")
+        .clone()
+}
+
 fn install_licence(ctx: &loco_rs::app::AppContext, active: bool) {
     let state = if active {
         LicenceState::licensed(LicenceClaims {
@@ -116,6 +123,59 @@ fn tool_result_json(response: &Value) -> Value {
             .expect("tool result text"),
     )
     .expect("JSON tool result")
+}
+
+/// A server instance is retained by rmcp for the whole session.
+/// Licence changes must therefore gate discovery and dispatch dynamically, not only at construction.
+#[tokio::test]
+#[serial]
+async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
+    if super::super::require_sqlite_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        install_licence(&ctx, true);
+        let (_tenant_id, workspace_id, owner_id, _schema_key) =
+            fixtures::create_tenant_workspace_owner(
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
+        let key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Schema, false).await;
+        let session = initialize(&request).await;
+
+        let licensed = mcp_call(&request, &session, &key, 2, "tools/list", json!({})).await;
+        let licensed_tools = tool_inventory(&licensed);
+        assert_eq!(licensed_tools.len(), 27);
+        for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
+            assert!(licensed_tools.iter().any(|tool| tool["name"] == name));
+        }
+        for tool in &licensed_tools {
+            assert_eq!(tool["inputSchema"]["type"], "object");
+        }
+
+        install_licence(&ctx, false);
+        let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
+        let community_tools = tool_inventory(&community);
+        assert_eq!(community_tools.len(), 24);
+        for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
+            assert!(!community_tools.iter().any(|tool| tool["name"] == name));
+            let denied = mcp_call(
+                &request,
+                &session,
+                &key,
+                10,
+                "tools/call",
+                json!({ "name": name, "arguments": {} }),
+            )
+            .await;
+            assert!(denied.get("error").is_some(), "tool executed: {denied}");
+        }
+    })
+    .await;
 }
 
 /// Origin tools read templates through the control-plane connection, keep schema work on an

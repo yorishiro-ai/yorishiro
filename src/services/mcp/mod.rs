@@ -9,8 +9,13 @@ mod template_library;
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 use rmcp::ErrorData;
+use rmcp::RoleServer;
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult,
+    PaginatedRequestParams, ResultType, ServerCapabilities, ServerInfo,
+};
+use rmcp::service::RequestContext;
 use rmcp::{ServerHandler, tool_handler};
 use sea_orm::DatabaseTransaction;
 
@@ -49,6 +54,49 @@ pub(crate) fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
 
 #[tool_handler(router = self.tool_router.clone())]
 impl ServerHandler for YorishiroMcpServer {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if !crate::services::edition::is_active(&self.ctx)
+            && is_enterprise_tool(request.name.as_ref())
+        {
+            return Err(ErrorData::invalid_params("tool not found", None));
+        }
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        let mut tools = self.tool_router.list_all();
+        if !crate::services::edition::is_active(&self.ctx) {
+            tools.retain(|tool| !is_enterprise_tool(tool.name.as_ref()));
+        }
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
+        })
+    }
+
+    fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
+        if !crate::services::edition::is_active(&self.ctx) && is_enterprise_tool(name) {
+            return None;
+        }
+        self.tool_router.get(name).cloned()
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
@@ -57,6 +105,12 @@ impl ServerHandler for YorishiroMcpServer {
              (read/write/schema, where higher scopes include the permissions of lower ones).",
         )
     }
+}
+
+const ENTERPRISE_TOOL_NAMES: &[&str] = &["list_upstream_changes", "merge_apply", "merge_preview"];
+
+fn is_enterprise_tool(name: &str) -> bool {
+    ENTERPRISE_TOOL_NAMES.contains(&name)
 }
 
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
