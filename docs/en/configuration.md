@@ -185,3 +185,4 @@ This task is measurement only: it does not change any schema or configuration. I
 API keys, webhook secrets, OAuth credentials, OIDC tokens, and licence owner information are hidden from debug logs.
 Provider error responses are also omitted from logs because they may echo credentials or tokens.
 This covers deployment and workspace embedding or LLM API keys, Stripe webhook secrets, OAuth client and state-signing credentials, OIDC ID tokens, and the subject in a licence claim.
+HTTP access logs record only the request path, never its query string, so OAuth callback codes and state values are not logged.

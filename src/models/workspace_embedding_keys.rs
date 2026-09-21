@@ -1,5 +1,18 @@
-pub use super::_entities::workspace_embedding_keys::{ActiveModel, Entity, Model};
+pub use super::_entities::workspace_embedding_keys::{ActiveModel, Entity};
 use sea_orm::entity::prelude::*;
+
+/// A safe read record for workspace embedding configuration.
+/// The generated entity model is kept behind the entity module because it contains the raw API key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Model {
+    pub workspace_id: Uuid,
+    pub base_url: String,
+    pub model: String,
+    pub dimensions: i32,
+    pub send_dimensions_param: bool,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
+}
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -12,9 +25,6 @@ impl ActiveModelBehavior for ActiveModel {
         Ok(this)
     }
 }
-
-// implement your read-oriented logic here
-impl Model {}
 
 // implement your write-oriented logic here
 impl ActiveModel {}
