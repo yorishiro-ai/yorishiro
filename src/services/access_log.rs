@@ -1,7 +1,10 @@
 use std::time::Instant;
 
 use axum::{extract::Request, middleware::Next, response::Response};
-use loco_rs::controller::middleware::{MiddlewareLayer, logger};
+use loco_rs::{
+    controller::middleware::{MiddlewareLayer, logger},
+    environment::Environment,
+};
 use serde::Serialize;
 use tracing::Instrument;
 
@@ -14,12 +17,14 @@ pub fn path_only(uri: &axum::http::Uri) -> &str {
 #[derive(Debug, Clone, Serialize)]
 pub struct Middleware {
     enable: bool,
+    environment: Environment,
 }
 
 impl Middleware {
-    pub fn new(config: &logger::Config) -> Self {
+    pub fn new(config: &logger::Config, environment: &Environment) -> Self {
         Self {
             enable: config.enable,
+            environment: environment.clone(),
         }
     }
 }
@@ -41,7 +46,9 @@ impl MiddlewareLayer for Middleware {
         &self,
         app: axum::Router<loco_rs::app::AppContext>,
     ) -> loco_rs::Result<axum::Router<loco_rs::app::AppContext>> {
-        Ok(app.layer(axum::middleware::from_fn(log_request)))
+        Ok(app
+            .layer(axum::middleware::from_fn(log_request))
+            .layer(axum::Extension(self.environment.clone())))
     }
 }
 

@@ -368,7 +368,10 @@ impl Hooks for App {
         let mut stack = loco_rs::controller::middleware::default_middleware_stack(ctx);
         stack.replace(
             "logger",
-            Box::new(crate::services::access_log::Middleware::new(&logger_config)),
+            Box::new(crate::services::access_log::Middleware::new(
+                &logger_config,
+                &ctx.environment,
+            )),
         );
         stack
     }
