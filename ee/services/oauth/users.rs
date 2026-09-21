@@ -20,12 +20,22 @@ use crate::ee::models::oauth_users::{
 };
 
 /// The workspace an OAuth login should issue its API key for, alongside the tenant/membership role that key's scope is derived from: everything the callback controller needs to call `IdentityApiKeys::create_api_key` exactly the way `POST /auth/login` does.
-#[derive(Debug)]
 pub struct ProvisionedLogin {
     pub user_id: Uuid,
     pub email: String,
     pub workspace_id: Uuid,
     pub role: MembershipRole,
+}
+
+impl std::fmt::Debug for ProvisionedLogin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProvisionedLogin")
+            .field("user_id", &self.user_id)
+            .field("email", &"<redacted>")
+            .field("workspace_id", &self.workspace_id)
+            .field("role", &self.role)
+            .finish()
+    }
 }
 
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
@@ -189,4 +199,24 @@ async fn resolve_existing_login(
 
 fn tenant_name_from_email(email: &str) -> String {
     email.split('@').next().unwrap_or(email).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_provisioned_login_email() {
+        let login = ProvisionedLogin {
+            user_id: Uuid::nil(),
+            email: "oidc-user@example.invalid".into(),
+            workspace_id: Uuid::nil(),
+            role: MembershipRole::Member,
+        };
+
+        let rendered = format!("{login:?}");
+
+        assert!(!rendered.contains("oidc-user@example.invalid"));
+        assert!(rendered.contains("workspace_id"));
+    }
 }

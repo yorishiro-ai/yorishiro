@@ -87,12 +87,11 @@ async fn authorize() -> Result<Response, ApiError> {
         .into_response())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct CallbackParams {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
-    error_description: Option<String>,
 }
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
@@ -107,12 +106,8 @@ async fn callback(
     let csrf_cookie_value = read_cookie(&headers, CSRF_COOKIE_NAME);
     let clear_cookie = csrf_clear_cookie();
 
-    if let Some(error) = params.error {
-        tracing::warn!(
-            error,
-            description = params.error_description.as_deref().unwrap_or_default(),
-            "identity provider returned an error on the OAuth callback"
-        );
+    if params.error.is_some() {
+        tracing::warn!("identity provider returned an error on the OAuth callback");
         return Ok(login_failure_redirect(clear_cookie));
     }
 

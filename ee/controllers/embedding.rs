@@ -32,6 +32,18 @@ pub struct SetEmbeddingKeyRequest {
     pub send_dimensions_param: bool,
 }
 
+impl std::fmt::Debug for SetEmbeddingKeyRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetEmbeddingKeyRequest")
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key", &"<redacted>")
+            .field("dimensions", &self.dimensions)
+            .field("send_dimensions_param", &self.send_dimensions_param)
+            .finish()
+    }
+}
+
 /// `PUT /api/workspace/embedding-key`
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
@@ -119,4 +131,25 @@ pub fn routes() -> Routes {
             .get(get_embedding_key)
             .delete(delete_embedding_key),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_embedding_api_key() {
+        let request = SetEmbeddingKeyRequest {
+            base_url: "https://provider.example".into(),
+            model: "model".into(),
+            api_key: "do-not-render-embedding-value".into(),
+            dimensions: 768,
+            send_dimensions_param: false,
+        };
+
+        let rendered = format!("{request:?}");
+
+        assert!(!rendered.contains("do-not-render-embedding-value"));
+        assert!(rendered.contains("provider.example"));
+    }
 }

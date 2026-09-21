@@ -89,7 +89,7 @@ fn verify_stripe_signature(
     Err("no v1 signature matched the computed HMAC")
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct StripeEvent {
     id: String,
     #[serde(rename = "type")]
@@ -99,7 +99,7 @@ struct StripeEvent {
     data: StripeEventData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct StripeEventData {
     object: serde_json::Value,
 }
