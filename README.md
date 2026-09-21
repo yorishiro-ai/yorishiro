@@ -2,6 +2,8 @@
 
 **English** | [日本語](README.jp.md)
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/yorishiro-ai/yorishiro)
+
 A knowledge store where you define your own data structures and search by meaning, not just keywords.
 
 ## What it does
