@@ -50,6 +50,25 @@ where
     .expect("migration assertion value")
 }
 
+async fn drop_postgres_database(base: &str, database_name: &str) {
+    let (without_query, query) = match base.split_once('?') {
+        Some((head, tail)) => (head, format!("?{tail}")),
+        None => (base, String::new()),
+    };
+    let prefix = without_query
+        .rsplit_once('/')
+        .expect("DATABASE_URL database segment")
+        .0;
+    let admin = Database::connect(format!("{prefix}/postgres{query}"))
+        .await
+        .expect("reconnect PostgreSQL admin database");
+    admin
+        .execute_unprepared(&format!("DROP DATABASE IF EXISTS {database_name}"))
+        .await
+        .expect("drop PostgreSQL migration database");
+    admin.close().await.expect("close PostgreSQL admin pool");
+}
+
 async fn with_database<F>(name: &str, test: F)
 where
     F: for<'a> FnOnce(&'a DatabaseConnection) -> futures::future::BoxFuture<'a, ()>,
@@ -91,10 +110,14 @@ where
             .execute_unprepared(&format!("CREATE DATABASE {database_name}"))
             .await
             .expect("create unique PostgreSQL migration database");
-        drop(admin);
-        let db = Database::connect(&target_url)
-            .await
-            .expect("connect unique PostgreSQL migration database");
+        admin.close().await.expect("close PostgreSQL admin pool");
+        let db = match Database::connect(&target_url).await {
+            Ok(db) => db,
+            Err(error) => {
+                drop_postgres_database(&base, &database_name).await;
+                panic!("connect unique PostgreSQL migration database: {error}");
+            }
+        };
         (db, None, Some(database_name), Some(base))
     };
 
@@ -102,22 +125,7 @@ where
     db.close().await.expect("close migration test pool");
 
     if let (Some(database_name), Some(base)) = (postgres_name, postgres_base) {
-        let (without_query, query) = match base.split_once('?') {
-            Some((head, tail)) => (head, format!("?{tail}")),
-            None => (base.as_str(), String::new()),
-        };
-        let prefix = without_query
-            .rsplit_once('/')
-            .expect("DATABASE_URL database segment")
-            .0;
-        let admin = Database::connect(format!("{prefix}/postgres{query}"))
-            .await
-            .expect("reconnect PostgreSQL admin database");
-        admin
-            .execute_unprepared(&format!("DROP DATABASE IF EXISTS {database_name}"))
-            .await
-            .expect("drop PostgreSQL migration database");
-        admin.close().await.expect("close PostgreSQL admin pool");
+        drop_postgres_database(&base, &database_name).await;
     }
     drop(sqlite_dir);
 
