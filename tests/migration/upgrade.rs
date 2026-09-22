@@ -122,7 +122,7 @@ where
     };
 
     let outcome = AssertUnwindSafe(test(&db)).catch_unwind().await;
-    db.close().await.expect("close migration test pool");
+    let _ = db.close().await;
 
     if let (Some(database_name), Some(base)) = (postgres_name, postgres_base) {
         drop_postgres_database(&base, &database_name).await;
@@ -559,14 +559,45 @@ async fn upgrade_000007_creates_fork_history_and_integrity_objects() {
             .await,
             1
         );
-        assert_eq!(
-            value::<i64>(
-                db,
-                format!("SELECT CASE WHEN customized THEN 1 ELSE 0 END FROM workspace_schema_forks WHERE id = {fork}"),
-            )
-            .await,
-            0
-        );
+        match db.get_database_backend() {
+            DbBackend::Sqlite => {
+                assert_eq!(
+                    value::<i64>(
+                        db,
+                        format!("SELECT CASE WHEN customized THEN 1 ELSE 0 END FROM workspace_schema_forks WHERE id = {fork}"),
+                    )
+                    .await,
+                    0
+                );
+                assert_eq!(
+                    value::<Option<i64>>(
+                        db,
+                        "SELECT MAX(source_schema_version) FROM workspace_schema_forks",
+                    )
+                    .await,
+                    Some(1)
+                );
+            }
+            DbBackend::Postgres => {
+                assert_eq!(
+                    value::<i32>(
+                        db,
+                        format!("SELECT CASE WHEN customized THEN 1 ELSE 0 END FROM workspace_schema_forks WHERE id = {fork}"),
+                    )
+                    .await,
+                    0
+                );
+                assert_eq!(
+                    value::<Option<i32>>(
+                        db,
+                        "SELECT MAX(source_schema_version) FROM workspace_schema_forks",
+                    )
+                    .await,
+                    Some(1)
+                );
+            }
+            backend => panic!("unsupported migration test backend: {backend:?}"),
+        }
         assert_index_exists(db, "workspace_schema_forks_workspace_source_name_key").await;
         assert_index_exists(db, "workspace_schema_fork_heads_fork_schema_key").await;
         assert_rejected(
