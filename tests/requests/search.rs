@@ -78,7 +78,7 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
 #[tokio::test]
 #[serial]
 async fn search_requires_authentication() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, _ctx| async move {

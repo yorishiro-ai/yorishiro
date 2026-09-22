@@ -6,10 +6,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 
 | Command | What it does | Backend |
 |---|---|---|
-| `cargo test --locked --workspace` with PostgreSQL environment | Full suite with Rust's default parallel execution | PostgreSQL |
-| `cargo test --locked --workspace` with SQLite environment | Full suite with `require_sqlite_backend()` gate and Rust's default parallel execution | SQLite |
-| `make test-postgres` | Convenience wrapper for the PostgreSQL command above | PostgreSQL |
-| `make test-sqlite` | Convenience wrapper for the SQLite command above | SQLite |
+| `make test-postgres` | Full suite with Rust's default parallel execution and backend-gate verification | PostgreSQL |
+| `make test-sqlite` | Full suite with Rust's default parallel execution and backend-gate verification | SQLite |
 | `make check` | `cargo check --locked --workspace` | — |
 | `make clippy` | `cargo clippy --locked --workspace --tests -- -D warnings` | — |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
@@ -31,7 +29,7 @@ Custom PostgreSQL:
 ```sh
 DATABASE_URL=postgres://user:pass@host:5432/db \
   DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres \
-  cargo test --locked --workspace
+  make test-postgres
 ```
 
 ### `make entities`
@@ -69,7 +67,9 @@ There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 
 ## SQLite gate
 
-`tests/mod.rs` exports `require_sqlite_backend()` which returns `true` when `DATABASE_URL` starts with `sqlite://` or `sqlite::memory:`. Call sites:
+`tests/mod.rs` exports centralized `require_sqlite_backend()` and `require_postgres_backend()` gates.
+Each gate records selected and skipped gate markers when `YORISHIRO_BACKEND_MARKER_DIR` is set.
+Call sites:
 
 ```rust
 if !require_sqlite_backend() { return; }
@@ -83,6 +83,8 @@ Dedicated SQLite files use this gate:
 - `tests/requests/schemas_sqlite.rs` — schema CRUD
 - `tests/requests/workspaces_sqlite.rs` — workspace CRUD
 - `tests/migration/sqlite.rs` — migration verification
+
+`scripts/test-backend.sh` runs the suite, reports selected, executed, and skipped gate counts with skip reasons, and fails when the expected backend has zero gate selections or when the other backend has any selections.
 
 `request_with_create_db` is not wired for SQLite (`CREATE DATABASE` has no SQLite equivalent).
 

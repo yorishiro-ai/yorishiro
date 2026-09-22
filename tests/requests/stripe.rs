@@ -107,7 +107,7 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 #[tokio::test]
 #[serial]
 async fn a_duplicate_event_id_is_not_reapplied() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     with_stripe_env(async {
@@ -173,7 +173,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 #[tokio::test]
 #[serial]
 async fn a_cancellation_returns_the_tenant_to_free() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     with_stripe_env(async {
@@ -242,7 +242,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 #[tokio::test]
 #[serial]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -267,7 +267,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 #[tokio::test]
 #[serial]
 async fn a_tampered_payload_is_rejected() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     with_stripe_env(async {

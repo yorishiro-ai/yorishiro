@@ -26,7 +26,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -124,7 +124,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
 #[tokio::test]
 #[serial]
 async fn undo_an_unknown_job_is_refused() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

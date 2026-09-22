@@ -20,7 +20,7 @@ fn note_definition(name: &str) -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn list_and_get_respect_tenant_and_community_visibility() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {

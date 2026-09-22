@@ -56,7 +56,7 @@ fn note_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn owner_can_create_update_and_delete_a_template() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -111,7 +111,7 @@ async fn owner_can_create_update_and_delete_a_template() {
 #[tokio::test]
 #[serial]
 async fn member_role_cannot_manage_the_template_library() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -134,7 +134,7 @@ async fn member_role_cannot_manage_the_template_library() {
 #[tokio::test]
 #[serial]
 async fn another_tenant_cannot_update_or_delete_a_community_template() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -194,7 +194,7 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
 #[tokio::test]
 #[serial]
 async fn fork_copies_a_community_template_into_the_forking_tenants_own_library() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
