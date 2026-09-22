@@ -58,7 +58,7 @@ fn note_definition() -> serde_json::Value {
 #[tokio::test]
 #[serial]
 async fn without_a_licence_the_marketplace_is_not_served() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -82,7 +82,7 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 #[tokio::test]
 #[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, _ctx| async move {
@@ -104,7 +104,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 #[tokio::test]
 #[serial]
 async fn a_licence_does_not_replace_authentication() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -128,7 +128,7 @@ async fn a_licence_does_not_replace_authentication() {
 #[tokio::test]
 #[serial]
 async fn publish_list_fork_and_review_round_trip() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -320,7 +320,7 @@ async fn publish_list_fork_and_review_round_trip() {
 #[tokio::test]
 #[serial]
 async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -370,7 +370,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 #[tokio::test]
 #[serial]
 async fn a_rating_outside_the_range_is_rejected() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

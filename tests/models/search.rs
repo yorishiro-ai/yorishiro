@@ -38,7 +38,7 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
 #[tokio::test]
 #[serial]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -182,7 +182,7 @@ impl EmbeddingProvider for FixedWidthProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -313,7 +313,7 @@ impl EmbeddingProvider for FixedModelProvider {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -404,7 +404,7 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -526,7 +526,7 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 #[tokio::test]
 #[serial]
 async fn sync_embedding_resolves_the_tenant_dimension_tier() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -596,7 +596,7 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 #[tokio::test]
 #[serial]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -810,7 +810,7 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 #[tokio::test]
 #[serial]
 async fn reindex_overwrites_existing_entity_embeddings() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
@@ -996,7 +996,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 #[tokio::test]
 #[serial]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {

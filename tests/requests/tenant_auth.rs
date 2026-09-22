@@ -26,7 +26,7 @@ async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output =
 #[tokio::test]
 #[serial]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     with_max_tenants("1", async move {
@@ -69,7 +69,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
 #[tokio::test]
 #[serial]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     with_max_tenants("1", async move {

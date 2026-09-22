@@ -202,4 +202,19 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
-        run: cargo test --locked --workspace
+        run: scripts/test-backend.sh ${{ matrix.backend }}
+
+      - name: Verify backend gate rejects a mismatch
+        env:
+          DATABASE_URL: sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc
+          LOCO_ENV: test_sqlite
+        run: |
+          set +e
+          output=$(scripts/test-backend.sh postgres models::maintenance:: 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ] || ! grep -q "zero postgres-specific tests" <<<"$output"; then
+            echo "ERROR: backend wrapper accepted a SQLite run as PostgreSQL"
+            exit 1
+          fi

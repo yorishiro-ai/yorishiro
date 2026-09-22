@@ -3,7 +3,7 @@
 //! These exist because a rollback bug reached review that SQLite could not have caught: `workspace_workspaces.schema_id` and `schema_schemas` reference each other, and the constraint that closes that circle is a separate `ALTER TABLE` on PostgreSQL only.
 //! SQLite declares the same foreign key inline in its own `CREATE TABLE`, so dropping the table carries it away and the rollback there succeeded while PostgreSQL's failed with `cannot drop table schema_schemas because other objects depend on it`.
 //!
-//! Skipped when `DATABASE_URL` names no PostgreSQL server, so `cargo test` still works on a machine with no database.
+//! Skipped by the shared PostgreSQL backend gate when another backend is active.
 //!
 //! Both tests are `#[serial]` because each gets its own database but they share a cluster, and `up()` creates the `yorishiro_app` **role**, which is a cluster-wide object.
 //! Run in parallel against a cluster where that role does not exist yet, both reach `CREATE ROLE` at once and one fails with `duplicate key value violates unique constraint "pg_authid_rolname_index"` — the migration's own `EXCEPTION WHEN duplicate_object` catches a role that already existed, not two transactions creating it simultaneously.
@@ -14,13 +14,9 @@ use serial_test::serial;
 
 /// A throwaway database, dropped and recreated so each run starts from nothing.
 ///
-/// Returns `None` only when `DATABASE_URL` is unset or names something other than PostgreSQL, which is how these tests skip on a machine with no database.
-/// A `DATABASE_URL` that is present but unusable panics rather than returning `None`: skipping there would report success for tests that never ran, which is the failure this file exists to prevent elsewhere.
-async fn scratch_db(name: &str) -> Option<sea_orm::DatabaseConnection> {
-    let base = std::env::var("DATABASE_URL").ok()?;
-    if !base.starts_with("postgres://") {
-        return None;
-    }
+/// A `DATABASE_URL` that is present but unusable panics rather than skipping.
+async fn scratch_db(name: &str) -> sea_orm::DatabaseConnection {
+    let base = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
 
     // Split the path from the query, so `?sslmode=require` and friends survive onto both derived
     // URLs. Dropping them silently produced a connection failure that the old `.ok()?` turned into
@@ -51,19 +47,18 @@ async fn scratch_db(name: &str) -> Option<sea_orm::DatabaseConnection> {
     }
     drop(admin);
 
-    Some(
-        Database::connect(&target_url)
-            .await
-            .expect("connect to scratch database"),
-    )
+    Database::connect(&target_url)
+        .await
+        .expect("connect to scratch database")
 }
 
 #[tokio::test]
 #[serial]
 async fn all_migrations_apply_to_a_fresh_postgres_database() {
-    let Some(db) = scratch_db("yorishiro_migtest_up").await else {
+    if !super::super::require_postgres_backend() {
         return;
-    };
+    }
+    let db = scratch_db("yorishiro_migtest_up").await;
     Migrator::up(&db, None).await.expect("run all migrations");
 }
 
@@ -71,9 +66,10 @@ async fn all_migrations_apply_to_a_fresh_postgres_database() {
 #[tokio::test]
 #[serial]
 async fn all_migrations_roll_back_and_reapply_on_postgres() {
-    let Some(db) = scratch_db("yorishiro_migtest_cycle").await else {
+    if !super::super::require_postgres_backend() {
         return;
-    };
+    }
+    let db = scratch_db("yorishiro_migtest_cycle").await;
 
     Migrator::up(&db, None).await.expect("run all migrations");
     Migrator::down(&db, None)

@@ -94,7 +94,7 @@ const UNGATED: &[&str] = &[
 #[tokio::test]
 #[serial]
 async fn gated_routes_are_absent_without_a_licence() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, _ctx| async move {
@@ -138,7 +138,7 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 #[serial]
 async fn gated_routes_are_served_with_a_licence() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -173,7 +173,7 @@ async fn gated_routes_are_served_with_a_licence() {
 #[tokio::test]
 #[serial]
 async fn an_expired_licence_closes_the_gate_again() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -217,7 +217,7 @@ async fn an_expired_licence_closes_the_gate_again() {
 #[tokio::test]
 #[serial]
 async fn stripe_webhook_is_gated() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -251,7 +251,7 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 #[serial]
 async fn oauth_login_is_gated() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

@@ -16,20 +16,22 @@ CI は PostgreSQL の `DB_MAX_CONNECTIONS` を `100` に上書きし、SQLite �
 ## テスト
 
 テストスイートは Rust の既定の並列実行で起動してください。
+`make test-postgres` または `make test-sqlite` を使うと、共通テストを含むスイートを実行し、選択したバックエンド専用テストが 1 件以上実行されたことも検証できます。
+最後に、バックエンド専用ゲートの選択数、実行数、スキップ数とスキップ理由が表示されます。
 
 PostgreSQL の実行例:
 
 ```console
 $ DATABASE_URL=postgres://yorishiro:yorishiro@localhost:15432/yorishiro \
     DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres \
-    cargo test --locked --workspace
+    make test-postgres
 ```
 
 SQLite の実行例:
 
 ```console
 $ DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' \
-    LOCO_ENV=test_sqlite cargo test --locked --workspace
+    LOCO_ENV=test_sqlite make test-sqlite
 ```
 
 リクエストテストは終了前に `close_app_pools` を呼び出してください。

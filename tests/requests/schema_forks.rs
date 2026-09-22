@@ -398,7 +398,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
 #[tokio::test]
 #[serial]
 async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -603,7 +603,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
 #[tokio::test]
 #[serial]
 async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -716,7 +716,7 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
 #[tokio::test]
 #[serial]
 async fn fork_creation_shares_the_schema_version_lock() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -802,7 +802,7 @@ async fn fork_creation_shares_the_schema_version_lock() {
 #[tokio::test]
 #[serial]
 async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

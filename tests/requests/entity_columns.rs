@@ -51,7 +51,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn set_get_and_reset_round_trip_in_display_order() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -145,7 +145,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 #[tokio::test]
 #[serial]
 async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -195,7 +195,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
 #[tokio::test]
 #[serial]
 async fn an_empty_selection_is_stored_as_a_choice() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

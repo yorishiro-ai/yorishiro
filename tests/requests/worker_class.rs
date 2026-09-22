@@ -59,7 +59,7 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 #[tokio::test]
 #[serial]
 async fn worker_class_set_get_and_clear_round_trip() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -125,7 +125,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
 #[tokio::test]
 #[serial]
 async fn setting_a_new_class_replaces_the_old_one() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -172,7 +172,7 @@ async fn setting_a_new_class_replaces_the_old_one() {
 #[tokio::test]
 #[serial]
 async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {

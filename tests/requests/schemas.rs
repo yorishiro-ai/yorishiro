@@ -98,7 +98,7 @@ async fn list_templates_and_get_template_over_rest() {
 #[tokio::test]
 #[serial]
 async fn create_schema_from_a_library_template_links_the_origin() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -151,7 +151,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
 #[tokio::test]
 #[serial]
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

@@ -130,7 +130,7 @@ fn tool_result_json(response: &Value) -> Value {
 #[tokio::test]
 #[serial]
 async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -183,7 +183,7 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 #[tokio::test]
 #[serial]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -348,7 +348,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 #[tokio::test]
 #[serial]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
-    if super::super::require_sqlite_backend() {
+    if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {

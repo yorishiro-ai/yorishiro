@@ -1,7 +1,7 @@
 # Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
 
 # CI mirrors this structure: check / clippy / fmt-check run once, then test runs.
-# SQLite tests are gated by require_sqlite_backend() (DATABASE_URL scheme check).
+# Backend-specific tests use centralized gates and post-test marker verification.
 # Default database URL for PostgreSQL tests.
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
@@ -23,10 +23,10 @@ fmt-check:
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build
-	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres cargo test --locked --workspace
+	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres scripts/test-backend.sh postgres
 
 test-sqlite: build
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite cargo test --locked --workspace
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite scripts/test-backend.sh sqlite
 
 build:
 	cargo build --locked --workspace
