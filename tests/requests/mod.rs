@@ -89,10 +89,8 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
 /// SQLite variant of `close_app_pools`.
 /// On SQLite `after_context` builds no `DbHandle` (no RLS, no second tenant),
 /// so there is only `ctx.db` to close.
-/// `queue:` is active in `config/test_sqlite.yaml` (the queue provider uses its own
-/// pool, so it never holds the session that would fail `DROP DATABASE`);
-/// `config/test_sqlite.yaml` has no `queue:` block, so it is `None` for every test that boots
-/// through `request_with_create_db`.
+/// `config/test_sqlite.yaml` has no `queue:` block, so the queue provider is `None` for every
+/// test that boots through `request_with_create_db`.
 /// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
     ctx.db.get_sqlite_connection_pool().close().await;

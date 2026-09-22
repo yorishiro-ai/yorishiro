@@ -95,10 +95,9 @@ It logs the replacement before writing when `--force` replaces an existing file.
 Yorishiro reads `YORISHIRO_CONFIG_PATH` first when it is set.
 That path is strict: a missing, unreadable, or invalid file is an error and does not fall back.
 Otherwise Yorishiro reads `./yorishiro.yaml` when present.
-Only when neither exists does it use the transitional Loco file at `config/{environment}.yaml`.
-Legacy files can still use Loco's Tera syntax during this migration, but do not add that syntax to `yorishiro.yaml`.
-
 The canonical file is plain YAML.
+Do not add Loco's Tera syntax to `yorishiro.yaml`.
+
 The following environment variables explicitly override its fields, so deploy-time secrets and addresses do not need template interpolation: `DATABASE_URL`, `DB_LOGGING`, `DB_CONNECT_TIMEOUT`, `DB_IDLE_TIMEOUT`, `DB_MIN_CONNECTIONS`, `DB_MAX_CONNECTIONS`, `DB_AUTO_MIGRATE`, `PORT`, `BINDING`, `HOST`, `LOG_LEVEL`, `QUEUE_URL`, `YORISHIRO_QUEUE_KIND`, `YORISHIRO_QUEUE_WORKERS`, `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, and `MAILER_PASSWORD`.
 
 An unconfigured skeleton starts with SQLite locally. No external services are needed.

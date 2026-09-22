@@ -93,12 +93,10 @@ PostgreSQL の負荷ガードは、デプロイメント全体のメンテナン
 
 `YORISHIRO_CONFIG_PATH` が設定されている場合、Yorishiro はまずそのパスを読みます。
 このパスは厳密に扱われます。
-ファイルがない、読めない、または無効な場合はエラーとなり、フォールバックしません。
 未設定の場合は `./yorishiro.yaml` があれば読みます。
-両方ともない場合に限り、移行用として `config/{environment}.yaml` を読みます。
-移行期間中は従来ファイルで Loco の Tera 構文を使えますが、`yorishiro.yaml` に追加してはいけません。
-
 正規ファイルはプレーン YAML です。
+`yorishiro.yaml` に Loco の Tera 構文を追加してはいけません。
+
 デプロイ時のシークレットやアドレスにテンプレート展開は不要です。
 次の環境変数が明示的に YAML の値を上書きします: `DATABASE_URL`, `DB_LOGGING`, `DB_CONNECT_TIMEOUT`, `DB_IDLE_TIMEOUT`, `DB_MIN_CONNECTIONS`, `DB_MAX_CONNECTIONS`, `DB_AUTO_MIGRATE`, `PORT`, `BINDING`, `HOST`, `LOG_LEVEL`, `QUEUE_URL`, `YORISHIRO_QUEUE_KIND`, `YORISHIRO_QUEUE_WORKERS`, `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, `MAILER_PASSWORD`。
 

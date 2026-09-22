@@ -28,7 +28,15 @@ pub(super) async fn load_from(base_dir: &Path, environment: &Environment) -> Res
     let canonical = base_dir.join(CANONICAL_CONFIG_FILE);
     match fs::symlink_metadata(&canonical) {
         Ok(_) => validate::load_canonical(&canonical),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => environment.load(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let result = environment.load();
+            if result.is_ok() {
+                eprintln!(
+                    "warning: using legacy config/{environment}.yaml; migrate to {CANONICAL_CONFIG_FILE} before its removal target of 0.61.0"
+                );
+            }
+            result
+        }
         Err(err) => Err(Error::Message(format!(
             "failed to inspect {}: {err}",
             canonical.display()
