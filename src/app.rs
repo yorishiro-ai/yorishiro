@@ -45,7 +45,6 @@ impl StartupReindexHandle {
     }
 }
 
-#[allow(unused_imports)]
 use crate::{controllers, tasks};
 
 use crate::workers::embedding_sync::WorkerClass;
@@ -103,8 +102,7 @@ impl Hooks for App {
         env!("CARGO_CRATE_NAME")
     }
 
-    /// Loads the canonical plain-YAML configuration, with the legacy Loco environment files as
-    /// a migration fallback.
+    /// Loads the canonical plain-YAML configuration.
     async fn load_config(env: &Environment) -> Result<Config> {
         crate::config::load(env).await
     }
@@ -407,7 +405,6 @@ impl Hooks for App {
         Ok(())
     }
 
-    #[allow(unused_variables)]
     fn register_tasks(tasks: &mut Tasks) {
         tasks.register(tasks::create_tenant::CreateTenant);
         tasks.register(tasks::create_workspace::CreateWorkspace);

@@ -34,7 +34,7 @@ The enterprise edition is `ee/`, a module of that same crate rather than a packa
 **GRANT is always per-table, never schema-wide**: `migration/src/helpers.rs::grant()` exists specifically to make a schema-wide/wildcard grant structurally awkward to write, because a single `public` schema means a wildcard grant would also sweep in tables that must stay ungranted (`identity_tenants`, `identity_users`, `identity_tenant_memberships`, `identity_invites`, `identity_templates`, `identity_workspace_llm_keys`, `identity_workspace_embedding_keys`).
 Never write `GRANT ... ON ALL TABLES IN SCHEMA public`.
 
-**Migrations**: one file, `migration/src/m20260829_000000_initial_schema.rs`, holding the whole schema.
+**Migrations**: the initial schema is in `migration/src/m20260829_000000_initial_schema.rs`, and later schema changes are separate migration files in `migration/src/`.
 
 A new table is added to that file rather than beside it, **only while no deployment has applied it**.
 Once any deployment has, a second file is the only correct answer, since editing an applied migration changes a schema someone is already running while leaving that deployment on the old one.

@@ -108,7 +108,7 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 `yorishiro config init` でコメント付きのローカル用ひな形を作成できます。
 既存ファイルを置き換える場合だけ `--force` を指定してください。
 設定の解決順序は、`YORISHIRO_CONFIG_PATH`（指定時は存在しない・読めない・不正なファイルをエラーにする）、
-`./yorishiro.yaml`、最後に移行用の旧 `config/{environment}.yaml` です。
+`./yorishiro.yaml` から読み込みます。
 対応する環境変数は YAML の値を明示的に上書きします。
 canonical ファイルでは Tera や `get_env` 式は使用できません。
 CLI が生成するローカルひな形は相対 SQLite パスを使い、パッケージと Docker の設定は `/var/lib/yorishiro` を使います。
