@@ -6,3 +6,4 @@
 
 mod postgres;
 mod sqlite;
+mod upgrade;
