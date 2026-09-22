@@ -110,7 +110,7 @@ where
             .execute_unprepared(&format!("CREATE DATABASE {database_name}"))
             .await
             .expect("create unique PostgreSQL migration database");
-        admin.close().await.expect("close PostgreSQL admin pool");
+        drop(admin);
         let db = match Database::connect(&target_url).await {
             Ok(db) => db,
             Err(error) => {
