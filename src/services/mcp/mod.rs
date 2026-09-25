@@ -6,6 +6,8 @@ mod schemas;
 mod search;
 mod template_library;
 
+use std::collections::HashSet;
+
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 use rmcp::ErrorData;
@@ -23,6 +25,9 @@ use crate::controllers::extractors::{authenticator, db_handle};
 use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::services::auth::{self, ApiKeyScope, AuthContext};
+
+#[cfg(test)]
+use rmcp::model::Tool;
 
 /// Yorishiro MCP server, assembled from each edition's `#[tool_router]` implementations.
 #[derive(Clone)]
@@ -43,13 +48,33 @@ impl YorishiroMcpServer {
 
 /// The complete community-edition tool set.
 pub(crate) fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
-    YorishiroMcpServer::tool_router_entities()
-        + YorishiroMcpServer::tool_router_import()
-        + YorishiroMcpServer::tool_router_recall()
-        + YorishiroMcpServer::tool_router_relations()
-        + YorishiroMcpServer::tool_router_schemas()
-        + YorishiroMcpServer::tool_router_search()
-        + YorishiroMcpServer::tool_router_template_library()
+    compose_tool_routers([
+        YorishiroMcpServer::tool_router_entities(),
+        YorishiroMcpServer::tool_router_import(),
+        YorishiroMcpServer::tool_router_recall(),
+        YorishiroMcpServer::tool_router_relations(),
+        YorishiroMcpServer::tool_router_schemas(),
+        YorishiroMcpServer::tool_router_search(),
+        YorishiroMcpServer::tool_router_template_library(),
+    ])
+}
+
+pub(crate) fn compose_tool_routers(
+    routers: impl IntoIterator<Item = ToolRouter<YorishiroMcpServer>>,
+) -> ToolRouter<YorishiroMcpServer> {
+    let mut composed = ToolRouter::new();
+    let mut names = HashSet::new();
+    for router in routers {
+        for tool in router.list_all() {
+            assert!(
+                names.insert(tool.name.to_string()),
+                "duplicate MCP tool name: {}",
+                tool.name
+            );
+        }
+        composed += router;
+    }
+    composed
 }
 
 #[tool_handler(router = self.tool_router.clone())]
@@ -107,10 +132,11 @@ impl ServerHandler for YorishiroMcpServer {
     }
 }
 
-const ENTERPRISE_TOOL_NAMES: &[&str] = &["list_upstream_changes", "merge_apply", "merge_preview"];
-
 fn is_enterprise_tool(name: &str) -> bool {
-    ENTERPRISE_TOOL_NAMES.contains(&name)
+    crate::ee::services::mcp::tool_router()
+        .list_all()
+        .iter()
+        .any(|tool| tool.name == name)
 }
 
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
@@ -142,7 +168,7 @@ impl Authorized {
 /// The former is a dead end an agent can't usefully retry (missing/invalid API key); the latter is information an agent can act on.
 ///
 /// Handlers match on this directly rather than through a macro, so the `return` that ends the call on a denial is visible where it happens.
-/// It cannot collapse into the `Err` side of the handler's own `Result`: `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.0.1`, `handler/server/router/tool.rs:202`), and `ErrorData` is the protocol-level failure, which is not what a denial is.
+/// It cannot collapse into the `Err` side of the handler's own `Result`: `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.4.0`, `handler/server/router/tool.rs:202`), and `ErrorData` is the protocol-level failure, which is not what a denial is.
 pub(crate) enum AuthzOutcome {
     Authorized(Authorized),
     ScopeDenied(CallToolResult),
@@ -286,46 +312,107 @@ pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
 }
 
 #[cfg(test)]
+pub(crate) fn render_inventory_fragment(community: &[Tool], enterprise: &[Tool]) -> String {
+    fn render_section(output: &mut String, title: &str, tools: &[Tool]) {
+        output.push_str("## ");
+        output.push_str(title);
+        output.push_str("\n\n");
+        for tool in tools {
+            output.push_str("### `");
+            output.push_str(&tool.name);
+            output.push_str("`\n\n");
+            output.push_str(tool.description.as_deref().unwrap_or(""));
+            output.push_str("\n\nInput schema:\n\n```json\n");
+            output.push_str(
+                &serde_json::to_string_pretty(&tool.schema_as_json_value())
+                    .expect("MCP tool schema is serializable"),
+            );
+            output.push_str("\n```\n\n");
+        }
+    }
+
+    let mut community = community.to_vec();
+    let mut enterprise = enterprise.to_vec();
+    community.sort_by(|a, b| a.name.cmp(&b.name));
+    enterprise.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut output = String::new();
+    render_section(&mut output, "Community tools", &community);
+    render_section(&mut output, "Enterprise-only tools", &enterprise);
+    output
+}
+
+#[cfg(test)]
 mod tests {
-    use super::community_tool_router;
+    use std::collections::HashSet;
+
+    use super::{community_tool_router, render_inventory_fragment};
+    use crate::ee::services::mcp::tool_router as enterprise_tool_router;
+
+    fn inventories() -> (Vec<rmcp::model::Tool>, Vec<rmcp::model::Tool>) {
+        (
+            community_tool_router().list_all(),
+            enterprise_tool_router().list_all(),
+        )
+    }
+
+    fn assert_inventory_contract(label: &str, tools: &[rmcp::model::Tool]) {
+        let names: Vec<_> = tools.iter().map(|tool| tool.name.to_string()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(
+            names, sorted,
+            "{label} MCP tool names are not sorted: {names:?}"
+        );
+        let unique: HashSet<_> = names.iter().collect();
+        assert_eq!(
+            unique.len(),
+            names.len(),
+            "duplicate {label} MCP tool names: {names:?}"
+        );
+        println!("{label} MCP tools: {names:?}");
+
+        for tool in tools {
+            assert!(
+                tool.description
+                    .as_deref()
+                    .is_some_and(|description| !description.trim().is_empty()),
+                "{label} tool {} has no description",
+                tool.name
+            );
+            let schema = tool.schema_as_json_value();
+            assert_eq!(
+                schema["type"], "object",
+                "invalid {label} schema for {}",
+                tool.name
+            );
+            assert!(
+                jsonschema::meta::options().is_valid(&schema),
+                "invalid {label} input schema for {}: {schema}",
+                tool.name
+            );
+        }
+    }
 
     #[test]
-    fn community_tool_inventory_is_exact() {
-        let names: Vec<_> = community_tool_router()
-            .list_all()
-            .into_iter()
-            .map(|tool| tool.name.to_string())
-            .collect();
+    fn community_inventory_contract_and_documentation_are_current() {
+        let (community, enterprise) = inventories();
+        assert_inventory_contract("community", &community);
+        let community_names: HashSet<_> = community.iter().map(|tool| &tool.name).collect();
+        let enterprise_names: HashSet<_> = enterprise.iter().map(|tool| &tool.name).collect();
+        assert!(community_names.is_disjoint(&enterprise_names));
+
+        let docs = include_str!("../../../docs/en/mcp-tools.md");
+        let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
+        let end = "<!-- END GENERATED MCP INVENTORY -->";
+        let generated = docs
+            .split_once(start)
+            .and_then(|(_, rest)| rest.split_once(end).map(|(body, _)| body))
+            .expect("English MCP documentation markers");
         assert_eq!(
-            names,
-            [
-                "create_entity",
-                "create_relation",
-                "create_schema",
-                "delete_entity",
-                "delete_relation",
-                "fill_defaults",
-                "get_active_schema",
-                "get_entity",
-                "get_entity_drift",
-                "get_entity_type_json_schema",
-                "get_relation",
-                "get_schema_by_id",
-                "get_template_library_item",
-                "import_jsonl",
-                "list_entities",
-                "list_relations",
-                "list_schemas",
-                "list_template_library",
-                "list_templates",
-                "migration_dry_run",
-                "recall_context",
-                "search_entities",
-                "set_relation_status",
-                "update_entity",
-            ]
-            .map(str::to_owned)
-            .to_vec()
+            generated,
+            render_inventory_fragment(&community, &enterprise),
+            "English MCP documentation has drifted from the runtime inventory"
         );
     }
 }

@@ -17,8 +17,8 @@
   - 埋め込みがまだ生成されていないレコードもキーワード検索でカバー。
 
 - **AIツールに接続**
-  - コミュニティモードでは、Claude、Cursor、他のMCP対応クライアントが24個の組み込みMCPツールを使ってデータを検索・作成・管理できます。
-  - ライセンスが有効なエンタープライズ環境では、originテンプレートの更新検出、プレビュー、マージを加えた27個のツールを利用できます。
+  - コミュニティモードでは、Claude、Cursor、他のMCP対応クライアントが組み込みMCPツールを使ってデータを検索・作成・管理できます。
+  - ライセンスが有効なエンタープライズ環境では、originテンプレートの更新検出、プレビュー、マージのツールが追加されます。
 
 - **REST API**
   - 標準HTTPエンドポイントで自動化できます。
@@ -88,10 +88,10 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 
 ### MCPツール一覧
 
-コミュニティモードでは、次の24個のツールを公開します：`create_entity`、`create_relation`、`create_schema`、`delete_entity`、`delete_relation`、`fill_defaults`、`get_active_schema`、`get_entity`、`get_entity_drift`、`get_entity_type_json_schema`、`get_relation`、`get_schema_by_id`、`get_template_library_item`、`import_jsonl`、`list_entities`、`list_relations`、`list_schemas`、`list_template_library`、`list_templates`、`migration_dry_run`、`recall_context`、`search_entities`、`set_relation_status`、`update_entity`。
+実行時のMCPインベントリには、ツール名、説明、入力スキーマが含まれます。詳細は [docs/ja/mcp-tools.md](docs/ja/mcp-tools.md) を参照してください。
 
-ライセンスが有効なエンタープライズ環境では、コミュニティ版の24個に`list_upstream_changes`、`merge_preview`、`merge_apply`を加えた合計27個のツールを公開します。
-コミュニティモードでは、この3個のoriginツールはMCP上に表示されず、呼び出すこともできません。
+ライセンスが有効なエンタープライズ環境では、同ドキュメントに示すoriginテンプレート用ツールが追加されます。
+コミュニティモードでは、これらのツールはMCP上に表示されず、呼び出すこともできません。
 
 ## クイックスタート
 
