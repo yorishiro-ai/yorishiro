@@ -12,7 +12,7 @@ use super::with_max_tenants;
 /// A base deployment started from the binary therefore has the wizard *enabled*, which is the opposite of what this test asserts and is not a contradiction: the two exercise different entry points.
 /// Nothing in this suite invokes a binary, so the prologue itself is deliberately untested rather than overlooked; testing it would mean building a harness around `main` for four lines.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let status = request.get("/setup/status").await;
@@ -40,7 +40,7 @@ async fn setup_is_unreachable_when_no_tenant_cap_is_set() {
 /// With the wizard enabled and no tenant yet, `POST /setup` creates the deployment's first tenant/workspace/owner and returns a working API key.
 /// A second call must be refused with 409 rather than creating a second tenant, and `GET /setup/status` must report `setup_required: false` once the first call has landed.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {

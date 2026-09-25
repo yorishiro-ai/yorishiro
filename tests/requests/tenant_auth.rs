@@ -1,30 +1,13 @@
-use super::boot_request;
+use super::{boot_request, with_max_tenants};
 use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
 use yorishiro::ee::services::tenant_auth::{WORKSPACE_HEADER, create_tenant_api_key};
 
-/// `YORISHIRO_MAX_TENANTS` unset means the setup wizard is disabled by default.
-async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_MAX_TENANTS", value);
-    }
-    let result = fut.await;
-    unsafe {
-        match &previous {
-            Some(v) => std::env::set_var("YORISHIRO_MAX_TENANTS", v),
-            None => std::env::remove_var("YORISHIRO_MAX_TENANTS"),
-        }
-    }
-    result
-}
-
 /// Installing `TenantScopedAuthenticator` (`App::after_context`) must not break a workspace-scoped key on a route base itself defines.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     if !super::super::require_postgres_backend() {
         return;
@@ -67,7 +50,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
 
 /// A tenant-scoped key (`workspace_id` NULL) names its workspace per request with `X-Workspace-Id`, and is rejected without one.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
     if !super::super::require_postgres_backend() {
         return;

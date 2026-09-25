@@ -3,14 +3,12 @@
 use super::boot_request;
 use loco_rs::app::Hooks;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::services::official_templates::{self, OFFICIAL_TENANT_ID};
 use yorishiro::models::_entities::tenant_tenants;
 
 /// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.
 #[tokio::test]
-#[serial]
 async fn seeding_is_idempotent_and_creates_the_official_tenant() {
     if !super::super::require_postgres_backend() {
         return;
@@ -51,7 +49,6 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
 
 /// The official tenant must exist after `Hooks::seed` even without running `seed_official_templates`.
 #[tokio::test]
-#[serial]
 async fn hooks_seed_creates_the_official_tenant_without_publishing_templates() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         App::seed(&ctx, std::path::Path::new("does-not-need-to-exist"))

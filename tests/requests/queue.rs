@@ -17,7 +17,6 @@ use loco_rs::boot::{self, BootResult};
 use loco_rs::config::{QueueConfig, SqliteQueueConfig, WorkerMode};
 use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
@@ -122,7 +121,6 @@ fn args_for(class: WorkerClass) -> EmbeddingSyncArgs {
 ///
 /// In `ForegroundBlocking` this assertion is vacuous, since `perform_later` runs the body inline and writes no row, which is why nothing else here catches an enqueue-side break.
 #[tokio::test]
-#[serial]
 async fn enqueue_for_class_puts_a_row_in_the_queue() {
     if !super::super::require_postgres_backend() {
         return;
@@ -144,7 +142,6 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 /// `tags()` is a per-type static, so the class has to select the worker type at `perform_later` time rather than travel in the job's arguments; getting that backwards is the easy mistake here.
 /// A regression that sent every class to one worker, or dropped the tag, shows up here as two rows sharing a name or carrying `None`.
 #[tokio::test]
-#[serial]
 async fn each_worker_class_carries_its_own_tag() {
     if !super::super::require_postgres_backend() {
         return;

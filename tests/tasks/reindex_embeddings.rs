@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::requests::boot_request;
 use async_trait::async_trait;
 use sea_orm::FromQueryResult;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
@@ -188,7 +187,6 @@ impl EmbeddingProvider for ConcurrentModificationProvider {
 
 /// A partial failure must leave the workspace's stamp completely unchanged, which is the load-bearing property `reindex_embeddings` exists to guarantee: restamping on a partial result would claim a model for rows that were never actually re-embedded with it, recreating the exact stamp/data mismatch the write-time model check in `sync.rs` exists to catch.
 #[tokio::test]
-#[serial]
 async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
     if !super::super::require_postgres_backend() {
         return;
@@ -226,7 +224,6 @@ async fn reindex_workspace_leaves_the_stamp_unchanged_on_partial_failure() {
 
 /// Full success must both write every row's vector and restamp the workspace to the new provider's identity, which is what lets a subsequent ordinary write pass the write-time model check instead of being refused forever.
 #[tokio::test]
-#[serial]
 async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
     if !super::super::require_postgres_backend() {
         return;
@@ -264,7 +261,6 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
 
 /// An entity modified between `reindex_workspace`'s batch fetch and its write landing must be reported as a failure, not silently counted as reindexed, or the workspace would restamp while that row still holds a vector from before the concurrent modification: the exact stamp/data mismatch the write-time model check exists to catch, this time caused by the migration tool racing an ordinary write instead of a misconfigured deployment.
 #[tokio::test]
-#[serial]
 async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure() {
     if !super::super::require_postgres_backend() {
         return;

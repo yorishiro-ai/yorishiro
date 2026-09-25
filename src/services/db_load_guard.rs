@@ -252,6 +252,41 @@ pub async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        values: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn capture(variables: &[&'static str]) -> Self {
+            Self {
+                values: variables
+                    .iter()
+                    .map(|variable| (*variable, std::env::var_os(variable)))
+                    .collect(),
+            }
+        }
+
+        fn set(&self, variable: &'static str, value: impl AsRef<std::ffi::OsStr>) {
+            assert!(self.values.iter().any(|(name, _)| *name == variable));
+            // SAFETY: this test holds the process_environment serial_test lock for its entire duration.
+            unsafe { std::env::set_var(variable, value) };
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: this test holds the process_environment serial_test lock until Drop.
+            unsafe {
+                for (variable, original) in &self.values {
+                    match original {
+                        Some(value) => std::env::set_var(variable, value),
+                        None => std::env::remove_var(variable),
+                    }
+                }
+            }
+        }
+    }
+
     fn state(mode: MaintenanceMode, reason: Option<&str>) -> MaintenanceState {
         MaintenanceState {
             mode,
@@ -443,27 +478,42 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
+    #[serial_test::serial(process_environment)]
     fn zero_poll_interval_falls_back_to_safe_default() {
-        let previous_threshold = std::env::var_os("YORISHIRO_DB_LOAD_THRESHOLD");
-        let previous = std::env::var_os("YORISHIRO_DB_LOAD_POLL_SECS");
-        unsafe {
-            std::env::set_var("YORISHIRO_DB_LOAD_THRESHOLD", "10");
-            std::env::set_var("YORISHIRO_DB_LOAD_POLL_SECS", "0");
-        }
+        let guard =
+            EnvGuard::capture(&["YORISHIRO_DB_LOAD_THRESHOLD", "YORISHIRO_DB_LOAD_POLL_SECS"]);
+        guard.set("YORISHIRO_DB_LOAD_THRESHOLD", "10");
+        guard.set("YORISHIRO_DB_LOAD_POLL_SECS", "0");
         assert_eq!(
             LoadGuardConfig::from_env().unwrap().poll,
             Duration::from_secs(5)
         );
-        unsafe {
-            match previous {
-                Some(value) => std::env::set_var("YORISHIRO_DB_LOAD_POLL_SECS", value),
-                None => std::env::remove_var("YORISHIRO_DB_LOAD_POLL_SECS"),
-            }
-            match previous_threshold {
-                Some(value) => std::env::set_var("YORISHIRO_DB_LOAD_THRESHOLD", value),
-                None => std::env::remove_var("YORISHIRO_DB_LOAD_THRESHOLD"),
-            }
-        }
+    }
+
+    #[test]
+    #[serial_test::serial(process_environment)]
+    fn env_guard_restores_values_during_unwind() {
+        const THRESHOLD: &str = "YORISHIRO_DB_LOAD_THRESHOLD";
+        const POLL: &str = "YORISHIRO_DB_LOAD_POLL_SECS";
+        let outer = EnvGuard::capture(&[THRESHOLD, POLL]);
+        outer.set(THRESHOLD, "original-threshold");
+        outer.set(POLL, "original-poll");
+
+        let result = std::panic::catch_unwind(|| {
+            let guard = EnvGuard::capture(&[THRESHOLD, POLL]);
+            guard.set(THRESHOLD, "temporary-threshold");
+            guard.set(POLL, "temporary-poll");
+            panic!("exercise load guard environment restoration");
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::env::var_os(THRESHOLD).as_deref(),
+            Some(std::ffi::OsStr::new("original-threshold"))
+        );
+        assert_eq!(
+            std::env::var_os(POLL).as_deref(),
+            Some(std::ffi::OsStr::new("original-poll"))
+        );
     }
 }

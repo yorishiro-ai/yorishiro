@@ -36,7 +36,6 @@
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
 use super::boot_request;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 
@@ -92,7 +91,6 @@ const UNGATED: &[&str] = &[
 ];
 
 #[tokio::test]
-#[serial]
 async fn gated_routes_are_absent_without_a_licence() {
     if !super::super::require_postgres_backend() {
         return;
@@ -136,7 +134,6 @@ async fn gated_routes_are_absent_without_a_licence() {
 }
 
 #[tokio::test]
-#[serial]
 async fn gated_routes_are_served_with_a_licence() {
     if !super::super::require_postgres_backend() {
         return;
@@ -171,7 +168,6 @@ async fn gated_routes_are_served_with_a_licence() {
 /// A key that verified and then lapsed closes the gate again with no restart, which is the property
 /// `app::licence_gate` is a per-request layer to keep.
 #[tokio::test]
-#[serial]
 async fn an_expired_licence_closes_the_gate_again() {
     if !super::super::require_postgres_backend() {
         return;
@@ -215,7 +211,6 @@ async fn an_expired_licence_closes_the_gate_again() {
 /// process boots without: reaching it proves the request passed the gate and entered the handler,
 /// where a weaker `assert_ne!(.., 404)` would also hold if the route stopped existing.
 #[tokio::test]
-#[serial]
 async fn stripe_webhook_is_gated() {
     if !super::super::require_postgres_backend() {
         return;
@@ -249,7 +244,6 @@ async fn stripe_webhook_is_gated() {
 /// This is the half that catches a gate applied too broadly: without it, a change that gated every
 /// enterprise route would still pass the unlicensed assertions.
 #[tokio::test]
-#[serial]
 async fn oauth_login_is_gated() {
     if !super::super::require_postgres_backend() {
         return;

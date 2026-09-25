@@ -52,27 +52,22 @@ fn sign_state(payload: &str) -> String {
 }
 
 /// `OAuthConfig::from_env` reads process env vars directly on every request, with no DI seam for it (see `controllers::oauth`'s module doc comment), so tests configure OAuth the same way production does: by setting the vars for the duration of the request.
-/// `#[serial]` on every test in this suite makes that safe.
+/// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_oauth_env<T>(fut: impl std::future::Future<Output = T>) -> T {
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
-        std::env::set_var("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
-        std::env::set_var("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
-    }
-    let result = fut.await;
-    unsafe {
-        std::env::remove_var("YORISHIRO_OAUTH_ISSUER_URL");
-        std::env::remove_var("YORISHIRO_OAUTH_CLIENT_ID");
-        std::env::remove_var("YORISHIRO_OAUTH_CLIENT_SECRET");
-    }
-    result
+    let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_OAUTH_ISSUER_URL",
+        "YORISHIRO_OAUTH_CLIENT_ID",
+        "YORISHIRO_OAUTH_CLIENT_SECRET",
+    ]);
+    guard.set("YORISHIRO_OAUTH_ISSUER_URL", ISSUER_URL);
+    guard.set("YORISHIRO_OAUTH_CLIENT_ID", CLIENT_ID);
+    guard.set("YORISHIRO_OAUTH_CLIENT_SECRET", CLIENT_SECRET);
+    fut.await
 }
-
 /// `GET /auth/oauth/status` answers 200 in both states this test sets, unconfigured and fully configured, reporting the difference in `enabled` rather than in the status code: a client deciding whether to show the "Sign in with SSO" button has no other way to tell "not configured" apart from "not present".
 /// The third state, an issuer set with no `client_id`/`client_secret`, answers 500 instead and belongs to `status_errors_loudly_when_partially_configured` below.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured() {
     if !super::super::require_postgres_backend() {
         return;
@@ -101,21 +96,16 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
 
 /// An issuer set with no `client_id`/`client_secret` is a misconfiguration, not "unconfigured": since `OAuthConfig::from_env` is read per request rather than once at boot, it must report `500` rather than panic and crash the task handling the request, and must not be silently treated as `enabled: false`.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn status_errors_loudly_when_partially_configured() {
     if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         licence(&ctx);
-        // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-        unsafe {
-            std::env::set_var("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
-        }
+        let guard = crate::EnvGuard::capture(&["YORISHIRO_OAUTH_ISSUER_URL"]);
+        guard.set("YORISHIRO_OAUTH_ISSUER_URL", "https://idp.example.com");
         let response = request.get("/auth/oauth/status").await;
-        unsafe {
-            std::env::remove_var("YORISHIRO_OAUTH_ISSUER_URL");
-        }
 
         assert_eq!(
             response.status_code(),
@@ -130,7 +120,7 @@ async fn status_errors_loudly_when_partially_configured() {
 
 /// With no `YORISHIRO_OAUTH_ISSUER_URL` set, `authorize` and `callback` must answer exactly the same `404` a route that does not exist would: a prober must not be able to tell "unconfigured" apart from "absent".
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn authorize_and_callback_404_when_unconfigured() {
     if !super::super::require_postgres_backend() {
         return;
@@ -159,7 +149,7 @@ async fn authorize_and_callback_404_when_unconfigured() {
 /// `authorize` reaches the identity provider to fetch its discovery document before it can redirect anywhere, so a configured but unreachable issuer fails loudly with an internal error rather than a redirect to nowhere.
 /// Exercising the redirect itself, and the CSRF cookie it sets, needs a live IdP and is out of scope here (see the module doc comment).
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     if !super::super::require_postgres_backend() {
         return;
@@ -182,7 +172,7 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 
 /// The provider itself reporting an error (the user declined consent, an app misconfiguration, ...) redirects to the login page's failure state rather than surfacing raw JSON to a browser mid-redirect, and clears the CSRF cookie so it is never reusable across two attempts.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
     if !super::super::require_postgres_backend() {
         return;
@@ -220,7 +210,7 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 
 /// A callback missing `code` or `state` (hit directly, without ever having visited `authorize`) redirects to the same login-failure state rather than a raw validation error.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
     if !super::super::require_postgres_backend() {
         return;
@@ -249,7 +239,7 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 
 /// A forged `state` (never issued by this process, so its HMAC signature cannot verify) is rejected with `401` before any provider is contacted: `handle_callback` checks `state` first.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn callback_rejects_a_state_with_a_bad_signature() {
     if !super::super::require_postgres_backend() {
         return;
@@ -271,7 +261,7 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 
 /// A `state` value signed correctly (under the deployment's own client secret, so the HMAC check that `callback_rejects_a_state_with_a_bad_signature` covers passes) but too old (older than `STATE_TTL_SECS`) is rejected the same `401` way: `state_token::verify`'s expiry check runs before the CSRF cookie is ever consulted.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn callback_rejects_an_expired_state() {
     if !super::super::require_postgres_backend() {
         return;
@@ -301,7 +291,7 @@ async fn callback_rejects_an_expired_state() {
 /// `find_or_create` must not be a backdoor around `YORISHIRO_MAX_TENANTS`: with the cap already met, a brand-new identity (one `find_by_oauth_identity` finds nothing for) is refused rather than silently given a fresh tenant.
 /// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
     if !super::super::require_postgres_backend() {
         return;
@@ -316,10 +306,8 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             .await
             .unwrap();
 
-        // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-        unsafe {
-            std::env::set_var("YORISHIRO_MAX_TENANTS", "1");
-        }
+        let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
+        guard.set("YORISHIRO_MAX_TENANTS", "1");
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let result = oauth::find_or_create(
@@ -333,10 +321,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
         .await;
         // The call is expected to be refused, so there is nothing to commit; dropping rolls back.
         drop(txn);
-        unsafe {
-            std::env::remove_var("YORISHIRO_MAX_TENANTS");
-        }
-
         match result {
             Err(yorishiro::YorishiroError::ScopeInsufficient { message, .. }) => {
                 assert!(
@@ -356,7 +340,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 /// A first login must not leave the auto-provisioned workspace `schema_pending`: there is no admin present afterward to choose a starting schema for it, unlike `controllers::setup::setup`'s own bootstrap workspace.
 /// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
     if !super::super::require_postgres_backend() {
         return;

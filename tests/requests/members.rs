@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -48,7 +47,6 @@ async fn issue_key_for(
 }
 
 #[tokio::test]
-#[serial]
 async fn owner_can_list_and_add_members() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
@@ -98,7 +96,6 @@ async fn owner_can_list_and_add_members() {
 }
 
 #[tokio::test]
-#[serial]
 async fn add_member_rejects_an_email_with_no_account() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
@@ -125,7 +122,6 @@ async fn add_member_rejects_an_email_with_no_account() {
 }
 
 #[tokio::test]
-#[serial]
 async fn member_role_cannot_manage_members() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_id) = setup_tenant(&ctx, "acme").await;
@@ -148,7 +144,6 @@ async fn member_role_cannot_manage_members() {
 }
 
 #[tokio::test]
-#[serial]
 async fn members_endpoints_require_authentication() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/members").await;

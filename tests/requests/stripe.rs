@@ -35,23 +35,18 @@ fn licence(ctx: &loco_rs::app::AppContext) {
 }
 
 /// `StripeConfig::from_env` reads process env vars directly, with no DI seam for it, so tests configure the webhook the same way production does: by setting the vars for the duration of the request.
-/// `#[serial]` on every test in this suite makes that safe.
+/// `#[serial(process_environment)]` on every test in this suite makes that safe.
 async fn with_stripe_env<T>(fut: impl std::future::Future<Output = T>) -> T {
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
-        std::env::set_var("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
-        std::env::set_var("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");
-    }
-    let result = fut.await;
-    unsafe {
-        std::env::remove_var("YORISHIRO_STRIPE_WEBHOOK_SECRET");
-        std::env::remove_var("YORISHIRO_STRIPE_PRICE_PRO");
-        std::env::remove_var("YORISHIRO_STRIPE_PRICE_TEAM");
-    }
-    result
+    let guard = crate::EnvGuard::capture(&[
+        "YORISHIRO_STRIPE_WEBHOOK_SECRET",
+        "YORISHIRO_STRIPE_PRICE_PRO",
+        "YORISHIRO_STRIPE_PRICE_TEAM",
+    ]);
+    guard.set("YORISHIRO_STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET);
+    guard.set("YORISHIRO_STRIPE_PRICE_PRO", "price_pro");
+    guard.set("YORISHIRO_STRIPE_PRICE_TEAM", "price_team");
+    fut.await
 }
-
 fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
     let mut signed_payload = format!("{timestamp}.").into_bytes();
     signed_payload.extend_from_slice(payload);
@@ -105,7 +100,7 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
 
 /// A duplicate delivery of an already-applied event must not re-apply it.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn a_duplicate_event_id_is_not_reapplied() {
     if !super::super::require_postgres_backend() {
         return;
@@ -171,7 +166,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
 
 /// Cancelling a subscription must put the tenant back on Free: both the plan and the workspace cap that comes with it.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn a_cancellation_returns_the_tenant_to_free() {
     if !super::super::require_postgres_backend() {
         return;
@@ -240,7 +235,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
 
 /// With no webhook secret configured there is no way to tell a genuine Stripe delivery from anything else, so the endpoint refuses rather than accepting unverifiable requests.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     if !super::super::require_postgres_backend() {
         return;
@@ -265,7 +260,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 
 /// A tampered payload (signature computed over a different body) must be rejected.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn a_tampered_payload_is_rejected() {
     if !super::super::require_postgres_backend() {
         return;

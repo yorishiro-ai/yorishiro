@@ -2,7 +2,6 @@ use super::boot_request;
 use axum::http::StatusCode;
 use sea_orm::TransactionTrait;
 use serde_json::json;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{
@@ -87,7 +86,6 @@ fn note_definition() -> serde_json::Value {
 
 /// A schema with no origin template reports nothing to follow, and merge-preview/merge both refuse it: the whole point of the origin/merge chain only applies to a schema copied from a template.
 #[tokio::test]
-#[serial]
 async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
     if !super::super::require_postgres_backend() {
         return;
@@ -138,7 +136,6 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
 
 /// The full round trip: a schema copied from a template, the template edited afterward, the change surfacing in the upstream-changes listing and the merge preview, and merge writing a new version that both takes upstream's addition and keeps the workspace's own field.
 #[tokio::test]
-#[serial]
 async fn upstream_changes_preview_and_merge_round_trip() {
     if !super::super::require_postgres_backend() {
         return;
@@ -343,7 +340,6 @@ async fn upstream_changes_preview_and_merge_round_trip() {
 
 /// A publication racing with merge cannot be acknowledged by the merge that read the older revision.
 #[tokio::test]
-#[serial]
 async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
     if !super::super::require_postgres_backend() {
         return;
@@ -496,7 +492,6 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
 
 /// Merging a schema whose two sides conflict on the same field is refused rather than picking one side silently.
 #[tokio::test]
-#[serial]
 async fn merging_a_conflicting_field_is_refused() {
     if !super::super::require_postgres_backend() {
         return;

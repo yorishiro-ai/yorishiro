@@ -2,7 +2,6 @@ use super::boot_request;
 use axum::http::StatusCode;
 use chrono::Utc;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Statement};
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
@@ -80,7 +79,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// Setting, reading and clearing a workspace's LLM credentials over REST.
 /// The key itself never comes back from GET, only what it configured.
 #[tokio::test]
-#[serial]
 async fn llm_key_set_get_and_clear_round_trip() {
     if !super::super::require_postgres_backend() {
         return;
@@ -158,7 +156,6 @@ async fn llm_key_set_get_and_clear_round_trip() {
 
 /// A scheme that could never be a chat-completions endpoint is refused before anything is stored, and a URL with no scheme at all is refused too rather than becoming a relative path.
 #[tokio::test]
-#[serial]
 async fn a_non_http_base_url_is_refused() {
     if !super::super::require_postgres_backend() {
         return;
@@ -193,7 +190,6 @@ async fn a_non_http_base_url_is_refused() {
 
 /// A workspace with no credentials configured is refused with one clear error before any entity is scanned, rather than reporting zero applied in a way that reads as "nothing to infer".
 #[tokio::test]
-#[serial]
 async fn infer_fill_without_a_configured_key_is_refused() {
     if !super::super::require_postgres_backend() {
         return;
@@ -236,7 +232,6 @@ async fn infer_fill_without_a_configured_key_is_refused() {
 /// An unlicensed deployment answers the same 404 whether or not a valid key is presented, so an anonymous prober cannot tell "does not exist" from "exists but locked".
 /// Matches `marketplace`'s and `dashboard`'s own tests for the same gate.
 #[tokio::test]
-#[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     if !super::super::require_postgres_backend() {
         return;
@@ -318,7 +313,6 @@ async fn create_entity(
 /// `POST /api/migration-jobs/{job_id}/undo`: this is `infer_fill`'s own write path, factored out
 /// so it is testable without a real or stubbed LLM endpoint.
 #[tokio::test]
-#[serial]
 async fn apply_answers_writes_directly_and_undo_reverses_it() {
     if !super::super::require_postgres_backend() {
         return;
@@ -393,7 +387,6 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
 /// merged data) must not leave a snapshot behind: leaving one would let a later, unrelated edit to
 /// the same entity be misattributed to this job on undo.
 #[tokio::test]
-#[serial]
 async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
     if !super::super::require_postgres_backend() {
         return;
@@ -508,7 +501,6 @@ async fn apply_answers_with_content_entities_locked(
 /// failure lands specifically on `update`'s write, exercising `apply_answers`'s
 /// `Err(err) => Err(err)` arm rather than the one on the snapshot's own read.
 #[tokio::test]
-#[serial]
 async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
     if !super::super::require_postgres_backend() {
         return;
@@ -530,7 +522,6 @@ async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error()
 /// `ACCESS EXCLUSIVE` also blocks `snapshot`'s own `INSERT ... SELECT`, isolating the failure to
 /// that statement instead of `update`'s.
 #[tokio::test]
-#[serial]
 async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
     if !super::super::require_postgres_backend() {
         return;
@@ -559,7 +550,6 @@ async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
 /// 200 (the durable status row stores the job and returns it) rather than a 404 or a misrouted
 /// response.
 #[tokio::test]
-#[serial]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     if !super::super::require_postgres_backend() {
         return;

@@ -1,28 +1,11 @@
-use super::boot_request;
+use super::{boot_request, with_max_tenants};
 use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 
-/// `YORISHIRO_MAX_TENANTS` unset means the setup wizard is disabled by default (same guard `tests/requests/setup.rs` in the base crate exercises): this test sets it for its own duration, matching that file's `with_max_tenants` convention, kept local since this crate has no shared helper for it yet and one test doesn't earn one.
-async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_MAX_TENANTS", value);
-    }
-    let result = fut.await;
-    unsafe {
-        match &previous {
-            Some(v) => std::env::set_var("YORISHIRO_MAX_TENANTS", v),
-            None => std::env::remove_var("YORISHIRO_MAX_TENANTS"),
-        }
-    }
-    result
-}
-
 /// The freshly bootstrapped owner can read their own tenant's overview: zero usage, no plan (never subscribed), and themselves as the sole member.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn tenant_overview_returns_usage_and_members_for_the_owner() {
     if !super::super::require_postgres_backend() {
         return;
@@ -71,7 +54,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
 
 /// No `Authorization` header at all must be rejected, not treated as an anonymous tenant.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn tenant_overview_requires_authentication() {
     if !super::super::require_postgres_backend() {
         return;

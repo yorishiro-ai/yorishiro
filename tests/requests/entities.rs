@@ -1,5 +1,4 @@
 use super::boot_request;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::models::{entity_entities, schema_schemas};
@@ -24,7 +23,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
-#[serial]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
     if !super::super::require_postgres_backend() {
         return;
@@ -122,7 +120,6 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
 
 /// A job with no snapshots (an unknown or already-undone job id) is refused rather than reporting zero restored, so a caller can tell "nothing to undo" from "already undone".
 #[tokio::test]
-#[serial]
 async fn undo_an_unknown_job_is_refused() {
     if !super::super::require_postgres_backend() {
         return;

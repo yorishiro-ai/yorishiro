@@ -50,11 +50,12 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// `YORISHIRO_EMBEDDING_PROVIDER=none` forces `build_embedding_provider` to return `UnconfiguredEmbeddingProvider` regardless of cached model files, so any actual search attempt surfaces as 502, not a panic or a silent empty result.
 /// Search fails loudly and namedly rather than the boot process itself failing for every deployment that hasn't configured embeddings yet.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn search_with_no_embedding_provider_configured_returns_502() {
     // Force unconfigured provider even if model files exist in cache: the test asserts on the
     // provider-missing path, not on the local provider succeeding.
-    unsafe { std::env::set_var("YORISHIRO_EMBEDDING_PROVIDER", "none") };
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_EMBEDDING_PROVIDER"]);
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { read_key } = setup(&ctx).await;
@@ -76,7 +77,7 @@ async fn search_with_no_embedding_provider_configured_returns_502() {
 /// The auth check (`Verified`) runs before the embedding call: no key at all must be rejected with 401, not 502.
 /// `Read` is the lowest scope, so there's no "too-low scope" case to test against a read-gated endpoint beyond this.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn search_requires_authentication() {
     if !super::super::require_postgres_backend() {
         return;

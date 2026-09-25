@@ -2,26 +2,25 @@
 mod openai;
 use serial_test::serial;
 
-/// `#[serial]`: mutates process-wide environment variables, which races other tests in this
+use crate::EnvGuard;
+
+/// `#[serial(process_environment)]`: mutates process-wide environment variables, which races other tests in this
 /// binary that also read or write `YORISHIRO_ONNX_*`/`YORISHIRO_LOCAL_*` if run concurrently.
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn reject_renamed_onnx_vars_fails_when_any_old_variable_is_set() {
     // The ONNX variables were renamed/deprecated as part of the embedding provider refactor.
     // This test verifies the guard that catches stale configurations.
     let onnx_vars = ["YORISHIRO_ONNX_RUNTIME_PATH", "YORISHIRO_ONNX_MODEL_PATH"];
+    let guard = EnvGuard::capture(&onnx_vars);
 
     for old in &onnx_vars {
-        unsafe {
-            std::env::set_var(old, "x");
-        }
+        guard.set(old, "x");
         // In the actual code, reject_renamed_onnx_vars() checks these variables.
         // Here we verify the behavior through the environment variable state.
         let val = std::env::var(old);
         assert!(val.is_ok(), "{old} should be set");
-        unsafe {
-            std::env::remove_var(old);
-        }
+        guard.remove(old);
     }
 }
 
@@ -32,33 +31,28 @@ fn reject_renamed_onnx_vars_fails_when_any_old_variable_is_set() {
 /// `OsStringExt::from_vec`, which only exists on Unix; Windows OS strings are not able to
 /// hold arbitrary invalid UTF-8 the same way, so this scenario cannot arise there the same way.
 #[test]
-#[serial]
+#[serial(process_environment)]
 #[cfg(unix)]
 fn reject_renamed_onnx_vars_catches_a_non_utf8_value() {
     use std::os::unix::ffi::OsStringExt;
 
     let old = "YORISHIRO_ONNX_RUNTIME_PATH";
     let non_utf8 = std::ffi::OsString::from_vec(vec![0xFF, 0xFE, 0xFD]);
-    unsafe {
-        std::env::set_var(old, &non_utf8);
-    }
+    let guard = EnvGuard::capture(&[old]);
+    guard.set(old, &non_utf8);
     let val = std::env::var(old);
     // Non-UTF-8 values return Err from std::env::var
     assert!(val.is_err(), "non-UTF-8 value should be detected");
-    unsafe {
-        std::env::remove_var(old);
-    }
 }
 
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn reject_renamed_onnx_vars_passes_when_none_are_set() {
     let onnx_vars = ["YORISHIRO_ONNX_RUNTIME_PATH", "YORISHIRO_ONNX_MODEL_PATH"];
+    let guard = EnvGuard::capture(&onnx_vars);
 
     for old in &onnx_vars {
-        unsafe {
-            std::env::remove_var(old);
-        }
+        guard.remove(old);
     }
     // All stale ONNX variables should be unset
     for old in &onnx_vars {
@@ -68,10 +62,10 @@ fn reject_renamed_onnx_vars_passes_when_none_are_set() {
 
 /// The half-populated cases are the reason this rule exists: falling through to the fetch there would ignore a file an operator deliberately placed and embed with a different model, with nothing in any status to show for it.
 #[test]
+#[serial(process_environment)]
 fn resolve_local_model_defaults_when_unset() {
-    unsafe {
-        std::env::remove_var("YORISHIRO_LOCAL_MODEL");
-    }
+    let guard = EnvGuard::capture(&["YORISHIRO_LOCAL_MODEL"]);
+    guard.remove("YORISHIRO_LOCAL_MODEL");
     // When YORISHIRO_LOCAL_MODEL is unset, the system should resolve to the default model.
     // The default is multilingual-e5-base.
     let default_id = "multilingual-e5-base";

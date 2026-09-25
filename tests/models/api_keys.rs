@@ -1,5 +1,4 @@
 use crate::requests::boot_request;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::Entity as ApiKeys;
@@ -28,7 +27,6 @@ async fn setup_workspace(ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
 
 /// `list_for_workspace` must return every key issued for the workspace, oldest first, and never leak into another workspace's listing.
 #[tokio::test]
-#[serial]
 async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;
@@ -72,7 +70,6 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
 
 /// `revoke` deletes the row so authentication (a lookup on every request) can no longer find it, and a second revoke of the same id must report not-found rather than succeeding silently.
 #[tokio::test]
-#[serial]
 async fn revoke_deletes_the_key_and_a_second_revoke_reports_not_found() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let workspace_id = setup_workspace(&ctx).await;

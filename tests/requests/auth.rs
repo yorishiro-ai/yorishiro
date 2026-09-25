@@ -5,7 +5,7 @@ use yorishiro::app::App;
 use yorishiro::models::tenancy::{self, MembershipRole};
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn signup_then_login_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = yorishiro::models::_entities::tenant_tenants::ActiveModel {
@@ -95,7 +95,7 @@ async fn signup_then_login_round_trip() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn signup_without_invite_creates_its_own_tenant() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let signup_response = request
@@ -136,7 +136,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
 
 /// `email` alongside `invite_token` is rejected rather than silently ignored: the invite already carries the email it was issued to, and a caller-supplied one could disagree with it unnoticed.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn signup_rejects_email_alongside_invite_token() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
@@ -159,7 +159,7 @@ async fn signup_rejects_email_alongside_invite_token() {
 
 /// No `invite_token` and no `email` has nothing to create a tenant or an account for.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn signup_rejects_neither_invite_token_nor_email() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request
@@ -180,7 +180,7 @@ async fn signup_rejects_neither_invite_token_nor_email() {
 
 /// `YORISHIRO_MAX_TENANTS` bounds invite-less signup the same way it bounds `/setup`: once the cap is reached, further signups are refused rather than growing the tenant count unbounded.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn signup_without_invite_respects_the_tenant_cap() {
     super::with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, _ctx| async move {
@@ -219,26 +219,15 @@ async fn signup_without_invite_respects_the_tenant_cap() {
 
 /// Widens `DB_MAX_CONNECTIONS` past `config/test.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let previous = std::env::var("DB_MAX_CONNECTIONS").ok();
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("DB_MAX_CONNECTIONS", value);
-    }
-    let result = fut.await;
-    unsafe {
-        match &previous {
-            Some(v) => std::env::set_var("DB_MAX_CONNECTIONS", v),
-            None => std::env::remove_var("DB_MAX_CONNECTIONS"),
-        }
-    }
-    result
+    let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
+    guard.set("DB_MAX_CONNECTIONS", value);
+    fut.await
 }
-
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
 /// This test is PostgreSQL-only: `lock_for_update` is a no-op on SQLite,
 /// so the serialisation guarantee does not hold.
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn create_tenant_serializes_on_its_advisory_lock() {
     if !super::super::require_postgres_backend() {
         return;

@@ -8,7 +8,7 @@ use yorishiro::config::{CANONICAL_CONFIG_FILE, load};
 use super::{CurrentDirGuard, EnvGuard, minimal_config};
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_path_loads_and_environment_overrides_it() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("explicit.yaml");
@@ -19,26 +19,22 @@ async fn explicit_path_loads_and_environment_overrides_it() {
     .unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
     let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH", "DATABASE_URL"]);
-    unsafe {
-        std::env::set_var("YORISHIRO_CONFIG_PATH", &path);
-        std::env::set_var("DATABASE_URL", "sqlite:///from-env.sqlite3?mode=rwc");
-    }
+    _guard.set("YORISHIRO_CONFIG_PATH", &path);
+    _guard.set("DATABASE_URL", "sqlite:///from-env.sqlite3?mode=rwc");
     let config = load(&Environment::Development).await.unwrap();
     assert_eq!(config.database.uri, "sqlite:///from-env.sqlite3?mode=rwc");
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_missing_path_never_falls_back() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
     let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH"]);
-    unsafe {
-        std::env::set_var(
-            "YORISHIRO_CONFIG_PATH",
-            directory.path().join("missing.yaml"),
-        )
-    };
+    _guard.set(
+        "YORISHIRO_CONFIG_PATH",
+        directory.path().join("missing.yaml"),
+    );
     let error = load(&Environment::Development)
         .await
         .unwrap_err()
@@ -47,12 +43,12 @@ async fn explicit_missing_path_never_falls_back() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_unreadable_path_never_falls_back() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
     let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH"]);
-    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", directory.path()) };
+    _guard.set("YORISHIRO_CONFIG_PATH", directory.path());
     let error = load(&Environment::Development)
         .await
         .unwrap_err()
@@ -61,14 +57,14 @@ async fn explicit_unreadable_path_never_falls_back() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_invalid_path_never_falls_back() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("explicit.yaml");
     fs::write(&path, "logger: [not valid for Config\n").unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
     let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH"]);
-    unsafe { std::env::set_var("YORISHIRO_CONFIG_PATH", path) };
+    _guard.set("YORISHIRO_CONFIG_PATH", path);
     let error = load(&Environment::Development)
         .await
         .unwrap_err()
@@ -77,7 +73,7 @@ async fn explicit_invalid_path_never_falls_back() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn canonical_file_in_current_directory_wins() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
@@ -92,18 +88,20 @@ async fn canonical_file_in_current_directory_wins() {
         minimal_config("sqlite:///canonical.sqlite3?mode=rwc"),
     )
     .unwrap();
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::remove_var("DATABASE_URL");
-        std::env::remove_var("QUEUE_URL");
-        std::env::remove_var("YORISHIRO_QUEUE_KIND");
+    for variable in [
+        "YORISHIRO_CONFIG_PATH",
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+    ] {
+        _guard.remove(variable);
     }
     let config = load(&Environment::Development).await.unwrap();
     assert_eq!(config.database.uri, "sqlite:///canonical.sqlite3?mode=rwc");
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn canonical_file_wins_when_legacy_file_also_exists() {
     let directory = tempdir().unwrap();
     let legacy_directory = directory.path().join("config");
@@ -126,19 +124,17 @@ async fn canonical_file_wins_when_legacy_file_also_exists() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("LOCO_CONFIG_FOLDER", &legacy_directory);
-        std::env::remove_var("DATABASE_URL");
-        std::env::remove_var("QUEUE_URL");
-        std::env::remove_var("YORISHIRO_QUEUE_KIND");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("LOCO_CONFIG_FOLDER", &legacy_directory);
+    _guard.remove("DATABASE_URL");
+    _guard.remove("QUEUE_URL");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
     let config = load(&Environment::Development).await.unwrap();
     assert_eq!(config.database.uri, "sqlite:///canonical.sqlite3?mode=rwc");
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn legacy_environment_file_is_the_final_fallback() {
     let directory = tempdir().unwrap();
     let config_directory = directory.path().join("config");
@@ -154,11 +150,9 @@ async fn legacy_environment_file_is_the_final_fallback() {
         "LOCO_CONFIG_FOLDER",
         "DATABASE_URL",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("LOCO_CONFIG_FOLDER", &config_directory);
-        std::env::set_var("DATABASE_URL", "postgres://test:test@localhost:5432/test");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("LOCO_CONFIG_FOLDER", &config_directory);
+    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
     let config = load(&Environment::Any("test_postgres".into()))
         .await
         .unwrap();
@@ -170,7 +164,7 @@ async fn legacy_environment_file_is_the_final_fallback() {
 
 #[cfg(unix)]
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn dangling_canonical_symlink_does_not_fall_back_to_legacy_config() {
     let directory = tempdir().unwrap();
     std::os::unix::fs::symlink(
@@ -185,12 +179,10 @@ async fn dangling_canonical_symlink_does_not_fall_back_to_legacy_config() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::remove_var("DATABASE_URL");
-        std::env::remove_var("QUEUE_URL");
-        std::env::remove_var("YORISHIRO_QUEUE_KIND");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.remove("DATABASE_URL");
+    _guard.remove("QUEUE_URL");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
     let error = load(&Environment::Development)
         .await
         .unwrap_err()

@@ -8,7 +8,7 @@ use yorishiro::config::{CANONICAL_CONFIG_FILE, load};
 use super::{CurrentDirGuard, EnvGuard, minimal_config};
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn postgres_database_derives_postgres_queue_and_uri() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -23,12 +23,10 @@ async fn postgres_database_derives_postgres_queue_and_uri() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("DATABASE_URL", "postgres://db/app");
-        std::env::remove_var("QUEUE_URL");
-        std::env::remove_var("YORISHIRO_QUEUE_KIND");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("DATABASE_URL", "postgres://db/app");
+    _guard.remove("QUEUE_URL");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
     let config = load(&Environment::Development).await.unwrap();
     assert!(matches!(
         config.queue,
@@ -38,7 +36,7 @@ async fn postgres_database_derives_postgres_queue_and_uri() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn sqlite_database_derives_sqlite_queue_and_uri() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -53,12 +51,10 @@ async fn sqlite_database_derives_sqlite_queue_and_uri() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("DATABASE_URL", "sqlite://derived.sqlite3?mode=rwc");
-        std::env::remove_var("QUEUE_URL");
-        std::env::remove_var("YORISHIRO_QUEUE_KIND");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("DATABASE_URL", "sqlite://derived.sqlite3?mode=rwc");
+    _guard.remove("QUEUE_URL");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
     let config = load(&Environment::Development).await.unwrap();
     assert!(matches!(
         config.queue,
@@ -68,7 +64,7 @@ async fn sqlite_database_derives_sqlite_queue_and_uri() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_queue_kind_and_queue_url_take_precedence() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -83,12 +79,10 @@ async fn explicit_queue_kind_and_queue_url_take_precedence() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("DATABASE_URL", "postgres://db/app");
-        std::env::set_var("QUEUE_URL", "sqlite://queue.sqlite3?mode=rwc");
-        std::env::set_var("YORISHIRO_QUEUE_KIND", "Sqlite");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("DATABASE_URL", "postgres://db/app");
+    _guard.set("QUEUE_URL", "sqlite://queue.sqlite3?mode=rwc");
+    _guard.set("YORISHIRO_QUEUE_KIND", "Sqlite");
     let config = load(&Environment::Development).await.unwrap();
     assert!(matches!(
         config.queue,
@@ -98,7 +92,7 @@ async fn explicit_queue_kind_and_queue_url_take_precedence() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_postgres_kind_rejects_sqlite_database_without_queue_url() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -113,12 +107,10 @@ async fn explicit_postgres_kind_rejects_sqlite_database_without_queue_url() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("DATABASE_URL", "sqlite://db.sqlite3?mode=rwc");
-        std::env::remove_var("QUEUE_URL");
-        std::env::set_var("YORISHIRO_QUEUE_KIND", "Postgres");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("DATABASE_URL", "sqlite://db.sqlite3?mode=rwc");
+    _guard.remove("QUEUE_URL");
+    _guard.set("YORISHIRO_QUEUE_KIND", "Postgres");
     let error = load(&Environment::Development)
         .await
         .unwrap_err()
@@ -127,7 +119,7 @@ async fn explicit_postgres_kind_rejects_sqlite_database_without_queue_url() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn explicit_postgres_kind_rejects_sqlite_queue_url() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -142,12 +134,10 @@ async fn explicit_postgres_kind_rejects_sqlite_queue_url() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::set_var("DATABASE_URL", "postgres://db/app");
-        std::env::set_var("QUEUE_URL", "sqlite://queue.sqlite3?mode=rwc");
-        std::env::set_var("YORISHIRO_QUEUE_KIND", "Postgres");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("DATABASE_URL", "postgres://db/app");
+    _guard.set("QUEUE_URL", "sqlite://queue.sqlite3?mode=rwc");
+    _guard.set("YORISHIRO_QUEUE_KIND", "Postgres");
     let error = load(&Environment::Development)
         .await
         .unwrap_err()
@@ -156,7 +146,7 @@ async fn explicit_postgres_kind_rejects_sqlite_queue_url() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn redis_without_queue_url_is_rejected() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -171,12 +161,10 @@ async fn redis_without_queue_url_is_rejected() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe {
-        std::env::remove_var("YORISHIRO_CONFIG_PATH");
-        std::env::remove_var("DATABASE_URL");
-        std::env::remove_var("QUEUE_URL");
-        std::env::set_var("YORISHIRO_QUEUE_KIND", "Redis");
-    }
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.remove("DATABASE_URL");
+    _guard.remove("QUEUE_URL");
+    _guard.set("YORISHIRO_QUEUE_KIND", "Redis");
     let error = load(&Environment::Development)
         .await
         .unwrap_err()

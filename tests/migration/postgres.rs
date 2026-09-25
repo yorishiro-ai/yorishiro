@@ -5,7 +5,7 @@
 //!
 //! Skipped by the shared PostgreSQL backend gate when another backend is active.
 //!
-//! Both tests are `#[serial]` because each gets its own database but they share a cluster, and `up()` creates the `yorishiro_app` **role**, which is a cluster-wide object.
+//! Both tests are `#[serial(postgres_cluster)]` because each gets its own database but they share a cluster, and `up()` creates the `yorishiro_app` **role**, which is a cluster-wide object.
 //! Run in parallel against a cluster where that role does not exist yet, both reach `CREATE ROLE` at once and one fails with `duplicate key value violates unique constraint "pg_authid_rolname_index"` — the migration's own `EXCEPTION WHEN duplicate_object` catches a role that already existed, not two transactions creating it simultaneously.
 //! This passed locally and failed in CI for exactly that reason: the local cluster already had the role from earlier runs, so the race had nothing to lose.
 use migration::{Migrator, MigratorTrait};
@@ -53,7 +53,7 @@ async fn scratch_db(name: &str) -> sea_orm::DatabaseConnection {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(postgres_cluster)]
 async fn all_migrations_apply_to_a_fresh_postgres_database() {
     if !super::super::require_postgres_backend() {
         return;
@@ -64,7 +64,7 @@ async fn all_migrations_apply_to_a_fresh_postgres_database() {
 
 /// The gate the rollback bug slipped past: `down()` has to drop the circular foreign key before the tables it ties together, and only PostgreSQL has that constraint as a separate object.
 #[tokio::test]
-#[serial]
+#[serial(postgres_cluster)]
 async fn all_migrations_roll_back_and_reapply_on_postgres() {
     if !super::super::require_postgres_backend() {
         return;

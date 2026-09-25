@@ -1,5 +1,4 @@
 use crate::requests::boot_request;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
@@ -19,7 +18,6 @@ fn chain_definition() -> serde_json::Value {
 
 /// `recall_context` at `depth: 2` must reach a neighbor-of-neighbor (root -> mid -> leaf) but not go further, and a diamond back to an already-visited node must not be reported twice or re-expanded.
 #[tokio::test]
-#[serial]
 async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
     if !super::super::require_postgres_backend() {
         return;
@@ -161,7 +159,6 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
 
 /// `full: false` (the default) must reduce a neighbor's `data` to only its `x-embed` fields.
 #[tokio::test]
-#[serial]
 async fn recall_context_shallow_copy_keeps_only_x_embed_fields() {
     if !super::super::require_postgres_backend() {
         return;

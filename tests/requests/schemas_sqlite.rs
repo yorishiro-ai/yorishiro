@@ -2,7 +2,6 @@
 ///
 /// Exercises the same schema creation flow as `schemas.rs` but boot against a
 /// SQLite backend.
-use serial_test::serial;
 use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -70,7 +69,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 
 /// Creating a schema from a built-in template works on SQLite.
 #[tokio::test]
-#[serial]
 async fn create_schema_from_a_builtin_template_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;

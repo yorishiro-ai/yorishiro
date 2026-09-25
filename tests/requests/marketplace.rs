@@ -2,7 +2,6 @@ use super::boot_request;
 use axum::http::StatusCode;
 use chrono::Utc;
 use serde_json::json;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
@@ -56,7 +55,6 @@ fn note_definition() -> serde_json::Value {
 
 /// An unlicensed deployment answers 404, matching an unconfigured setup wizard: the deployment genuinely does not serve this, not 401/403, which would confirm the route exists.
 #[tokio::test]
-#[serial]
 async fn without_a_licence_the_marketplace_is_not_served() {
     if !super::super::require_postgres_backend() {
         return;
@@ -80,7 +78,6 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 
 /// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
 #[tokio::test]
-#[serial]
 async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     if !super::super::require_postgres_backend() {
         return;
@@ -102,7 +99,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 
 /// A licensed deployment still authenticates: without this, "gated" and "open to anyone" would look the same as the previous test.
 #[tokio::test]
-#[serial]
 async fn a_licence_does_not_replace_authentication() {
     if !super::super::require_postgres_backend() {
         return;
@@ -126,7 +122,6 @@ async fn a_licence_does_not_replace_authentication() {
 
 /// The full publish -> list -> fork -> review round trip, and the decisions along the way: a draft never appears in the public listing, version numbers are assigned server-side, and a fork is a private ('tenant') copy of a forker's own, distinct from the original.
 #[tokio::test]
-#[serial]
 async fn publish_list_fork_and_review_round_trip() {
     if !super::super::require_postgres_backend() {
         return;
@@ -318,7 +313,6 @@ async fn publish_list_fork_and_review_round_trip() {
 
 /// A tenant may not set another tenant's template's visibility, or publish a version onto it: ownership is enforced by the service, not the role, and is reported as 404 rather than 403 so a caller that cannot act on a template does not learn it exists from the difference.
 #[tokio::test]
-#[serial]
 async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
     if !super::super::require_postgres_backend() {
         return;
@@ -368,7 +362,6 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
 
 /// A rating outside 1-5 is rejected before it ever reaches the database.
 #[tokio::test]
-#[serial]
 async fn a_rating_outside_the_range_is_rejected() {
     if !super::super::require_postgres_backend() {
         return;

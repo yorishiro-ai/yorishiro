@@ -27,24 +27,14 @@ mod tenant_auth;
 mod worker_class;
 mod workspaces;
 
-/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there before.
+/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future.
 pub(crate) async fn with_max_tenants<T>(
     value: &str,
     fut: impl std::future::Future<Output = T>,
 ) -> T {
-    let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_MAX_TENANTS", value);
-    }
-    let result = fut.await;
-    unsafe {
-        match &previous {
-            Some(v) => std::env::set_var("YORISHIRO_MAX_TENANTS", v),
-            None => std::env::remove_var("YORISHIRO_MAX_TENANTS"),
-        }
-    }
-    result
+    let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
+    guard.set("YORISHIRO_MAX_TENANTS", value);
+    fut.await
 }
 
 use axum_test::TestServer;
