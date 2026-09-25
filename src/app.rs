@@ -45,6 +45,7 @@ impl StartupReindexHandle {
     }
 }
 
+use crate::controllers::route_inventory::{Edition, RouteClass, RouteInventory};
 use crate::{controllers, tasks};
 
 use crate::workers::embedding_sync::WorkerClass;
@@ -275,43 +276,119 @@ impl Hooks for App {
     /// `infer-fill` spends an LLM call and is gated, while the `/workspace/llm-key` routes beside it
     /// only store the credential. A layer applies to a whole `Routes`, so one group would gate all
     /// four.
-    fn routes(_ctx: &AppContext) -> AppRoutes {
-        let gate = axum::middleware::from_fn_with_state(_ctx.clone(), licence_gate);
+    fn routes(ctx: &AppContext) -> AppRoutes {
+        let gate = axum::middleware::from_fn_with_state(ctx.clone(), licence_gate);
+        let mut inventory = RouteInventory::default();
+        inventory.add_allowlisted_exclusions();
+        let mut app_routes = AppRoutes::with_default_routes();
+        inventory.add_infrastructure(&app_routes);
 
-        AppRoutes::with_default_routes()
-            .add_route(controllers::audit_log::routes())
-            .add_route(controllers::auth::routes())
-            .add_route(controllers::entities::routes())
-            .add_route(controllers::entities::migration_routes())
-            .add_route(controllers::export::routes())
-            .add_route(controllers::import::routes())
-            .add_route(controllers::members::routes())
-            .add_route(controllers::relations::routes())
-            .add_route(controllers::schemas::routes())
-            .add_route(controllers::schemas::template_routes())
-            .add_route(controllers::search::routes())
-            .add_route(controllers::setup::routes())
-            .add_route(controllers::system::routes())
-            .add_route(controllers::template_library::routes())
-            .add_route(controllers::whoami::routes())
-            .add_route(controllers::workspaces::routes())
-            // The enterprise edition's routes, mounted unconditionally; see this function's doc comment
-            // for which of them carry the gate and why.
-            .add_route(crate::ee::controllers::dashboard::routes())
-            .add_route(crate::ee::controllers::embedding::routes())
-            .add_route(crate::ee::controllers::entity_columns::routes())
-            .add_route(crate::ee::controllers::inference::routes())
-            .add_route(crate::ee::controllers::inference::gated_routes().layer(gate.clone()))
-            .add_route(
-                crate::ee::controllers::inference::inference_job_status_routes()
-                    .layer(gate.clone()),
-            )
-            .add_route(crate::ee::controllers::marketplace::routes().layer(gate.clone()))
-            .add_route(crate::ee::controllers::oauth::routes().layer(gate.clone()))
-            .add_route(crate::ee::controllers::origin::routes())
-            .add_route(crate::ee::controllers::schema_forks::routes())
-            .add_route(crate::ee::controllers::stripe::routes().layer(gate))
-            .add_route(crate::ee::controllers::worker_class::routes())
+        macro_rules! mount {
+            ($route:expr, $edition:expr, $gated:expr) => {{
+                let route = $route;
+                let inventory_routes = AppRoutes::empty().add_route(route.clone());
+                inventory.add_group(&inventory_routes, $edition, $gated, RouteClass::Public);
+                app_routes = app_routes.add_route(route);
+            }};
+        }
+
+        mount!(controllers::audit_log::routes(), Edition::Community, false);
+        mount!(controllers::auth::routes(), Edition::Community, false);
+        mount!(controllers::entities::routes(), Edition::Community, false);
+        mount!(
+            controllers::entities::migration_routes(),
+            Edition::Community,
+            false
+        );
+        mount!(controllers::export::routes(), Edition::Community, false);
+        mount!(controllers::import::routes(), Edition::Community, false);
+        mount!(controllers::members::routes(), Edition::Community, false);
+        mount!(controllers::relations::routes(), Edition::Community, false);
+        mount!(controllers::schemas::routes(), Edition::Community, false);
+        mount!(
+            controllers::schemas::template_routes(),
+            Edition::Community,
+            false
+        );
+        mount!(controllers::search::routes(), Edition::Community, false);
+        mount!(controllers::setup::routes(), Edition::Community, false);
+        mount!(controllers::system::routes(), Edition::Community, false);
+        mount!(
+            controllers::template_library::routes(),
+            Edition::Community,
+            false
+        );
+        mount!(controllers::whoami::routes(), Edition::Community, false);
+        mount!(controllers::workspaces::routes(), Edition::Community, false);
+        // The enterprise edition's routes are mounted unconditionally; the inventory records the
+        // edition boundary and the licence gate separately from runtime reachability.
+        mount!(
+            crate::ee::controllers::dashboard::routes(),
+            Edition::Enterprise,
+            false
+        );
+        mount!(
+            crate::ee::controllers::embedding::routes(),
+            Edition::Enterprise,
+            false
+        );
+        mount!(
+            crate::ee::controllers::entity_columns::routes(),
+            Edition::Enterprise,
+            false
+        );
+        mount!(
+            crate::ee::controllers::inference::routes(),
+            Edition::Enterprise,
+            false
+        );
+        mount!(
+            crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
+            Edition::Enterprise,
+            true
+        );
+        mount!(
+            crate::ee::controllers::inference::inference_job_status_routes().layer(gate.clone()),
+            Edition::Enterprise,
+            true
+        );
+        mount!(
+            crate::ee::controllers::marketplace::routes().layer(gate.clone()),
+            Edition::Enterprise,
+            true
+        );
+        mount!(
+            crate::ee::controllers::oauth::routes().layer(gate.clone()),
+            Edition::Enterprise,
+            true
+        );
+        mount!(
+            crate::ee::controllers::origin::routes(),
+            Edition::Enterprise,
+            false
+        );
+        mount!(
+            crate::ee::controllers::schema_forks::routes(),
+            Edition::Enterprise,
+            false
+        );
+        mount!(
+            crate::ee::controllers::stripe::routes().layer(gate),
+            Edition::Enterprise,
+            true
+        );
+        mount!(
+            crate::ee::controllers::worker_class::routes(),
+            Edition::Enterprise,
+            false
+        );
+
+        ctx.shared_store.insert(inventory);
+        ctx.shared_store
+            .get::<RouteInventory>()
+            .expect("route inventory was just installed")
+            .validate();
+        app_routes
     }
 
     /// Mounts the MCP server under `/mcp` and the swagger docs.
@@ -327,7 +404,11 @@ impl Hooks for App {
     /// instead: this hook runs after Loco's own routes are built, which is where
     /// Loco itself says custom Axum logic belongs.
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
-        let router = controllers::swagger::mount(router);
+        let inventory = ctx
+            .shared_store
+            .get::<RouteInventory>()
+            .ok_or_else(|| loco_rs::Error::Message("route inventory missing".into()))?;
+        let router = controllers::swagger::mount(router, &inventory);
         let router = controllers::mcp::mount(router, ctx, |ctx| {
             let enterprise_tool_router = crate::ee::services::mcp::tool_router();
             let enterprise_tool_names = enterprise_tool_router

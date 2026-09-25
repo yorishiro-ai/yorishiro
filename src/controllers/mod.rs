@@ -8,6 +8,7 @@ pub mod import;
 pub mod mcp;
 pub mod members;
 pub mod relations;
+pub mod route_inventory;
 pub mod schemas;
 pub mod search;
 pub mod setup;
