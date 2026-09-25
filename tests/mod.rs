@@ -22,6 +22,7 @@ static BACKEND_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 ///
 /// The guard is intentionally Drop-based so restoration also runs while a test unwinds from a
 /// panic.
+/// Named `serial_test` locks and process environments are local to each test executable.
 pub(crate) struct EnvGuard {
     values: Vec<(&'static str, Option<OsString>)>,
 }
