@@ -147,7 +147,6 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 
         let licensed = mcp_call(&request, &session, &key, 2, "tools/list", json!({})).await;
         let licensed_tools = tool_inventory(&licensed);
-        assert_eq!(licensed_tools.len(), 27);
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
             assert!(licensed_tools.iter().any(|tool| tool["name"] == name));
         }
@@ -158,7 +157,6 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
         install_licence(&ctx, false);
         let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
         let community_tools = tool_inventory(&community);
-        assert_eq!(community_tools.len(), 24);
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
             assert!(!community_tools.iter().any(|tool| tool["name"] == name));
             let denied = mcp_call(

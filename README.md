@@ -19,8 +19,8 @@ A knowledge store where you define your own data structures and search by meanin
   - Full-text fallback when embeddings are not yet available.
 
 - **Connect to AI tools**
-  - Community mode provides 24 built-in MCP tools for Claude, Cursor, and other MCP-compatible clients to search, create, and manage your data.
-  - A licensed enterprise deployment provides 27 tools by adding origin-template update discovery, preview, and merge.
+  - Community mode provides built-in MCP tools for Claude, Cursor, and other MCP-compatible clients to search, create, and manage your data.
+  - A licensed enterprise deployment adds origin-template update discovery, preview, and merge tools.
 
 - **REST API**
   - Automate everything with standard HTTP endpoints.
@@ -90,10 +90,10 @@ One binary, one repository. Enterprise features are controlled by a licence key.
 
 ### MCP tool inventory
 
-Community mode exposes these 24 tools: `create_entity`, `create_relation`, `create_schema`, `delete_entity`, `delete_relation`, `fill_defaults`, `get_active_schema`, `get_entity`, `get_entity_drift`, `get_entity_type_json_schema`, `get_relation`, `get_schema_by_id`, `get_template_library_item`, `import_jsonl`, `list_entities`, `list_relations`, `list_schemas`, `list_template_library`, `list_templates`, `migration_dry_run`, `recall_context`, `search_entities`, `set_relation_status`, and `update_entity`.
+The runtime MCP inventory, including names, descriptions, and input schemas, is documented in [docs/en/mcp-tools.md](docs/en/mcp-tools.md).
 
-A licensed enterprise deployment exposes all 24 community tools plus `list_upstream_changes`, `merge_preview`, and `merge_apply`, for 27 tools total.
-The three origin tools are not advertised or callable through MCP in community mode.
+A licensed enterprise deployment adds the origin-template tools shown in that document.
+Those tools are not advertised or callable through MCP in community mode.
 
 ## Quick start
 
