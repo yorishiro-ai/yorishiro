@@ -13,7 +13,7 @@ use rmcp::RoleServer;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult,
-    PaginatedRequestParams, ResultType, ServerCapabilities, ServerInfo,
+    PaginatedRequestParams, ResultType, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ServerHandler, tool_handler};
@@ -97,8 +97,8 @@ impl ServerHandler for YorishiroMcpServer {
         self.tool_router.get(name).cloned()
     }
 
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
              Every tool call requires authentication via an `Authorization: Bearer <api-key>` \
              header, and the tools available depend on the API key's scope \
