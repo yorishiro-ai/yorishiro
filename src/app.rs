@@ -329,12 +329,18 @@ impl Hooks for App {
     async fn after_routes(router: axum::Router, ctx: &AppContext) -> Result<axum::Router> {
         let router = controllers::swagger::mount(router);
         let router = controllers::mcp::mount(router, ctx, |ctx| {
+            let enterprise_tool_router = crate::ee::services::mcp::tool_router();
+            let enterprise_tool_names = enterprise_tool_router
+                .map
+                .keys()
+                .map(ToString::to_string)
+                .collect::<std::collections::HashSet<_>>();
             let mut tool_routers = vec![crate::services::mcp::community_tool_router()];
             if crate::services::edition::is_active(&ctx) {
-                tool_routers.push(crate::ee::services::mcp::tool_router());
+                tool_routers.push(enterprise_tool_router);
             }
             let tool_router = crate::services::mcp::compose_tool_routers(tool_routers);
-            crate::services::mcp::YorishiroMcpServer::new(ctx, tool_router)
+            crate::services::mcp::YorishiroMcpServer::new(ctx, tool_router, enterprise_tool_names)
         });
         let rate_limiter =
             std::sync::Arc::new(crate::services::rate_limit::RateLimiter::from_env());

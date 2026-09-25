@@ -34,11 +34,20 @@ use rmcp::model::Tool;
 pub struct YorishiroMcpServer {
     ctx: AppContext,
     tool_router: ToolRouter<Self>,
+    enterprise_tool_names: HashSet<String>,
 }
 
 impl YorishiroMcpServer {
-    pub(crate) fn new(ctx: AppContext, tool_router: ToolRouter<Self>) -> Self {
-        Self { ctx, tool_router }
+    pub(crate) fn new(
+        ctx: AppContext,
+        tool_router: ToolRouter<Self>,
+        enterprise_tool_names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            ctx,
+            tool_router,
+            enterprise_tool_names: enterprise_tool_names.into_iter().collect(),
+        }
     }
 
     pub(crate) fn app_context(&self) -> &AppContext {
@@ -65,11 +74,11 @@ pub(crate) fn compose_tool_routers(
     let mut composed = ToolRouter::new();
     let mut names = HashSet::new();
     for router in routers {
-        for tool in router.list_all() {
+        for name in router.map.keys() {
             assert!(
-                names.insert(tool.name.to_string()),
+                names.insert(name.to_string()),
                 "duplicate MCP tool name: {}",
-                tool.name
+                name
             );
         }
         composed += router;
@@ -85,7 +94,7 @@ impl ServerHandler for YorishiroMcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         if !crate::services::edition::is_active(&self.ctx)
-            && is_enterprise_tool(request.name.as_ref())
+            && self.is_enterprise_tool(request.name.as_ref())
         {
             return Err(ErrorData::invalid_params("tool not found", None));
         }
@@ -103,7 +112,7 @@ impl ServerHandler for YorishiroMcpServer {
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
         let mut tools = self.tool_router.list_all();
         if !crate::services::edition::is_active(&self.ctx) {
-            tools.retain(|tool| !is_enterprise_tool(tool.name.as_ref()));
+            tools.retain(|tool| !self.is_enterprise_tool(tool.name.as_ref()));
         }
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
@@ -116,7 +125,7 @@ impl ServerHandler for YorishiroMcpServer {
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        if !crate::services::edition::is_active(&self.ctx) && is_enterprise_tool(name) {
+        if !crate::services::edition::is_active(&self.ctx) && self.is_enterprise_tool(name) {
             return None;
         }
         self.tool_router.get(name).cloned()
@@ -132,11 +141,10 @@ impl ServerHandler for YorishiroMcpServer {
     }
 }
 
-fn is_enterprise_tool(name: &str) -> bool {
-    crate::ee::services::mcp::tool_router()
-        .list_all()
-        .iter()
-        .any(|tool| tool.name == name)
+impl YorishiroMcpServer {
+    fn is_enterprise_tool(&self, name: &str) -> bool {
+        self.enterprise_tool_names.contains(name)
+    }
 }
 
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
@@ -312,49 +320,49 @@ pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, Er
 }
 
 #[cfg(test)]
-pub(crate) fn render_inventory_fragment(community: &[Tool], enterprise: &[Tool]) -> String {
-    fn render_section(output: &mut String, title: &str, tools: &[Tool]) {
-        output.push_str("## ");
-        output.push_str(title);
-        output.push_str("\n\n");
-        for tool in tools {
-            output.push_str("### `");
-            output.push_str(&tool.name);
-            output.push_str("`\n\n");
-            output.push_str(tool.description.as_deref().unwrap_or(""));
-            output.push_str("\n\nInput schema:\n\n```json\n");
-            output.push_str(
-                &serde_json::to_string_pretty(&tool.schema_as_json_value())
-                    .expect("MCP tool schema is serializable"),
-            );
-            output.push_str("\n```\n\n");
-        }
+fn render_inventory_section(title: &str, tools: &[Tool]) -> String {
+    let mut output = String::new();
+    output.push_str("## ");
+    output.push_str(title);
+    output.push_str("\n\n");
+    for tool in tools {
+        output.push_str("### `");
+        output.push_str(&tool.name);
+        output.push_str("`\n\n");
+        output.push_str(tool.description.as_deref().unwrap_or(""));
+        output.push_str("\n\nInput schema:\n\n```json\n");
+        output.push_str(
+            &serde_json::to_string_pretty(&tool.schema_as_json_value())
+                .expect("MCP tool schema is serializable"),
+        );
+        output.push_str("\n```\n\n");
     }
+    output
+}
 
+#[cfg(test)]
+pub(crate) fn render_inventory_fragment(community: &[Tool], enterprise: &[Tool]) -> String {
     let mut community = community.to_vec();
     let mut enterprise = enterprise.to_vec();
     community.sort_by(|a, b| a.name.cmp(&b.name));
     enterprise.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let mut output = String::new();
-    render_section(&mut output, "Community tools", &community);
-    render_section(&mut output, "Enterprise-only tools", &enterprise);
-    output
+    format!(
+        "{}{}",
+        render_inventory_section("Community tools", &community),
+        render_inventory_section("Enterprise-only tools", &enterprise)
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::sync::Arc;
 
-    use super::{community_tool_router, render_inventory_fragment};
-    use crate::ee::services::mcp::tool_router as enterprise_tool_router;
+    use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
+    use rmcp::model::{CallToolResult, Tool};
 
-    fn inventories() -> (Vec<rmcp::model::Tool>, Vec<rmcp::model::Tool>) {
-        (
-            community_tool_router().list_all(),
-            enterprise_tool_router().list_all(),
-        )
-    }
+    use super::{community_tool_router, compose_tool_routers, render_inventory_section};
 
     fn assert_inventory_contract(label: &str, tools: &[rmcp::model::Tool]) {
         let names: Vec<_> = tools.iter().map(|tool| tool.name.to_string()).collect();
@@ -396,23 +404,42 @@ mod tests {
 
     #[test]
     fn community_inventory_contract_and_documentation_are_current() {
-        let (community, enterprise) = inventories();
+        let community = community_tool_router().list_all();
         assert_inventory_contract("community", &community);
-        let community_names: HashSet<_> = community.iter().map(|tool| &tool.name).collect();
-        let enterprise_names: HashSet<_> = enterprise.iter().map(|tool| &tool.name).collect();
-        assert!(community_names.is_disjoint(&enterprise_names));
 
         let docs = include_str!("../../../docs/en/mcp-tools.md");
         let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
-        let end = "<!-- END GENERATED MCP INVENTORY -->";
-        let generated = docs
+        let end = "## Enterprise-only tools\n";
+        let generated_community = docs
             .split_once(start)
             .and_then(|(_, rest)| rest.split_once(end).map(|(body, _)| body))
-            .expect("English MCP documentation markers");
+            .expect("English MCP community inventory markers");
         assert_eq!(
-            generated,
-            render_inventory_fragment(&community, &enterprise),
-            "English MCP documentation has drifted from the runtime inventory"
+            generated_community,
+            render_inventory_section("Community tools", &community),
+            "English MCP community documentation has drifted from the runtime inventory"
+        );
+    }
+
+    #[test]
+    fn composition_rejects_duplicate_registered_names_even_when_disabled() {
+        fn router(name: &'static str) -> ToolRouter<super::YorishiroMcpServer> {
+            ToolRouter::new().with_route(ToolRoute::new_dyn(
+                Tool::new(name, "test tool", Arc::new(Default::default())),
+                |_context| Box::pin(async { Ok(CallToolResult::default().into()) }),
+            ))
+        }
+
+        let disabled = router("duplicate").with_disabled("duplicate");
+        assert!(disabled.list_all().is_empty());
+        assert!(disabled.map.contains_key("duplicate"));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            compose_tool_routers([router("duplicate"), disabled]);
+        }));
+        assert!(
+            result.is_err(),
+            "duplicate registered names must be rejected"
         );
     }
 }
