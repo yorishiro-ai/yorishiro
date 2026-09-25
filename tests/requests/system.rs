@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -79,7 +78,6 @@ async fn member_key(ctx: &loco_rs::app::AppContext, name: &str) -> String {
 }
 
 #[tokio::test]
-#[serial]
 async fn maintenance_is_readable_and_settable_over_rest() {
     if !super::super::require_postgres_backend() {
         return;
@@ -126,7 +124,6 @@ async fn maintenance_is_readable_and_settable_over_rest() {
 /// Behind the maintenance guard, a full lock entered over REST could only be left over the CLI, which makes the switch a one-way door for anyone without shell access.
 /// This test fails if the route ever moves behind the guard.
 #[tokio::test]
-#[serial]
 async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
     if !super::super::require_postgres_backend() {
         return;
@@ -178,7 +175,6 @@ async fn a_full_lock_entered_over_rest_can_be_left_over_rest() {
 /// `migration` is the scope that guards batch migration and the maintenance switch alike.
 /// A `write`-scoped key stopping every caller would be an escalation.
 #[tokio::test]
-#[serial]
 async fn a_member_key_cannot_touch_maintenance() {
     if !super::super::require_postgres_backend() {
         return;
@@ -205,7 +201,6 @@ async fn a_member_key_cannot_touch_maintenance() {
 /// A typo must not read as a mode.
 /// Silently ignoring it would leave an operator believing the deployment is locked when it is serving.
 #[tokio::test]
-#[serial]
 async fn an_unknown_mode_is_refused() {
     if !super::super::require_postgres_backend() {
         return;
@@ -232,7 +227,6 @@ async fn an_unknown_mode_is_refused() {
 }
 
 #[tokio::test]
-#[serial]
 async fn auth_endpoints_are_rate_limited() {
     if !super::super::require_postgres_backend() {
         return;

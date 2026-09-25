@@ -1,7 +1,6 @@
 use crate::requests::boot_request;
 use async_trait::async_trait;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
@@ -36,7 +35,6 @@ async fn set_embedding(conn: &impl ConnectionTrait, entity_id: uuid::Uuid, vecto
 
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
-#[serial]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
     if !super::super::require_postgres_backend() {
         return;
@@ -180,7 +178,6 @@ impl EmbeddingProvider for FixedWidthProvider {
 
 /// A workspace stamped with a dimension count (`workspace_workspaces.embedding_dimensions`) must refuse a sync whose provider produces a different width, rather than writing a vector that would silently break every future search over that workspace with a dimension-mismatch error naming neither the entity nor the write that caused it.
 #[tokio::test]
-#[serial]
 async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp() {
     if !super::super::require_postgres_backend() {
         return;
@@ -311,7 +308,6 @@ impl EmbeddingProvider for FixedModelProvider {
 
 /// A workspace stamped with a model name (`workspace_workspaces.embedding_model`) must refuse a sync whose provider reports a different model, even though both produce 768-dimensional vectors and the dimension check above cannot see any difference: this is exactly the nomic/multilingual-e5-base coexistence `entity_entities.embedding vector(768)` allows, and the case that check exists to catch.
 #[tokio::test]
-#[serial]
 async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspace_stamp() {
     if !super::super::require_postgres_backend() {
         return;
@@ -402,7 +398,6 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 /// A workspace with no stamp of its own inherits its tenant's `embedding_model`/`embedding_dimensions` as the effective model check target and dimension target.
 /// If the tenant's value and the deployment default are the same, deleting the join would pass this test, so the tenant is set to a different model than the deployment default: removing the join would then cause the test to use the deployment default instead of the tenant's, and the provider mismatch would be caught by the model check.
 #[tokio::test]
-#[serial]
 async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
     if !super::super::require_postgres_backend() {
         return;
@@ -524,7 +519,6 @@ async fn sync_embedding_resolves_the_tenant_tier_of_the_embedding_chain() {
 /// against a 1024 tenant is rejected on width; the `contains("1024")` assertion in the test
 /// proves it was the dimension and not the model check that fired.
 #[tokio::test]
-#[serial]
 async fn sync_embedding_resolves_the_tenant_dimension_tier() {
     if !super::super::require_postgres_backend() {
         return;
@@ -594,7 +588,6 @@ async fn sync_embedding_resolves_the_tenant_dimension_tier() {
 /// `src/tasks/reindex_embeddings.rs`), the two concurrent calls race and the final stamp does
 /// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
-#[serial]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
     if !super::super::require_postgres_backend() {
         return;
@@ -808,7 +801,6 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 /// the old vector in place would still pass the `assert_eq!` on the existing data; without the
 /// `assert_eq!`, a corrupted or zeroed row would pass `assert_ne!` on its own.
 #[tokio::test]
-#[serial]
 async fn reindex_overwrites_existing_entity_embeddings() {
     if !super::super::require_postgres_backend() {
         return;
@@ -994,7 +986,6 @@ async fn reindex_overwrites_existing_entity_embeddings() {
 
 /// The trigram fallback surfaces an entity with no embedding at all, when its data fuzzy-matches `query_text`; an entity with neither an embedding nor a fuzzy match must not appear.
 #[tokio::test]
-#[serial]
 async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
     if !super::super::require_postgres_backend() {
         return;
@@ -1077,7 +1068,6 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// against a SQLite file database to confirm the FTS5 path works end to end, including schema
 /// creation, entity insertion, and trigger-driven index updates.
 #[tokio::test]
-#[serial]
 async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;

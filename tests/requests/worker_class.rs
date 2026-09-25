@@ -1,7 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::worker_class_resolver::WorkerClassAssignmentResolver;
@@ -57,7 +56,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 
 /// Setting, reading and clearing a workspace's own worker-class assignment over REST, matching `embedding_key_set_get_and_clear_round_trip`.
 #[tokio::test]
-#[serial]
 async fn worker_class_set_get_and_clear_round_trip() {
     if !super::super::require_postgres_backend() {
         return;
@@ -123,7 +121,6 @@ async fn worker_class_set_get_and_clear_round_trip() {
 
 /// Re-`PUT`ting a different class replaces the assignment rather than erroring or adding a second row, matching the `ON CONFLICT` upsert `embedding_keys::set`/`llm_keys::set` both use.
 #[tokio::test]
-#[serial]
 async fn setting_a_new_class_replaces_the_old_one() {
     if !super::super::require_postgres_backend() {
         return;
@@ -170,7 +167,6 @@ async fn setting_a_new_class_replaces_the_old_one() {
 
 /// The `WorkerClassResolver` seam returns the workspace's own assignment when one exists, and `None` (falling back to `WorkerClass::Shared`) when it does not, matching `resolver_returns_the_workspace_assignment_when_set_and_none_otherwise`.
 #[tokio::test]
-#[serial]
 async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
     if !super::super::require_postgres_backend() {
         return;

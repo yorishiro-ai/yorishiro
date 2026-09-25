@@ -1,5 +1,4 @@
 use crate::requests::boot_request;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
@@ -9,7 +8,6 @@ use yorishiro::models::{entity_entities, schema_schemas};
 /// A single-version workspace can't tell whether that mapping is correct: every entity lands in the `current` bucket and the per-old-version loop body never runs.
 /// This test forces a second version so the loop actually executes.
 #[tokio::test]
-#[serial]
 async fn drift_and_migration_dry_run_see_a_second_version() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = tenant_tenants::ActiveModel {

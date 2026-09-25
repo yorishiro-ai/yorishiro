@@ -7,7 +7,7 @@ use yorishiro::config::{CONFIG_SKELETON, init};
 use super::CurrentDirGuard;
 
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn init_refuses_existing_file_and_force_replaces_it() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
@@ -26,7 +26,7 @@ fn init_refuses_existing_file_and_force_replaces_it() {
 }
 
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn init_force_creates_an_absent_target() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
@@ -35,7 +35,7 @@ fn init_force_creates_an_absent_target() {
 }
 
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn init_force_replaces_an_existing_regular_file_with_create_new() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
@@ -50,7 +50,7 @@ fn init_force_replaces_an_existing_regular_file_with_create_new() {
 }
 
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn init_force_rejects_a_directory() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
@@ -64,7 +64,7 @@ fn init_force_rejects_a_directory() {
 
 #[cfg(unix)]
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn init_without_force_refuses_a_dangling_symlink() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
@@ -81,7 +81,7 @@ fn init_without_force_refuses_a_dangling_symlink() {
 
 #[cfg(unix)]
 #[test]
-#[serial]
+#[serial(process_environment)]
 fn init_force_replaces_a_dangling_symlink_without_following_it() {
     let directory = tempdir().unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());

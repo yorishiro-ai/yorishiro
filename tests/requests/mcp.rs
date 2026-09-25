@@ -3,7 +3,6 @@ use axum_test::{TestResponse, TestServer};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
 use serde_json::{Value, json};
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
@@ -128,7 +127,6 @@ fn tool_result_json(response: &Value) -> Value {
 /// A server instance is retained by rmcp for the whole session.
 /// Licence changes must therefore gate discovery and dispatch dynamically, not only at construction.
 #[tokio::test]
-#[serial]
 async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
     if !super::super::require_postgres_backend() {
         return;
@@ -181,7 +179,6 @@ async fn mcp_origin_tools_disappear_after_same_session_licence_expiry() {
 /// Origin tools read templates through the control-plane connection, keep schema work on an
 /// RLS-scoped transaction, enforce read/schema scopes, and explicitly commit a successful merge.
 #[tokio::test]
-#[serial]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
     if !super::super::require_postgres_backend() {
         return;
@@ -346,7 +343,6 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
 /// writes and snapshot, and leave an audit record. A lower-scope key receives an isError result
 /// and cannot change the entity.
 #[tokio::test]
-#[serial]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
     if !super::super::require_postgres_backend() {
         return;

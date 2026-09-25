@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
 
@@ -21,7 +20,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 }
 
 #[tokio::test]
-#[serial]
 async fn create_schema_from_a_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
@@ -43,7 +41,6 @@ async fn create_schema_from_a_builtin_template() {
 }
 
 #[tokio::test]
-#[serial]
 async fn create_schema_rejects_an_unknown_template_id() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
@@ -64,7 +61,6 @@ async fn create_schema_rejects_an_unknown_template_id() {
 }
 
 #[tokio::test]
-#[serial]
 async fn list_templates_and_get_template_over_rest() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let Setup { key, .. } = setup(&ctx).await;
@@ -96,7 +92,6 @@ async fn list_templates_and_get_template_over_rest() {
 
 /// A UUID `template_id` names a row in the tenant's own library rather than a built-in template, and resolving it stamps `origin_template_id`/`origin_status`/`origin_snapshot` onto the created schema.
 #[tokio::test]
-#[serial]
 async fn create_schema_from_a_library_template_links_the_origin() {
     if !super::super::require_postgres_backend() {
         return;
@@ -149,7 +144,6 @@ async fn create_schema_from_a_library_template_links_the_origin() {
 
 /// A caller passing no origin on a second version must not silently un-link a schema that was created from a template: `schema_schemas::create_schema` inherits the previous active version's origin when the caller passes `None`.
 #[tokio::test]
-#[serial]
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
     if !super::super::require_postgres_backend() {
         return;

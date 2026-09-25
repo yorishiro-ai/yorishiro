@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
 
@@ -26,7 +25,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// and the cache hit (second entity), and asserts both actually land with the right entity_type
 /// rather than just checking the import didn't error.
 #[tokio::test]
-#[serial]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
     if !super::super::require_postgres_backend() {
         return;

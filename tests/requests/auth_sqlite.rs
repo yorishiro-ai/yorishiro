@@ -3,7 +3,6 @@
 /// These exercise the same signup/login flow as `auth.rs` but boot against a
 /// SQLite backend, confirming the `AuthContext`/`Authorized<R>` SQLite branches
 /// work end to end.
-use serial_test::serial;
 use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -13,7 +12,6 @@ use yorishiro::models::tenancy::{self, MembershipRole};
 /// On SQLite this uses `request_with_create_sqlite` to boot against a temp
 /// file database with `test_sqlite.yaml` config.
 #[tokio::test]
-#[serial]
 async fn signup_then_login_round_trip_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;
@@ -108,7 +106,6 @@ async fn signup_then_login_round_trip_sqlite() {
 /// No workspace is created, so this account cannot log in until an operator runs
 /// `create_workspace` then `create_api_key`.
 #[tokio::test]
-#[serial]
 async fn signup_without_invite_creates_its_own_tenant_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;

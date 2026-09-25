@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
+    #[serial_test::serial(process_environment)]
     fn zero_poll_interval_falls_back_to_safe_default() {
         let previous_threshold = std::env::var_os("YORISHIRO_DB_LOAD_THRESHOLD");
         let previous = std::env::var_os("YORISHIRO_DB_LOAD_POLL_SECS");

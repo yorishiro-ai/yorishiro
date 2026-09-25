@@ -1,5 +1,4 @@
 use crate::requests::boot_request;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{template_templates, tenant_tenants};
 use yorishiro::models::template_templates as templates;
@@ -18,7 +17,6 @@ fn note_definition(name: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
-#[serial]
 async fn list_and_get_respect_tenant_and_community_visibility() {
     if !super::super::require_postgres_backend() {
         return;

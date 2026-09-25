@@ -1,30 +1,13 @@
 //! Verifies `App::seed`'s official-templates publisher tenant does not make base's `/setup` wizard read as already set up.
 
-use super::boot_request;
+use super::{boot_request, with_max_tenants};
 use axum::http::StatusCode;
 use loco_rs::app::Hooks;
 use serial_test::serial;
 use yorishiro::app::App;
 
-/// Sets `YORISHIRO_MAX_TENANTS` for the duration of the future, restoring whatever was there before.
-async fn with_max_tenants<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
-    let previous = std::env::var("YORISHIRO_MAX_TENANTS").ok();
-    // SAFETY: serialized by every test in this binary being #[serial] on the default key.
-    unsafe {
-        std::env::set_var("YORISHIRO_MAX_TENANTS", value);
-    }
-    let result = fut.await;
-    unsafe {
-        match &previous {
-            Some(v) => std::env::set_var("YORISHIRO_MAX_TENANTS", v),
-            None => std::env::remove_var("YORISHIRO_MAX_TENANTS"),
-        }
-    }
-    result
-}
-
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn setup_still_works_after_hooks_seed_has_run() {
     with_max_tenants("1", async move {
         boot_request::<App, _, _>(|request, ctx| async move {

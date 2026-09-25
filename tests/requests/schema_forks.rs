@@ -4,7 +4,6 @@ use axum::http::StatusCode;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{
@@ -53,7 +52,6 @@ async fn insert_reference(
 }
 
 #[tokio::test]
-#[serial]
 async fn schema_fork_crud_copy_follow_and_history_guards() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, source_workspace_id, owner_id, source_key) =
@@ -396,7 +394,6 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
 }
 
 #[tokio::test]
-#[serial]
 async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
     if !super::super::require_postgres_backend() {
         return;
@@ -509,7 +506,6 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
 }
 
 #[tokio::test]
-#[serial]
 async fn schema_forks_reject_transitive_workspace_cycles() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, workspace_a, owner_id, key_a) = fixtures::create_tenant_workspace_owner(
@@ -601,7 +597,6 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
 }
 
 #[tokio::test]
-#[serial]
 async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
     if !super::super::require_postgres_backend() {
         return;
@@ -714,7 +709,6 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
 }
 
 #[tokio::test]
-#[serial]
 async fn fork_creation_shares_the_schema_version_lock() {
     if !super::super::require_postgres_backend() {
         return;
@@ -800,7 +794,6 @@ async fn fork_creation_shares_the_schema_version_lock() {
 }
 
 #[tokio::test]
-#[serial]
 async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
     if !super::super::require_postgres_backend() {
         return;
@@ -917,7 +910,6 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
     if !super::super::require_sqlite_backend() {
         return;

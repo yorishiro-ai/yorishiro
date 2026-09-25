@@ -8,7 +8,7 @@ use yorishiro::config::{CANONICAL_CONFIG_FILE, load};
 use super::{CurrentDirGuard, EnvGuard};
 
 #[tokio::test]
-#[serial]
+#[serial(process_environment)]
 async fn canonical_file_rejects_tera_and_get_env_syntax() {
     let directory = tempdir().unwrap();
     fs::write(
@@ -23,7 +23,7 @@ async fn canonical_file_rejects_tera_and_get_env_syntax() {
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
     ]);
-    unsafe { std::env::remove_var("YORISHIRO_CONFIG_PATH") };
+    _guard.remove("YORISHIRO_CONFIG_PATH");
     let error = load(&Environment::Development)
         .await
         .unwrap_err()

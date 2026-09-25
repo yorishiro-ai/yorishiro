@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -47,7 +46,6 @@ async fn issue_key_for(
 }
 
 #[tokio::test]
-#[serial]
 async fn owner_can_create_list_view_and_delete_workspaces() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
@@ -111,7 +109,6 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 }
 
 #[tokio::test]
-#[serial]
 async fn cannot_delete_a_tenants_only_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
@@ -133,7 +130,6 @@ async fn cannot_delete_a_tenants_only_workspace() {
 }
 
 #[tokio::test]
-#[serial]
 async fn member_role_cannot_create_or_delete_workspaces() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_id, main_id) = setup_tenant(&ctx, "acme").await;
@@ -169,7 +165,6 @@ async fn member_role_cannot_create_or_delete_workspaces() {
 }
 
 #[tokio::test]
-#[serial]
 async fn workspaces_endpoints_require_authentication() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
@@ -179,7 +174,6 @@ async fn workspaces_endpoints_require_authentication() {
 }
 
 #[tokio::test]
-#[serial]
 async fn workspace_endpoints_enforce_tenant_isolation() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant_a, workspace_a) = setup_tenant(&ctx, "acme").await;

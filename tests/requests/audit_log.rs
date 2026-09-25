@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
@@ -39,7 +38,6 @@ async fn setup(ctx: &loco_rs::app::AppContext, tenant_name: &str) -> Setup {
 /// `set_maintenance` is recorded, and an `audit`-permission key (holding no `Migration` scope at
 /// all) can read the row back; the acting key's own scope never had to be raised for this.
 #[tokio::test]
-#[serial]
 async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
     if !super::super::require_postgres_backend() {
         return;
@@ -91,7 +89,6 @@ async fn set_maintenance_is_recorded_and_readable_by_an_audit_key() {
 
 /// `undo_migration_job` is recorded on the same transaction as the undo itself.
 #[tokio::test]
-#[serial]
 async fn undo_migration_job_is_recorded() {
     if !super::super::require_postgres_backend() {
         return;
@@ -176,7 +173,6 @@ async fn undo_migration_job_is_recorded() {
 /// `audit` grant.
 /// If `audit` had been added as a fifth rung above `Migration` instead, this would 200.
 #[tokio::test]
-#[serial]
 async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
     if !super::super::require_postgres_backend() {
         return;
@@ -203,7 +199,6 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
 /// tenant B's audit key must not see tenant A's audit trail, even though both rows live in the
 /// same table.
 #[tokio::test]
-#[serial]
 async fn an_audit_key_cannot_read_another_tenants_audit_log() {
     if !super::super::require_postgres_backend() {
         return;

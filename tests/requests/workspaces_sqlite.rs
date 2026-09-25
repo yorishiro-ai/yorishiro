@@ -2,7 +2,6 @@
 ///
 /// These exercise the same workspace create/list/delete flow as `workspaces.rs`
 /// but boot against a SQLite backend.
-use serial_test::serial;
 use axum::http::StatusCode;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
@@ -51,7 +50,6 @@ async fn issue_key_for(
 
 /// An owner can create, list, view, and delete workspaces.
 #[tokio::test]
-#[serial]
 async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;
@@ -124,7 +122,6 @@ async fn owner_can_create_list_view_and_delete_workspaces_sqlite() {
 
 /// Workspace endpoints require authentication.
 #[tokio::test]
-#[serial]
 async fn workspaces_endpoints_require_authentication_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;

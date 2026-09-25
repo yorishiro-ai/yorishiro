@@ -1,7 +1,6 @@
 use super::boot_request;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
-use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::ee::services::embedding_resolver::EmbeddingKeyResolver;
@@ -58,7 +57,6 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
 /// Setting, reading and clearing a workspace's own embedding provider over REST.
 /// The key itself never comes back from GET, only what it configured, matching `llm_key_set_get_and_clear_round_trip`.
 #[tokio::test]
-#[serial]
 async fn embedding_key_set_get_and_clear_round_trip() {
     if !super::super::require_postgres_backend() {
         return;
@@ -138,7 +136,6 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 
 /// A scheme that could never be an embeddings endpoint is refused before anything is stored, matching `a_non_http_base_url_is_refused`.
 #[tokio::test]
-#[serial]
 async fn a_non_http_base_url_is_refused() {
     if !super::super::require_postgres_backend() {
         return;
@@ -174,7 +171,6 @@ async fn a_non_http_base_url_is_refused() {
 
 /// Assigning a provider whose `dimensions` does not match a workspace's own stamped `embedding_dimensions` is refused at configuration time, not discovered only on the next entity write (`sync_embedding`'s own write-time guard, `services/embedding/sync.rs`, is the backstop this is in front of, not a replacement for it).
 #[tokio::test]
-#[serial]
 async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_reindex() {
     if !super::super::require_postgres_backend() {
         return;
@@ -231,7 +227,6 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
 
 /// The `WorkspaceEmbeddingResolver` seam returns the workspace's own assignment when one exists, and `None` (falling back to the deployment default) when it does not: the two outcomes every caller of `resolve_embedding_provider` branches on.
 #[tokio::test]
-#[serial]
 async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise() {
     if !super::super::require_postgres_backend() {
         return;

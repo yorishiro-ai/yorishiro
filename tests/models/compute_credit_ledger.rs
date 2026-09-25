@@ -1,13 +1,11 @@
 use crate::requests::boot_request;
 use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::ee::models::compute_credit_ledger as ledger;
 use yorishiro::models::_entities::{tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 
 #[tokio::test]
-#[serial]
 async fn actual_debit_never_overdraws_the_append_only_balance() {
     boot_request::<App, _, _>(|_request, ctx| async move {
         let tenant = tenant_tenants::ActiveModel {

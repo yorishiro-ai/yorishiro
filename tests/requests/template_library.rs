@@ -1,6 +1,5 @@
 use super::boot_request;
 use axum::http::StatusCode;
-use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::services::auth::ApiKeyScope;
@@ -54,7 +53,6 @@ fn note_definition() -> serde_json::Value {
 }
 
 #[tokio::test]
-#[serial]
 async fn owner_can_create_update_and_delete_a_template() {
     if !super::super::require_postgres_backend() {
         return;
@@ -109,7 +107,6 @@ async fn owner_can_create_update_and_delete_a_template() {
 }
 
 #[tokio::test]
-#[serial]
 async fn member_role_cannot_manage_the_template_library() {
     if !super::super::require_postgres_backend() {
         return;
@@ -132,7 +129,6 @@ async fn member_role_cannot_manage_the_template_library() {
 
 /// Community visibility makes a template *readable* across tenants, not writable: only the owning tenant may update or delete it (fork creates a new row owned by the caller, so it doesn't need this guard, but update/delete do).
 #[tokio::test]
-#[serial]
 async fn another_tenant_cannot_update_or_delete_a_community_template() {
     if !super::super::require_postgres_backend() {
         return;
@@ -192,7 +188,6 @@ async fn another_tenant_cannot_update_or_delete_a_community_template() {
 }
 
 #[tokio::test]
-#[serial]
 async fn fork_copies_a_community_template_into_the_forking_tenants_own_library() {
     if !super::super::require_postgres_backend() {
         return;

@@ -93,7 +93,7 @@ async fn shared_tag_dequeues_the_probe(queue: Arc<bgworker::Queue>) {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(queue_postgres)]
 async fn postgres_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_them() {
     if !crate::require_postgres_backend() {
         return;
@@ -130,7 +130,7 @@ async fn postgres_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_t
 }
 
 #[tokio::test]
-#[serial]
+#[serial(queue_postgres)]
 async fn sqlite_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_them() {
     let directory = tempfile::tempdir().expect("queue tempdir");
     let uri = format!(
