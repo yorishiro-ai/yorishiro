@@ -1,7 +1,9 @@
 /// Tests for metaschema definition validation.
+use std::collections::BTreeMap;
+
 use proptest::prelude::*;
 use serde_json::json;
-use std::collections::BTreeMap;
+
 use yorishiro::error::YorishiroError;
 use yorishiro::metaschema::{
     ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MAX_OBJECT_DEPTH, MetaSchemaDefinition,
