@@ -7,7 +7,7 @@
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 
-.PHONY: check clippy fmt fmt-check test-postgres test-sqlite build task doctor entities
+.PHONY: check clippy fmt fmt-check coverage test-postgres test-sqlite build task doctor entities
 
 check:
 	cargo check --locked --workspace
@@ -20,6 +20,11 @@ fmt:
 
 fmt-check:
 	cargo fmt --all -- --check
+
+# Nightly is required because LLVM branch coverage is not available on stable.
+# Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
+coverage:
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres python3 scripts/coverage_report.py
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build

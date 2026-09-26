@@ -4,6 +4,7 @@
 .opencode/
 
 /target
+/coverage
 *.swp
 *.swo
 .env
