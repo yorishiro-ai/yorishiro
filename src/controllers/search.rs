@@ -23,6 +23,7 @@ pub struct SearchEntitiesParams {
     pub limit: Option<i64>,
 }
 
+#[utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [super::openapi::SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn search_entities(
     State(ctx): State<AppContext>,
     // `Verified`, not `Authorized`: no connection is acquired here until after the slow embedding call below.
@@ -76,6 +77,10 @@ pub async fn search_entities(
     )
     .await?;
     Ok(Json(hits))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![super::route_inventory::path_doc(__path_search_entities)]
 }
 
 pub fn routes() -> Routes {

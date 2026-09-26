@@ -52,6 +52,7 @@ pub struct ListEntitiesParams {
     pub page: crate::controllers::PageParams,
 }
 
+#[utoipa::path(post, path = "/api/entities", request_body = super::openapi::CreateEntityRequest, responses((status = 201, body = super::openapi::EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn create_entity(
     State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
@@ -70,6 +71,7 @@ pub async fn create_entity(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
+#[utoipa::path(get, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_entity(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
@@ -79,6 +81,7 @@ pub async fn get_entity(
     Ok(Json(record))
 }
 
+#[utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = super::openapi::UpdateEntityRequest, responses((status = 200, body = super::openapi::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn update_entity(
     State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
@@ -94,6 +97,7 @@ pub async fn update_entity(
     Ok(Json(record))
 }
 
+#[utoipa::path(delete, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Entity deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn delete_entity(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
@@ -104,6 +108,7 @@ pub async fn delete_entity(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(get, path = "/api/entities", params(("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query), ("schema_version" = Option<i32>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::EntityRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,
@@ -123,6 +128,7 @@ pub async fn list_entities(
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
 /// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. `ee/`'s fill-proposal confirmation), not an ordinary entity write.
+#[utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 200, body = super::openapi::UndoReport), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community")]
 pub async fn undo_migration_job(
     authorized: Authorized<MigrationScope>,
     Path(job_id): Path<Uuid>,
@@ -162,6 +168,7 @@ pub async fn undo_migration_job(
 ///
 /// Returns 503 when no queue provider is configured: `perform_later` would silently return
 /// a job ID while discarding the job, which is worse than no endpoint at all.
+#[utoipa::path(post, path = "/api/migration-jobs/reindex", responses((status = 200, body = super::openapi::ReindexResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community")]
 pub async fn reindex_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
@@ -221,6 +228,7 @@ pub struct ReindexResponse {
 /// updated data.
 ///
 /// Returns 409 when the workspace has no entities behind the active version.
+#[utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = super::openapi::FillDefaultsRequest, responses((status = 200, body = super::openapi::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community")]
 pub async fn fill_defaults(
     authorized: Authorized<MigrationScope>,
     Json(body): Json<FillDefaultsRequest>,
@@ -277,4 +285,17 @@ pub fn migration_routes() -> Routes {
         .add("/{job_id}/undo", post(undo_migration_job))
         .add("/reindex", post(reindex_workspace))
         .add("/fill-defaults", post(fill_defaults))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_create_entity),
+        super::route_inventory::path_doc(__path_get_entity),
+        super::route_inventory::path_doc(__path_update_entity),
+        super::route_inventory::path_doc(__path_delete_entity),
+        super::route_inventory::path_doc(__path_list_entities),
+        super::route_inventory::path_doc(__path_undo_migration_job),
+        super::route_inventory::path_doc(__path_reindex_workspace),
+        super::route_inventory::path_doc(__path_fill_defaults),
+    ]
 }

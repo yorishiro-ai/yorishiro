@@ -33,6 +33,7 @@ pub struct SetupStatusResponse {
     pub setup_required: bool,
 }
 
+#[utoipa::path(get, path = "/setup/status", responses((status = 200, body = super::openapi::SetupStatusResponse)), security(()), tag = "community")]
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if wizard_enabled() {
         tenancy::count_tenants(&ctx.db).await? == 0
@@ -59,6 +60,7 @@ pub struct SetupResponse {
     pub api_key: String,
 }
 
+#[utoipa::path(post, path = "/setup", request_body = super::openapi::SetupRequest, responses((status = 201, body = super::openapi::SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community")]
 pub async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
@@ -136,6 +138,13 @@ pub async fn setup(
             api_key: created.plaintext,
         }),
     ))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_status),
+        super::route_inventory::path_doc(__path_setup),
+    ]
 }
 
 pub fn routes() -> Routes {

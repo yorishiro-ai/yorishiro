@@ -29,6 +29,7 @@ pub(crate) async fn require_tenant_admin(
     Ok(())
 }
 
+#[utoipa::path(get, path = "/api/members", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::MembershipRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
 pub async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -47,6 +48,7 @@ pub struct AddMemberRequest {
     pub role: MembershipRole,
 }
 
+#[utoipa::path(post, path = "/api/members", request_body = super::openapi::AddMemberRequest, responses((status = 201, body = super::openapi::MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
 pub async fn add_member(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -74,6 +76,13 @@ pub async fn add_member(
             role: body.role,
         }),
     ))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_list_members),
+        super::route_inventory::path_doc(__path_add_member),
+    ]
 }
 
 pub fn routes() -> Routes {

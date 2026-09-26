@@ -10,6 +10,7 @@ use crate::models::import::{self, ImportResult};
 /// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
 ///
 /// All-or-nothing: on the first error the request fails with that error and, because the handler never reaches `Authorized::commit()`, nothing imported so far is applied.
+#[utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 200, body = super::openapi::ImportResult), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community")]
 pub async fn import_jsonl(
     authorized: Authorized<SchemaScope>,
     body: String,
@@ -27,6 +28,10 @@ pub async fn import_jsonl(
     .await?;
     authorized.commit().await?;
     Ok(Json(result))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![super::route_inventory::path_doc(__path_import_jsonl)]
 }
 
 pub fn routes() -> Routes {

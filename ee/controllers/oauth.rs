@@ -63,6 +63,7 @@ pub struct OAuthStatus {
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
 /// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
+#[utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise")]
 async fn status() -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_env()?.is_some(),
@@ -71,6 +72,7 @@ async fn status() -> Result<Json<OAuthStatus>, ApiError> {
 
 /// `GET /auth/oauth/authorize`: starts the login flow by redirecting the browser to the identity provider's own authorization endpoint.
 /// Also sets the CSRF cookie that `callback` checks the returning `state` against: without it, `state`'s HMAC signature alone only proves this server issued *some* state, not that the browser presenting it at callback time is the one that started this flow.
+#[utoipa::path(get, path = "/auth/oauth/authorize", responses((status = 302, description = "Redirects to the configured identity provider"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise")]
 async fn authorize() -> Result<Response, ApiError> {
     let config = OAuthConfig::from_env()?.ok_or_else(not_found)?;
 
@@ -96,6 +98,7 @@ struct CallbackParams {
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
 /// Exchanges the authorization code for tokens, verifies the ID token, resolves (or auto-provisions) the Yorishiro user/tenant/workspace it corresponds to, issues an API key exactly the way `POST /auth/login` does, and hands it to the client via a URL fragment (`#api_key=...`), a fragment rather than a query parameter so the key never appears in server access logs or gets sent back to any server in a `Referer` header.
+#[utoipa::path(get, path = "/auth/oauth/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query), ("error" = Option<String>, Query)), responses((status = 302, description = "Redirects to the application login result"), (status = 400, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise")]
 async fn callback(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -153,6 +156,14 @@ async fn callback(
     .await?;
 
     Ok(login_success_redirect(&created.plaintext, clear_cookie))
+}
+
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+    vec![
+        crate::controllers::route_inventory::path_doc(__path_status),
+        crate::controllers::route_inventory::path_doc(__path_authorize),
+        crate::controllers::route_inventory::path_doc(__path_callback),
+    ]
 }
 
 fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {

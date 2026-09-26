@@ -24,6 +24,7 @@ pub struct SetWorkerClassRequest {
 }
 
 /// `PUT /api/workspace/worker-class`
+#[utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
 async fn set_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -36,6 +37,7 @@ async fn set_worker_class(
 }
 
 /// `GET /api/workspace/worker-class`
+#[utoipa::path(get, path = "/api/workspace/worker-class", responses((status = 200, body = crate::controllers::openapi::WorkerClassResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise")]
 async fn get_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -51,6 +53,7 @@ async fn get_worker_class(
 }
 
 /// `DELETE /api/workspace/worker-class`
+#[utoipa::path(delete, path = "/api/workspace/worker-class", responses((status = 204, description = "Worker class reset"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
 async fn delete_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -59,6 +62,14 @@ async fn delete_worker_class(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     worker_classes::clear(&ctx.db, auth_ctx.workspace_id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+    vec![
+        crate::controllers::route_inventory::path_doc(__path_set_worker_class),
+        crate::controllers::route_inventory::path_doc(__path_get_worker_class),
+        crate::controllers::route_inventory::path_doc(__path_delete_worker_class),
+    ]
 }
 
 pub fn routes() -> Routes {

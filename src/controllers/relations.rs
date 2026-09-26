@@ -38,6 +38,7 @@ pub struct SetRelationStatusRequest {
     pub status: RelationStatus,
 }
 
+#[utoipa::path(post, path = "/api/relations", request_body = super::openapi::CreateRelationRequest, responses((status = 201, body = super::openapi::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn create_relation(
     authorized: Authorized<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
@@ -54,6 +55,7 @@ pub async fn create_relation(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
+#[utoipa::path(get, path = "/api/relations/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_relation(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
@@ -63,6 +65,7 @@ pub async fn get_relation(
     Ok(Json(record))
 }
 
+#[utoipa::path(delete, path = "/api/relations/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Relation deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn delete_relation(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
@@ -73,6 +76,7 @@ pub async fn delete_relation(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(get, path = "/api/relations", params(("source_id" = Option<Uuid>, Query), ("target_id" = Option<Uuid>, Query), ("relation_type" = Option<String>, Query), ("status" = Option<super::openapi::RelationStatus>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::RelationRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,
@@ -90,6 +94,7 @@ pub async fn list_relations(
     Ok(Json(records))
 }
 
+#[utoipa::path(put, path = "/api/relations/{id}/status", params(("id" = Uuid, Path)), request_body = super::openapi::SetRelationStatusRequest, responses((status = 200, body = super::openapi::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn set_relation_status(
     authorized: Authorized<WriteScope>,
     Path(id): Path<Uuid>,
@@ -100,6 +105,16 @@ pub async fn set_relation_status(
         entity_relations::set_status(authorized.txn(), workspace_id, id, body.status).await?;
     authorized.commit().await?;
     Ok(Json(record))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_create_relation),
+        super::route_inventory::path_doc(__path_get_relation),
+        super::route_inventory::path_doc(__path_delete_relation),
+        super::route_inventory::path_doc(__path_list_relations),
+        super::route_inventory::path_doc(__path_set_relation_status),
+    ]
 }
 
 pub fn routes() -> Routes {

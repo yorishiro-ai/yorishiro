@@ -14,6 +14,7 @@ mod mcp;
 mod members;
 mod oauth;
 mod official_templates;
+mod openapi;
 mod origin;
 mod queue;
 mod schema_forks;
