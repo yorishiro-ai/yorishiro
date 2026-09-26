@@ -86,6 +86,137 @@ pub(crate) fn compose_tool_routers(
     composed
 }
 
+#[cfg(test)]
+mod input_parity_tests {
+    use super::*;
+    use crate::controllers::{entities as rest_entities, relations as rest_relations};
+    use crate::models::{entity_entities, entity_relations};
+    use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn entity_rest_and_mcp_adapters_build_equivalent_inputs() {
+        let rest: entity_entities::CreateEntityInput = rest_entities::CreateEntityRequest {
+            schema_name: "notes".into(),
+            entity_type: "note".into(),
+            data: json!({"title": "hello"}),
+        }
+        .into();
+        let mcp: entity_entities::CreateEntityInput = entities::CreateEntityArgs {
+            schema_name: "notes".into(),
+            entity_type: "note".into(),
+            data: json!({"title": "hello"}),
+        }
+        .into();
+
+        assert_eq!(rest.schema_name, mcp.schema_name);
+        assert_eq!(rest.entity_type, mcp.entity_type);
+        assert_eq!(rest.data, mcp.data);
+
+        let rest_query: entity_entities::ListEntitiesQuery = rest_entities::ListEntitiesParams {
+            entity_type: Some("note".into()),
+            filter: Some(r#"{"title":"hello"}"#.into()),
+            schema_version: Some(2),
+            page: crate::controllers::PageParams(loco_rs::model::query::PaginationQuery {
+                page: 3,
+                page_size: 7,
+            }),
+        }
+        .try_into()
+        .expect("REST entity query");
+        let mcp_query: entity_entities::ListEntitiesQuery = entities::ListEntitiesArgs {
+            entity_type: Some("note".into()),
+            filter: Some(json!({"title": "hello"})),
+            schema_version: Some(2),
+            limit: Some(7),
+            offset: Some(14),
+        }
+        .try_into()
+        .expect("MCP entity query");
+
+        assert_eq!(rest_query.entity_type, mcp_query.entity_type);
+        assert_eq!(rest_query.filter, mcp_query.filter);
+        assert_eq!(rest_query.schema_version, mcp_query.schema_version);
+        assert_eq!(rest_query.page.limit(), mcp_query.page.limit());
+        assert_eq!(rest_query.page.offset(), mcp_query.page.offset());
+    }
+
+    #[test]
+    fn relation_rest_and_mcp_adapters_build_equivalent_inputs() {
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        let rest: entity_relations::CreateRelationInput = rest_relations::CreateRelationRequest {
+            source_id,
+            target_id,
+            relation_type: "knows".into(),
+            properties: None,
+        }
+        .into();
+        let mcp: entity_relations::CreateRelationInput = relations::CreateRelationArgs {
+            source_id,
+            target_id,
+            relation_type: "knows".into(),
+            properties: None,
+        }
+        .into();
+
+        assert_eq!(rest.source_id, mcp.source_id);
+        assert_eq!(rest.target_id, mcp.target_id);
+        assert_eq!(rest.relation_type, mcp.relation_type);
+        assert_eq!(rest.properties, mcp.properties);
+
+        let rest_query: entity_relations::ListRelationsQuery =
+            rest_relations::ListRelationsParams {
+                source_id: Some(source_id),
+                target_id: Some(target_id),
+                relation_type: Some("knows".into()),
+                status: Some(entity_relations::RelationStatus::Deprecated),
+                page: crate::controllers::PageParams(loco_rs::model::query::PaginationQuery {
+                    page: 2,
+                    page_size: 5,
+                }),
+            }
+            .into();
+        let mcp_query: entity_relations::ListRelationsQuery = relations::ListRelationsArgs {
+            source_id: Some(source_id),
+            target_id: Some(target_id),
+            relation_type: Some("knows".into()),
+            status: Some("deprecated".into()),
+            limit: Some(5),
+            offset: Some(5),
+        }
+        .try_into()
+        .expect("MCP relation query");
+
+        assert_eq!(rest_query.source_id, mcp_query.source_id);
+        assert_eq!(rest_query.target_id, mcp_query.target_id);
+        assert_eq!(rest_query.relation_type, mcp_query.relation_type);
+        assert_eq!(rest_query.status, mcp_query.status);
+        assert_eq!(rest_query.page.limit(), mcp_query.page.limit());
+        assert_eq!(rest_query.page.offset(), mcp_query.page.offset());
+    }
+
+    #[test]
+    fn mcp_closed_relation_values_fail_before_model_query_conversion() {
+        let result: Result<entity_relations::ListRelationsQuery, _> =
+            relations::ListRelationsArgs {
+                source_id: None,
+                target_id: None,
+                relation_type: None,
+                status: Some("unknown".into()),
+                limit: None,
+                offset: None,
+            }
+            .try_into();
+
+        match result {
+            Err(crate::YorishiroError::ValidationFailed { .. }) => {}
+            Ok(_) => panic!("invalid status must be rejected"),
+            Err(error) => panic!("unexpected validation error: {error:?}"),
+        }
+    }
+}
+
 #[tool_handler(router = self.tool_router.clone())]
 impl ServerHandler for YorishiroMcpServer {
     async fn call_tool(

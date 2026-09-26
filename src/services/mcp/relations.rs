@@ -11,8 +11,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
-use crate::models::entity_relations::{self, RelationStatus};
+use crate::models::entity_relations::{self, SetRelationStatusInput};
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -57,6 +56,36 @@ pub struct SetRelationStatusArgs {
     pub status: String,
 }
 
+impl From<CreateRelationArgs> for entity_relations::CreateRelationInput {
+    fn from(args: CreateRelationArgs) -> Self {
+        Self {
+            source_id: args.source_id,
+            target_id: args.target_id,
+            relation_type: args.relation_type,
+            properties: args.properties.unwrap_or_else(|| serde_json::json!({})),
+        }
+    }
+}
+
+impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
+    type Error = crate::YorishiroError;
+
+    fn try_from(args: ListRelationsArgs) -> Result<Self, Self::Error> {
+        let status = args
+            .status
+            .as_deref()
+            .map(entity_relations::parse_relation_status)
+            .transpose()?;
+        Ok(Self {
+            source_id: args.source_id,
+            target_id: args.target_id,
+            relation_type: args.relation_type,
+            status,
+            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
+        })
+    }
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_relations)]
 impl YorishiroMcpServer {
     #[tool(
@@ -75,12 +104,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let input = entity_relations::CreateRelationInput {
-            source_id: args.source_id,
-            target_id: args.target_id,
-            relation_type: args.relation_type,
-            properties: args.properties.unwrap_or_else(|| serde_json::json!({})),
-        };
+        let input = args.into();
 
         let workspace_id = authorized.ctx.workspace_id;
         let record = match entity_relations::create(authorized.txn(), workspace_id, input).await {
@@ -141,32 +165,9 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let status = match args.status.as_deref() {
-            Some(value) => match RelationStatus::from_db_str(value) {
-                Some(status) => Some(status),
-                None => {
-                    return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
-                        message: format!("'{value}' is not a relation status"),
-                        details: vec![ValidationDetail {
-                            field: "/status".into(),
-                            problem: "expected active, deprecated, or archived".into(),
-                            code: ValidationErrorCode::Other,
-                            expected: Some("active, deprecated, archived".into()),
-                            actual: Some(value.into()),
-                        }],
-                        hint: "use active, deprecated, or archived".into(),
-                    }));
-                }
-            },
-            None => None,
-        };
-
-        let query = entity_relations::ListRelationsQuery {
-            source_id: args.source_id,
-            target_id: args.target_id,
-            relation_type: args.relation_type,
-            status,
-            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
+        let query = match args.try_into() {
+            Ok(query) => query,
+            Err(err) => return Ok(err_to_tool_result(err)),
         };
 
         let workspace_id = authorized.ctx.workspace_id;
@@ -194,29 +195,23 @@ impl YorishiroMcpServer {
         };
 
         let workspace_id = authorized.ctx.workspace_id;
-        let status = match RelationStatus::from_db_str(&args.status) {
-            Some(status) => status,
-            None => {
-                return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
-                    message: format!("'{}' is not a relation status", args.status),
-                    details: vec![ValidationDetail {
-                        field: "/status".into(),
-                        problem: "expected active, deprecated, or archived".into(),
-                        code: ValidationErrorCode::Other,
-                        expected: Some("active, deprecated, archived".into()),
-                        actual: Some(args.status),
-                    }],
-                    hint: "use active, deprecated, or archived".into(),
-                }));
-            }
+        let status = match entity_relations::parse_relation_status(&args.status) {
+            Ok(status) => status,
+            Err(err) => return Ok(err_to_tool_result(err)),
         };
-        let record =
-            match entity_relations::set_status(authorized.txn(), workspace_id, args.id, status)
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let record = match entity_relations::set_status(
+            authorized.txn(),
+            workspace_id,
+            SetRelationStatusInput {
+                id: args.id,
+                status,
+            },
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         authorized.commit().await?;
         ok_json(record)
     }

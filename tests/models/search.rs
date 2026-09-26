@@ -1160,9 +1160,11 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             entity_entities::update(
                 &ctx.db,
                 workspace_id,
-                rec.id,
-                serde_json::json!({ "title": "quarterly board meeting notes" }),
-                None,
+                entity_entities::UpdateEntityInput {
+                    id: rec.id,
+                    data: serde_json::json!({ "title": "quarterly board meeting notes" }),
+                    updated_by: None,
+                },
             )
             .await
             .expect("update entity");

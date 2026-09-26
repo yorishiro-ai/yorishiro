@@ -174,9 +174,11 @@ impl EmbeddingProvider for ConcurrentModificationProvider {
             entity_entities::update(
                 &self.conn,
                 self.workspace_id,
-                self.target_entity_id,
-                serde_json::json!({ "title": "modified concurrently with the reindex" }),
-                None,
+                entity_entities::UpdateEntityInput {
+                    id: self.target_entity_id,
+                    data: serde_json::json!({ "title": "modified concurrently with the reindex" }),
+                    updated_by: None,
+                },
             )
             .await
             .expect("concurrent update");

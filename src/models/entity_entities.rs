@@ -72,6 +72,12 @@ pub struct CreateEntityInput {
     pub data: Value,
 }
 
+pub struct UpdateEntityInput {
+    pub id: Uuid,
+    pub data: Value,
+    pub updated_by: Option<Uuid>,
+}
+
 #[derive(Default)]
 pub struct ListEntitiesQuery {
     pub entity_type: Option<String>,
@@ -289,20 +295,18 @@ pub async fn get_batch(
 pub async fn update(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    id: Uuid,
-    data: Value,
-    updated_by: Option<Uuid>,
+    input: UpdateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
-    let existing = get(conn, workspace_id, id).await?;
+    let existing = get(conn, workspace_id, input.id).await?;
     let schema =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
-    validate_data(entity_type_def, &data)?;
+    validate_data(entity_type_def, &input.data)?;
 
     let active = ActiveModel {
-        id: ActiveValue::Unchanged(id),
-        data: ActiveValue::Set(data),
-        updated_by: ActiveValue::Set(updated_by),
+        id: ActiveValue::Unchanged(input.id),
+        data: ActiveValue::Set(input.data),
+        updated_by: ActiveValue::Set(input.updated_by),
         ..Default::default()
     };
     active.update(conn).await.internal().map(EntityRecord::from)

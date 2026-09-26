@@ -137,9 +137,11 @@ async fn undo_migration_job_is_recorded() {
         yorishiro::models::entity_entities::update(
             &ctx.db,
             setup.workspace_id,
-            entity.id,
-            serde_json::json!({ "title": "overwritten" }),
-            None,
+            yorishiro::models::entity_entities::UpdateEntityInput {
+                id: entity.id,
+                data: serde_json::json!({ "title": "overwritten" }),
+                updated_by: None,
+            },
         )
         .await
         .expect("overwrite entity");

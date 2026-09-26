@@ -38,18 +38,36 @@ pub struct SetRelationStatusRequest {
     pub status: RelationStatus,
 }
 
+impl From<CreateRelationRequest> for entity_relations::CreateRelationInput {
+    fn from(request: CreateRelationRequest) -> Self {
+        Self {
+            source_id: request.source_id,
+            target_id: request.target_id,
+            relation_type: request.relation_type,
+            properties: request.properties.unwrap_or_else(|| serde_json::json!({})),
+        }
+    }
+}
+
+impl From<ListRelationsParams> for entity_relations::ListRelationsQuery {
+    fn from(params: ListRelationsParams) -> Self {
+        Self {
+            source_id: params.source_id,
+            target_id: params.target_id,
+            relation_type: params.relation_type,
+            status: params.status,
+            page: params.page.into(),
+        }
+    }
+}
+
 #[utoipa::path(post, path = "/api/relations", request_body = super::openapi::CreateRelationRequest, responses((status = 201, body = super::openapi::RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn create_relation(
     authorized: Authorized<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let input = entity_relations::CreateRelationInput {
-        source_id: body.source_id,
-        target_id: body.target_id,
-        relation_type: body.relation_type,
-        properties: body.properties.unwrap_or_else(|| serde_json::json!({})),
-    };
+    let input = body.into();
     let record = entity_relations::create(authorized.txn(), workspace_id, input).await?;
     authorized.commit().await?;
     Ok((StatusCode::CREATED, Json(record)))
@@ -81,13 +99,7 @@ pub async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
-    let query = entity_relations::ListRelationsQuery {
-        source_id: params.source_id,
-        target_id: params.target_id,
-        relation_type: params.relation_type,
-        status: params.status,
-        page: params.page.into(),
-    };
+    let query = params.into();
 
     let workspace_id = authorized.ctx.workspace_id;
     let records = entity_relations::list(authorized.txn(), workspace_id, query).await?;
@@ -101,8 +113,15 @@ pub async fn set_relation_status(
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let record =
-        entity_relations::set_status(authorized.txn(), workspace_id, id, body.status).await?;
+    let record = entity_relations::set_status(
+        authorized.txn(),
+        workspace_id,
+        entity_relations::SetRelationStatusInput {
+            id,
+            status: body.status,
+        },
+    )
+    .await?;
     authorized.commit().await?;
     Ok(Json(record))
 }
