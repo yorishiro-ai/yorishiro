@@ -85,9 +85,11 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
         entity_entities::update(
             &ctx.db,
             setup.workspace_id,
-            survivor.id,
-            serde_json::json!({ "title": "overwritten" }),
-            None,
+            entity_entities::UpdateEntityInput {
+                id: survivor.id,
+                data: serde_json::json!({ "title": "overwritten" }),
+                updated_by: None,
+            },
         )
         .await
         .expect("overwrite survivor");

@@ -67,6 +67,29 @@ pub struct ListEntitiesArgs {
     pub offset: Option<i64>,
 }
 
+impl From<CreateEntityArgs> for entity_entities::CreateEntityInput {
+    fn from(args: CreateEntityArgs) -> Self {
+        Self {
+            schema_name: args.schema_name,
+            entity_type: args.entity_type,
+            data: args.data,
+        }
+    }
+}
+
+impl TryFrom<ListEntitiesArgs> for entity_entities::ListEntitiesQuery {
+    type Error = crate::YorishiroError;
+
+    fn try_from(args: ListEntitiesArgs) -> Result<Self, Self::Error> {
+        Ok(Self {
+            entity_type: args.entity_type,
+            filter: args.filter,
+            schema_version: args.schema_version,
+            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
+        })
+    }
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_entities)]
 impl YorishiroMcpServer {
     #[tool(description = "Create a new entity (requires write scope)")]
@@ -80,11 +103,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let input = entity_entities::CreateEntityInput {
-            schema_name: args.schema_name,
-            entity_type: args.entity_type,
-            data: args.data,
-        };
+        let input = args.into();
 
         let workspace_id = authorized.ctx.workspace_id;
         let created_by = authorized.ctx.user_id;
@@ -141,9 +160,11 @@ impl YorishiroMcpServer {
         let record = match entity_entities::update(
             authorized.txn(),
             workspace_id,
-            args.id,
-            args.data,
-            updated_by,
+            entity_entities::UpdateEntityInput {
+                id: args.id,
+                data: args.data,
+                updated_by,
+            },
         )
         .await
         {
@@ -188,11 +209,9 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        let query = entity_entities::ListEntitiesQuery {
-            entity_type: args.entity_type,
-            filter: args.filter,
-            schema_version: args.schema_version,
-            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
+        let query = match args.try_into() {
+            Ok(query) => query,
+            Err(err) => return Ok(err_to_tool_result(err)),
         };
 
         let workspace_id = authorized.ctx.workspace_id;

@@ -52,6 +52,29 @@ pub struct ListEntitiesParams {
     pub page: crate::controllers::PageParams,
 }
 
+impl From<CreateEntityRequest> for entity_entities::CreateEntityInput {
+    fn from(request: CreateEntityRequest) -> Self {
+        Self {
+            schema_name: request.schema_name,
+            entity_type: request.entity_type,
+            data: request.data,
+        }
+    }
+}
+
+impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
+    type Error = crate::YorishiroError;
+
+    fn try_from(params: ListEntitiesParams) -> Result<Self, Self::Error> {
+        Ok(Self {
+            entity_type: params.entity_type,
+            filter: crate::controllers::parse_filter_param(params.filter)?,
+            schema_version: params.schema_version,
+            page: params.page.into(),
+        })
+    }
+}
+
 #[utoipa::path(post, path = "/api/entities", request_body = super::openapi::CreateEntityRequest, responses((status = 201, body = super::openapi::EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community")]
 pub async fn create_entity(
     State(ctx): State<AppContext>,
@@ -59,11 +82,7 @@ pub async fn create_entity(
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
-    let input = entity_entities::CreateEntityInput {
-        schema_name: body.schema_name,
-        entity_type: body.entity_type,
-        data: body.data,
-    };
+    let input = body.into();
     let created_by = authorized.ctx.user_id;
     let record = entity_entities::create(authorized.txn(), workspace_id, input, created_by).await?;
     authorized.commit().await?;
@@ -90,8 +109,16 @@ pub async fn update_entity(
 ) -> Result<Json<EntityRecord>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let updated_by = authorized.ctx.user_id;
-    let record =
-        entity_entities::update(authorized.txn(), workspace_id, id, body.data, updated_by).await?;
+    let record = entity_entities::update(
+        authorized.txn(),
+        workspace_id,
+        entity_entities::UpdateEntityInput {
+            id,
+            data: body.data,
+            updated_by,
+        },
+    )
+    .await?;
     authorized.commit().await?;
     embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id).await;
     Ok(Json(record))
@@ -113,12 +140,7 @@ pub async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
-    let query = entity_entities::ListEntitiesQuery {
-        entity_type: params.entity_type,
-        filter: crate::controllers::parse_filter_param(params.filter)?,
-        schema_version: params.schema_version,
-        page: params.page.into(),
-    };
+    let query = params.try_into()?;
 
     let workspace_id = authorized.ctx.workspace_id;
     let records = entity_entities::list(authorized.txn(), workspace_id, query).await?;

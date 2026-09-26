@@ -6,7 +6,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 pub use super::_entities::entity_relations::{ActiveModel, Entity, Model};
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::entity_entities::{self, EntityRecord};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,11 +119,30 @@ pub fn is_valid_relation_status(status: RelationStatus) -> bool {
     RELATION_STATUSES.contains(&status)
 }
 
+pub fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
+    RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
+        message: format!("'{value}' is not a relation status"),
+        details: vec![ValidationDetail {
+            field: "/status".into(),
+            problem: "expected active, deprecated, or archived".into(),
+            code: ValidationErrorCode::Other,
+            expected: Some("active, deprecated, archived".into()),
+            actual: Some(value.into()),
+        }],
+        hint: "use active, deprecated, or archived".into(),
+    })
+}
+
 pub struct CreateRelationInput {
     pub source_id: Uuid,
     pub target_id: Uuid,
     pub relation_type: String,
     pub properties: Value,
+}
+
+pub struct SetRelationStatusInput {
+    pub id: Uuid,
+    pub status: RelationStatus,
 }
 
 #[derive(Default)]
@@ -252,14 +271,13 @@ pub async fn get(
 pub async fn set_status(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    id: Uuid,
-    status: RelationStatus,
+    input: SetRelationStatusInput,
 ) -> Result<RelationRecord, YorishiroError> {
-    let existing = get(conn, workspace_id, id).await?;
+    let existing = get(conn, workspace_id, input.id).await?;
 
     let active = ActiveModel {
         id: ActiveValue::Unchanged(existing.id),
-        status: ActiveValue::Set(status.as_db_str().to_string()),
+        status: ActiveValue::Set(input.status.as_db_str().to_string()),
         ..Default::default()
     };
     // A concurrent delete between `get` above and this update surfaces as `DbErr::RecordNotUpdated`, not a row.
@@ -269,7 +287,7 @@ pub async fn set_status(
         .await
         .map_err(|err| match err {
             DbErr::RecordNotUpdated => {
-                YorishiroError::not_found(format!("relation '{id}' was not found"))
+                YorishiroError::not_found(format!("relation '{}' was not found", input.id))
             }
             err => YorishiroError::Internal(err.into()),
         })

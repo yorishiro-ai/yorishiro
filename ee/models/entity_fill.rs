@@ -80,7 +80,17 @@ pub async fn apply_answers(
 
     crate::models::entity_entities::snapshot(conn, workspace_id, entity.id, job_id).await?;
 
-    match crate::models::entity_entities::update(conn, workspace_id, entity.id, data, None).await {
+    match crate::models::entity_entities::update(
+        conn,
+        workspace_id,
+        crate::models::entity_entities::UpdateEntityInput {
+            id: entity.id,
+            data,
+            updated_by: None,
+        },
+    )
+    .await
+    {
         Ok(_) => Ok(true),
         Err(YorishiroError::NotFound { .. } | YorishiroError::ValidationFailed { .. }) => {
             // The snapshot just taken now describes a change that never landed: the entity's data is unchanged, so undo restoring from it would be a no-op today, but the row still exists under job_id and would falsely attribute a *later*, unrelated edit to this job if that edit happens before an eventual undo.

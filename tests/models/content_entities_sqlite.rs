@@ -88,9 +88,11 @@ async fn content_entities_crud_on_sqlite() {
     let updated = entity_entities::update(
         &db,
         workspace_id,
-        created.id,
-        serde_json::json!({"title": "second"}),
-        None,
+        entity_entities::UpdateEntityInput {
+            id: created.id,
+            data: serde_json::json!({"title": "second"}),
+            updated_by: None,
+        },
     )
     .await
     .expect("update");
