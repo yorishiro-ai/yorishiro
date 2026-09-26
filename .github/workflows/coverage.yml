@@ -40,6 +40,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Set up nightly for branch coverage
+        uses: dtolnay/rust-toolchain@nightly
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-llvm-cov
@@ -69,10 +72,17 @@ jobs:
           DB_CONNECT_TIMEOUT: "5000"
         run: ./target/debug/yorishiro db migrate
 
-      - name: Run coverage
+      - name: Run actionable coverage
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           LOCO_ENV: test_postgres
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
-        run: cargo llvm-cov --locked --workspace --summary-only
+        run: make coverage
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: actionable-coverage
+          path: coverage/
+          if-no-files-found: error

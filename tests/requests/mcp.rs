@@ -491,3 +491,298 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
     })
     .await;
 }
+
+/// Community MCP tools use the same authenticated mounted server as REST, and successful writes
+/// commit before the tool result is returned. The follow-up reads make a dropped transaction fail.
+#[tokio::test]
+async fn community_mcp_entities_relations_and_schema_tools_execute_over_protocol() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, workspace_id, owner_id, schema_key) = fixtures::create_tenant_workspace_owner(
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let write_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Write, false).await;
+        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+
+        let session = initialize(&request).await;
+        let schema = mcp_call(
+            &request,
+            &session,
+            &schema_key,
+            2,
+            "tools/call",
+            json!({
+                "name": "create_schema",
+                "arguments": {
+                    "definition": {
+                        "name": "graph",
+                        "entity_types": {
+                            "person": { "fields": { "name": { "type": "string", "required": true } } }
+                        },
+                        "relation_types": {
+                            "knows": { "source": "person", "target": "person" }
+                        }
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(schema["result"]["isError"], false, "MCP call: {schema}");
+
+        let invalid = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({
+                "name": "list_relations",
+                "arguments": { "status": "not-a-status" }
+            }),
+        )
+        .await;
+        assert_eq!(invalid["result"]["isError"], true, "MCP call: {invalid}");
+        assert!(invalid["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("relation status")));
+
+        let created = mcp_call(
+            &request,
+            &session,
+            &write_key,
+            4,
+            "tools/call",
+            json!({
+                "name": "create_entity",
+                "arguments": {
+                    "schema_name": "graph",
+                    "entity_type": "person",
+                    "data": { "name": "alice" }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(created["result"]["isError"], false, "MCP call: {created}");
+        let alice = tool_result_json(&created);
+        let alice_id: Uuid = alice["id"].as_str().unwrap().parse().unwrap();
+
+        let second = mcp_call(
+            &request,
+            &session,
+            &write_key,
+            5,
+            "tools/call",
+            json!({
+                "name": "create_entity",
+                "arguments": {
+                    "schema_name": "graph",
+                    "entity_type": "person",
+                    "data": { "name": "bob" }
+                }
+            }),
+        )
+        .await;
+        let bob_id: Uuid = tool_result_json(&second)["id"].as_str().unwrap().parse().unwrap();
+
+        let relation = mcp_call(
+            &request,
+            &session,
+            &write_key,
+            6,
+            "tools/call",
+            json!({
+                "name": "create_relation",
+                "arguments": {
+                    "source_id": alice_id,
+                    "target_id": bob_id,
+                    "relation_type": "knows"
+                }
+            }),
+        )
+        .await;
+        assert_eq!(relation["result"]["isError"], false, "MCP call: {relation}");
+        let relation_id = tool_result_json(&relation)["id"].clone();
+
+        let listed = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            7,
+            "tools/call",
+            json!({ "name": "list_entities", "arguments": { "entity_type": "person" } }),
+        )
+        .await;
+        assert_eq!(tool_result_json(&listed).as_array().unwrap().len(), 2);
+
+        let status = mcp_call(
+            &request,
+            &session,
+            &write_key,
+            8,
+            "tools/call",
+            json!({
+                "name": "set_relation_status",
+                "arguments": { "id": relation_id, "status": "archived" }
+            }),
+        )
+        .await;
+        assert_eq!(tool_result_json(&status)["status"], "archived");
+
+        let persisted = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            9,
+            "tools/call",
+            json!({ "name": "get_relation", "arguments": { "id": relation_id } }),
+        )
+        .await;
+        assert_eq!(tool_result_json(&persisted)["status"], "archived");
+
+        let missing = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            10,
+            "tools/call",
+            json!({ "name": "get_entity", "arguments": { "id": Uuid::new_v4() } }),
+        )
+        .await;
+        assert_eq!(missing["result"]["isError"], true, "MCP call: {missing}");
+        assert!(missing["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("not found")));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (tenant_id, workspace_id, _owner_id, schema_key) =
+            fixtures::create_tenant_workspace_owner(
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Schema,
+                    ..Default::default()
+                },
+            )
+            .await;
+        let session = initialize(&request).await;
+        let schema_id = Uuid::new_v4();
+        let jsonl = format!(
+            "{}\nnot-json\n",
+            json!({
+                "kind": "schema",
+                "record": {
+                    "id": schema_id,
+                    "tenant_id": tenant_id,
+                    "workspace_id": workspace_id,
+                    "name": "rollback-schema",
+                    "version": 1,
+                    "definition": {
+                        "name": "rollback-schema",
+                        "entity_types": { "note": { "fields": {} } },
+                        "relation_types": {}
+                    },
+                    "status": "active",
+                    "origin_template_id": null,
+                    "origin_status": "detached",
+                    "origin_snapshot": null,
+                    "origin_updated_at": null,
+                    "created_at": Utc::now()
+                }
+            })
+        );
+        let result = mcp_call(
+            &request,
+            &session,
+            &schema_key,
+            2,
+            "tools/call",
+            json!({ "name": "import_jsonl", "arguments": { "jsonl": jsonl } }),
+        )
+        .await;
+        assert_eq!(result["result"]["isError"], true, "MCP call: {result}");
+        assert!(
+            result["result"]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("line 2"))
+        );
+        assert!(
+            schema_schemas::get_active_schema(&ctx.db, workspace_id, "rollback-schema")
+                .await
+                .is_err()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mcp_rejects_missing_auth_and_scope_insufficient_writes() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let (_, workspace_id, owner_id, _) = fixtures::create_tenant_workspace_owner(
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let session = initialize(&request).await;
+
+        let missing = request
+            .post("/mcp")
+            .add_header("Accept", "application/json, text/event-stream")
+            .add_header("MCP-Session-Id", session.clone())
+            .add_header("MCP-Protocol-Version", "2025-03-26")
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_entity",
+                    "arguments": {
+                        "schema_name": "missing",
+                        "entity_type": "missing",
+                        "data": {}
+                    }
+                }
+            }))
+            .await;
+        assert_eq!(missing.status_code(), StatusCode::OK, "{}", missing.text());
+        assert!(rpc_body(&missing).get("error").is_some());
+
+        let denied = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            3,
+            "tools/call",
+            json!({
+                "name": "create_entity",
+                "arguments": {
+                    "schema_name": "missing",
+                    "entity_type": "missing",
+                    "data": {}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true, "MCP call: {denied}");
+        assert!(
+            denied["result"]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("scope"))
+        );
+    })
+    .await;
+}

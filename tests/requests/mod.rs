@@ -17,6 +17,7 @@ mod official_templates;
 mod openapi;
 mod origin;
 mod queue;
+mod relations;
 mod schema_forks;
 mod schemas;
 mod search;
