@@ -36,6 +36,7 @@ async fn get_workspace_in_tenant(
     Ok(workspace)
 }
 
+#[utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [super::openapi::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community")]
 pub async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -65,6 +66,7 @@ pub struct CreateWorkspaceRequest {
     pub schema_id: Option<Uuid>,
 }
 
+#[utoipa::path(post, path = "/api/workspaces", request_body = super::openapi::CreateWorkspaceRequest, responses((status = 201, body = super::openapi::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
 pub async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -105,6 +107,7 @@ pub struct WorkspaceDetail {
     pub schema_count: i64,
 }
 
+#[utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<ReadScope>,
@@ -129,6 +132,7 @@ pub async fn get_workspace(
     }))
 }
 
+#[utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
 pub async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -141,6 +145,15 @@ pub async fn delete_workspace(
     tenancy::delete_workspace(&txn, id).await?;
     txn.commit().await.internal()?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_list_workspaces),
+        super::route_inventory::path_doc(__path_create_workspace),
+        super::route_inventory::path_doc(__path_get_workspace),
+        super::route_inventory::path_doc(__path_delete_workspace),
+    ]
 }
 
 pub fn routes() -> Routes {

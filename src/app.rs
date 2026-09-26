@@ -293,33 +293,48 @@ impl Hooks for App {
         }
 
         mount!(controllers::audit_log::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::audit_log::openapi_docs());
         mount!(controllers::auth::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::auth::openapi_docs());
         mount!(controllers::entities::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::entities::openapi_docs());
         mount!(
             controllers::entities::migration_routes(),
             Edition::Community,
             false
         );
         mount!(controllers::export::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::export::openapi_docs());
         mount!(controllers::import::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::import::openapi_docs());
         mount!(controllers::members::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::members::openapi_docs());
         mount!(controllers::relations::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::relations::openapi_docs());
         mount!(controllers::schemas::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::schemas::openapi_docs());
         mount!(
             controllers::schemas::template_routes(),
             Edition::Community,
             false
         );
+        inventory.add_docs(controllers::schemas::template_openapi_docs());
         mount!(controllers::search::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::search::openapi_docs());
         mount!(controllers::setup::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::setup::openapi_docs());
         mount!(controllers::system::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::system::openapi_docs());
         mount!(
             controllers::template_library::routes(),
             Edition::Community,
             false
         );
+        inventory.add_docs(controllers::template_library::openapi_docs());
         mount!(controllers::whoami::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::whoami::openapi_docs());
         mount!(controllers::workspaces::routes(), Edition::Community, false);
+        inventory.add_docs(controllers::workspaces::openapi_docs());
         // The enterprise edition's routes are mounted unconditionally; the inventory records the
         // edition boundary and the licence gate separately from runtime reachability.
         mount!(
@@ -327,61 +342,73 @@ impl Hooks for App {
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::dashboard::openapi_docs());
         mount!(
             crate::ee::controllers::embedding::routes(),
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::embedding::openapi_docs());
         mount!(
             crate::ee::controllers::entity_columns::routes(),
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::entity_columns::openapi_docs());
         mount!(
             crate::ee::controllers::inference::routes(),
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::inference::openapi_docs());
         mount!(
             crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
             Edition::Enterprise,
             true
         );
+        inventory.add_docs(crate::ee::controllers::inference::gated_openapi_docs());
         mount!(
             crate::ee::controllers::inference::inference_job_status_routes().layer(gate.clone()),
             Edition::Enterprise,
             true
         );
+        inventory.add_docs(crate::ee::controllers::inference::job_status_openapi_docs());
         mount!(
             crate::ee::controllers::marketplace::routes().layer(gate.clone()),
             Edition::Enterprise,
             true
         );
+        inventory.add_docs(crate::ee::controllers::marketplace::openapi_docs());
         mount!(
             crate::ee::controllers::oauth::routes().layer(gate.clone()),
             Edition::Enterprise,
             true
         );
+        inventory.add_docs(crate::ee::controllers::oauth::openapi_docs());
         mount!(
             crate::ee::controllers::origin::routes(),
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::origin::openapi_docs());
         mount!(
             crate::ee::controllers::schema_forks::routes(),
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::schema_forks::openapi_docs());
         mount!(
             crate::ee::controllers::stripe::routes().layer(gate),
             Edition::Enterprise,
             true
         );
+        inventory.add_docs(crate::ee::controllers::stripe::openapi_docs());
         mount!(
             crate::ee::controllers::worker_class::routes(),
             Edition::Enterprise,
             false
         );
+        inventory.add_docs(crate::ee::controllers::worker_class::openapi_docs());
 
         ctx.shared_store.insert(inventory);
         ctx.shared_store

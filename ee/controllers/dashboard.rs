@@ -28,6 +28,7 @@ pub struct TenantOverview {
     pub members: Vec<MembershipRecord>,
 }
 
+#[utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = crate::controllers::openapi::TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "enterprise")]
 async fn tenant_overview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -71,4 +72,10 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/tenant")
         .add("/overview", get(tenant_overview))
+}
+
+pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
+    vec![crate::controllers::route_inventory::path_doc(
+        __path_tenant_overview,
+    )]
 }

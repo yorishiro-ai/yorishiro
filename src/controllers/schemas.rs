@@ -22,6 +22,7 @@ pub struct CreateSchemaResponse {
     pub diff: VersioningDiff,
 }
 
+#[utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn list_schemas(
     authorized: Authorized<ReadScope>,
     Query(page): Query<crate::controllers::PageParams>,
@@ -43,6 +44,7 @@ pub enum CreateSchemaRequest {
     Template { template_id: String },
 }
 
+#[utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, responses((status = 201, body = super::openapi::CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community")]
 pub async fn create_schema(
     State(ctx): State<AppContext>,
     authorized: Authorized<SchemaScope>,
@@ -85,6 +87,7 @@ pub async fn create_schema(
     ))
 }
 
+#[utoipa::path(get, path = "/api/schemas/active/{name}", params(("name" = String, Path)), responses((status = 200, body = super::openapi::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_active_schema(
     authorized: Authorized<ReadScope>,
     Path(name): Path<String>,
@@ -94,6 +97,7 @@ pub async fn get_active_schema(
     Ok(Json(record))
 }
 
+#[utoipa::path(get, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 200, body = super::openapi::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_schema_by_id(
     authorized: Authorized<ReadScope>,
     Path(schema_id): Path<Uuid>,
@@ -103,12 +107,14 @@ pub async fn get_schema_by_id(
     Ok(Json(record))
 }
 
+#[utoipa::path(get, path = "/api/templates", responses((status = 200, body = [super::openapi::TemplateSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn list_templates(
     _authorized: Authorized<ReadScope>,
 ) -> Result<Json<Vec<TemplateSummary>>, ApiError> {
     Ok(Json(templates::list_templates()))
 }
 
+#[utoipa::path(get, path = "/api/templates/{id}", params(("id" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_template(
     _authorized: Authorized<ReadScope>,
     Path(id): Path<String>,
@@ -117,6 +123,7 @@ pub async fn get_template(
     Ok(Json(definition))
 }
 
+#[utoipa::path(get, path = "/api/schemas/active/{name}/entity-types/{entity_type}/json-schema", params(("name" = String, Path), ("entity_type" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
 pub async fn get_entity_type_json_schema(
     authorized: Authorized<ReadScope>,
     Path((name, entity_type)): Path<(String, String)>,
@@ -157,4 +164,21 @@ pub fn template_routes() -> Routes {
         .prefix("api/templates")
         .add("/", get(list_templates))
         .add("/{id}", get(get_template))
+}
+
+pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_list_schemas),
+        super::route_inventory::path_doc(__path_create_schema),
+        super::route_inventory::path_doc(__path_get_active_schema),
+        super::route_inventory::path_doc(__path_get_schema_by_id),
+        super::route_inventory::path_doc(__path_get_entity_type_json_schema),
+    ]
+}
+
+pub(crate) fn template_openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
+    vec![
+        super::route_inventory::path_doc(__path_list_templates),
+        super::route_inventory::path_doc(__path_get_template),
+    ]
 }

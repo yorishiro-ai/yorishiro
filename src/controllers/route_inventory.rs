@@ -1,5 +1,7 @@
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
+use utoipa::openapi::path::{HttpMethod, Operation};
+use utoipa::openapi::{RefOr, Schema};
 
 /// The edition that owns a REST route.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,10 +29,48 @@ pub(crate) struct RouteEntry {
 }
 
 /// The route inventory produced while the application route tree is composed.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct RouteInventory {
     pub(crate) entries: Vec<RouteEntry>,
     pub(crate) exclusions: Vec<InfrastructureExclusion>,
+    pub(crate) docs: Vec<RouteDoc>,
+}
+
+/// OpenAPI metadata emitted next to the handler that serves an operation.
+#[derive(Clone)]
+pub(crate) struct RouteDoc {
+    pub(crate) path: String,
+    pub(crate) methods: Vec<HttpMethod>,
+    pub(crate) operation: Operation,
+    pub(crate) schemas: Vec<(String, RefOr<Schema>)>,
+}
+
+fn openapi_method(method: &Method) -> HttpMethod {
+    match *method {
+        Method::GET => HttpMethod::Get,
+        Method::POST => HttpMethod::Post,
+        Method::PUT => HttpMethod::Put,
+        Method::DELETE => HttpMethod::Delete,
+        Method::PATCH => HttpMethod::Patch,
+        Method::HEAD => HttpMethod::Head,
+        Method::OPTIONS => HttpMethod::Options,
+        Method::TRACE => HttpMethod::Trace,
+        _ => panic!("unsupported OpenAPI method: {method}"),
+    }
+}
+
+pub(crate) fn path_doc<P>(_: P) -> RouteDoc
+where
+    P: utoipa::Path + utoipa::__dev::SchemaReferences,
+{
+    let mut schemas = Vec::new();
+    <P as utoipa::__dev::SchemaReferences>::schemas(&mut schemas);
+    RouteDoc {
+        path: P::path(),
+        methods: P::methods(),
+        operation: P::operation(),
+        schemas,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,6 +100,10 @@ impl RouteInventory {
                 });
             }
         }
+    }
+
+    pub(crate) fn add_docs(&mut self, docs: impl IntoIterator<Item = RouteDoc>) {
+        self.docs.extend(docs);
     }
 
     pub(crate) fn add_infrastructure(&mut self, routes: &AppRoutes) {
@@ -108,6 +152,36 @@ impl RouteInventory {
                     .entries
                     .iter()
                     .any(|entry| entry.path == exclusion.path)
+            );
+        }
+
+        let mut docs = std::collections::HashSet::new();
+        for doc in &self.docs {
+            for method in &doc.methods {
+                assert!(
+                    docs.insert((doc.path.clone(), method.clone())),
+                    "duplicate OpenAPI metadata: {}",
+                    doc.path,
+                );
+            }
+        }
+        for entry in self.public(Edition::Enterprise) {
+            assert!(
+                self.docs.iter().any(|doc| {
+                    doc.path == entry.path && doc.methods.contains(&openapi_method(&entry.method))
+                }),
+                "missing OpenAPI metadata for {} {}",
+                entry.method,
+                entry.path
+            );
+        }
+        for doc in &self.docs {
+            assert!(
+                self.public(Edition::Enterprise).any(|entry| {
+                    doc.path == entry.path && doc.methods.contains(&openapi_method(&entry.method))
+                }),
+                "OpenAPI metadata has no composed route: {}",
+                doc.path
             );
         }
     }
