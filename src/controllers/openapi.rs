@@ -2,19 +2,17 @@
 //!
 //! These types intentionally mirror the serialized HTTP wire format rather than domain models.
 
-#![allow(dead_code)]
-
 use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[derive(ToSchema)]
-pub(crate) struct ApiErrorBody {
+pub struct ApiErrorBody {
     pub error: ApiErrorDetail,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ApiErrorDetail {
+pub struct ApiErrorDetail {
     pub code: String,
     pub message: String,
     #[schema(nullable = true)]
@@ -26,7 +24,7 @@ pub(crate) struct ApiErrorDetail {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ValidationDetail {
+pub struct ValidationDetail {
     pub field: String,
     pub problem: String,
     pub code: String,
@@ -37,7 +35,7 @@ pub(crate) struct ValidationDetail {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SignupRequest {
+pub struct SignupRequest {
     #[schema(nullable = true)]
     pub invite_token: Option<String>,
     #[schema(nullable = true)]
@@ -48,13 +46,13 @@ pub(crate) struct SignupRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct WorkspaceSummary {
+pub struct WorkspaceSummary {
     pub id: Uuid,
     pub name: String,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SignupResponse {
+pub struct SignupResponse {
     pub user_id: Uuid,
     pub email: String,
     pub tenant_id: Uuid,
@@ -63,7 +61,7 @@ pub(crate) struct SignupResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct LoginRequest {
+pub struct LoginRequest {
     pub email: String,
     pub password: String,
     #[schema(nullable = true)]
@@ -71,7 +69,7 @@ pub(crate) struct LoginRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct LoginResponse {
+pub struct LoginResponse {
     pub api_key: String,
     pub api_key_id: Uuid,
     pub workspace_id: Uuid,
@@ -80,7 +78,7 @@ pub(crate) struct LoginResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetupRequest {
+pub struct SetupRequest {
     pub email: String,
     pub password: String,
     #[schema(nullable = true)]
@@ -88,7 +86,7 @@ pub(crate) struct SetupRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetupResponse {
+pub struct SetupResponse {
     pub user_id: Uuid,
     pub email: String,
     pub tenant_id: Uuid,
@@ -97,12 +95,12 @@ pub(crate) struct SetupResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetupStatusResponse {
+pub struct SetupStatusResponse {
     pub setup_required: bool,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct EntityRecord {
+pub struct EntityRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub schema_id: Uuid,
@@ -120,31 +118,31 @@ pub(crate) struct EntityRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SearchHit {
+pub struct SearchHit {
     pub entity: EntityRecord,
     #[schema(nullable = true)]
     pub distance: Option<f64>,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct CreateEntityRequest {
+pub struct CreateEntityRequest {
     pub schema_name: String,
     pub entity_type: String,
     pub data: Value,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct UpdateEntityRequest {
+pub struct UpdateEntityRequest {
     pub data: Value,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct FillDefaultsRequest {
+pub struct FillDefaultsRequest {
     pub schema_name: String,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct FillDefaultsResponse {
+pub struct FillDefaultsResponse {
     pub schema_name: String,
     pub job_id: Uuid,
     pub entities_updated: i64,
@@ -152,26 +150,26 @@ pub(crate) struct FillDefaultsResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ReindexResponse {
+pub struct ReindexResponse {
     pub job_id: String,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ImportResult {
+pub struct ImportResult {
     pub schemas: usize,
     pub entities: usize,
     pub relations: usize,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct UndoReport {
+pub struct UndoReport {
     pub job_id: Uuid,
     pub restored: i64,
     pub missing: i64,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct RelationRecord {
+pub struct RelationRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub source_id: Uuid,
@@ -184,7 +182,7 @@ pub(crate) struct RelationRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct CreateRelationRequest {
+pub struct CreateRelationRequest {
     pub source_id: Uuid,
     pub target_id: Uuid,
     pub relation_type: String,
@@ -194,19 +192,19 @@ pub(crate) struct CreateRelationRequest {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum RelationStatus {
+pub enum RelationStatus {
     Active,
     Deprecated,
     Archived,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetRelationStatusRequest {
+pub struct SetRelationStatusRequest {
     pub status: RelationStatus,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SchemaRecord {
+pub struct SchemaRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
@@ -226,7 +224,7 @@ pub(crate) struct SchemaRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SchemaSummary {
+pub struct SchemaSummary {
     pub id: Uuid,
     pub name: String,
     pub version: i32,
@@ -236,19 +234,19 @@ pub(crate) struct SchemaSummary {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct CreateSchemaResponse {
+pub struct CreateSchemaResponse {
     pub schema: SchemaRecord,
     pub diff: VersioningDiff,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct VersioningDiff {
+pub struct VersioningDiff {
     pub is_breaking: bool,
     pub reasons: Vec<String>,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct TemplateSummary {
+pub struct TemplateSummary {
     pub id: String,
     pub name: String,
     #[schema(nullable = true)]
@@ -256,7 +254,7 @@ pub(crate) struct TemplateSummary {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct TemplateRecord {
+pub struct TemplateRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
@@ -280,7 +278,7 @@ pub(crate) struct TemplateRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct CreateTemplateRequest {
+pub struct CreateTemplateRequest {
     pub name: String,
     #[schema(nullable = true)]
     pub description: Option<String>,
@@ -294,7 +292,7 @@ pub(crate) struct CreateTemplateRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct UpdateTemplateRequest {
+pub struct UpdateTemplateRequest {
     #[schema(nullable = true)]
     pub name: Option<String>,
     #[schema(nullable = true)]
@@ -308,12 +306,12 @@ pub(crate) struct UpdateTemplateRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ForkTemplateRequest {
+pub struct ForkTemplateRequest {
     pub name: String,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MembershipRecord {
+pub struct MembershipRecord {
     pub user_id: Uuid,
     pub email: String,
     #[schema(nullable = true)]
@@ -322,7 +320,7 @@ pub(crate) struct MembershipRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct AuditLogRecord {
+pub struct AuditLogRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,
@@ -337,13 +335,13 @@ pub(crate) struct AuditLogRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct AddMemberRequest {
+pub struct AddMemberRequest {
     pub email: String,
     pub role: MembershipRole,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct CreateWorkspaceRequest {
+pub struct CreateWorkspaceRequest {
     pub name: String,
     #[schema(nullable = true)]
     pub max_entities: Option<i32>,
@@ -352,7 +350,7 @@ pub(crate) struct CreateWorkspaceRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct WorkspaceRecord {
+pub struct WorkspaceRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
@@ -370,7 +368,7 @@ pub(crate) struct WorkspaceRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct WorkspaceDetail {
+pub struct WorkspaceDetail {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
@@ -386,7 +384,7 @@ pub(crate) struct WorkspaceDetail {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MaintenanceResponse {
+pub struct MaintenanceResponse {
     pub mode: MaintenanceMode,
     pub retry_after: u32,
     #[schema(nullable = true)]
@@ -395,14 +393,14 @@ pub(crate) struct MaintenanceResponse {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum MaintenanceMode {
+pub enum MaintenanceMode {
     Off,
     ReadOnly,
     FullLock,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetMaintenanceRequest {
+pub struct SetMaintenanceRequest {
     pub mode: MaintenanceMode,
     #[schema(nullable = true)]
     pub retry_after: Option<u32>,
@@ -411,7 +409,7 @@ pub(crate) struct SetMaintenanceRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct WhoAmIResponse {
+pub struct WhoAmIResponse {
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,
     pub scope: ApiKeyScope,
@@ -421,23 +419,23 @@ pub(crate) struct WhoAmIResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct OAuthStatus {
+pub struct OAuthStatus {
     pub enabled: bool,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ForkResponse {
+pub struct ForkResponse {
     pub template_id: Uuid,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetVisibilityRequest {
+pub struct SetVisibilityRequest {
     pub visibility: TemplateVisibility,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum MembershipRole {
+pub enum MembershipRole {
     Owner,
     Admin,
     Member,
@@ -446,7 +444,7 @@ pub(crate) enum MembershipRole {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ApiKeyScope {
+pub enum ApiKeyScope {
     Read,
     Write,
     Schema,
@@ -455,28 +453,28 @@ pub(crate) enum ApiKeyScope {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SchemaStatus {
+pub enum SchemaStatus {
     Active,
     Archived,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SchemaOriginStatus {
+pub enum SchemaOriginStatus {
     Linked,
     Detached,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum WorkspaceStatus {
+pub enum WorkspaceStatus {
     SchemaPending,
     Active,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum AuditAction {
+pub enum AuditAction {
     UndoMigrationJob,
     SetMaintenance,
     ReindexEmbeddings,
@@ -485,13 +483,13 @@ pub(crate) enum AuditAction {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum TemplateVisibility {
+pub enum TemplateVisibility {
     Tenant,
     Community,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct JsonSchemaDefinition {
+pub struct JsonSchemaDefinition {
     pub name: String,
     #[schema(nullable = true)]
     pub description: Option<String>,
@@ -503,13 +501,13 @@ pub(crate) struct JsonSchemaDefinition {
 
 #[derive(ToSchema)]
 #[serde(untagged)]
-pub(crate) enum CreateSchemaRequest {
+pub enum CreateSchemaRequest {
     Definition(JsonSchemaDefinition),
     Template { template_id: String },
 }
 
 #[derive(ToSchema)]
-pub(crate) struct EmbeddingKeyRequest {
+pub struct EmbeddingKeyRequest {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
@@ -519,7 +517,7 @@ pub(crate) struct EmbeddingKeyRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct EmbeddingKeyResponse {
+pub struct EmbeddingKeyResponse {
     pub base_url: String,
     pub model: String,
     pub dimensions: i32,
@@ -527,63 +525,63 @@ pub(crate) struct EmbeddingKeyResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct LlmKeyRequest {
+pub struct LlmKeyRequest {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct LlmKeyResponse {
+pub struct LlmKeyResponse {
     pub base_url: String,
     pub model: String,
     pub configured: bool,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct WorkerClassRequest {
+pub struct WorkerClassRequest {
     pub worker_class: WorkerClass,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum WorkerClass {
+pub enum WorkerClass {
     TenantPrivate,
     Official,
     Shared,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct WorkerClassResponse {
+pub struct WorkerClassResponse {
     pub worker_class: WorkerClass,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ColumnPreference {
+pub struct ColumnPreference {
     pub entity_type: String,
     pub columns: Vec<String>,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SetColumnsRequest {
+pub struct SetColumnsRequest {
     pub columns: Vec<String>,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct InferFillResponse {
+pub struct InferFillResponse {
     pub job_id: String,
     pub status: InferFillStatus,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum InferFillStatus {
+pub enum InferFillStatus {
     Queued,
 }
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum InferJobStatusValue {
+pub enum InferJobStatusValue {
     Queued,
     Running,
     Completed,
@@ -591,7 +589,7 @@ pub(crate) enum InferJobStatusValue {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct InferJobStatusResponse {
+pub struct InferJobStatusResponse {
     pub job_id: String,
     pub status: InferJobStatusValue,
     #[schema(nullable = true)]
@@ -603,7 +601,7 @@ pub(crate) struct InferJobStatusResponse {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct TenantUsage {
+pub struct TenantUsage {
     pub tenant_id: Uuid,
     pub workspace_count: i64,
     pub member_count: i64,
@@ -611,7 +609,7 @@ pub(crate) struct TenantUsage {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct TenantOverview {
+pub struct TenantOverview {
     pub tenant_id: Uuid,
     #[schema(nullable = true)]
     pub plan: Option<String>,
@@ -622,7 +620,7 @@ pub(crate) struct TenantOverview {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MarketplaceListing {
+pub struct MarketplaceListing {
     pub template_id: Uuid,
     pub name: String,
     #[schema(nullable = true)]
@@ -639,7 +637,7 @@ pub(crate) struct MarketplaceListing {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct TemplateVersionRecord {
+pub struct TemplateVersionRecord {
     pub id: Uuid,
     pub template_id: Uuid,
     pub version: i32,
@@ -654,14 +652,14 @@ pub(crate) struct TemplateVersionRecord {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum TemplateVersionStatus {
+pub enum TemplateVersionStatus {
     Draft,
     Pre,
     Stable,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct PublishVersionRequest {
+pub struct PublishVersionRequest {
     #[schema(value_type = Object)]
     pub definition: Value,
     #[schema(nullable = true)]
@@ -672,7 +670,7 @@ pub(crate) struct PublishVersionRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct TemplateReviewRecord {
+pub struct TemplateReviewRecord {
     pub id: Uuid,
     pub template_id: Uuid,
     pub tenant_id: Uuid,
@@ -686,14 +684,14 @@ pub(crate) struct TemplateReviewRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct SubmitReviewRequest {
+pub struct SubmitReviewRequest {
     pub rating: i16,
     #[schema(nullable = true)]
     pub comment: Option<String>,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct ForkRecord {
+pub struct ForkRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
@@ -715,13 +713,13 @@ pub(crate) struct ForkRecord {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct CreateForkRequest {
+pub struct CreateForkRequest {
     pub source_workspace_id: Uuid,
     pub source_schema_id: Uuid,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct UpdateForkRequest {
+pub struct UpdateForkRequest {
     #[schema(nullable = true)]
     pub definition: Option<Value>,
     #[schema(nullable = true)]
@@ -735,7 +733,7 @@ pub(crate) struct UpdateForkRequest {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct UpstreamChange {
+pub struct UpstreamChange {
     pub schema_id: Uuid,
     pub schema_name: String,
     pub version: i32,
@@ -748,13 +746,13 @@ pub(crate) struct UpstreamChange {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MergePlan {
+pub struct MergePlan {
     pub fields: Vec<FieldMerge>,
     pub summary: MergeDiffSummary,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct FieldMerge {
+pub struct FieldMerge {
     pub entity_type: String,
     pub field: String,
     pub verdict: MergeVerdict,
@@ -763,7 +761,7 @@ pub(crate) struct FieldMerge {
 
 #[derive(ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum MergeVerdict {
+pub enum MergeVerdict {
     AutoAdd,
     AutoUpdate,
     KeepLocal,
@@ -771,7 +769,7 @@ pub(crate) enum MergeVerdict {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MergeDiffSummary {
+pub struct MergeDiffSummary {
     pub total_fields: usize,
     pub auto_add: usize,
     pub auto_update: usize,
@@ -781,16 +779,16 @@ pub(crate) struct MergeDiffSummary {
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MergeResponse {
+pub struct MergeResponse {
     pub schema: SchemaRecord,
     pub diff: MergeDiff,
     pub summary: MergeDiffSummary,
 }
 
 #[derive(ToSchema)]
-pub(crate) struct MergeDiff {
+pub struct MergeDiff {
     pub is_breaking: bool,
     pub reasons: Vec<String>,
 }
 
-pub(crate) type JsonSchema = Value;
+pub type JsonSchema = Value;
