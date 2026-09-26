@@ -1,9 +1,12 @@
-use crate::db::AppContextBackend;
+mod context;
+mod startup;
+mod workers;
+
 use async_trait::async_trait;
 use loco_rs::{
     Result,
     app::{AppContext, Hooks, Initializer},
-    bgworker::{BackgroundWorker, Queue},
+    bgworker::Queue,
     boot::{BootResult, StartMode, create_app},
     config::Config,
     controller::AppRoutes,
@@ -12,46 +15,11 @@ use loco_rs::{
 };
 use migration::Migrator;
 use std::path::Path;
-use std::sync::Arc;
-use tokio::task::spawn;
 
-/// A handle for the startup reindex background task, stored in `shared_store` so that
-/// test teardown can signal shutdown and await the task before closing pools.
-///
-/// Without this, `close_app_pools` would close pools while the spawned task still held
-/// a connection from `ctx.db`, leaving a session on the throwaway test database and
-/// causing `DROP DATABASE` to panic with "being accessed by other users".
-#[derive(Clone)]
-pub struct StartupReindexHandle {
-    shut: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    task: std::sync::Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
-}
+pub use startup::StartupReindexHandle;
 
-impl StartupReindexHandle {
-    /// Signal shutdown and await the task's completion.
-    ///
-    /// This structurally closes the race: if the task is mid-await when signaled,
-    /// we wait for that await to return (at which point it sees the flag and exits)
-    /// rather than closing pools while the task still holds a ctx.db connection.
-    pub async fn shutdown_and_wait(self) {
-        self.shut.store(true, std::sync::atomic::Ordering::SeqCst);
-        let task = {
-            let mut guard = self.task.lock().unwrap();
-            guard.take()
-        };
-        if let Some(task) = task {
-            let _ = task.await;
-        }
-    }
-}
-
+use crate::controllers;
 use crate::controllers::route_inventory::{Edition, RouteClass, RouteInventory};
-use crate::{controllers, tasks};
-
-use crate::workers::embedding_sync::WorkerClass;
-use crate::workers::reindex::{
-    ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
-};
 
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
@@ -125,7 +93,7 @@ impl Hooks for App {
     ) -> Result<BootResult> {
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
-        crate::db::register_sqlite_extensions();
+        startup::register_sqlite_extensions();
 
         let result = create_app::<Self, Migrator>(mode, environment, config).await?;
 
@@ -136,13 +104,7 @@ impl Hooks for App {
         // Skip in test environments — the background task holds a `ctx.db`
         // connection that survives the test callback and races with loco's
         // `BootResultWrapper::drop` which tries `DROP DATABASE`.
-        if !matches!(environment, Environment::Test) {
-            spawn_startup_reindex(result.app_context.clone());
-            if let Some(config) = crate::services::db_load_guard::LoadGuardConfig::from_env() {
-                let ctx = result.app_context.clone();
-                spawn(async move { crate::services::db_load_guard::run(ctx, config).await });
-            }
-        }
+        startup::after_boot(&result, environment);
 
         Ok(result)
     }
@@ -151,111 +113,9 @@ impl Hooks for App {
         Ok(vec![])
     }
 
-    /// Builds the RLS-aware raw sqlx pool and stores it in `shared_store`, on PostgreSQL only.
-    /// `crate::db`'s module doc has why that pool exists separately from `ctx.db`.
-    ///
-    /// On SQLite none of this runs, and the branch must skip it rather than let it fail: `PgPoolOptions::connect` on a `sqlite://` URL hangs indefinitely instead of erroring.
-    /// That backend has no second tenant to isolate (see `docs/sqlite.md`), so `DbHandle` and the `Authenticator` trait implementation are not built at all; `controllers::extractors` authenticates against `ctx.db` directly there.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
-        if ctx.is_sqlite() {
-            crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
-                .map_err(loco_rs::Error::Message)?;
-        }
-        if ctx.is_postgres() {
-            let database_url = ctx.config.database.uri.clone();
-            let tenant =
-                crate::db::TenantDb::connect(&database_url, ctx.config.database.max_connections)
-                    .await
-                    .map_err(|e| {
-                        loco_rs::Error::Message(format!("failed to build tenant pool: {e}"))
-                    })?;
-            // The identity pool connects as the migration role for control-plane access (signup,
-            // setup, the admin CLI), so it needs no hooks: it never scopes to a workspace.
-            let identity = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(ctx.config.database.max_connections)
-                .connect(&database_url)
-                .await
-                .map_err(|e| {
-                    loco_rs::Error::Message(format!("failed to build identity pool: {e}"))
-                })?;
-            ctx.shared_store
-                .insert(crate::db::DbHandle { tenant, identity });
-            // Each of the four trait objects below is replaced by a later `shared_store.insert`:
-            // `Arc<dyn Trait>` is keyed by `TypeId`, so the later insert wins without changing
-            // any call site.
-            ctx.shared_store
-                .insert(crate::services::auth::default_authenticator());
-        }
-        // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the error to the first search.
-        let embedding_provider = crate::services::embedding::build_embedding_provider()
-            .await
-            .map_err(|e| {
-                loco_rs::Error::Message(format!("failed to build embedding provider: {e}"))
-            })?;
-        ctx.shared_store.insert(embedding_provider);
-        // Both resolver trait objects are installed on every backend, unlike the authenticator above: they
-        // read `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
-        ctx.shared_store
-            .insert(crate::services::embedding::default_embedding_resolver());
-        ctx.shared_store
-            .insert(crate::workers::embedding_sync::default_worker_class_resolver());
-        // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
-        ctx.shared_store.insert(std::sync::Arc::new(
-            crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
-        ));
-
-        // The enterprise edition's own wiring.
-        //
-        // An absent or invalid licence key warns and continues rather than failing boot: unlike
-        // `require_min_sqlite_connections` above, this misconfiguration announces itself the moment
-        // a gated route is reached, so the operator keeps the choice.
-        ctx.shared_store.insert(
-            Arc::new(crate::ee::services::licence::LicenceState::from_env())
-                as Arc<dyn crate::services::edition::EnterpriseEdition>,
-        );
-
-        if ctx.is_sqlite() {
-            // The three ee/ features named here use PostgreSQL-only SQL (`unnest`, `CROSS JOIN LATERAL`, or correlated subqueries with advisory locks) and would otherwise fail at execution time
-            // naming a query rather than the configuration behind it. Nothing else reports the
-            // enterprise edition's state at boot here, since `TenantScopedAuthenticator` below is
-            // not installed.
-            // Vector search works on this backend via sqlite-vec; JSONB filtering does not.
-            tracing::warn!(
-                "some enterprise features are unavailable on SQLite: browsing the marketplace, publishing \
-                 a template version, and listing template-origin updates each run a PostgreSQL-only \
-                 query and will fail when reached. Point DATABASE_URL at PostgreSQL to use them; \
-                 vector search and everything else works on this backend"
-            );
-        } else {
-            // Replaces the default authenticator inserted above (`Arc<dyn Authenticator>` is keyed
-            // by `TypeId`, so the later insert wins), letting a tenant-scoped key name its workspace
-            // per request on every authenticated path, REST and MCP alike.
-            //
-            // PostgreSQL only, because it reads through `DbHandle::tenant`. Deliberately not
-            // licence-conditional either: tying authentication to the licence would change who a
-            // caller *is* the moment a key lapsed, rather than which features they reach.
-            // Installing it unconditionally here is safe because it is a strict superset, calling
-            // `authenticate_api_key($1, $2)` where base calls `($1)`, and the second argument only
-            // matters for a NULL-`workspace_id` key, which nothing outside `ee/` can mint.
-            ctx.shared_store.insert(std::sync::Arc::new(
-                crate::ee::services::tenant_auth::TenantScopedAuthenticator,
-            )
-                as std::sync::Arc<dyn crate::services::auth::Authenticator>);
-        }
-
-        // The embedding and worker-class resolver trait objects, replacing the defaults inserted above.
-        // Both return `None` for a workspace with no row of its own, so a deployment that never
-        // assigns one is unaffected; which compute a tenant's jobs run on, and against which
-        // embedding backend, is the enterprise-edition decision that keeps these tables in `ee/`.
-        ctx.shared_store.insert(std::sync::Arc::new(
-            crate::ee::services::embedding_resolver::EmbeddingKeyResolver,
-        )
-            as std::sync::Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>);
-        ctx.shared_store.insert(std::sync::Arc::new(
-            crate::ee::services::worker_class_resolver::WorkerClassAssignmentResolver,
-        )
-            as std::sync::Arc<dyn crate::workers::embedding_sync::WorkerClassResolver>);
-
+        let ctx = context::build(ctx).await?;
+        crate::ee::services::boot::compose_context(&ctx);
         Ok(ctx)
     }
 
@@ -489,61 +349,15 @@ impl Hooks for App {
         stack
     }
 
-    /// Registers all three `WorkerClass` worker types and the reindex worker:
-    /// `Queue::register` keys a handler by `class_name()`, and `enqueue_for_class`
-    /// enqueues under whichever of the three types matches the resolved `WorkerClass`,
-    /// so a type left unregistered here would have jobs enqueue successfully but never
-    /// dequeue (loco-rs has no "unregistered handler" error at enqueue time, only silence
-    /// at dequeue time).
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
-        use crate::workers::embedding_sync::{
-            EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
-            EmbeddingSyncWorkerTenantPrivate,
-        };
-        queue
-            .register(EmbeddingSyncWorkerTenantPrivate::build(ctx))
-            .await?;
-        queue
-            .register(EmbeddingSyncWorkerOfficial::build(ctx))
-            .await?;
-        queue
-            .register(EmbeddingSyncWorkerShared::build(ctx))
-            .await?;
-        queue
-            .register(ReindexWorkerTenantPrivate::build(ctx))
-            .await?;
-        queue.register(ReindexWorkerOfficial::build(ctx)).await?;
-        queue.register(ReindexWorkerShared::build(ctx)).await?;
-        queue
-            .register(crate::ee::workers::infer_fill::InferFillWorker::build(ctx))
-            .await?;
+        workers::connect_workers(ctx, queue).await?;
+        crate::ee::services::boot::connect_workers(ctx, queue).await?;
         Ok(())
     }
 
     fn register_tasks(tasks: &mut Tasks) {
-        tasks.register(tasks::create_tenant::CreateTenant);
-        tasks.register(tasks::create_workspace::CreateWorkspace);
-        tasks.register(tasks::create_api_key::CreateApiKey);
-        tasks.register(tasks::create_invite::CreateInvite);
-        tasks.register(tasks::list_tenants::ListTenants);
-        tasks.register(tasks::list_workspaces::ListWorkspaces);
-        tasks.register(tasks::create_user::CreateUser);
-        tasks.register(tasks::add_member::AddMember);
-        tasks.register(tasks::list_members::ListMembers);
-        tasks.register(tasks::list_api_keys::ListApiKeys);
-        tasks.register(tasks::revoke_api_key::RevokeApiKey);
-        tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
-        tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
-        tasks.register(tasks::maintenance::Maintenance);
-        tasks.register(tasks::maintenance_status::MaintenanceStatus);
-        tasks.register(tasks::db_load_guard::DbLoadGuard);
-        // The enterprise edition's tasks. Registering only makes them available to `cargo loco task`;
-        // neither runs at boot, so this changes nothing for a deployment that never invokes them.
-        tasks.register(crate::ee::tasks::seed_official_templates::SeedOfficialTemplates);
-        tasks.register(crate::ee::tasks::create_tenant_api_key::CreateTenantApiKey);
-        tasks.register(crate::ee::tasks::reindex_scheduler::TenantReindexScheduler);
-        tasks.register(crate::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark);
-        // tasks-inject (do not remove)
+        workers::register_tasks(tasks);
+        crate::ee::services::boot::register_tasks(tasks);
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())
@@ -555,7 +369,7 @@ impl Hooks for App {
     /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
     /// so seeding it cannot consume a single-tenant deployment's one slot.
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
-        crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
+        crate::ee::services::boot::seed(ctx).await?;
         // Seed from YAML fixtures (Loco db::seed).
         // Locates fixture files under the `src/fixtures/` directory and feeds
         // each to `loco_rs::db::seed::<T>()` which expects a file path string.
@@ -576,156 +390,4 @@ impl Hooks for App {
         }
         Ok(())
     }
-}
-
-/// Spawns a background task that detects and enqueues startup reindex for any workspace
-/// whose stored vectors were embedded with a model that differs from the current provider.
-///
-/// This runs after migrations have applied (see `boot` above), and in a spawned task so the
-/// server stays responsive while the check runs.  On SQLite there is no embedding column,
-/// so this is a no-op.
-///
-/// **Community edition only.**  This feature compares every workspace's stamped model name
-/// against the deployment-wide provider; under EE a workspace can carry its own assignment
-/// (see `ee::services::embedding_resolver`), so the comparison would flag every workspace as
-/// a mismatch and reindex them with the wrong provider.  Skip when a licence is active —
-/// `is_active()` evaluates `exp` against the current clock each time, so a lapsed key still
-/// allows CE behaviour without a restart.
-fn spawn_startup_reindex(ctx: AppContext) {
-    let shut = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    // Clone before move into the spawned task.
-    let shut_for_task = shut.clone();
-
-    let task = std::sync::Arc::new(std::sync::Mutex::new(None::<tokio::task::JoinHandle<()>>));
-    let task_for_clone = task.clone();
-
-    let handle = StartupReindexHandle {
-        shut,
-        task: task_for_clone,
-    };
-    ctx.shared_store.insert(handle);
-
-    let join_handle = spawn(async move {
-        // Check for shutdown between each await point.
-        // The pattern: do work → sleep briefly (checking shut each iteration) → do more work.
-        // This ensures the task exits promptly even when blocked on an async op,
-        // because the sleep loop always checks the flag.
-        let mut do_work = true;
-        while do_work {
-            do_work = false;
-
-            // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
-            if crate::services::edition::is_active(&ctx) {
-                tracing::debug!("startup reindex: enterprise licence active, skipping");
-                return;
-            }
-
-            // Resolve the deployment's current provider to compare against workspace stamps.
-            let provider = match crate::services::embedding::build_embedding_provider().await {
-                Ok(p) => p,
-                Err(err) => {
-                    tracing::warn!(
-                        "startup reindex: failed to build embedding provider, skipping detection: {err}"
-                    );
-                    return;
-                }
-            };
-            if provider.embed_batch(&[]).await.is_err() {
-                tracing::warn!("startup reindex: embedding provider must be configured");
-                return;
-            }
-
-            // Fetch all workspaces that have an embedding model stamp.
-            // We compare each workspace's stamped model against the provider's model name.
-            // If they differ, enqueue a reindex.
-            use sea_orm::{EntityTrait, QuerySelect};
-
-            let workspaces: Vec<_> = match crate::models::workspace_workspaces::Entity::find()
-                .select_only()
-                .column(crate::models::_entities::workspace_workspaces::Column::Id)
-                .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingModel)
-                .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingDimensions)
-                .column_as(
-                    crate::models::_entities::tenant_tenants::Column::EmbeddingModel,
-                    "tenant_model",
-                )
-                .column_as(
-                    crate::models::_entities::tenant_tenants::Column::EmbeddingDimensions,
-                    "tenant_dimensions",
-                )
-                .left_join(crate::models::tenant_tenants::Entity)
-                .into_model::<crate::services::embedding::sync::StartupReindexRow>()
-                .all(&ctx.db)
-                .await
-            {
-                Ok(ws) => ws,
-                Err(err) => {
-                    tracing::error!("startup reindex: failed to list workspaces: {err}");
-                    return;
-                }
-            };
-
-            for ws in &workspaces {
-                // Check for shutdown before processing each workspace.
-                if shut_for_task.load(std::sync::atomic::Ordering::SeqCst) {
-                    tracing::info!("startup reindex: shutdown requested, aborting");
-                    return;
-                }
-
-                let Some(stamped_model) = &ws.embedding_model else {
-                    // No stamp — no reindex needed. First-write stamping will handle it.
-                    continue;
-                };
-
-                if stamped_model.as_str() == provider.model_name() {
-                    // Already matches — no reindex needed.
-                    continue;
-                }
-
-                tracing::info!(
-                    workspace_id = %ws.id,
-                    stamped_model = stamped_model,
-                    provider_model = provider.model_name(),
-                    "startup reindex: model mismatch, enqueueing reindex"
-                );
-
-                // Resolve the worker class for this workspace and dispatch through the correct type.
-                let worker_class = match crate::controllers::extractors::resolve_worker_class(
-                    &ctx, ws.id,
-                )
-                .await
-                {
-                    Ok(cls) => cls,
-                    Err(err) => {
-                        tracing::warn!(
-                            workspace_id = %ws.id,
-                            error = %err.0,
-                            "startup reindex: failed to resolve worker class, defaulting to shared"
-                        );
-                        WorkerClass::Shared
-                    }
-                };
-                let args = super::workers::reindex::ReindexArgs {
-                    workspace_id: ws.id,
-                    worker_class,
-                };
-                if let Err(err) = super::workers::reindex::enqueue_for_class(&ctx, args).await {
-                    tracing::error!(
-                        workspace_id = %ws.id,
-                        error = %err,
-                        "startup reindex: failed to enqueue reindex"
-                    );
-                } else {
-                    tracing::info!(
-                        workspace_id = %ws.id,
-                        "startup reindex: enqueue success"
-                    );
-                }
-            }
-        }
-    });
-
-    // Store the JoinHandle so shutdown_and_wait() can await task completion.
-    task.lock().unwrap().replace(join_handle);
 }
