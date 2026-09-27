@@ -5,9 +5,7 @@
 
 pub use super::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
-use sea_orm::{
-    ActiveValue, Condition, DatabaseTransaction, FromQueryResult, QueryOrder, QuerySelect,
-};
+use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -174,38 +172,6 @@ pub async fn get_template(
             "template '{template_id}' was not found"
         ))),
     }
-}
-
-/// Reads and parses one stored visibility without applying caller visibility rules.
-pub(crate) async fn find_visibility(
-    conn: &impl ConnectionTrait,
-    template_id: uuid::Uuid,
-) -> Result<Option<(uuid::Uuid, TemplateVisibility)>, YorishiroError> {
-    #[derive(FromQueryResult)]
-    struct VisibilityRow {
-        tenant_id: uuid::Uuid,
-        visibility: String,
-    }
-
-    let Some(row) = Entity::find()
-        .select_only()
-        .column(Column::TenantId)
-        .column(Column::Visibility)
-        .filter(Column::Id.eq(template_id))
-        .into_model::<VisibilityRow>()
-        .one(conn)
-        .await
-        .internal()?
-    else {
-        return Ok(None);
-    };
-    let visibility = TemplateVisibility::from_db_str(&row.visibility).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "unknown template visibility: {}",
-            row.visibility
-        ))
-    })?;
-    Ok(Some((row.tenant_id, visibility)))
 }
 
 /// Resolves a `template_id` as either a library template or a built-in, and says which.

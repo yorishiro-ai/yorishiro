@@ -7,7 +7,7 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
-use crate::models::template_templates::{self, TemplateVisibility};
+use crate::models::template_templates::TemplateVisibility;
 use chrono::{DateTime, Utc};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
@@ -18,7 +18,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromQueryResult)]
 pub struct MarketplaceListing {
     pub template_id: Uuid,
     pub name: String,
@@ -33,44 +33,6 @@ pub struct MarketplaceListing {
     pub review_count: i64,
     /// Mean rating, `null` when nobody has reviewed it.
     pub average_rating: Option<f64>,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct MarketplaceListingDbRecord {
-    template_id: Uuid,
-    name: String,
-    description: Option<String>,
-    tags: Vec<String>,
-    author: Option<String>,
-    tenant_id: Uuid,
-    visibility: String,
-    latest_stable_version: Option<i32>,
-    review_count: i64,
-    average_rating: Option<f64>,
-}
-
-impl TryFrom<MarketplaceListingDbRecord> for MarketplaceListing {
-    type Error = YorishiroError;
-
-    fn try_from(row: MarketplaceListingDbRecord) -> Result<Self, Self::Error> {
-        TemplateVisibility::from_db_str(&row.visibility).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template visibility: {}",
-                row.visibility
-            ))
-        })?;
-        Ok(Self {
-            template_id: row.template_id,
-            name: row.name,
-            description: row.description,
-            tags: row.tags,
-            author: row.author,
-            tenant_id: row.tenant_id,
-            latest_stable_version: row.latest_stable_version,
-            review_count: row.review_count,
-            average_rating: row.average_rating,
-        })
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -144,6 +106,43 @@ struct TemplateVersionDbRecord {
     created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, FromQueryResult)]
+struct AuthorizedTemplateVersionDbRecord {
+    // Visibility is projected only after the query's authorization predicate.
+    // An inaccessible corrupt row must remain indistinguishable from a missing row.
+    id: Uuid,
+    template_id: Uuid,
+    version: i32,
+    definition: Value,
+    changelog: Option<String>,
+    status: String,
+    created_at: DateTime<Utc>,
+    template_visibility: String,
+}
+
+impl TryFrom<AuthorizedTemplateVersionDbRecord> for TemplateVersionRecord {
+    type Error = YorishiroError;
+
+    fn try_from(row: AuthorizedTemplateVersionDbRecord) -> Result<Self, Self::Error> {
+        TemplateVisibility::from_db_str(&row.template_visibility).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template visibility: {}",
+                row.template_visibility
+            ))
+        })?;
+        TemplateVersionDbRecord {
+            id: row.id,
+            template_id: row.template_id,
+            version: row.version,
+            definition: row.definition,
+            changelog: row.changelog,
+            status: row.status,
+            created_at: row.created_at,
+        }
+        .try_into()
+    }
+}
+
 impl TryFrom<TemplateVersionDbRecord> for TemplateVersionRecord {
     type Error = YorishiroError;
 
@@ -210,6 +209,40 @@ impl From<crate::models::_entities::template_reviews::Model> for TemplateReviewR
     }
 }
 
+#[derive(Debug, FromQueryResult)]
+struct AuthorizedTemplateReviewDbRecord {
+    id: Uuid,
+    template_id: Uuid,
+    tenant_id: Uuid,
+    rating: i16,
+    comment: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    template_visibility: String,
+}
+
+impl TryFrom<AuthorizedTemplateReviewDbRecord> for TemplateReviewRecord {
+    type Error = YorishiroError;
+
+    fn try_from(row: AuthorizedTemplateReviewDbRecord) -> Result<Self, Self::Error> {
+        TemplateVisibility::from_db_str(&row.template_visibility).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template visibility: {}",
+                row.template_visibility
+            ))
+        })?;
+        Ok(Self {
+            id: row.id,
+            template_id: row.template_id,
+            tenant_id: row.tenant_id,
+            rating: row.rating,
+            comment: row.comment,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PublishVersionRequest {
     pub definition: Value,
@@ -230,12 +263,39 @@ pub struct SubmitReviewRequest {
 }
 
 /// The template columns a fork copies across, minus the definition (which comes from the chosen version rather than the template row).
-#[derive(FromQueryResult)]
 pub(crate) struct ForkSource {
     pub(crate) name: String,
     pub(crate) description: Option<String>,
     pub(crate) tags: Vec<String>,
     pub(crate) author: Option<String>,
+}
+
+#[derive(FromQueryResult)]
+struct ForkSourceDbRecord {
+    name: String,
+    description: Option<String>,
+    tags: Vec<String>,
+    author: Option<String>,
+    template_visibility: String,
+}
+
+impl TryFrom<ForkSourceDbRecord> for ForkSource {
+    type Error = YorishiroError;
+
+    fn try_from(row: ForkSourceDbRecord) -> Result<Self, Self::Error> {
+        TemplateVisibility::from_db_str(&row.template_visibility).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template visibility: {}",
+                row.template_visibility
+            ))
+        })?;
+        Ok(Self {
+            name: row.name,
+            description: row.description,
+            tags: row.tags,
+            author: row.author,
+        })
+    }
 }
 
 /// Lists community-visible templates across every tenant, ordered by name then id, one page at a time.
@@ -256,9 +316,9 @@ pub async fn list_marketplace(
     let limit = page.limit();
     let offset = page.offset();
 
-    MarketplaceListingDbRecord::find_by_statement(Statement::from_sql_and_values(
+    MarketplaceListing::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
-         "SELECT t.id AS template_id, t.name, t.description, t.tags, t.author, t.tenant_id, t.visibility, \
+        "SELECT t.id AS template_id, t.name, t.description, t.tags, t.author, t.tenant_id, \
          (SELECT max(v.version) FROM template_versions v \
            WHERE v.template_id = t.id AND v.status = 'stable') AS latest_stable_version, \
          (SELECT count(*) FROM template_reviews r \
@@ -281,10 +341,7 @@ pub async fn list_marketplace(
     ))
     .all(conn)
     .await
-    .internal()?
-    .into_iter()
-    .map(MarketplaceListing::try_from)
-    .collect()
+    .internal()
 }
 
 /// Versions of a template that `tenant_id` is allowed to see.
@@ -297,19 +354,20 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
-    let Some((owner_id, visibility)) =
-        template_templates::find_visibility(conn, template_id).await?
-    else {
-        return Ok(Vec::new());
-    };
-    if owner_id != tenant_id && visibility != TemplateVisibility::Community {
-        return Ok(Vec::new());
-    }
     use crate::models::_entities::template_templates::Column as TemplateColumn;
     use crate::models::_entities::template_versions::{Column, Entity, Relation};
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
 
     let rows = Entity::find()
+        .select_only()
+        .column(Column::Id)
+        .column(Column::TemplateId)
+        .column(Column::Version)
+        .column(Column::Definition)
+        .column(Column::Changelog)
+        .column(Column::Status)
+        .column(Column::CreatedAt)
+        .column_as(TemplateColumn::Visibility, "template_visibility")
         .filter(Column::TemplateId.eq(template_id))
         .join(
             sea_orm::JoinType::InnerJoin,
@@ -328,6 +386,7 @@ pub async fn list_versions(
         .order_by_desc(Column::Version)
         .limit(page.limit() as u64)
         .offset(page.offset() as u64)
+        .into_model::<AuthorizedTemplateVersionDbRecord>()
         .all(conn)
         .await
         .internal()?;
@@ -381,19 +440,20 @@ pub async fn list_reviews(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateReviewRecord>, YorishiroError> {
-    let Some((owner_id, visibility)) =
-        template_templates::find_visibility(conn, template_id).await?
-    else {
-        return Ok(Vec::new());
-    };
-    if owner_id != tenant_id && visibility != TemplateVisibility::Community {
-        return Ok(Vec::new());
-    }
     use crate::models::_entities::template_reviews::{Column, Entity, Relation};
     use crate::models::_entities::template_templates::Column as TemplateColumn;
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
 
     let rows = Entity::find()
+        .select_only()
+        .column(Column::Id)
+        .column(Column::TemplateId)
+        .column(Column::TenantId)
+        .column(Column::Rating)
+        .column(Column::Comment)
+        .column(Column::CreatedAt)
+        .column(Column::UpdatedAt)
+        .column_as(TemplateColumn::Visibility, "template_visibility")
         .filter(Column::TemplateId.eq(template_id))
         .join(
             sea_orm::JoinType::InnerJoin,
@@ -407,11 +467,14 @@ pub async fn list_reviews(
         .order_by_desc(Column::CreatedAt)
         .limit(page.limit() as u64)
         .offset(page.offset() as u64)
+        .into_model::<AuthorizedTemplateReviewDbRecord>()
         .all(conn)
         .await
         .internal()?;
 
-    Ok(rows.into_iter().map(TemplateReviewRecord::from).collect())
+    rows.into_iter()
+        .map(TemplateReviewRecord::try_from)
+        .collect()
 }
 
 /// Whether a template visible to `tenant_id` exists, for `services::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
@@ -420,12 +483,20 @@ pub(crate) async fn is_visible(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    let Some((owner_id, visibility)) =
-        template_templates::find_visibility(conn, template_id).await?
-    else {
-        return Ok(false);
-    };
-    Ok(owner_id == tenant_id || visibility == TemplateVisibility::Community)
+    use crate::models::_entities::template_templates::{Column, Entity};
+    use sea_orm::{ColumnTrait, Condition, PaginatorTrait, QueryFilter};
+
+    let count = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(
+            Condition::any()
+                .add(Column::TenantId.eq(tenant_id))
+                .add(Column::Visibility.eq(TemplateVisibility::Community.as_db_str())),
+        )
+        .count(conn)
+        .await
+        .internal()?;
+    Ok(count > 0)
 }
 
 /// Records this tenant's review, replacing its previous one if it had left one.
@@ -474,14 +545,6 @@ pub(crate) async fn find_fork_source(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<Option<ForkSource>, YorishiroError> {
-    let Some((owner_id, visibility)) =
-        template_templates::find_visibility(conn, template_id).await?
-    else {
-        return Ok(None);
-    };
-    if owner_id != tenant_id && visibility != TemplateVisibility::Community {
-        return Ok(None);
-    }
     use crate::models::_entities::template_templates::{Column, Entity};
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QuerySelect};
 
@@ -491,16 +554,19 @@ pub(crate) async fn find_fork_source(
         .column(Column::Description)
         .column(Column::Tags)
         .column(Column::Author)
+        .column_as(Column::Visibility, "template_visibility")
         .filter(Column::Id.eq(template_id))
         .filter(
             Condition::any()
                 .add(Column::TenantId.eq(tenant_id))
                 .add(Column::Visibility.eq(TemplateVisibility::Community.as_db_str())),
         )
-        .into_model::<ForkSource>()
+        .into_model::<ForkSourceDbRecord>()
         .one(conn)
         .await
-        .internal()
+        .internal()?
+        .map(ForkSource::try_from)
+        .transpose()
 }
 
 /// The definition to fork: the given version if published (never a draft, even by number), or the latest `stable` one when `version` is `None`.
@@ -607,9 +673,16 @@ pub(crate) async fn is_owned_by(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<bool, YorishiroError> {
-    Ok(template_templates::find_visibility(conn, template_id)
-        .await?
-        .is_some_and(|(owner_id, _)| owner_id == tenant_id))
+    use crate::models::_entities::template_templates::{Column, Entity};
+    use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
+
+    let count = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?;
+    Ok(count > 0)
 }
 
 /// Sets a template's marketplace visibility.
