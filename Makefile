@@ -7,7 +7,7 @@
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 
-.PHONY: check clippy fmt fmt-check coverage test-postgres test-sqlite build task doctor entities
+.PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite build task doctor entities
 
 check:
 	cargo check --locked --workspace
@@ -20,6 +20,11 @@ fmt:
 
 fmt-check:
 	cargo fmt --all -- --check
+
+public-api-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_public_api.py
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_public_api.py
+	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
 
 # Nightly is required because LLVM branch coverage is not available on stable.
 # Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
@@ -60,4 +65,4 @@ entities: build
 	docker compose down -v testdb
 
 # Convenience alias: check + fmt + clippy (CI check job).
-check-all: fmt-check check clippy
+check-all: fmt-check public-api-check check clippy
