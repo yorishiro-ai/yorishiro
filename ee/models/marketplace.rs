@@ -214,7 +214,6 @@ pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
-    validate_persisted_statuses(conn).await?;
     let limit = page.limit();
     let offset = page.offset();
 
@@ -252,7 +251,6 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
-    validate_persisted_statuses(conn).await?;
     use crate::models::_entities::template_templates::Column as TemplateColumn;
     use crate::models::_entities::template_versions::{Column, Entity, Relation};
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
@@ -283,33 +281,6 @@ pub async fn list_versions(
     rows.into_iter()
         .map(TemplateVersionRecord::try_from)
         .collect()
-}
-
-async fn validate_persisted_statuses(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
-    use crate::models::_entities::template_versions::{Column, Entity};
-    use sea_orm::{FromQueryResult, QuerySelect};
-
-    #[derive(FromQueryResult)]
-    struct PersistedStatus {
-        status: String,
-    }
-
-    let rows = Entity::find()
-        .select_only()
-        .column(Column::Status)
-        .into_model::<PersistedStatus>()
-        .all(conn)
-        .await
-        .internal()?;
-    for row in rows {
-        TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template version status: {}",
-                row.status
-            ))
-        })?;
-    }
-    Ok(())
 }
 
 /// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
@@ -481,42 +452,45 @@ pub(crate) async fn find_forkable_definition(
 
     #[derive(FromQueryResult)]
     struct Definition {
-        version: i32,
         definition: Value,
         status: String,
     }
 
-    let rows = Entity::find()
-        .select_only()
-        .column(Column::Version)
-        .column(Column::Definition)
-        .column(Column::Status)
-        .filter(Column::TemplateId.eq(template_id))
-        .order_by_desc(Column::Version)
-        .into_model::<Definition>()
-        .all(conn)
-        .await
-        .internal()?;
+    let row = match version {
+        Some(version) => Entity::find()
+            .select_only()
+            .column(Column::Definition)
+            .column(Column::Status)
+            .filter(Column::TemplateId.eq(template_id))
+            .filter(Column::Version.eq(version))
+            .into_model::<Definition>()
+            .one(conn)
+            .await
+            .internal()?,
+        None => Entity::find()
+            .select_only()
+            .column(Column::Definition)
+            .column(Column::Status)
+            .filter(Column::TemplateId.eq(template_id))
+            .filter(Column::Status.eq(TemplateVersionStatus::Stable.as_db_str()))
+            .order_by_desc(Column::Version)
+            .into_model::<Definition>()
+            .one(conn)
+            .await
+            .internal()?,
+    };
 
-    for row in &rows {
-        TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
-            YorishiroError::Internal(anyhow::anyhow!(
-                "unknown template version status: {}",
-                row.status
-            ))
-        })?;
-    }
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let status = TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
+        YorishiroError::Internal(anyhow::anyhow!(
+            "unknown template version status: {}",
+            row.status
+        ))
+    })?;
 
-    Ok(rows.into_iter().find_map(|row| {
-        let status = TemplateVersionStatus::from_db_str(&row.status)?;
-        match version {
-            Some(version) if row.version == version && status != TemplateVersionStatus::Draft => {
-                Some(row.definition)
-            }
-            None if status == TemplateVersionStatus::Stable => Some(row.definition),
-            _ => None,
-        }
-    }))
+    Ok((version.is_none() || status != TemplateVersionStatus::Draft).then_some(row.definition))
 }
 
 /// Outcome of [`insert_fork`]: either the new template's id, or the name it collided on.
