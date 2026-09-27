@@ -81,35 +81,32 @@ pub async fn reindex_workspace(
 
 /// The resolved embedding chain for a workspace.
 #[derive(Clone)]
-pub struct ResolvedEmbedding {
-    pub workspace_model: Option<String>,
-    pub workspace_dimensions: Option<i32>,
-    pub tenant_model: Option<String>,
-    pub tenant_dimensions: Option<i32>,
-    pub deployment_dimensions: usize,
+pub(crate) struct ResolvedEmbedding {
+    pub(crate) workspace_model: Option<String>,
+    pub(crate) workspace_dimensions: Option<i32>,
+    pub(crate) tenant_model: Option<String>,
+    pub(crate) tenant_dimensions: Option<i32>,
+    pub(crate) deployment_dimensions: usize,
 }
 
 /// A row returned by the workspace and tenant embedding-chain query.
 #[derive(sea_orm::FromQueryResult)]
-pub struct EmbeddingChainRow {
-    pub embedding_model: Option<String>,
-    pub embedding_dimensions: Option<i32>,
-    pub tenant_model: Option<String>,
-    pub tenant_dimensions: Option<i32>,
+struct EmbeddingChainRow {
+    embedding_model: Option<String>,
+    embedding_dimensions: Option<i32>,
+    tenant_model: Option<String>,
+    tenant_dimensions: Option<i32>,
 }
 
 /// A workspace row used by startup reindex detection.
 #[derive(Clone, sea_orm::FromQueryResult)]
-pub struct StartupReindexRow {
-    pub id: Uuid,
-    pub embedding_model: Option<String>,
-    pub embedding_dimensions: Option<i32>,
-    pub tenant_model: Option<String>,
-    pub tenant_dimensions: Option<i32>,
+pub(crate) struct StartupReindexRow {
+    pub(crate) id: Uuid,
+    pub(crate) embedding_model: Option<String>,
 }
 
 /// Resolves the workspace, tenant, and deployment embedding settings.
-pub async fn resolve_embedding_chain(
+pub(crate) async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     licenced: bool,
