@@ -6,6 +6,7 @@ use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
 use yorishiro::ee::models::entity_fill;
+use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -628,6 +629,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
             infer.text()
         );
         let infer_body: serde_json::Value = infer.json();
+        assert_eq!(infer_body["status"], "queued");
         let job_id = infer_body["job_id"]
             .as_str()
             .expect("response must contain a job_id string");
@@ -662,6 +664,77 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
                     != serde_json::json!("test"),
             "the POST path must not serve job status"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn inference_status_polling_preserves_all_wire_values() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let mut jobs = Vec::new();
+
+        let queued = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, queued, setup.workspace_id, "notes")
+            .await
+            .expect("create queued job");
+        jobs.push((queued, InferenceJobStatus::Queued));
+
+        let running = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, running, setup.workspace_id, "notes")
+            .await
+            .expect("create running job");
+        assert!(inference_jobs::claim(&ctx.db, running).await.unwrap());
+        jobs.push((running, InferenceJobStatus::Running));
+
+        let completed = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, completed, setup.workspace_id, "notes")
+            .await
+            .expect("create completed job");
+        assert!(inference_jobs::claim(&ctx.db, completed).await.unwrap());
+        inference_jobs::complete(&ctx.db, completed, 3, 1)
+            .await
+            .expect("complete job");
+        jobs.push((completed, InferenceJobStatus::Completed));
+
+        let failed = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, failed, setup.workspace_id, "notes")
+            .await
+            .expect("create failed job");
+        inference_jobs::fail(&ctx.db, failed, "provider failed")
+            .await
+            .expect("fail job");
+        jobs.push((failed, InferenceJobStatus::Failed));
+
+        for (job_id, expected) in jobs {
+            let response = request
+                .get(&format!("/api/inference-jobs/{job_id}"))
+                .add_header("Authorization", format!("Bearer {}", setup.key))
+                .await;
+            assert_eq!(
+                response.status_code(),
+                StatusCode::OK,
+                "response: {:?}",
+                response.text()
+            );
+            let body: serde_json::Value = response.json();
+            assert_eq!(body["status"], expected.as_db_str());
+            if expected == InferenceJobStatus::Completed {
+                assert_eq!(body["applied"], 3);
+                assert_eq!(body["skipped"], 1);
+            } else if expected == InferenceJobStatus::Failed {
+                assert_eq!(body["error"], "provider failed");
+                assert!(body["applied"].is_null());
+                assert!(body["skipped"].is_null());
+            } else {
+                assert!(body["applied"].is_null());
+                assert!(body["skipped"].is_null());
+            }
+        }
     })
     .await;
 }
