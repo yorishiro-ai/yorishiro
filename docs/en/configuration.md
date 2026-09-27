@@ -33,6 +33,10 @@ You can choose between a local model that runs on your machine, or an OpenAI-com
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | Expected vector size (default: `768`). Must match your chosen model |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | Include a `dimensions` field in the request. Default `false` |
 
+The OpenAI-compatible provider keeps the public `EmbeddingProvider` contract as its domain boundary.
+Its outbound request is behind a private provider-specific transport seam so failure tests can substitute the network without changing embedding behavior or exposing another application-wide HTTP service.
+Loco provides extension points for application composition, but it does not own this provider-specific outbound request, so no Loco transport extension is applicable here.
+
 ### Local model
 
 Set `YORISHIRO_EMBEDDING_PROVIDER=local` to use a model that runs on your machine.
