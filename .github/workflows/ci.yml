@@ -43,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: ./.github/actions/rust-setup
         with:
@@ -64,6 +66,12 @@ jobs:
             echo "ERROR: call boot_request/boot_request_sqlite instead of the raw loco helper directly"
             exit 1
           fi
+
+      - name: Check public API additions
+        run: make public-api-check
+        env:
+          PUBLIC_API_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          PUBLIC_API_HEAD_REF: ${{ github.sha }}
 
       - name: Check for allow(dead_code)
         run: |
