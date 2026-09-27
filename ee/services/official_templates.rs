@@ -137,7 +137,11 @@ async fn upsert_template(
         name: ActiveValue::Set(name.to_string()),
         description: ActiveValue::Set(description.map(str::to_string)),
         definition: ActiveValue::Set(definition.clone()),
-        visibility: ActiveValue::Set("community".to_string()),
+        visibility: ActiveValue::Set(
+            crate::models::template_templates::TemplateVisibility::Community
+                .as_db_str()
+                .to_string(),
+        ),
         author: ActiveValue::Set(Some(OFFICIAL_AUTHOR.to_string())),
         updated_at: ActiveValue::Set(chrono::Utc::now().into()),
         ..Default::default()

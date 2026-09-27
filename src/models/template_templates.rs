@@ -6,7 +6,9 @@
 pub use super::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::MetaSchemaDefinition;
@@ -44,7 +46,7 @@ pub struct TemplateRecord {
     pub definition: MetaSchemaDefinition,
     pub tags: Vec<String>,
     pub locale: Option<String>,
-    pub visibility: String,
+    pub visibility: TemplateVisibility,
     pub author: Option<String>,
     pub fork_of: Option<uuid::Uuid>,
     pub created_by: Option<uuid::Uuid>,
@@ -56,6 +58,12 @@ impl TryFrom<Model> for TemplateRecord {
     type Error = YorishiroError;
 
     fn try_from(model: Model) -> Result<Self, Self::Error> {
+        let visibility = TemplateVisibility::from_db_str(&model.visibility).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template visibility: {}",
+                model.visibility
+            ))
+        })?;
         Ok(Self {
             id: model.id,
             tenant_id: model.tenant_id,
@@ -64,7 +72,7 @@ impl TryFrom<Model> for TemplateRecord {
             definition: serde_json::from_value(model.definition).internal()?,
             tags: model.tags,
             locale: model.locale,
-            visibility: model.visibility,
+            visibility,
             author: model.author,
             fork_of: model.fork_of,
             created_by: model.created_by,
@@ -74,11 +82,57 @@ impl TryFrom<Model> for TemplateRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TemplateVisibility {
+    Tenant,
+    Community,
+}
+
+impl TemplateVisibility {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Tenant => "tenant",
+            Self::Community => "community",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+
+    pub fn parse_input(value: &str) -> Result<Self, YorishiroError> {
+        Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
+            message: format!("unknown visibility '{value}'"),
+            details: Vec::new(),
+            hint: "use 'tenant' to keep it private or 'community' to list it".into(),
+        })
+    }
+}
+
+impl fmt::Display for TemplateVisibility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for TemplateVisibility {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "tenant" => Ok(Self::Tenant),
+            "community" => Ok(Self::Community),
+            _ => Err(format!("unknown template visibility: {value}")),
+        }
+    }
+}
+
 /// Templates visible to `tenant_id`: its own templates plus any published with community visibility.
 fn visible_to(tenant_id: uuid::Uuid) -> Condition {
     Condition::any()
         .add(Column::TenantId.eq(tenant_id))
-        .add(Column::Visibility.eq("community"))
+        .add(Column::Visibility.eq(TemplateVisibility::Community.as_db_str()))
 }
 
 /// Lists templates visible to `tenant_id`: its own templates plus any published with community visibility.
@@ -182,6 +236,7 @@ pub async fn create_template(
         tags: ActiveValue::Set(input.tags),
         locale: ActiveValue::Set(input.locale),
         author: ActiveValue::Set(input.author),
+        visibility: ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),
         created_by: ActiveValue::Set(created_by),
         ..Default::default()
     };
@@ -311,6 +366,7 @@ pub async fn fork_template(
         tags: ActiveValue::Set(source.tags),
         locale: ActiveValue::Set(source.locale),
         author: ActiveValue::Set(source.author),
+        visibility: ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),
         fork_of: ActiveValue::Set(Some(source.id)),
         created_by: ActiveValue::Set(created_by),
         ..Default::default()

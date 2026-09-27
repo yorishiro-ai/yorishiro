@@ -1,7 +1,10 @@
 use crate::requests::boot_request;
+use chrono::Utc;
+use serde_json::json;
+use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::models::_entities::{template_templates, tenant_tenants};
-use yorishiro::models::template_templates as templates;
+use yorishiro::models::template_templates::{self as templates, TemplateVisibility};
 
 fn note_definition(name: &str) -> serde_json::Value {
     serde_json::json!({
@@ -14,6 +17,66 @@ fn note_definition(name: &str) -> serde_json::Value {
             }
         }
     })
+}
+
+#[test]
+fn visibility_round_trips_db_and_json_values() {
+    for (visibility, wire) in [
+        (TemplateVisibility::Tenant, "tenant"),
+        (TemplateVisibility::Community, "community"),
+    ] {
+        assert_eq!(visibility.as_db_str(), wire);
+        assert_eq!(TemplateVisibility::from_db_str(wire), Some(visibility));
+        assert_eq!(serde_json::to_value(visibility).unwrap(), json!(wire));
+        assert_eq!(visibility.to_string(), wire);
+
+        let record = templates::TemplateRecord::try_from(template_templates::Model {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            name: "template".into(),
+            description: None,
+            definition: note_definition("template"),
+            locale: None,
+            visibility: wire.into(),
+            author: None,
+            fork_of: None,
+            created_by: None,
+            created_at: Utc::now().fixed_offset(),
+            updated_at: Utc::now().fixed_offset(),
+            tags: vec![],
+        })
+        .unwrap();
+        assert_eq!(record.visibility, visibility);
+    }
+}
+
+#[test]
+fn unknown_persisted_visibility_is_internal_and_input_is_validation_failed() {
+    let row = template_templates::Model {
+        id: Uuid::new_v4(),
+        tenant_id: Uuid::new_v4(),
+        name: "template".into(),
+        description: None,
+        definition: note_definition("template"),
+        locale: None,
+        visibility: "paused".into(),
+        author: None,
+        fork_of: None,
+        created_by: None,
+        created_at: Utc::now().fixed_offset(),
+        updated_at: Utc::now().fixed_offset(),
+        tags: vec![],
+    };
+    assert!(matches!(
+        templates::TemplateRecord::try_from(row),
+        Err(yorishiro::YorishiroError::Internal(_))
+    ));
+
+    let error = TemplateVisibility::parse_input("paused").unwrap_err();
+    assert!(matches!(
+        error,
+        yorishiro::YorishiroError::ValidationFailed { .. }
+    ));
 }
 
 #[tokio::test]

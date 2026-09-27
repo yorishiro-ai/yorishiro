@@ -69,6 +69,10 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             document["components"]["schemas"]["TemplateVersionStatus"]["enum"],
             serde_json::json!(["draft", "pre", "stable"])
         );
+        assert_eq!(
+            document["components"]["schemas"]["TemplateVisibility"]["enum"],
+            serde_json::json!(["tenant", "community"])
+        );
     })
     .await;
 }
