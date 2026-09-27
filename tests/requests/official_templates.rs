@@ -5,7 +5,7 @@ use loco_rs::app::Hooks;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::app::App;
 use yorishiro::ee::services::official_templates::{self, OFFICIAL_TENANT_ID};
-use yorishiro::models::_entities::tenant_tenants;
+use yorishiro::models::_entities::{template_versions, tenant_tenants};
 
 /// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.
 #[tokio::test]
@@ -32,6 +32,15 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
             tenant.is_some(),
             "the official tenant row must exist after seeding"
         );
+        let published_statuses = template_versions::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|version| version.status)
+            .collect::<Vec<_>>();
+        assert!(!published_statuses.is_empty());
+        assert!(published_statuses.iter().all(|status| status == "stable"));
 
         let second = official_templates::seed_official_templates(&ctx)
             .await

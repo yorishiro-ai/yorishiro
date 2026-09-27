@@ -63,19 +63,30 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
             .internal()?;
 
         match latest {
-            Some(latest) if latest.definition == definition_json => {
-                outcome.unchanged.push(summary.id.clone());
-                continue;
+            Some(latest) => {
+                crate::ee::models::marketplace::TemplateVersionStatus::from_db_str(&latest.status)
+                    .ok_or_else(|| {
+                        YorishiroError::Internal(anyhow::anyhow!(
+                            "unknown template version status: {}",
+                            latest.status
+                        ))
+                    })?;
+                if latest.definition == definition_json {
+                    outcome.unchanged.push(summary.id.clone());
+                    continue;
+                }
+                outcome.updated.push(summary.id.clone());
             }
-            Some(_) => outcome.updated.push(summary.id.clone()),
-            None => outcome.published.push(summary.id.clone()),
+            None => {
+                outcome.published.push(summary.id.clone());
+            }
         }
 
         // `stable`, not `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
         let request = crate::ee::models::marketplace::PublishVersionRequest {
             definition: definition_json,
             changelog: Some(format!("Built-in template '{}'", summary.id)),
-            status: "stable".to_string(),
+            status: crate::ee::models::marketplace::TemplateVersionStatus::Stable,
         };
         // lock_for_update is transaction-scoped, so this needs its own txn rather than ctx.db.
         let txn = ctx.db.begin().await.internal()?;

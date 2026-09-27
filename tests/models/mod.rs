@@ -4,6 +4,7 @@ mod content_entities_sqlite;
 mod entities;
 mod inference_jobs;
 mod maintenance;
+mod marketplace;
 mod recall;
 mod search;
 mod template_templates;

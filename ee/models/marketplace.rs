@@ -12,6 +12,8 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
@@ -32,20 +34,106 @@ pub struct MarketplaceListing {
     pub average_rating: Option<f64>,
 }
 
-#[derive(Debug, Serialize, FromQueryResult)]
+#[derive(Debug, Serialize)]
 pub struct TemplateVersionRecord {
     pub id: Uuid,
     pub template_id: Uuid,
     pub version: i32,
     pub definition: Value,
     pub changelog: Option<String>,
-    pub status: String,
+    pub status: TemplateVersionStatus,
     pub created_at: DateTime<Utc>,
 }
 
-impl From<crate::models::_entities::template_versions::Model> for TemplateVersionRecord {
-    fn from(row: crate::models::_entities::template_versions::Model) -> Self {
-        Self {
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TemplateVersionStatus {
+    Draft,
+    Pre,
+    Stable,
+}
+
+impl TemplateVersionStatus {
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Pre => "pre",
+            Self::Stable => "stable",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        value.parse().ok()
+    }
+
+    pub fn parse_publish(value: &str) -> Result<Self, YorishiroError> {
+        Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
+            message: format!("unknown publish status '{value}'"),
+            details: Vec::new(),
+            hint: "use one of: draft, pre, stable".into(),
+        })
+    }
+}
+
+impl fmt::Display for TemplateVersionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_db_str())
+    }
+}
+
+impl FromStr for TemplateVersionStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "draft" => Ok(Self::Draft),
+            "pre" => Ok(Self::Pre),
+            "stable" => Ok(Self::Stable),
+            _ => Err(format!("unknown template version status: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, FromQueryResult)]
+struct TemplateVersionDbRecord {
+    id: Uuid,
+    template_id: Uuid,
+    version: i32,
+    definition: Value,
+    changelog: Option<String>,
+    status: String,
+    created_at: DateTime<Utc>,
+}
+
+impl TryFrom<TemplateVersionDbRecord> for TemplateVersionRecord {
+    type Error = YorishiroError;
+
+    fn try_from(row: TemplateVersionDbRecord) -> Result<Self, Self::Error> {
+        let status = TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template version status: {}",
+                row.status
+            ))
+        })?;
+        Ok(Self {
+            id: row.id,
+            template_id: row.template_id,
+            version: row.version,
+            definition: row.definition,
+            changelog: row.changelog,
+            status,
+            created_at: row.created_at,
+        })
+    }
+}
+
+impl TryFrom<crate::models::_entities::template_versions::Model> for TemplateVersionRecord {
+    type Error = YorishiroError;
+
+    fn try_from(
+        row: crate::models::_entities::template_versions::Model,
+    ) -> Result<Self, Self::Error> {
+        TemplateVersionDbRecord {
             id: row.id,
             template_id: row.template_id,
             version: row.version,
@@ -54,6 +142,7 @@ impl From<crate::models::_entities::template_versions::Model> for TemplateVersio
             status: row.status,
             created_at: row.created_at.into(),
         }
+        .try_into()
     }
 }
 
@@ -88,11 +177,11 @@ pub struct PublishVersionRequest {
     pub changelog: Option<String>,
     /// `draft` (default), `pre`, or `stable`.
     #[serde(default = "default_status")]
-    pub status: String,
+    pub status: TemplateVersionStatus,
 }
 
-fn default_status() -> String {
-    "draft".to_string()
+fn default_status() -> TemplateVersionStatus {
+    TemplateVersionStatus::Draft
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +214,7 @@ pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
+    validate_persisted_statuses(conn).await?;
     let limit = page.limit();
     let offset = page.offset();
 
@@ -141,7 +231,7 @@ pub async fn list_marketplace(
          WHERE t.visibility = 'community' \
            AND EXISTS ( \
              SELECT 1 FROM template_versions v \
-              WHERE v.template_id = t.id AND v.status <> 'draft' \
+               WHERE v.template_id = t.id AND v.status IN ('pre', 'stable') \
            ) \
          ORDER BY t.name ASC, t.id ASC \
          LIMIT $1 OFFSET $2",
@@ -162,6 +252,7 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
+    validate_persisted_statuses(conn).await?;
     use crate::models::_entities::template_templates::Column as TemplateColumn;
     use crate::models::_entities::template_versions::{Column, Entity, Relation};
     use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
@@ -189,7 +280,36 @@ pub async fn list_versions(
         .await
         .internal()?;
 
-    Ok(rows.into_iter().map(TemplateVersionRecord::from).collect())
+    rows.into_iter()
+        .map(TemplateVersionRecord::try_from)
+        .collect()
+}
+
+async fn validate_persisted_statuses(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
+    use crate::models::_entities::template_versions::{Column, Entity};
+    use sea_orm::{FromQueryResult, QuerySelect};
+
+    #[derive(FromQueryResult)]
+    struct PersistedStatus {
+        status: String,
+    }
+
+    let rows = Entity::find()
+        .select_only()
+        .column(Column::Status)
+        .into_model::<PersistedStatus>()
+        .all(conn)
+        .await
+        .internal()?;
+    for row in rows {
+        TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template version status: {}",
+                row.status
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 /// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
@@ -204,7 +324,7 @@ pub(crate) async fn insert_next_version(
     request: &PublishVersionRequest,
     user_id: Option<Uuid>,
 ) -> Result<TemplateVersionRecord, YorishiroError> {
-    TemplateVersionRecord::find_by_statement(Statement::from_sql_and_values(
+    TemplateVersionDbRecord::find_by_statement(Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         "INSERT INTO template_versions \
                 (template_id, version, definition, changelog, status, created_by) \
@@ -218,7 +338,7 @@ pub(crate) async fn insert_next_version(
             template_id.into(),
             request.definition.clone().into(),
             request.changelog.clone().into(),
-            request.status.clone().into(),
+            request.status.as_db_str().into(),
             user_id.into(),
         ],
     ))
@@ -226,6 +346,7 @@ pub(crate) async fn insert_next_version(
     .await
     .internal()?
     .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("insert did not return a row")))
+    .and_then(TemplateVersionRecord::try_from)
 }
 
 /// Reviews of a template, readable by anyone who can see the template itself.
@@ -360,35 +481,42 @@ pub(crate) async fn find_forkable_definition(
 
     #[derive(FromQueryResult)]
     struct Definition {
+        version: i32,
         definition: Value,
+        status: String,
     }
 
-    let query = Entity::find()
+    let rows = Entity::find()
         .select_only()
+        .column(Column::Version)
         .column(Column::Definition)
-        .filter(Column::TemplateId.eq(template_id));
+        .column(Column::Status)
+        .filter(Column::TemplateId.eq(template_id))
+        .order_by_desc(Column::Version)
+        .into_model::<Definition>()
+        .all(conn)
+        .await
+        .internal()?;
 
-    let row = match version {
-        Some(version) => {
-            query
-                .filter(Column::Version.eq(version))
-                .filter(Column::Status.ne("draft"))
-                .into_model::<Definition>()
-                .one(conn)
-                .await
-        }
-        None => {
-            query
-                .filter(Column::Status.eq("stable"))
-                .order_by_desc(Column::Version)
-                .into_model::<Definition>()
-                .one(conn)
-                .await
-        }
+    for row in &rows {
+        TemplateVersionStatus::from_db_str(&row.status).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template version status: {}",
+                row.status
+            ))
+        })?;
     }
-    .internal()?;
 
-    Ok(row.map(|r| r.definition))
+    Ok(rows.into_iter().find_map(|row| {
+        let status = TemplateVersionStatus::from_db_str(&row.status)?;
+        match version {
+            Some(version) if row.version == version && status != TemplateVersionStatus::Draft => {
+                Some(row.definition)
+            }
+            None if status == TemplateVersionStatus::Stable => Some(row.definition),
+            _ => None,
+        }
+    }))
 }
 
 /// Outcome of [`insert_fork`]: either the new template's id, or the name it collided on.

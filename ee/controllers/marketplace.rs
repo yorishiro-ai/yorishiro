@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::ee::models::marketplace::{
     self as marketplace_models, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest,
-    TemplateReviewRecord, TemplateVersionRecord,
+    TemplateReviewRecord, TemplateVersionRecord, TemplateVersionStatus,
 };
 use crate::ee::services::authz;
 use crate::ee::services::marketplace;
@@ -66,11 +66,29 @@ async fn publish_version(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
-    Json(body): Json<PublishVersionRequest>,
+    Json(body): Json<PublishVersionInput>,
 ) -> Result<(StatusCode, Json<TemplateVersionRecord>), ApiError> {
     let (tenant_id, user_id) = licensed_tenant(&ctx, &headers).await?;
-    let record = marketplace::publish_version(&ctx, tenant_id, template_id, user_id, body).await?;
+    let request = PublishVersionRequest {
+        definition: body.definition,
+        changelog: body.changelog,
+        status: TemplateVersionStatus::parse_publish(&body.status)?,
+    };
+    let record =
+        marketplace::publish_version(&ctx, tenant_id, template_id, user_id, request).await?;
     Ok((StatusCode::CREATED, Json(record)))
+}
+
+#[derive(Debug, Deserialize)]
+struct PublishVersionInput {
+    definition: serde_json::Value,
+    changelog: Option<String>,
+    #[serde(default = "default_publish_status")]
+    status: String,
+}
+
+fn default_publish_status() -> String {
+    "draft".to_string()
 }
 
 /// `GET /api/marketplace/{id}/reviews`
