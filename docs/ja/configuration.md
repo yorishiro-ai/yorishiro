@@ -33,6 +33,11 @@ cargo loco task resync_embeddings workspace_id:<uuid>
 | `YORISHIRO_EMBEDDING_DIMENSIONS` | ベクトルの次元数（既定：`768`）。使うモデルに合わせる |
 | `YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM` | リクエストに `dimensions` フィールドを含めるか。既定は `false` |
 
+OpenAI 互換プロバイダは、ドメイン境界として公開の `EmbeddingProvider` 契約を維持します。
+ネットワークを使わずに失敗をテストできるよう、外部リクエストはプロバイダ固有の非公開 transport seam の内側に置いています。
+これにより、埋め込みの動作を変更せず、アプリケーション全体で共有する別の HTTP サービスも公開しません。
+Loco にはアプリケーション構成の拡張点はありますが、このプロバイダ固有の外向きリクエストを管理する拡張点はありません。
+
 ### ローカルモデル
 
 `YORISHIRO_EMBEDDING_PROVIDER=local` でマシン上でモデルを実行します。
