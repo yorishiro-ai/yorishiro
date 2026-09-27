@@ -100,13 +100,9 @@ struct EmbeddingChainRow {
 
 /// A workspace row used by startup reindex detection.
 #[derive(Clone, sea_orm::FromQueryResult)]
-#[allow(dead_code)]
 pub(crate) struct StartupReindexRow {
-    pub id: Uuid,
-    pub embedding_model: Option<String>,
-    pub embedding_dimensions: Option<i32>,
-    pub tenant_model: Option<String>,
-    pub tenant_dimensions: Option<i32>,
+    pub(crate) id: Uuid,
+    pub(crate) embedding_model: Option<String>,
 }
 
 /// Resolves the workspace, tenant, and deployment embedding settings.
