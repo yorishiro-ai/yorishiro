@@ -14,18 +14,6 @@ use crate::ee::models::marketplace::{
     TemplateVersionRecord,
 };
 
-fn validate_status(status: &str) -> Result<(), YorishiroError> {
-    if matches!(status, "draft" | "pre" | "stable") {
-        Ok(())
-    } else {
-        Err(YorishiroError::ValidationFailed {
-            message: format!("unknown publish status '{status}'"),
-            details: Vec::new(),
-            hint: "use one of: draft, pre, stable".into(),
-        })
-    }
-}
-
 /// Publishes the next version of a template.
 ///
 /// Only the owning tenant may publish, and the version number is assigned in the insert itself rather than taken from the caller: letting a client choose it invites gaps and collisions in a sequence other tenants read as history.
@@ -36,7 +24,6 @@ pub async fn publish_version(
     user_id: Option<Uuid>,
     request: PublishVersionRequest,
 ) -> Result<TemplateVersionRecord, YorishiroError> {
-    validate_status(&request.status)?;
     require_ownership(ctx, tenant_id, template_id).await?;
 
     // The insert reads `max(version) + 1` in the same statement it writes, and at READ COMMITTED Postgres locks no range for the rows that do not exist yet, so two concurrent publishes of one template both read the same maximum and both try to write the same next version.

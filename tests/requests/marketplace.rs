@@ -188,22 +188,54 @@ async fn publish_list_fork_and_review_round_trip() {
             "a community template with no published version must not be listed: {empty_body:?}"
         );
 
+        let invalid_publish = request
+            .post(&format!("/api/marketplace/{template_id}/versions"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .json(&json!({"definition": note_definition(), "status": "paused"}))
+            .await;
+        assert_eq!(
+            invalid_publish.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+
+        let versions_after_invalid: Vec<serde_json::Value> = request
+            .get(&format!("/api/marketplace/{template_id}/versions"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .await
+            .json();
+        assert!(versions_after_invalid.is_empty());
+
+        let publish_draft = request
+            .post(&format!("/api/marketplace/{template_id}/versions"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .json(&json!({"definition": note_definition()}))
+            .await;
+        assert_eq!(
+            publish_draft.status_code(),
+            201,
+            "response: {:?}",
+            publish_draft.text()
+        );
+        assert_eq!(publish_draft.json::<serde_json::Value>()["status"], "draft");
+
         let publish_v1 = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
             .json(&json!({"definition": note_definition(), "status": "stable"}))
             .await;
         assert_eq!(
-            publish_v1.status_code(),
-            201,
-            "response: {:?}",
-            publish_v1.text()
-        );
-        assert_eq!(
             publish_v1.json::<serde_json::Value>()["version"].as_i64(),
-            Some(1),
-            "the first published version must be numbered 1"
+            Some(2),
+            "the second version must be numbered 2"
         );
+
+        let publish_pre = request
+            .post(&format!("/api/marketplace/{template_id}/versions"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .json(&json!({"definition": note_definition(), "status": "pre"}))
+            .await;
+        assert_eq!(publish_pre.status_code(), StatusCode::CREATED);
+        assert_eq!(publish_pre.json::<serde_json::Value>()["status"], "pre");
 
         let publish_v2 = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
@@ -212,7 +244,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .await;
         assert_eq!(
             publish_v2.json::<serde_json::Value>()["version"].as_i64(),
-            Some(2),
+            Some(4),
             "the next publish must be numbered one past the last, not caller-supplied"
         );
 
@@ -222,7 +254,20 @@ async fn publish_list_fork_and_review_round_trip() {
             .await;
         let listing_body: Vec<serde_json::Value> = listing.json();
         assert_eq!(listing_body.len(), 1, "listing: {listing_body:?}");
-        assert_eq!(listing_body[0]["latest_stable_version"].as_i64(), Some(2));
+        assert_eq!(listing_body[0]["latest_stable_version"].as_i64(), Some(4));
+
+        let versions: Vec<serde_json::Value> = request
+            .get(&format!("/api/marketplace/{template_id}/versions"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .await
+            .json();
+        assert_eq!(
+            versions
+                .iter()
+                .map(|version| version["status"].as_str())
+                .collect::<Vec<_>>(),
+            vec![Some("stable"), Some("pre"), Some("stable"), Some("draft")]
+        );
 
         // A second tenant forks it.
         let forker = setup(&ctx, "beta").await;
