@@ -17,13 +17,13 @@ use crate::models::system_maintenance::{self, MaintenanceMode, MaintenanceState}
 pub const AUTO_REASON: &str = "database load (automatic)";
 
 /// Runtime settings for the load guard.
-pub struct LoadGuardConfig {
+pub(crate) struct LoadGuardConfig {
     /// Active connections at or above which the database counts as busy.
-    pub threshold: i64,
+    threshold: i64,
     /// How long the database must remain busy or quiet before changing mode.
-    pub sustain: Duration,
+    sustain: Duration,
     /// Time between activity samples.
-    pub poll: Duration,
+    poll: Duration,
 }
 
 impl LoadGuardConfig {
@@ -31,7 +31,7 @@ impl LoadGuardConfig {
     ///
     /// `YORISHIRO_DB_LOAD_THRESHOLD` defaults to zero, which disables the guard.
     /// `YORISHIRO_DB_LOAD_SUSTAIN_SECS` defaults to 30 and `YORISHIRO_DB_LOAD_POLL_SECS` defaults to 5.
-    pub fn from_env() -> Option<Self> {
+    pub(crate) fn from_env() -> Option<Self> {
         let threshold = std::env::var("YORISHIRO_DB_LOAD_THRESHOLD")
             .ok()
             .and_then(|value| value.parse().ok())
@@ -60,7 +60,7 @@ impl LoadGuardConfig {
 }
 
 /// Returns the maintenance transition allowed by the current load history.
-pub fn decide(
+fn decide(
     current: &MaintenanceState,
     busy_for: Duration,
     quiet_for: Duration,
@@ -167,7 +167,7 @@ async fn poll(ctx: &AppContext) -> Result<i64, YorishiroError> {
 }
 
 /// Runs the opt-in guard until the process exits.
-pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
+pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
     let mut ticker = interval(config.poll);
     let mut history = LoadHistory::default();
 
@@ -235,7 +235,7 @@ pub async fn run(ctx: AppContext, config: LoadGuardConfig) {
 }
 
 /// Performs one diagnostic task invocation without changing maintenance mode.
-pub async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
+pub(crate) async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
     let Some(config) = LoadGuardConfig::from_env() else {
         return Ok(());
     };
