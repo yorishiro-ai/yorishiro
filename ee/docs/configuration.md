@@ -16,6 +16,13 @@ Each workspace can use its own embedding endpoint. Use `PUT /api/workspace/embed
 | `dimensions` | Vector size the model produces |
 | `send_dimensions_param` | Include dimensions in requests (default: `false`) |
 
+## OAuth2/OIDC login
+
+OAuth2/OIDC login fetches the provider discovery document, exchanges the authorization code, and retrieves the provider JWKS through a private OAuth-specific transport seam.
+The production implementation owns the `reqwest` client, the ten-second timeout, HTTPS-or-loopback URL validation, redirect restrictions, response parsing, and credential redaction.
+Tests can substitute those three provider operations without changing authorization, callback, PKCE, state-token, cookie, or user-provisioning behavior.
+Loco provides application composition and queue extension points, but it does not provide an extension point for this provider-specific outbound transport, so the seam is composed inside the existing OAuth service instead of adding a generic HTTP service.
+
 ## Asynchronous infer-fill
 
 Configure a workspace LLM key with `PUT /api/workspace/llm-key`, then start a fill with `POST /api/schemas/active/{name}/infer-fill`.

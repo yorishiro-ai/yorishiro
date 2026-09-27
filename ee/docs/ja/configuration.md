@@ -16,6 +16,13 @@
 | `dimensions` | モデルが生成するベクトルの次元数 |
 | `send_dimensions_param` | リクエストに dimensions を含めるか（既定：`false`） |
 
+## OAuth2/OIDC ログイン
+
+OAuth2/OIDC ログインは、プロバイダの discovery document の取得、authorization code の交換、JWKS の取得を、OAuth 専用の非公開 transport seam 経由で実行します。
+本番実装は `reqwest` クライアント、10 秒のタイムアウト、HTTPS または loopback に限定する URL 検証、リダイレクト制限、レスポンス解析、認証情報の redaction を保持します。
+テストでは、認証、callback、PKCE、state token、cookie、ユーザープロビジョニングの動作を変えずに、3 つのプロバイダ操作だけを差し替えられます。
+Loco にはアプリケーション構成とキューの拡張点はありますが、このプロバイダ固有の外向き transport の拡張点はありません。そのため、汎用 HTTP サービスを追加せず、既存の OAuth service 内で seam を構成します。
+
 ## 非同期 infer-fill
 
 `PUT /api/workspace/llm-key` でワークスペースの LLM キーを設定してから、`POST /api/schemas/active/{name}/infer-fill` で fill を開始します。
