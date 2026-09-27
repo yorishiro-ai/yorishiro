@@ -14,6 +14,7 @@ use loco_rs::controller::Routes;
 use serde::{Deserialize, Serialize};
 
 use crate::ee::models::inference_jobs;
+use crate::ee::models::inference_jobs::InferenceJobStatus;
 use crate::ee::models::llm_keys;
 use crate::ee::services::authz;
 
@@ -29,7 +30,7 @@ pub struct InferFillRequest {
     /// The durable job ID used by the polling endpoint.
     pub job_id: String,
     /// Initial status: always `"queued"`.
-    pub status: String,
+    pub status: InferenceJobStatus,
 }
 
 #[utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
@@ -66,7 +67,7 @@ async fn infer_fill(
 
     Ok(Json(InferFillRequest {
         job_id,
-        status: "queued".to_string(),
+        status: InferenceJobStatus::Queued,
     }))
 }
 
@@ -81,7 +82,7 @@ pub struct InferJobStatus {
     /// The job ID.
     pub job_id: String,
     /// One of `queued`, `running`, `completed`, `failed`.
-    pub status: String,
+    pub status: InferenceJobStatus,
     /// Fields the model proposed and wrote to `entity_entities`. Only present on `completed`.
     pub applied: Option<i64>,
     /// Entities skipped: nothing missing, the model declined to guess, or the guess didn't fit. Only present on `completed`.
@@ -115,11 +116,12 @@ async fn infer_job_status(
     }
 
     let status = result.status;
+    let completed = status == InferenceJobStatus::Completed;
     Ok(Json(InferJobStatus {
         job_id,
-        status: status.clone(),
-        applied: (status == inference_jobs::COMPLETED).then_some(result.applied),
-        skipped: (status == inference_jobs::COMPLETED).then_some(result.skipped),
+        status,
+        applied: completed.then_some(result.applied),
+        skipped: completed.then_some(result.skipped),
         error: result.error,
     }))
 }

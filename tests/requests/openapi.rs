@@ -57,6 +57,14 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             serde_json::json!([])
         );
         assert!(document["components"]["schemas"]["TenantOverview"].is_object());
+        assert_eq!(
+            document["components"]["schemas"]["InferFillStatus"]["enum"],
+            serde_json::json!(["queued"])
+        );
+        assert_eq!(
+            document["components"]["schemas"]["InferJobStatusValue"]["enum"],
+            serde_json::json!(["queued", "running", "completed", "failed"])
+        );
     })
     .await;
 }

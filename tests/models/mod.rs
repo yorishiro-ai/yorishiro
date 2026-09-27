@@ -2,6 +2,7 @@ mod api_keys;
 mod compute_credit_ledger;
 mod content_entities_sqlite;
 mod entities;
+mod inference_jobs;
 mod maintenance;
 mod recall;
 mod search;
