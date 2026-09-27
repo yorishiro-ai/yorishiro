@@ -27,6 +27,10 @@ If a worker crashes after claiming it, the durable row remains `running` and is 
 Operators must reconcile a `running` job before retrying it through an operational procedure.
 Job records are retained until a future retention policy is introduced.
 
+The OpenAI-compatible chat-completions call stays behind a private inference-client transport seam.
+The production implementation uses the configured `reqwest` client, while tests can substitute the network without changing infer-fill behavior or exposing a generic application-wide HTTP service.
+No Loco extension applies because Loco provides application composition and queue extension points, not a provider-specific outbound transport for this call.
+
 ## Per-workspace worker class
 
 `PUT /api/workspace/worker-class` assigns a workspace's background jobs to a specific compute pool.
