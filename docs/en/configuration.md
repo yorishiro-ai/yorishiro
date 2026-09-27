@@ -52,6 +52,9 @@ The only available model is `multilingual-e5-base` (768 dimensions), which works
 
 If the download fails, restarting fixes it. The binary verifies the downloaded file against a built-in checksum.
 
+The download uses a private artifact transport seam, while the embedding artifact component keeps the pinned URL and revision, timeout, expected length, SHA-256 check, partial-file cleanup, and atomic rename together.
+Loco's storage extension points do not fit this cache because it is a deployment-local filesystem cache, not application storage, and the verified bytes must be staged beside the destination before a same-filesystem atomic rename.
+
 ### Changing embedding models
 
 If you switch to a different embedding model, existing embedded entities will still use vectors from the old model. You need to regenerate embeddings for affected workspaces:
