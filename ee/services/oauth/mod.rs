@@ -11,6 +11,8 @@ pub use config::OAuthConfig;
 pub use state_token::STATE_TTL_SECS;
 pub use users::{ProvisionedLogin, find_or_create};
 
+use std::sync::Arc;
+
 use crate::YorishiroError;
 
 /// Everything `GET /auth/oauth/authorize` needs to build its redirect and set the CSRF cookie that binds the flow to this browser (see `state_token` module docs).
@@ -24,7 +26,14 @@ pub struct AuthorizeRedirect {
 pub async fn build_authorize_redirect(
     config: &OAuthConfig,
 ) -> Result<AuthorizeRedirect, YorishiroError> {
-    let discovery = discovery::fetch_discovery_document(&config.issuer_url).await?;
+    build_authorize_redirect_with_http(config, discovery::production()).await
+}
+
+async fn build_authorize_redirect_with_http(
+    config: &OAuthConfig,
+    http: Arc<dyn discovery::OAuthHttp>,
+) -> Result<AuthorizeRedirect, YorishiroError> {
+    let discovery = http.fetch_discovery_document(&config.issuer_url).await?;
     let issued = state_token::issue(&config.state_signing_key);
 
     let url = url_with_query(
@@ -62,6 +71,23 @@ pub async fn handle_callback(
     state: &str,
     csrf_cookie_value: Option<&str>,
 ) -> Result<CallbackIdentity, YorishiroError> {
+    handle_callback_with_http(
+        config,
+        code,
+        state,
+        csrf_cookie_value,
+        discovery::production(),
+    )
+    .await
+}
+
+async fn handle_callback_with_http(
+    config: &OAuthConfig,
+    code: &str,
+    state: &str,
+    csrf_cookie_value: Option<&str>,
+    http: Arc<dyn discovery::OAuthHttp>,
+) -> Result<CallbackIdentity, YorishiroError> {
     let verified = state_token::verify(&config.state_signing_key, state).ok_or_else(|| {
         tracing::warn!("OAuth callback rejected: invalid or expired state parameter");
         YorishiroError::Unauthenticated
@@ -78,19 +104,20 @@ pub async fn handle_callback(
     }
     let pkce_verifier = verified.pkce_verifier;
 
-    let discovery = discovery::fetch_discovery_document(&config.issuer_url).await?;
+    let discovery = http.fetch_discovery_document(&config.issuer_url).await?;
 
-    let tokens = discovery::exchange_code_for_tokens(
-        &discovery.token_endpoint,
-        &config.client_id,
-        &config.client_secret,
-        code,
-        &config.redirect_uri,
-        &pkce_verifier,
-    )
-    .await?;
+    let tokens = http
+        .exchange_code_for_tokens(
+            &discovery.token_endpoint,
+            &config.client_id,
+            &config.client_secret,
+            code,
+            &config.redirect_uri,
+            &pkce_verifier,
+        )
+        .await?;
 
-    let jwks = discovery::fetch_jwks(&discovery.jwks_uri).await?;
+    let jwks = http.fetch_jwks(&discovery.jwks_uri).await?;
     let claims = id_token::verify(
         &tokens.id_token,
         &jwks,
@@ -125,4 +152,104 @@ fn url_with_query(base: &str, params: &[(&str, &str)]) -> Result<String, Yorishi
         url.query_pairs_mut().append_pair(key, value);
     }
     Ok(url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use jsonwebtoken::jwk::JwkSet;
+
+    use super::*;
+
+    struct FakeOAuthHttp {
+        calls: Mutex<Vec<&'static str>>,
+    }
+
+    #[async_trait]
+    impl discovery::OAuthHttp for FakeOAuthHttp {
+        async fn fetch_discovery_document(
+            &self,
+            _issuer_url: &str,
+        ) -> Result<discovery::DiscoveryDocument, YorishiroError> {
+            self.calls.lock().unwrap().push("discovery");
+            Ok(discovery::DiscoveryDocument {
+                authorization_endpoint: "https://idp.example/authorize".into(),
+                token_endpoint: "https://idp.example/token".into(),
+                jwks_uri: "https://idp.example/jwks".into(),
+            })
+        }
+
+        async fn exchange_code_for_tokens(
+            &self,
+            _token_endpoint: &str,
+            _client_id: &str,
+            _client_secret: &str,
+            _code: &str,
+            _redirect_uri: &str,
+            _pkce_verifier: &str,
+        ) -> Result<discovery::TokenResponse, YorishiroError> {
+            self.calls.lock().unwrap().push("token");
+            Ok(discovery::TokenResponse {
+                id_token: "not-a-jwt".into(),
+            })
+        }
+
+        async fn fetch_jwks(&self, _jwks_uri: &str) -> Result<JwkSet, YorishiroError> {
+            self.calls.lock().unwrap().push("jwks");
+            Ok(JwkSet { keys: Vec::new() })
+        }
+    }
+
+    fn config() -> OAuthConfig {
+        OAuthConfig {
+            issuer_url: "https://idp.example".into(),
+            client_id: "client-id".into(),
+            client_secret: "client-secret".into(),
+            redirect_uri: "http://localhost:8080/auth/oauth/callback".into(),
+            state_signing_key: b"client-secret".to_vec(),
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_uses_the_injected_discovery_operation() {
+        let http = Arc::new(FakeOAuthHttp {
+            calls: Mutex::new(Vec::new()),
+        });
+        let redirect = build_authorize_redirect_with_http(&config(), http.clone())
+            .await
+            .expect("fake discovery should build the authorization redirect");
+
+        assert!(redirect.url.starts_with("https://idp.example/authorize?"));
+        assert!(redirect.url.contains("code_challenge_method=S256"));
+        assert!(!redirect.csrf_cookie_value.is_empty());
+        assert_eq!(*http.calls.lock().unwrap(), vec!["discovery"]);
+    }
+
+    #[tokio::test]
+    async fn callback_uses_all_three_injected_operations_before_token_verification() {
+        let http = Arc::new(FakeOAuthHttp {
+            calls: Mutex::new(Vec::new()),
+        });
+        let issued = state_token::issue(b"client-secret");
+        let result = handle_callback_with_http(
+            &config(),
+            "authorization-code",
+            &issued.state,
+            Some(&issued.csrf_cookie_value),
+            http.clone(),
+        )
+        .await;
+        let error = match result {
+            Ok(_) => panic!("the deliberately invalid ID token must be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, YorishiroError::Unauthenticated));
+        assert_eq!(
+            *http.calls.lock().unwrap(),
+            vec!["discovery", "token", "jwks"]
+        );
+    }
 }
