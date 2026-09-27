@@ -726,6 +726,10 @@ async fn inference_status_polling_preserves_all_wire_values() {
             if expected == InferenceJobStatus::Completed {
                 assert_eq!(body["applied"], 3);
                 assert_eq!(body["skipped"], 1);
+            } else if expected == InferenceJobStatus::Failed {
+                assert_eq!(body["error"], "provider failed");
+                assert!(body["applied"].is_null());
+                assert!(body["skipped"].is_null());
             } else {
                 assert!(body["applied"].is_null());
                 assert!(body["skipped"].is_null());

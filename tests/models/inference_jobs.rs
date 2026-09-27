@@ -123,23 +123,33 @@ async fn lifecycle_transitions_from_queued_to_completed_or_failed() {
                 .status,
             InferenceJobStatus::Queued
         );
-        assert!(inference_jobs::claim(&db, job_id).await.unwrap());
-        assert_eq!(
-            inference_jobs::get(&db, job_id)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            InferenceJobStatus::Running
-        );
-
         match terminal {
             InferenceJobStatus::Completed => {
+                assert!(inference_jobs::claim(&db, job_id).await.unwrap());
+                assert_eq!(
+                    inference_jobs::get(&db, job_id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .status,
+                    InferenceJobStatus::Running
+                );
                 inference_jobs::complete(&db, job_id, 3, 1).await.unwrap()
             }
-            InferenceJobStatus::Failed => inference_jobs::fail(&db, job_id, "provider failed")
-                .await
-                .unwrap(),
+            InferenceJobStatus::Failed => {
+                assert!(inference_jobs::claim(&db, job_id).await.unwrap());
+                assert_eq!(
+                    inference_jobs::get(&db, job_id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .status,
+                    InferenceJobStatus::Running
+                );
+                inference_jobs::fail(&db, job_id, "provider failed")
+                    .await
+                    .unwrap();
+            }
             _ => unreachable!(),
         }
         let record = inference_jobs::get(&db, job_id).await.unwrap().unwrap();
