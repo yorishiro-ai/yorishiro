@@ -13,6 +13,7 @@ use crate::ee::models::marketplace::{
     self, InsertForkOutcome, PublishVersionRequest, SubmitReviewRequest, TemplateReviewRecord,
     TemplateVersionRecord,
 };
+use crate::models::template_templates::TemplateVisibility;
 
 /// Publishes the next version of a template.
 ///
@@ -117,15 +118,8 @@ pub async fn set_visibility(
     ctx: &AppContext,
     tenant_id: Uuid,
     template_id: Uuid,
-    visibility: &str,
+    visibility: TemplateVisibility,
 ) -> Result<(), YorishiroError> {
-    if !matches!(visibility, "tenant" | "community") {
-        return Err(YorishiroError::ValidationFailed {
-            message: format!("unknown visibility '{visibility}'"),
-            details: Vec::new(),
-            hint: "use 'tenant' to keep it private or 'community' to list it".into(),
-        });
-    }
     require_ownership(ctx, tenant_id, template_id).await?;
 
     marketplace::update_visibility(&ctx.db, template_id, visibility).await

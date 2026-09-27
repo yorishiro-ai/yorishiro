@@ -19,6 +19,7 @@ use crate::ee::models::marketplace::{
 };
 use crate::ee::services::authz;
 use crate::ee::services::marketplace;
+use crate::models::template_templates::TemplateVisibility;
 
 /// Authentication for every route in this module.
 ///
@@ -165,7 +166,8 @@ async fn set_visibility(
     Json(body): Json<SetVisibilityRequest>,
 ) -> Result<StatusCode, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
-    marketplace::set_visibility(&ctx, tenant_id, template_id, &body.visibility).await?;
+    let visibility = TemplateVisibility::parse_input(&body.visibility)?;
+    marketplace::set_visibility(&ctx, tenant_id, template_id, visibility).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

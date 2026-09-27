@@ -164,6 +164,35 @@ async fn publish_list_fork_and_review_round_trip() {
             .parse()
             .unwrap();
 
+        let invalid_visibility = request
+            .put(&format!("/api/marketplace/{template_id}/visibility"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .json(&json!({"visibility": "paused"}))
+            .await;
+        assert_eq!(
+            invalid_visibility.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        let invalid_body: serde_json::Value = invalid_visibility.json();
+        assert_eq!(
+            invalid_body["error"]["message"],
+            "unknown visibility 'paused'"
+        );
+        assert_eq!(
+            invalid_body["error"]["hint"],
+            "use 'tenant' to keep it private or 'community' to list it"
+        );
+
+        let unchanged = request
+            .get(&format!("/api/template-library/{template_id}"))
+            .add_header("Authorization", format!("Bearer {}", owner.owner_key))
+            .await;
+        assert_eq!(unchanged.status_code(), StatusCode::OK);
+        assert_eq!(
+            unchanged.json::<serde_json::Value>()["visibility"],
+            "tenant"
+        );
+
         let make_community = request
             .put(&format!("/api/marketplace/{template_id}/visibility"))
             .add_header("Authorization", format!("Bearer {}", owner.owner_key))
