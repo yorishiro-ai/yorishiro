@@ -208,7 +208,8 @@ detached connection はスケジュールの選択、更新の commit、すべ�
 所有権トランザクションは期限到来したスケジュールを読み取り、キューへ dispatch する前に次回時刻を更新します。
 これは意図した at-most-once dispatch です。
 スケジュールの commit 後に scheduler が落ちても重複キューは作られませんが、その commit 後に落ちるかキューが失敗するとその tick の dispatch は失われます。
-復旧点は次のスケジュール間隔です。
+キューへの dispatch は対象をすべて試行し、1 件でも enqueue に失敗した場合は集約した task failure を返します。
+失敗した interval は再試行せず、復旧点は次のスケジュール間隔です。
 手動、起動時、定期実行のジョブが重なった場合も、既存のワーカー側ワークスペース単位 advisory lock が実際の再インデックス処理を直列化します。
 
 SQLite では Loco のキュープールが別接続であるため、PostgreSQL と同じトランザクション所有権 lock は使いません。

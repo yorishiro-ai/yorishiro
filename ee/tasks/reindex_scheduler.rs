@@ -223,7 +223,7 @@ impl TenantReindexScheduler {
         let txn = match app_context.db.begin().await {
             Ok(txn) => txn,
             Err(err) => {
-                release_scheduler_ownership(ownership.take().unwrap()).await;
+                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
                 return Err(Error::Message(format!(
                     "scheduler ownership transaction: {err}"
                 )));
@@ -233,7 +233,7 @@ impl TenantReindexScheduler {
             Ok(schedules) => schedules,
             Err(err) => {
                 let _ = txn.rollback().await;
-                release_scheduler_ownership(ownership.take().unwrap()).await;
+                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
                 return Err(Error::Message(err.to_string()));
             }
         };
@@ -258,7 +258,7 @@ impl TenantReindexScheduler {
                 Ok(workspaces) => workspaces,
                 Err(err) => {
                     let _ = txn.rollback().await;
-                    release_scheduler_ownership(ownership.take().unwrap()).await;
+                    let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
                     return Err(Error::Message(err.to_string()));
                 }
             };
@@ -298,49 +298,81 @@ impl TenantReindexScheduler {
             active.updated_at = ActiveValue::Set(tick.into());
             if let Err(err) = active.update(&txn).await {
                 let _ = txn.rollback().await;
-                release_scheduler_ownership(ownership.take().unwrap()).await;
+                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
                 return Err(Error::Message(err.to_string()));
             }
         }
 
         if let Err(err) = txn.commit().await {
-            release_scheduler_ownership(ownership.take().unwrap()).await;
+            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
             return Err(Error::Message(format!("scheduler ownership commit: {err}")));
         }
 
-        for (tenant_id, args) in dispatches {
-            let workspace_id = args.workspace_id;
-            if let Err(err) = crate::workers::reindex::enqueue_for_class(app_context, args).await {
-                tracing::warn!(
-                    tenant_id = %tenant_id,
-                    workspace_id = %workspace_id,
-                    error = %err,
-                    "reindex scheduler: dispatch failed after schedule advancement"
-                );
-            } else {
-                tracing::info!(
-                    tenant_id = %tenant_id,
-                    workspace_id = %workspace_id,
-                    "reindex scheduler: dispatched"
-                );
-            }
+        let dispatch_errors = dispatch_reindex_batch(app_context, dispatches).await;
+        let release_error = release_scheduler_ownership(ownership.take().unwrap()).await;
+        if !dispatch_errors.is_empty() {
+            let message = format!(
+                "reindex scheduler dispatch failed for {} workspace(s) after schedule advancement; interval is not retried: {}",
+                dispatch_errors.len(),
+                dispatch_errors.join("; ")
+            );
+            tracing::error!(error = %message, "reindex scheduler tick failed after dispatch attempts");
+            return Err(Error::Message(message));
         }
-        release_scheduler_ownership(ownership.take().unwrap()).await;
+        if let Err(err) = release_error {
+            return Err(Error::Message(format!(
+                "reindex scheduler ownership release failed: {err}"
+            )));
+        }
         Ok(())
     }
 }
 
-async fn release_scheduler_ownership(ownership: crate::db::SchedulerOwnership) {
+async fn dispatch_reindex_batch(
+    app_context: &AppContext,
+    dispatches: Vec<(Uuid, crate::workers::reindex::ReindexArgs)>,
+) -> Vec<String> {
+    let mut dispatch_errors = Vec::new();
+    for (tenant_id, args) in dispatches {
+        let workspace_id = args.workspace_id;
+        if let Err(err) = crate::workers::reindex::enqueue_for_class(app_context, args).await {
+            tracing::warn!(
+                tenant_id = %tenant_id,
+                workspace_id = %workspace_id,
+                error = %err,
+                "reindex scheduler: dispatch failed after schedule advancement"
+            );
+            dispatch_errors.push(format!("workspace {workspace_id}: {err}"));
+        } else {
+            tracing::info!(
+                tenant_id = %tenant_id,
+                workspace_id = %workspace_id,
+                "reindex scheduler: dispatched"
+            );
+        }
+    }
+    dispatch_errors
+}
+
+async fn release_scheduler_ownership(
+    ownership: crate::db::SchedulerOwnership,
+) -> Result<(), String> {
     match ownership.release().await {
-        Ok(()) => tracing::info!(
-            ownership_key = "yorishiro:tenant-reindex-scheduler",
-            "reindex scheduler tick ownership released"
-        ),
-        Err(err) => tracing::error!(
-            ownership_key = "yorishiro:tenant-reindex-scheduler",
-            error = %err,
-            "reindex scheduler tick ownership release failed"
-        ),
+        Ok(()) => {
+            tracing::info!(
+                ownership_key = "yorishiro:tenant-reindex-scheduler",
+                "reindex scheduler tick ownership released"
+            );
+            Ok(())
+        }
+        Err(err) => {
+            tracing::error!(
+                ownership_key = "yorishiro:tenant-reindex-scheduler",
+                error = %err,
+                "reindex scheduler tick ownership release failed"
+            );
+            Err(err)
+        }
     }
 }
 
@@ -353,9 +385,16 @@ fn is_due(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
-    use super::is_due;
+    use async_trait::async_trait;
+    use chrono::{TimeZone, Utc};
+    use uuid::Uuid;
+
+    use super::{dispatch_reindex_batch, is_due};
 
     const TICK: i64 = 1_700_000_000;
 
@@ -372,5 +411,46 @@ mod tests {
                 "scheduled offset {offset}"
             );
         }
+    }
+
+    struct FailingDispatcher {
+        attempts: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl crate::workers::dispatch::ReindexDispatcher for FailingDispatcher {
+        async fn dispatch(
+            &self,
+            _ctx: &loco_rs::app::AppContext,
+            _args: crate::workers::reindex::ReindexArgs,
+        ) -> loco_rs::Result<String> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            Err(loco_rs::Error::Message("dispatch failed".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
+        let ctx = crate::workers::dispatch::test_context().await;
+        let dispatcher = Arc::new(FailingDispatcher {
+            attempts: AtomicUsize::new(0),
+        });
+        ctx.shared_store
+            .insert(dispatcher.clone() as Arc<dyn crate::workers::dispatch::ReindexDispatcher>);
+        let dispatches = (0..3)
+            .map(|_| {
+                (
+                    Uuid::now_v7(),
+                    crate::workers::reindex::ReindexArgs {
+                        workspace_id: Uuid::now_v7(),
+                        worker_class: crate::workers::embedding_sync::WorkerClass::Shared,
+                    },
+                )
+            })
+            .collect();
+
+        let errors = dispatch_reindex_batch(&ctx, dispatches).await;
+        assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(errors.len(), 3);
     }
 }

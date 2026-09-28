@@ -204,7 +204,8 @@ It is explicitly unlocked and closed afterward.
 Connection loss or abrupt process termination releases the lock automatically, so a surviving replica can take ownership on the next tick.
 The ownership transaction reads due schedules and advances them before queue dispatch.
 This is deliberate at-most-once dispatch protection: a scheduler crash cannot create duplicate queue jobs after the schedule commit, but a crash or queue failure after that commit can miss that tick.
-The next scheduled interval remains the recovery point.
+The task attempts every due queue dispatch, then reports one aggregated task failure if any enqueue fails.
+Those intervals are not retried, and the next scheduled interval remains the recovery point.
 The reindex worker's existing per-workspace advisory lock still serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
 
 SQLite does not share a transaction with Loco's separate queue pool, so it uses a non-blocking OS file lock instead.

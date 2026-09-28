@@ -10,9 +10,11 @@ use sea_orm::{
 use sqlite_vec::sqlite3_vec_init;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, PgConnection};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Common backend predicates for request and service code.
@@ -390,61 +392,87 @@ fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
         .or_else(|| uri.strip_prefix("sqlite:"))
         .ok_or_else(|| format!("unsupported SQLite database URI for scheduler lock: {uri}"))?;
     let (database, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let mode = query.split('&').find_map(|part| {
-        let (key, value) = part.split_once('=')?;
-        if percent_decode(key).ok()?.as_str() == "mode" {
-            percent_decode(value).ok()
-        } else {
-            None
-        }
-    });
-    if database == ":memory:" || mode.as_deref() == Some("memory") {
+    let pairs: Vec<_> = url::form_urlencoded::parse(query.as_bytes()).collect();
+    let last_mode = pairs
+        .iter()
+        .filter(|(key, _)| key == "mode")
+        .map(|(_, value)| value.as_ref())
+        .next_back();
+    if database == ":memory:" || last_mode == Some("memory") {
         return Err(
             "SQLite scheduler ownership requires a file database; in-memory SQLite is unsupported"
                 .into(),
         );
     }
-    let database = percent_decode(database)?;
-    if database.is_empty() {
+    // Normalize decoded query pairs so the effective duplicate mode is the last one, while
+    // SQLx remains the authority for supported parameter names and malformed values.
+    let mut normalized_query = url::form_urlencoded::Serializer::new(String::new());
+    let mut mode_seen = false;
+    for (key, value) in &pairs {
+        if key == "mode" {
+            mode_seen = true;
+            continue;
+        }
+        normalized_query.append_pair(key, value);
+    }
+    if let Some(mode) = last_mode {
+        normalized_query.append_pair("mode", mode);
+    } else if mode_seen {
+        unreachable!("mode_seen implies last_mode");
+    }
+    let normalized_query = normalized_query.finish();
+    let effective_uri = if normalized_query.is_empty() {
+        format!("sqlite:{database}")
+    } else {
+        format!("sqlite:{database}?{normalized_query}")
+    };
+    let options = SqliteConnectOptions::from_str(&effective_uri)
+        .map_err(|err| format!("invalid SQLite database URI for scheduler lock: {err}"))?;
+    let database = options.get_filename();
+    if database
+        .to_str()
+        .is_some_and(|path| path.starts_with("file:sqlx-in-memory-"))
+    {
+        return Err(
+            "SQLite scheduler ownership requires a file database; in-memory SQLite is unsupported"
+                .into(),
+        );
+    }
+    if database.as_os_str().is_empty() {
         return Err("SQLite scheduler ownership requires a database file path".into());
     }
-    let database = PathBuf::from(database);
-    let database = if database.is_absolute() {
-        database
+    let database = if database.exists() {
+        std::fs::canonicalize(database)
+            .map_err(|err| format!("failed to resolve SQLite database path: {err}"))?
     } else {
-        std::env::current_dir()
-            .map_err(|err| format!("SQLite scheduler database directory: {err}"))?
-            .join(database)
+        let file_name = database.file_name().ok_or_else(|| {
+            "SQLite scheduler database URI has no final path component".to_string()
+        })?;
+        let parent = database
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        std::fs::canonicalize(parent)
+            .map_err(|err| format!("failed to resolve SQLite database directory: {err}"))?
+            .join(file_name)
     };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let links = std::fs::metadata(&database)
+            .map(|metadata| metadata.nlink())
+            .unwrap_or(1);
+        if links > 1 {
+            return Err(format!(
+                "SQLite scheduler ownership does not support hard-linked database files: {} has {links} links",
+                database.display()
+            ));
+        }
+    }
     Ok(PathBuf::from(format!(
         "{}.scheduler.lock",
         database.display()
     )))
-}
-
-fn percent_decode(value: &str) -> Result<String, String> {
-    let mut bytes = Vec::with_capacity(value.len());
-    let value = value.as_bytes();
-    let mut index = 0;
-    while index < value.len() {
-        if value[index] == b'%' {
-            if index + 2 >= value.len() {
-                return Err("invalid percent escape in SQLite database URI".into());
-            }
-            let high = (value[index + 1] as char)
-                .to_digit(16)
-                .ok_or_else(|| "invalid percent escape in SQLite database URI".to_string())?;
-            let low = (value[index + 2] as char)
-                .to_digit(16)
-                .ok_or_else(|| "invalid percent escape in SQLite database URI".to_string())?;
-            bytes.push((high * 16 + low) as u8);
-            index += 3;
-        } else {
-            bytes.push(value[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(bytes).map_err(|_| "SQLite database URI path is not UTF-8".into())
 }
 
 fn try_lock_sqlite_scheduler_file(path: &Path) -> Result<Option<File>, String> {
@@ -631,6 +659,10 @@ pub async fn reindex_workspace_with_lock(
 mod tests {
     use sqlx::Connection;
     use std::fs::OpenOptions;
+    use std::io::BufRead;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
     use tempfile::tempdir;
 
     use super::PgPoolOptions;
@@ -639,26 +671,90 @@ mod tests {
         unlock_sqlite_scheduler_file,
     };
 
+    fn postgres_test_url() -> Option<String> {
+        let url = std::env::var("DATABASE_URL").ok();
+        let is_postgres = url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("postgres://") || url.starts_with("postgresql://"));
+        if std::env::var("LOCO_ENV").as_deref() == Ok("test_postgres") {
+            assert!(
+                is_postgres,
+                "test_postgres must provide a PostgreSQL DATABASE_URL"
+            );
+            return url;
+        }
+        if is_postgres { url } else { None }
+    }
+
     #[test]
     fn sqlite_scheduler_lock_path_handles_uri_forms_and_queries() {
+        let dir = tempdir().unwrap();
+        let relative_parent = dir.path().join("relative");
+        std::fs::create_dir(&relative_parent).unwrap();
+        let database = relative_parent.join("data.db");
+        let absolute_parent = dir.path().join("absolute");
+        std::fs::create_dir(&absolute_parent).unwrap();
+        let encoded_database = dir.path().join("encoded name.db");
+        let encoded_uri = format!(
+            "sqlite://{}?mode=rwc",
+            encoded_database.to_string_lossy().replace(' ', "%20")
+        );
+
         assert!(sqlite_scheduler_lock_path("sqlite::memory:").is_err());
         assert!(sqlite_scheduler_lock_path("sqlite://?mode=memory").is_err());
+        assert!(
+            sqlite_scheduler_lock_path(&format!(
+                "sqlite://{}?mode=memory&mode=rw",
+                database.display()
+            ))
+            .is_ok()
+        );
+        assert!(
+            sqlite_scheduler_lock_path(&format!(
+                "sqlite://{}?mode=rw&mode=memory",
+                database.display()
+            ))
+            .is_err()
+        );
+        assert!(
+            match sqlite_scheduler_lock_path("sqlite://db.sqlite?mode=bad&mode=rw") {
+                Ok(_) => true,
+                Err(error) => {
+                    eprintln!("unexpected duplicate mode error: {error}");
+                    false
+                }
+            }
+        );
+        assert!(sqlite_scheduler_lock_path("sqlite://db.sqlite?mode=rw&mode=bad").is_err());
+        assert!(
+            sqlite_scheduler_lock_path(&format!(
+                "sqlite://{}?%6dode=%6demory&%6dode=rw",
+                database.display()
+            ))
+            .is_ok()
+        );
         assert_eq!(
-            sqlite_scheduler_lock_path("sqlite://relative/data.db?mode=rwc&cache=shared")
-                .unwrap()
-                .file_name()
-                .unwrap(),
+            sqlite_scheduler_lock_path(&format!(
+                "sqlite://{}?mode=rwc&cache=shared",
+                database.display()
+            ))
+            .unwrap()
+            .file_name()
+            .unwrap(),
             "data.db.scheduler.lock"
         );
         assert_eq!(
-            sqlite_scheduler_lock_path("sqlite:///absolute/data.db?mode=rw")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "/absolute/data.db.scheduler.lock"
+            sqlite_scheduler_lock_path(&format!(
+                "sqlite://{}?mode=rw",
+                absolute_parent.join("data.db").display()
+            ))
+            .unwrap()
+            .parent()
+            .unwrap(),
+            absolute_parent
         );
         assert_eq!(
-            sqlite_scheduler_lock_path("sqlite://encoded%20name.db?mode=rwc")
+            sqlite_scheduler_lock_path(&encoded_uri)
                 .unwrap()
                 .file_name()
                 .unwrap(),
@@ -714,14 +810,99 @@ mod tests {
         lock_sqlite_scheduler_file(&second).unwrap();
     }
 
-    #[tokio::test]
-    async fn postgres_scheduler_lock_contends_and_connection_close_releases() {
-        let Ok(url) = std::env::var("DATABASE_URL") else {
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_scheduler_lock_rejects_hard_linked_database() {
+        let dir = tempdir().unwrap();
+        let database = dir.path().join("app.sqlite");
+        let hard_link = dir.path().join("alias.sqlite");
+        std::fs::write(&database, b"").unwrap();
+        std::fs::hard_link(&database, &hard_link).unwrap();
+        let error =
+            sqlite_scheduler_lock_path(&format!("sqlite://{}", database.display())).unwrap_err();
+        assert!(error.contains("hard-linked"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_scheduler_lock_subprocess_aliases_contend_and_release() {
+        let dir = tempdir().unwrap();
+        let database = dir.path().join("app.sqlite");
+        let alias = dir.path().join("alias.sqlite");
+        std::fs::write(&database, b"").unwrap();
+        std::os::unix::fs::symlink(&database, &alias).unwrap();
+        let absolute_uri = format!("sqlite://{}?mode=rwc", database.display());
+        let alias_uri = format!("sqlite://{}?mode=rwc", alias.display());
+
+        for contender_uri in [absolute_uri, alias_uri] {
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "db::tests::sqlite_scheduler_lock_child",
+                    "--nocapture",
+                ])
+                .current_dir(dir.path())
+                .env(
+                    "YORISHIRO_SQLITE_LOCK_CHILD_URI",
+                    "sqlite://app.sqlite?mode=rwc",
+                )
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let stdout = child.stdout.take().unwrap();
+            let mut lines = std::io::BufReader::new(stdout).lines();
+            let mut ready = false;
+            for line in &mut lines {
+                if line.is_ok_and(|line| line == "ready") {
+                    ready = true;
+                    break;
+                }
+            }
+            assert!(ready);
+            assert!(
+                acquire_sqlite_scheduler_lock(&contender_uri, "unused")
+                    .unwrap()
+                    .is_none()
+            );
+            for _line in &mut lines {}
+            assert!(child.wait().unwrap().success());
+            let released = acquire_sqlite_scheduler_lock(&contender_uri, "unused")
+                .unwrap()
+                .unwrap();
+            release_sqlite_for_test(&released);
+        }
+    }
+
+    #[test]
+    fn sqlite_scheduler_lock_child() {
+        let Some(uri) = std::env::var_os("YORISHIRO_SQLITE_LOCK_CHILD_URI") else {
             return;
         };
-        if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
-            return;
+        let ownership = acquire_sqlite_scheduler_lock(uri.to_str().unwrap(), "unused")
+            .unwrap()
+            .unwrap();
+        println!("ready");
+        std::io::stdout().flush().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        release_sqlite_for_test(&ownership);
+    }
+
+    fn release_sqlite_for_test(ownership: &super::SchedulerOwnership) {
+        if let super::SchedulerOwnership::Sqlite {
+            file: Some(file), ..
+        } = ownership
+        {
+            unlock_sqlite_scheduler_file(file).unwrap();
+        } else {
+            panic!("expected SQLite ownership");
         }
+    }
+
+    #[tokio::test]
+    async fn postgres_scheduler_lock_contends_and_connection_close_releases() {
+        let Some(url) = postgres_test_url() else {
+            return;
+        };
         let pool = PgPoolOptions::new()
             .max_connections(4)
             .connect(&url)
@@ -749,12 +930,9 @@ mod tests {
 
     #[tokio::test]
     async fn postgres_scheduler_detached_connection_close_releases_without_unlock() {
-        let Ok(url) = std::env::var("DATABASE_URL") else {
+        let Some(url) = postgres_test_url() else {
             return;
         };
-        if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
-            return;
-        }
 
         let pool = PgPoolOptions::new()
             .max_connections(4)
@@ -781,6 +959,46 @@ mod tests {
             .unwrap()
             .unwrap();
         final_ownership.release().await.unwrap();
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn postgres_scheduler_lock_drop_releases_after_task_cancellation() {
+        let Some(url) = postgres_test_url() else {
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&url)
+            .await
+            .unwrap();
+        let key = format!("test-scheduler-cancel-release-{}", uuid::Uuid::now_v7());
+        let ownership = super::acquire_postgres_scheduler_lock(pool.clone(), &key)
+            .await
+            .unwrap()
+            .unwrap();
+        let task = tokio::spawn(async move {
+            let _ownership = ownership;
+            std::future::pending::<()>().await;
+        });
+        task.abort();
+        let _ = task.await;
+        let mut final_ownership = None;
+        for _ in 0..20 {
+            if let Some(ownership) = super::acquire_postgres_scheduler_lock(pool.clone(), &key)
+                .await
+                .unwrap()
+            {
+                final_ownership = Some(ownership);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        final_ownership
+            .expect("cancellation must release scheduler ownership")
+            .release()
+            .await
+            .unwrap();
         pool.close().await;
     }
 }
