@@ -250,6 +250,34 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
     Ok(())
 }
 
+/// Attempts to acquire a transaction-scoped scheduler ownership lock.
+///
+/// PostgreSQL returns immediately when another scheduler owns the run.
+/// SQLite does not use this helper because an `IMMEDIATE` transaction would
+/// block the separate SQLite queue connection while the task dispatches jobs.
+pub(crate) async fn try_scheduler_lock(
+    conn: &impl ConnectionTrait,
+    key: &str,
+) -> Result<bool, DbErr> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return Ok(true);
+    }
+
+    let result = conn
+        .query_one_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS locked",
+            [key.into()],
+        ))
+        .await?
+        .ok_or_else(|| {
+            DbErr::Query(sea_orm::RuntimeErr::Internal(
+                "scheduler lock returned no row".into(),
+            ))
+        })?;
+    result.try_get("", "locked")
+}
+
 /// A guard that holds a session-scoped advisory lock on a workspace for reindex serialization.
 ///
 /// `conn` is detached so returning it to the pool does not release the lock.
@@ -365,5 +393,48 @@ pub async fn reindex_workspace_with_lock(
     match outcome {
         Ok(ok) => Ok(ok),
         Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{Database, TransactionTrait};
+
+    use super::try_scheduler_lock;
+
+    #[tokio::test]
+    async fn sqlite_scheduler_lock_is_a_noop() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        assert!(try_scheduler_lock(&db, "test-scheduler").await.unwrap());
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn postgres_scheduler_lock_contends_and_releases() {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            return;
+        };
+        if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
+            return;
+        }
+
+        let db = Database::connect(url).await.unwrap();
+        let key = format!("test-scheduler-ownership-{}", uuid::Uuid::now_v7());
+        let holder = db.begin().await.unwrap();
+        assert!(try_scheduler_lock(&holder, &key).await.unwrap());
+
+        let contender = db.begin().await.unwrap();
+        assert!(!try_scheduler_lock(&contender, &key).await.unwrap());
+        contender.rollback().await.unwrap();
+        holder.rollback().await.unwrap();
+
+        let after_rollback = db.begin().await.unwrap();
+        assert!(try_scheduler_lock(&after_rollback, &key).await.unwrap());
+        after_rollback.commit().await.unwrap();
+
+        let after_commit = db.begin().await.unwrap();
+        assert!(try_scheduler_lock(&after_commit, &key).await.unwrap());
+        after_commit.rollback().await.unwrap();
+        db.close().await.unwrap();
     }
 }

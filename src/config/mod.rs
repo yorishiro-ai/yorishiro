@@ -61,6 +61,8 @@ queue:
     interval_seconds: 60
 
 # Add scheduled tasks here when this process runs `yorishiro scheduler`.
+# SQLite requires exactly one scheduler replica (`YORISHIRO_SCHEDULER_REPLICAS=1`, the default).
+# PostgreSQL permits multiple replicas through a transaction-scoped ownership lock.
 # scheduler:
 #   output: stdout
 #   jobs: {}

@@ -199,6 +199,22 @@ API エンドポイント（`POST /api/identity/tenants/schedule` など）で I
 
 `yorishiro.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
 
+`cargo loco scheduler` は HTTP サーバとワーカーとは別のプロセスとして実行します。
+PostgreSQL では、同じデータベースを使う scheduler replica を複数起動できます。
+各 tick は `yorishiro:tenant-reindex-scheduler` のトランザクション単位 advisory lock を試行し、別 replica が所有している場合は待機せずにスキップします。
+lock は commit、rollback、接続断、プロセスの異常終了で自動的に解放されるため、残った replica が次の tick で所有権を取得できます。
+所有権トランザクションは期限到来したスケジュールを読み取り、キューへ dispatch する前に次回時刻を更新します。
+これは意図した at-most-once dispatch です。
+スケジュールの commit 後に scheduler が落ちても重複キューは作られませんが、その commit 後に落ちるかキューが失敗するとその tick の dispatch は失われます。
+復旧点は次のスケジュール間隔です。
+手動、起動時、定期実行のジョブが重なった場合も、既存のワーカー側ワークスペース単位 advisory lock が実際の再インデックス処理を直列化します。
+
+SQLite では Loco のキュープールが別接続であるため、PostgreSQL と同じトランザクション所有権 lock は使いません。
+SQLite の scheduler deployment は scheduler replica を必ず 1 つにしてください。
+`YORISHIRO_SCHEDULER_REPLICAS` に `1` 以外（デフォルトは `1`）を設定すると起動時に拒否されます。
+SQLite のローリングデプロイでは、旧 scheduler を停止してから新 scheduler を起動してください。
+PostgreSQL の replica は重複して稼働できます。
+
 ## SQLite ANN ベンチマーク
 
 大規模なエンティティ数を持つ SQLite デプロイメントで動作させる場合、フルスキャンのベクトル検索が遅くなる可能性があります。このデプロイメントにはベンチマークタスクが同梱されており、データに対する実際のレイテンシを測定し、vec0 仮想テーブル（KNN インデックス）の採用を推奨するかどうかを判断します。

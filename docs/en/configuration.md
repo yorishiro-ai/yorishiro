@@ -196,6 +196,20 @@ On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run gra
 
 To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to `yorishiro.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
 
+Run `cargo loco scheduler` as a separate process from the HTTP server and workers.
+With PostgreSQL, any number of scheduler replicas may use the same database.
+Each tick attempts the transaction-scoped advisory ownership lock `yorishiro:tenant-reindex-scheduler` and skips immediately when another replica owns it.
+The lock is released automatically on commit, rollback, connection loss, or abrupt process termination, so a surviving replica can take ownership on the next tick.
+The ownership transaction reads due schedules and advances them before queue dispatch.
+This is deliberate at-most-once dispatch protection: a scheduler crash cannot create duplicate queue jobs after the schedule commit, but a crash or queue failure after that commit can miss that tick.
+The next scheduled interval remains the recovery point.
+The reindex worker's existing per-workspace advisory lock still serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
+
+SQLite does not share a transaction with Loco's separate queue pool, so it does not use the PostgreSQL ownership lock.
+SQLite scheduler deployments must have exactly one scheduler replica.
+The application rejects a configured `YORISHIRO_SCHEDULER_REPLICAS` value other than `1` (the default) during startup.
+Rolling deployments on SQLite must stop the old scheduler before starting the new one; PostgreSQL replicas may overlap safely.
+
 ## SQLite ANN benchmark
 
 When you run Yorishiro on SQLite with a large number of embedded entities, full-scan vector search may become slow. This deployment ships a benchmark task that measures the actual latency on your data and recommends whether to adopt the vec0 virtual table (KNN index).

@@ -68,11 +68,12 @@ server:
 # scheduler:
 #   output: stdout
 #   jobs:
-#     reindex_daily:
-#       run: "reindex_embeddings"
+#     tenant_reindex_daily:
+#       run: "tenant_reindex_scheduler"
 #       schedule: "0 3 * * * * 2030"
-#       tags: ["infer-fill"]
 #       run_on_start: false
+# Run exactly one scheduler replica on SQLite. PostgreSQL scheduler replicas use
+# a transaction-scoped advisory lock and may run concurrently.
 
 # Worker Configuration
 workers:
