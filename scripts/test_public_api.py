@@ -90,6 +90,95 @@ class PublicApiCheckerTests(unittest.TestCase):
 
         self.assertEqual([(item.path, item.kind, item.symbol) for item in findings], [("ee/new_surface.rs", "enum", "NewSurface")])
 
+    def test_model_area_move_preserves_public_items(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.commit()
+        self.write("src/models/content/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.git("rm", "src/models/widgets.rs")
+        self.write("src/models/widgets.rs", "")
+
+        self.assertEqual(self.check(), [])
+
+    def test_nested_model_area_move_preserves_public_items(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.commit()
+        self.write("src/models/content/widgets/mod.rs", "pub struct Widget { pub id: String }\n")
+        self.git("rm", "src/models/widgets.rs")
+        self.write("src/models/widgets.rs", "")
+
+        self.assertEqual(self.check(), [])
+
+    def test_model_area_move_preserves_public_items_when_unstaged(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.commit()
+        self.write("src/models/content/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.write("src/models/widgets.rs", "")
+
+        self.assertEqual(self.check(), [])
+
+    def test_model_area_move_preserves_public_items_when_staged(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.commit()
+        self.write("src/models/content/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.write("src/models/widgets.rs", "")
+        self.git("add", "src/models/content/widgets.rs", "src/models/widgets.rs")
+
+        self.assertEqual(self.check(), [])
+
+    def test_changed_area_file_next_to_unchanged_root_is_checked(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Historical;\n")
+        self.commit()
+        self.write("src/models/content/widgets.rs", "pub struct Replacement;\n")
+
+        findings = self.check()
+
+        self.assertEqual(
+            [(item.path, item.kind, item.symbol) for item in findings],
+            [("src/models/content/widgets.rs", "struct", "Replacement")],
+        )
+
+    def test_nested_area_file_next_to_unchanged_root_is_checked(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Historical;\n")
+        self.commit()
+        self.write("src/models/content/widgets/mod.rs", "pub struct Replacement;\n")
+
+        findings = self.check()
+
+        self.assertEqual(
+            [(item.path, item.kind, item.symbol) for item in findings],
+            [("src/models/content/widgets/mod.rs", "struct", "Replacement")],
+        )
+
+    def test_deleted_root_does_not_hide_an_unrelated_area_file(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Historical;\n")
+        self.commit()
+        self.git("rm", "src/models/widgets.rs")
+        self.write("src/models/content/gadgets.rs", "pub struct Gadget;\n")
+
+        findings = self.check()
+
+        self.assertEqual(
+            [(item.path, item.kind, item.symbol) for item in findings],
+            [("src/models/content/gadgets.rs", "struct", "Gadget")],
+        )
+
+    def test_deleted_area_file_does_not_create_findings(self) -> None:
+        self.write("src/models/content/widgets.rs", "pub struct Historical;\n")
+        self.commit()
+        self.git("rm", "src/models/content/widgets.rs")
+
+        self.assertEqual(self.check(), [])
+
+    def test_new_area_file_without_a_root_counterpart_is_checked(self) -> None:
+        self.write("src/models/content/gadgets.rs", "pub struct Gadget;\n")
+
+        findings = self.check()
+
+        self.assertEqual(
+            [(item.path, item.kind, item.symbol) for item in findings],
+            [("src/models/content/gadgets.rs", "struct", "Gadget")],
+        )
+
     def test_supported_declaration_forms_are_classified(self) -> None:
         source = """
 pub const fn const_fn() {}
