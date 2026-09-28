@@ -177,7 +177,9 @@ With SQLite, dequeueing is serialized, while durable queue recovery still works.
 
 You can configure a deployment to automatically reindex every workspace under a tenant on a regular interval. The schedule runs through the normal reindex flow (same as the manual `reindex_embeddings` task), so it respects the same workspace provider and model version checks.
 
-Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC). The scheduler picks up the next tick within a five-minute grace window, so a missed run is not lost if the process restarts during that window.
+Configure the schedule through the API endpoint (`POST /api/identity/tenants/schedule` or the equivalent route), which takes an ISO 8601 duration (`P1D` for daily, `P1W` for weekly) and an optional IANA timezone name (default: UTC).
+The five-minute interval sets the next `scheduled_for` time.
+On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run grace cutoff.
 
 To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to `yorishiro.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
 

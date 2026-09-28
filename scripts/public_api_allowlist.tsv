@@ -1,2 +1,5 @@
 # Newly approved broad public declarations only.
 # path	kind	symbol	reason
+src/models/tenancy.rs	mod	test_support	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.
+src/models/tenancy.rs	fn	test_support::create_invite_at	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.
+src/models/tenancy.rs	fn	test_support::redeem_invite_at	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.

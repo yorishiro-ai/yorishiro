@@ -41,6 +41,10 @@ pub struct VerifiedState {
 
 /// Generates a fresh CSRF cookie value and PKCE verifier, and packs the PKCE verifier plus the CSRF value's hash into a signed `state` value.
 pub fn issue(signing_key: &[u8]) -> IssuedState {
+    issue_at(signing_key, chrono::Utc::now().timestamp())
+}
+
+fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
     let mut csrf_bytes = [0u8; CSRF_COOKIE_BYTES];
     rand::rng().fill_bytes(&mut csrf_bytes);
     let csrf_cookie_value = URL_SAFE_NO_PAD.encode(csrf_bytes);
@@ -51,7 +55,6 @@ pub fn issue(signing_key: &[u8]) -> IssuedState {
     let pkce_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
     let pkce_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pkce_verifier.as_bytes()));
 
-    let issued_at = chrono::Utc::now().timestamp();
     let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
     let signature = hmac_sign::sign(signing_key, payload.as_bytes());
     let state = format!("{payload}.{signature}");
@@ -70,6 +73,10 @@ pub fn issue(signing_key: &[u8]) -> IssuedState {
 /// See the module docs.
 /// Callers must separately check the returned `csrf_hash` against the SHA-256 hash of the browser's CSRF cookie.
 pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
+    verify_at(signing_key, state, chrono::Utc::now().timestamp())
+}
+
+fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState> {
     let mut parts = state.splitn(4, '.');
     let issued_at_str = parts.next()?;
     let csrf_hash = parts.next()?;
@@ -85,8 +92,9 @@ pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     }
 
     let issued_at: i64 = issued_at_str.parse().ok()?;
-    let now = chrono::Utc::now().timestamp();
-    if now - issued_at > STATE_TTL_SECS || issued_at - now > 5 {
+    let outside_past_window = issued_at <= now && now.saturating_sub(issued_at) > STATE_TTL_SECS;
+    let outside_future_window = issued_at > now && issued_at.saturating_sub(now) > 5;
+    if outside_past_window || outside_future_window {
         // Small clock-skew allowance in the future direction; not an outright future-dated token.
         return None;
     }
@@ -110,8 +118,9 @@ mod tests {
 
     #[test]
     fn issued_state_verifies_and_the_csrf_hash_matches_the_cookie() {
-        let issued = issue(KEY);
-        let verified = verify(KEY, &issued.state).expect("a freshly issued state must verify");
+        let issued = issue_at(KEY, 1_700_000_000);
+        let verified = verify_at(KEY, &issued.state, 1_700_000_000)
+            .expect("a freshly issued state must verify");
         assert_eq!(
             verified.csrf_hash,
             hash_csrf_cookie(&issued.csrf_cookie_value)
@@ -120,13 +129,13 @@ mod tests {
 
     #[test]
     fn verify_rejects_a_wrong_signing_key() {
-        let issued = issue(KEY);
-        assert!(verify(b"a different key", &issued.state).is_none());
+        let issued = issue_at(KEY, 1_700_000_000);
+        assert!(verify_at(b"a different key", &issued.state, 1_700_000_000).is_none());
     }
 
     #[test]
     fn verify_rejects_a_tampered_payload() {
-        let issued = issue(KEY);
+        let issued = issue_at(KEY, 1_700_000_000);
         // Flip the last character of the payload without re-signing.
         let mut parts: Vec<&str> = issued.state.split('.').collect();
         let last_payload_part = parts[2].to_string();
@@ -135,7 +144,7 @@ mod tests {
         parts[2] = &tampered_part;
         let tampered = parts.join(".");
 
-        assert!(verify(KEY, &tampered).is_none());
+        assert!(verify_at(KEY, &tampered, 1_700_000_000).is_none());
     }
 
     #[test]
@@ -146,26 +155,62 @@ mod tests {
 
     #[test]
     fn verify_rejects_an_expired_state() {
-        // Hand-built rather than sleeping in the test.
-        let issued_at = chrono::Utc::now().timestamp() - STATE_TTL_SECS - 1;
+        let now = 1_700_000_000;
+        let issued_at = now - STATE_TTL_SECS - 1;
         let csrf_hash = "deadbeef";
         let pkce_verifier = "verifier";
         let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
         let signature = hmac_sign::sign(KEY, payload.as_bytes());
         let state = format!("{payload}.{signature}");
 
-        assert!(verify(KEY, &state).is_none());
+        assert!(verify_at(KEY, &state, now).is_none());
     }
 
     #[test]
-    fn verify_rejects_a_state_issued_too_far_in_the_future() {
-        let issued_at = chrono::Utc::now().timestamp() + 10;
+    fn verify_accepts_the_expiry_and_future_skew_boundaries() {
+        let now = 1_700_000_000;
+        for issued_at in [now - STATE_TTL_SECS, now + 5] {
+            let csrf_hash = "deadbeef";
+            let pkce_verifier = "verifier";
+            let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
+            let signature = hmac_sign::sign(KEY, payload.as_bytes());
+            let state = format!("{payload}.{signature}");
+
+            assert!(verify_at(KEY, &state, now).is_some());
+        }
+    }
+
+    #[test]
+    fn verify_rejects_a_state_outside_the_future_skew_boundary() {
+        let now = 1_700_000_000;
+        let issued_at = now + 6;
         let csrf_hash = "deadbeef";
         let pkce_verifier = "verifier";
         let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
         let signature = hmac_sign::sign(KEY, payload.as_bytes());
         let state = format!("{payload}.{signature}");
 
-        assert!(verify(KEY, &state).is_none());
+        assert!(verify_at(KEY, &state, now).is_none());
+    }
+
+    #[test]
+    fn verify_handles_extreme_timestamps_without_overflow() {
+        for (issued_at, now) in [(i64::MIN, i64::MAX), (i64::MAX, i64::MIN)] {
+            let payload = format!("{issued_at}.deadbeef.verifier");
+            let signature = hmac_sign::sign(KEY, payload.as_bytes());
+            let state = format!("{payload}.{signature}");
+
+            assert!(verify_at(KEY, &state, now).is_none());
+        }
+    }
+
+    #[test]
+    fn production_wrappers_issue_and_verify_a_state() {
+        let issued = issue(KEY);
+        let verified = verify(KEY, &issued.state).expect("a production state must verify");
+        assert_eq!(
+            verified.csrf_hash,
+            hash_csrf_cookie(&issued.csrf_cookie_value)
+        );
     }
 }

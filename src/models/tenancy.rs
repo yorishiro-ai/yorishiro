@@ -303,9 +303,20 @@ pub async fn create_invite(
     role: MembershipRole,
     ttl: Duration,
 ) -> Result<(workspace_invites::Model, String), YorishiroError> {
+    create_invite_at(conn, tenant_id, email, role, ttl, Utc::now()).await
+}
+
+async fn create_invite_at(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    email: &str,
+    role: MembershipRole,
+    ttl: Duration,
+    now: DateTime<Utc>,
+) -> Result<(workspace_invites::Model, String), YorishiroError> {
     let token = random_hex(INVITE_TOKEN_BYTES);
     let token_hash = hash_key(&token);
-    let expires_at = Utc::now() + ttl;
+    let expires_at = now + ttl;
 
     let active = workspace_invites::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
@@ -343,8 +354,15 @@ pub async fn redeem_invite(
     conn: &impl ConnectionTrait,
     raw_token: &str,
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
+    redeem_invite_at(conn, raw_token, Utc::now()).await
+}
+
+async fn redeem_invite_at(
+    conn: &impl ConnectionTrait,
+    raw_token: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<RedeemedInvite>, YorishiroError> {
     let token_hash = hash_key(raw_token);
-    let now = Utc::now();
 
     // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
     let invite = workspace_invites::Entity::find()
@@ -388,6 +406,31 @@ pub async fn redeem_invite(
         email: invite.email,
         role,
     }))
+}
+
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support {
+    use super::*;
+
+    pub async fn create_invite_at(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        email: &str,
+        role: MembershipRole,
+        ttl: Duration,
+        now: DateTime<Utc>,
+    ) -> Result<(workspace_invites::Model, String), YorishiroError> {
+        super::create_invite_at(conn, tenant_id, email, role, ttl, now).await
+    }
+
+    pub async fn redeem_invite_at(
+        conn: &impl ConnectionTrait,
+        raw_token: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<RedeemedInvite>, YorishiroError> {
+        super::redeem_invite_at(conn, raw_token, now).await
+    }
 }
 
 #[derive(Clone, Serialize)]

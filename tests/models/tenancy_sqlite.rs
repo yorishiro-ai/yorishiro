@@ -1,5 +1,5 @@
-use migration::{Migrator, MigratorTrait};
 /// SQLite-specific tests for tenancy: single-tenant cap and invite ID generation.
+use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::tenancy::{MembershipRole, create_invite, create_tenant};
@@ -79,4 +79,14 @@ async fn an_invite_gets_an_id_on_sqlite() {
         !invite.id.is_nil(),
         "the invite must carry a generated id, not a nil UUID"
     );
+}
+
+#[cfg(feature = "test-support")]
+#[tokio::test]
+async fn invite_expiry_boundaries_match_sqlite_gt() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let db = sqlite_db().await;
+    super::tenancy::assert_invitation_boundaries(&db).await;
 }

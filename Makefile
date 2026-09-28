@@ -13,7 +13,7 @@ check:
 	cargo check --locked --workspace
 
 clippy:
-	cargo clippy --locked --workspace --tests -- -D warnings
+	cargo clippy --locked --workspace --tests --features test-support -- -D warnings
 
 fmt:
 	cargo fmt --all

@@ -73,16 +73,9 @@ pub async fn set(
         }
     }
 
-    // Compute the next scheduled time: now + 5 minutes grace.
-    // The grace period is 5 minutes: if the expected time has passed within
-    // the last 5 minutes, still enqueue it (the tick missed its window
-    // but is still within a reasonable window). Beyond that, skip and log.
+    // Compute the next scheduled time: now + 5 minutes.
+    // This is the interval until the next run, not a grace period for a missed run.
     //
-    // 5 minutes is chosen because it covers a tick that was delayed by
-    // a process restart or a brief queue unavailability. It is short enough
-    // that a missed daily run does not surprise an operator (they would
-    // notice the gap within a day). It is long enough to absorb a few
-    // minutes of queue backlog without silently dropping the run.
     let expected: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::minutes(5))
         .unwrap()
@@ -159,7 +152,6 @@ pub async fn get(
 /// `scheduler:` section). Each run enqueues a reindex job for every workspace
 /// under every scheduled tenant whose `scheduled_for` time has passed.
 ///
-/// The ticker uses the grace period documented on `set`: 5 minutes.
 pub struct TenantReindexScheduler;
 
 #[async_trait]
@@ -171,15 +163,22 @@ impl Task for TenantReindexScheduler {
         }
     }
 
-    async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
+    async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
+        self.run_at(app_context, vars, chrono::Utc::now()).await
+    }
+}
+
+impl TenantReindexScheduler {
+    async fn run_at(
+        &self,
+        app_context: &AppContext,
+        _vars: &Vars,
+        tick: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
         use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
         use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::ReindexArgs;
-
-        let tick = chrono::Utc::now();
-        let grace = chrono::Duration::minutes(5);
-        let cutoff = tick - grace;
 
         // Fetch all scheduled tenants.
         let schedules = ScheduleEntity::Entity::find()
@@ -188,12 +187,12 @@ impl Task for TenantReindexScheduler {
             .map_err(|e| Error::Message(e.to_string()))?;
 
         for schedule in &schedules {
-            // Only enqueue if the expected time has passed (within grace window).
+            // Only enqueue once the scheduled time has arrived.
             let sched_utc = match schedule.scheduled_for {
                 Some(v) => chrono::DateTime::<chrono::Utc>::from(v),
                 None => continue,
             };
-            if sched_utc > tick && sched_utc > cutoff {
+            if !is_due(sched_utc, tick) {
                 continue;
             }
 
@@ -259,5 +258,36 @@ impl Task for TenantReindexScheduler {
         }
 
         Ok(())
+    }
+}
+
+fn is_due(
+    scheduled_for: chrono::DateTime<chrono::Utc>,
+    tick: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    scheduled_for <= tick
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::is_due;
+
+    const TICK: i64 = 1_700_000_000;
+
+    fn at(offset: i64) -> chrono::DateTime<Utc> {
+        Utc.timestamp_opt(TICK + offset, 0).single().unwrap()
+    }
+
+    #[test]
+    fn due_decision_keeps_the_exact_tick_boundary_matrix() {
+        for offset in [-301, 0, 1, 300, 301] {
+            assert_eq!(
+                is_due(at(offset), at(0)),
+                offset <= 0,
+                "scheduled offset {offset}"
+            );
+        }
     }
 }

@@ -14,7 +14,7 @@ trap 'rm -rf "$marker_dir"' EXIT
 export YORISHIRO_BACKEND_MARKER_DIR=$marker_dir
 
 set +e
-cargo test --locked --workspace "$@"
+cargo test --locked --workspace --features test-support "$@"
 test_status=$?
 set -e
 
