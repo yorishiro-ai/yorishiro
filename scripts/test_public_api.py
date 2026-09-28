@@ -90,6 +90,24 @@ class PublicApiCheckerTests(unittest.TestCase):
 
         self.assertEqual([(item.path, item.kind, item.symbol) for item in findings], [("ee/new_surface.rs", "enum", "NewSurface")])
 
+    def test_model_area_move_preserves_public_items(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.commit()
+        self.write("src/models/content/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.git("rm", "src/models/widgets.rs")
+        self.write("src/models/widgets.rs", "")
+
+        self.assertEqual(self.check(), [])
+
+    def test_nested_model_area_move_preserves_public_items(self) -> None:
+        self.write("src/models/widgets.rs", "pub struct Widget { pub id: String }\n")
+        self.commit()
+        self.write("src/models/content/widgets/mod.rs", "pub struct Widget { pub id: String }\n")
+        self.git("rm", "src/models/widgets.rs")
+        self.write("src/models/widgets.rs", "")
+
+        self.assertEqual(self.check(), [])
+
     def test_supported_declaration_forms_are_classified(self) -> None:
         source = """
 pub const fn const_fn() {}

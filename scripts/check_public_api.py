@@ -22,6 +22,7 @@ GENERATED_PREFIXES = (
     "src/models/_entities/",
     "src/dtos/",
 )
+MODEL_AREA_DIRS = {"content", "identity", "templates", "system"}
 
 
 class CheckError(RuntimeError):
@@ -462,7 +463,27 @@ def _changed_paths(root: pathlib.Path, base: str, head: str) -> dict[str, str | 
         for path in untracked.split("\0"):
             if path.endswith(".rs"):
                 paths[path] = None
-    return {path: base_path for path, base_path in paths.items() if not is_generated(path)}
+    changed = {path: base_path for path, base_path in paths.items() if not is_generated(path)}
+    for path, base_path in list(changed.items()):
+        if not path.startswith("src/models/"):
+            continue
+        relative = pathlib.PurePosixPath(path).relative_to("src/models")
+        if len(relative.parts) < 2 or relative.parts[0] not in MODEL_AREA_DIRS:
+            continue
+        if relative.name == "mod.rs" and len(relative.parts) == 2:
+            continue
+        if relative.name == "mod.rs":
+            old_path = pathlib.PurePosixPath("src/models", relative.parts[-2] + ".rs")
+        else:
+            old_path = pathlib.PurePosixPath("src/models", *relative.parts[1:])
+        if base_path is not None and base_path != path:
+            continue
+        try:
+            _git(root, "cat-file", "-e", f"{base}:{old_path}")
+        except CheckError:
+            continue
+        changed[path] = str(old_path)
+    return changed
 
 
 def _source(root: pathlib.Path, head: str, path: str) -> str | None:
