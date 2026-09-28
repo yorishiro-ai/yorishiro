@@ -110,7 +110,7 @@ jobs:
         # Both lints are nursery/pedantic, off by default, so --force-warn opts them in.
         # Step 3 (doc coverage) stays separate because `--lib` is a different target set
         # from `--tests` and does not fire missing_errors_doc/missing_panics_doc on lib code.
-        run: cargo clippy --locked --workspace --tests -- -D warnings --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
+        run: cargo clippy --locked --workspace --tests --features test-support -- -D warnings --force-warn clippy::cognitive_complexity --force-warn clippy::too_many_lines
 
       - name: Clippy doc coverage report
         # Warn-only (see clippy.toml): ~200 existing violations of missing_errors_doc
