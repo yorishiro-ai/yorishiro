@@ -177,43 +177,66 @@ impl TenantReindexScheduler {
         _vars: &Vars,
         tick: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
+        use crate::db::AppContextBackend;
         use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
         use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::ReindexArgs;
 
-        // The transaction-scoped lock makes the scheduler tick single-owner on
-        // PostgreSQL and releases automatically on commit, rollback, or loss of
-        // the scheduler connection. SQLite uses the startup replica invariant.
-        let txn = app_context
-            .db
-            .begin()
-            .await
-            .map_err(|e| Error::Message(format!("scheduler ownership transaction: {e}")))?;
-        let owns_run = crate::db::try_scheduler_lock(&txn, "yorishiro:tenant-reindex-scheduler")
-            .await
-            .map_err(|e| Error::Message(format!("scheduler ownership lock: {e}")))?;
-        if !owns_run {
-            tracing::info!(
-                ownership_key = "yorishiro:tenant-reindex-scheduler",
-                "reindex scheduler tick skipped because another replica owns it"
-            );
-            return Ok(());
-        }
+        // Ownership is held on a detached PostgreSQL session or an OS file handle through every
+        // queue dispatch. The schedule transaction is separate so dispatch cannot hold a DB
+        // transaction open, and the guard is released explicitly after the final dispatch.
+        let mut ownership = match crate::db::acquire_scheduler_ownership(
+            app_context,
+            "yorishiro:tenant-reindex-scheduler",
+        )
+        .await
+        {
+            Ok(Some(ownership)) => Some(ownership),
+            Ok(None) => {
+                tracing::info!(
+                    ownership_key = "yorishiro:tenant-reindex-scheduler",
+                    "reindex scheduler tick skipped because another owner holds scheduler ownership"
+                );
+                return Ok(());
+            }
+            Err(err) => {
+                return Err(Error::Message(format!(
+                    "scheduler ownership acquisition: {err}"
+                )));
+            }
+        };
         tracing::info!(
             ownership_key = "yorishiro:tenant-reindex-scheduler",
+            ownership_backend = if app_context.is_postgres() {
+                "postgres"
+            } else {
+                "sqlite"
+            },
+            ownership_lock_path = ownership
+                .as_ref()
+                .and_then(crate::db::SchedulerOwnership::sqlite_path)
+                .map(|path| path.display().to_string()),
             "reindex scheduler tick ownership acquired"
         );
 
-        // Keep schedule reads and advancement in the ownership transaction.
-        // The queue has a separate connection pool, so the schedule is advanced
-        // and committed before dispatch. This is an at-most-once dispatch policy:
-        // a crash after commit can miss a tick, but cannot create duplicate queue
-        // jobs when the next scheduler replica takes over.
-        let schedules = ScheduleEntity::Entity::find()
-            .all(&txn)
-            .await
-            .map_err(|e| Error::Message(e.to_string()))?;
+        let txn = match app_context.db.begin().await {
+            Ok(txn) => txn,
+            Err(err) => {
+                release_scheduler_ownership(ownership.take().unwrap()).await;
+                return Err(Error::Message(format!(
+                    "scheduler ownership transaction: {err}"
+                )));
+            }
+        };
+        let schedules = match ScheduleEntity::Entity::find().all(&txn).await {
+            Ok(schedules) => schedules,
+            Err(err) => {
+                let _ = txn.rollback().await;
+                release_scheduler_ownership(ownership.take().unwrap()).await;
+                return Err(Error::Message(err.to_string()));
+            }
+        };
 
         let mut dispatches = Vec::new();
         for schedule in &schedules {
@@ -227,11 +250,18 @@ impl TenantReindexScheduler {
             }
 
             // Fetch all workspaces under this tenant.
-            let workspaces: Vec<_> = WorkspaceEntity::Entity::find()
+            let workspaces: Vec<_> = match WorkspaceEntity::Entity::find()
                 .filter(WorkspaceEntity::Column::TenantId.eq(schedule.tenant_id))
                 .all(&txn)
                 .await
-                .map_err(|e| Error::Message(e.to_string()))?;
+            {
+                Ok(workspaces) => workspaces,
+                Err(err) => {
+                    let _ = txn.rollback().await;
+                    release_scheduler_ownership(ownership.take().unwrap()).await;
+                    return Err(Error::Message(err.to_string()));
+                }
+            };
 
             for ws in workspaces {
                 let worker_class = match crate::controllers::extractors::resolve_worker_class(
@@ -257,8 +287,8 @@ impl TenantReindexScheduler {
                 dispatches.push((schedule.tenant_id, args));
             }
 
-            // Advance after collecting the complete tenant batch. If the
-            // process dies before commit, the next owner retries the batch.
+            // Advance before dispatch for the deliberate at-most-once policy. A crash or queue
+            // failure after this commit loses the current interval until the next one.
             let mut active = schedule.clone().into_active_model();
             let new_sched: chrono::DateTime<chrono::FixedOffset> = tick
                 .checked_add_signed(chrono::Duration::minutes(5))
@@ -266,19 +296,17 @@ impl TenantReindexScheduler {
                 .into();
             active.scheduled_for = ActiveValue::Set(Some(new_sched));
             active.updated_at = ActiveValue::Set(tick.into());
-            active
-                .update(&txn)
-                .await
-                .map_err(|e| Error::Message(e.to_string()))?;
+            if let Err(err) = active.update(&txn).await {
+                let _ = txn.rollback().await;
+                release_scheduler_ownership(ownership.take().unwrap()).await;
+                return Err(Error::Message(err.to_string()));
+            }
         }
 
-        txn.commit()
-            .await
-            .map_err(|e| Error::Message(format!("scheduler ownership commit: {e}")))?;
-        tracing::info!(
-            ownership_key = "yorishiro:tenant-reindex-scheduler",
-            "reindex scheduler tick ownership released"
-        );
+        if let Err(err) = txn.commit().await {
+            release_scheduler_ownership(ownership.take().unwrap()).await;
+            return Err(Error::Message(format!("scheduler ownership commit: {err}")));
+        }
 
         for (tenant_id, args) in dispatches {
             let workspace_id = args.workspace_id;
@@ -297,7 +325,22 @@ impl TenantReindexScheduler {
                 );
             }
         }
+        release_scheduler_ownership(ownership.take().unwrap()).await;
         Ok(())
+    }
+}
+
+async fn release_scheduler_ownership(ownership: crate::db::SchedulerOwnership) {
+    match ownership.release().await {
+        Ok(()) => tracing::info!(
+            ownership_key = "yorishiro:tenant-reindex-scheduler",
+            "reindex scheduler tick ownership released"
+        ),
+        Err(err) => tracing::error!(
+            ownership_key = "yorishiro:tenant-reindex-scheduler",
+            error = %err,
+            "reindex scheduler tick ownership release failed"
+        ),
     }
 }
 

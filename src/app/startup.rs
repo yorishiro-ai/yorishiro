@@ -58,44 +58,7 @@ pub(super) fn validate_backend(ctx: &AppContext) -> Result<()> {
         crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
             .map_err(loco_rs::Error::Message)?;
     }
-    validate_scheduler_topology(ctx)?;
     Ok(())
-}
-
-/// Validates the deployment invariant required by the SQLite scheduler path.
-///
-/// SQLite's application and queue pools are separate, so holding a database
-/// write lock across dispatch would deadlock the queue when both use one file.
-/// PostgreSQL uses a transaction-scoped advisory lock and permits replicas.
-fn validate_scheduler_topology(ctx: &AppContext) -> Result<()> {
-    if !ctx.is_sqlite() || ctx.config.scheduler.is_none() {
-        return Ok(());
-    }
-
-    let replicas = scheduler_replica_count(std::env::var("YORISHIRO_SCHEDULER_REPLICAS").ok())
-        .map_err(loco_rs::Error::Message)?;
-
-    tracing::info!(
-        backend = "sqlite",
-        scheduler_replicas = replicas,
-        ownership = "deployment_invariant",
-        "scheduler topology validated"
-    );
-    Ok(())
-}
-
-fn scheduler_replica_count(value: Option<String>) -> std::result::Result<u32, String> {
-    let replicas = value
-        .as_deref()
-        .unwrap_or("1")
-        .parse::<u32>()
-        .map_err(|_| "YORISHIRO_SCHEDULER_REPLICAS must be a positive integer on SQLite")?;
-    if replicas != 1 {
-        return Err(format!(
-            "SQLite scheduler deployments require exactly one scheduler replica, but YORISHIRO_SCHEDULER_REPLICAS={replicas}"
-        ));
-    }
-    Ok(replicas)
 }
 
 /// Spawns a background task that detects and enqueues startup reindex for any workspace
@@ -246,21 +209,4 @@ fn spawn_startup_reindex(ctx: AppContext) {
 
     // Store the JoinHandle so shutdown_and_wait() can await task completion.
     task.lock().unwrap().replace(join_handle);
-}
-
-#[cfg(test)]
-mod scheduler_tests {
-    use super::scheduler_replica_count;
-
-    #[test]
-    fn sqlite_scheduler_defaults_to_one_replica() {
-        assert_eq!(scheduler_replica_count(None).unwrap(), 1);
-        assert_eq!(scheduler_replica_count(Some("1".into())).unwrap(), 1);
-    }
-
-    #[test]
-    fn sqlite_scheduler_rejects_multiple_or_invalid_replicas() {
-        assert!(scheduler_replica_count(Some("2".into())).is_err());
-        assert!(scheduler_replica_count(Some("not-a-number".into())).is_err());
-    }
 }

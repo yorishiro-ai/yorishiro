@@ -42,6 +42,8 @@ server:
 # Runs registered tasks or shell commands on a recurring schedule.
 # `cargo loco scheduler` starts the scheduler daemon.
 # English syntax ("every 15 seconds") and cron expressions are both supported.
+# PostgreSQL scheduler replicas coordinate with a detached session advisory lock.
+# SQLite uses a non-blocking `.scheduler.lock` file beside the database URI's file.
 scheduler:
   output: stdout      # stdout | silent (default for all jobs)
   jobs:

@@ -201,8 +201,10 @@ API エンドポイント（`POST /api/identity/tenants/schedule` など）で I
 
 `cargo loco scheduler` は HTTP サーバとワーカーとは別のプロセスとして実行します。
 PostgreSQL では、同じデータベースを使う scheduler replica を複数起動できます。
-各 tick は `yorishiro:tenant-reindex-scheduler` のトランザクション単位 advisory lock を試行し、別 replica が所有している場合は待機せずにスキップします。
-lock は commit、rollback、接続断、プロセスの異常終了で自動的に解放されるため、残った replica が次の tick で所有権を取得できます。
+各 tick は `yorishiro:tenant-reindex-scheduler` の detached なセッション単位 advisory lock を試行し、別 replica が所有している場合は待機せずにスキップします。
+detached connection はスケジュールの選択、更新の commit、すべての queue dispatch が終わるまで保持します。
+その後に明示的に unlock して close します。
+接続断やプロセスの異常終了では lock が自動解放されるため、残った replica が次の tick で所有権を取得できます。
 所有権トランザクションは期限到来したスケジュールを読み取り、キューへ dispatch する前に次回時刻を更新します。
 これは意図した at-most-once dispatch です。
 スケジュールの commit 後に scheduler が落ちても重複キューは作られませんが、その commit 後に落ちるかキューが失敗するとその tick の dispatch は失われます。
@@ -210,10 +212,12 @@ lock は commit、rollback、接続断、プロセスの異常終了で自動的
 手動、起動時、定期実行のジョブが重なった場合も、既存のワーカー側ワークスペース単位 advisory lock が実際の再インデックス処理を直列化します。
 
 SQLite では Loco のキュープールが別接続であるため、PostgreSQL と同じトランザクション所有権 lock は使いません。
-SQLite の scheduler deployment は scheduler replica を必ず 1 つにしてください。
-`YORISHIRO_SCHEDULER_REPLICAS` に `1` 以外（デフォルトは `1`）を設定すると起動時に拒否されます。
-SQLite のローリングデプロイでは、旧 scheduler を停止してから新 scheduler を起動してください。
-PostgreSQL の replica は重複して稼働できます。
+有効な SQLite database path の隣に `.scheduler.lock` suffix の lock file を作り、待機しない OS file lock を取得します。
+競合した task process は直ちにスキップし、handle の close またはプロセス終了で lock が解放されます。
+この取得は task の実行中に行うため、外部の Loco configuration で scheduler job を指定した場合も対象です。
+決定的な隣接 file がないため、in-memory SQLite の scheduler 実行は拒否されます。
+`YORISHIRO_SCHEDULER_REPLICAS` は診断・互換性用の metadata にすぎず、実行時の権威としては使いません。
+両 backend とも rolling deployment で重複起動できますが、旧 owner が lock を解放してから新しい task が進みます。
 
 ## SQLite ANN ベンチマーク
 
