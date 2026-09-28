@@ -1,8 +1,9 @@
 use crate::requests::boot_request;
+#[cfg(feature = "test-support")]
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
-};
+#[cfg(feature = "test-support")]
+use sea_orm::ActiveModelTrait;
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 use tokio::sync::Barrier;
 use yorishiro::app::App;
