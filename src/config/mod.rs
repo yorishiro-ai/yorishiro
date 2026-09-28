@@ -61,6 +61,9 @@ queue:
     interval_seconds: 60
 
 # Add scheduled tasks here when this process runs `yorishiro scheduler`.
+# SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
+# PostgreSQL permits multiple replicas through a detached session advisory lock.
+# YORISHIRO_SCHEDULER_REPLICAS is diagnostic compatibility metadata only.
 # scheduler:
 #   output: stdout
 #   jobs: {}

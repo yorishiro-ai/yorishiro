@@ -68,11 +68,13 @@ server:
 # scheduler:
 #   output: stdout
 #   jobs:
-#     reindex_daily:
-#       run: "reindex_embeddings"
+#     tenant_reindex_daily:
+#       run: "tenant_reindex_scheduler"
 #       schedule: "0 3 * * * * 2030"
-#       tags: ["infer-fill"]
 #       run_on_start: false
+# SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
+# PostgreSQL scheduler replicas use a detached session advisory lock and may run concurrently.
+# YORISHIRO_SCHEDULER_REPLICAS is diagnostic compatibility metadata only and is not enforced.
 
 # Worker Configuration
 workers:

@@ -199,6 +199,29 @@ API エンドポイント（`POST /api/identity/tenants/schedule` など）で I
 
 `yorishiro.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
 
+`cargo loco scheduler` は HTTP サーバとワーカーとは別のプロセスとして実行します。
+PostgreSQL では、同じデータベースを使う scheduler replica を複数起動できます。
+各 tick は `yorishiro:tenant-reindex-scheduler` の detached なセッション単位 advisory lock を試行し、別 replica が所有している場合は待機せずにスキップします。
+PostgreSQL を使うデプロイメントでは、`DATABASE_URL` は PostgreSQL に直接接続するか、session mode の pooler を経由する必要があります。
+この所有権 lock はセッション単位であり、スケジュールの選択、更新の commit、すべての queue dispatch の間、同じ DB セッションに保持する必要があるため、transaction mode の pooling はサポートしません。
+detached connection はスケジュールの選択、更新の commit、すべての queue dispatch が終わるまで保持します。
+その後に明示的に unlock して close します。
+接続断やプロセスの異常終了では lock が自動解放されるため、残った replica が次の tick で所有権を取得できます。
+所有権トランザクションは期限到来したスケジュールを読み取り、キューへ dispatch する前に次回時刻を更新します。
+これは意図した at-most-once dispatch です。
+スケジュールの commit 後に scheduler が落ちても重複キューは作られませんが、その commit 後に落ちるかキューが失敗するとその tick の dispatch は失われます。
+キューへの dispatch は対象をすべて試行し、1 件でも enqueue に失敗した場合は集約した task failure を返します。
+失敗した interval は再試行せず、復旧点は次のスケジュール間隔です。
+手動、起動時、定期実行のジョブが重なった場合も、既存のワーカー側ワークスペース単位 advisory lock が実際の再インデックス処理を直列化します。
+
+SQLite には PostgreSQL のような advisory lock がないため、scheduler ownership には待機しない OS file lock を使います。
+有効な SQLite database path の隣に `.scheduler.lock` suffix の lock file を作り、待機しない OS file lock を取得します。
+競合した task process は直ちにスキップし、handle の close またはプロセス終了で lock が解放されます。
+この取得は task の実行中に行うため、外部の Loco configuration で scheduler job を指定した場合も対象です。
+決定的な隣接 file がないため、in-memory SQLite の scheduler 実行は拒否されます。
+`YORISHIRO_SCHEDULER_REPLICAS` は診断・互換性用の metadata にすぎず、実行時の権威としては使いません。
+両 backend とも rolling deployment で重複起動できますが、旧 owner が lock を解放してから新しい task が進みます。
+
 ## SQLite ANN ベンチマーク
 
 大規模なエンティティ数を持つ SQLite デプロイメントで動作させる場合、フルスキャンのベクトル検索が遅くなる可能性があります。このデプロイメントにはベンチマークタスクが同梱されており、データに対する実際のレイテンシを測定し、vec0 仮想テーブル（KNN インデックス）の採用を推奨するかどうかを判断します。

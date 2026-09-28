@@ -196,6 +196,28 @@ On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run gra
 
 To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to `yorishiro.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
 
+Run `cargo loco scheduler` as a separate process from the HTTP server and workers.
+With PostgreSQL, any number of scheduler replicas may use the same database.
+Each tick attempts the detached session-scoped advisory ownership lock `yorishiro:tenant-reindex-scheduler` and skips immediately when another replica owns it.
+For PostgreSQL deployments, `DATABASE_URL` must connect directly to PostgreSQL or through a session-mode pooler.
+Transaction-mode pooling is unsupported because this ownership lock is session-scoped and must remain on the same database session through schedule selection, the advancement commit, and every queue dispatch.
+The detached connection remains held through schedule selection, advancement commit, and every queue dispatch.
+It is explicitly unlocked and closed afterward.
+Connection loss or abrupt process termination releases the lock automatically, so a surviving replica can take ownership on the next tick.
+The ownership transaction reads due schedules and advances them before queue dispatch.
+This is deliberate at-most-once dispatch protection: a scheduler crash cannot create duplicate queue jobs after the schedule commit, but a crash or queue failure after that commit can miss that tick.
+The task attempts every due queue dispatch, then reports one aggregated task failure if any enqueue fails.
+Those intervals are not retried, and the next scheduled interval remains the recovery point.
+The reindex worker's existing per-workspace advisory lock still serializes actual reindex effects when manual, startup, or scheduled jobs overlap.
+
+SQLite has no PostgreSQL-style advisory locks, so scheduler ownership uses a non-blocking OS file lock instead.
+The lock file is adjacent to the effective SQLite database path and has the `.scheduler.lock` suffix.
+Contending task processes skip immediately, and closing the handle or process termination releases the lock.
+This acquisition happens inside the task, so it also covers scheduler jobs supplied through external Loco configuration.
+In-memory SQLite scheduler operation is rejected because it has no deterministic adjacent file.
+`YORISHIRO_SCHEDULER_REPLICAS` is diagnostic/compatibility metadata only and is never runtime authority.
+Rolling deployments may overlap on both backends; the old owner must release before the new task proceeds.
+
 ## SQLite ANN benchmark
 
 When you run Yorishiro on SQLite with a large number of embedded entities, full-scan vector search may become slow. This deployment ships a benchmark task that measures the actual latency on your data and recommends whether to adopt the vec0 virtual table (KNN index).

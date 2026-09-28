@@ -19,7 +19,9 @@ use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Column, En
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -175,17 +177,68 @@ impl TenantReindexScheduler {
         _vars: &Vars,
         tick: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
+        use crate::db::AppContextBackend;
         use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
         use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::ReindexArgs;
 
-        // Fetch all scheduled tenants.
-        let schedules = ScheduleEntity::Entity::find()
-            .all(&app_context.db)
-            .await
-            .map_err(|e| Error::Message(e.to_string()))?;
+        // Ownership is held on a detached PostgreSQL session or an OS file handle through every
+        // queue dispatch. The schedule transaction is separate so dispatch cannot hold a DB
+        // transaction open, and the guard is released explicitly after the final dispatch.
+        let mut ownership = match crate::db::acquire_scheduler_ownership(
+            app_context,
+            "yorishiro:tenant-reindex-scheduler",
+        )
+        .await
+        {
+            Ok(Some(ownership)) => Some(ownership),
+            Ok(None) => {
+                tracing::info!(
+                    ownership_key = "yorishiro:tenant-reindex-scheduler",
+                    "reindex scheduler tick skipped because another owner holds scheduler ownership"
+                );
+                return Ok(());
+            }
+            Err(err) => {
+                return Err(Error::Message(format!(
+                    "scheduler ownership acquisition: {err}"
+                )));
+            }
+        };
+        tracing::info!(
+            ownership_key = "yorishiro:tenant-reindex-scheduler",
+            ownership_backend = if app_context.is_postgres() {
+                "postgres"
+            } else {
+                "sqlite"
+            },
+            ownership_lock_path = ownership
+                .as_ref()
+                .and_then(crate::db::SchedulerOwnership::sqlite_path)
+                .map(|path| path.display().to_string()),
+            "reindex scheduler tick ownership acquired"
+        );
 
+        let txn = match app_context.db.begin().await {
+            Ok(txn) => txn,
+            Err(err) => {
+                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+                return Err(Error::Message(format!(
+                    "scheduler ownership transaction: {err}"
+                )));
+            }
+        };
+        let schedules = match ScheduleEntity::Entity::find().all(&txn).await {
+            Ok(schedules) => schedules,
+            Err(err) => {
+                let _ = txn.rollback().await;
+                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+                return Err(Error::Message(err.to_string()));
+            }
+        };
+
+        let mut dispatches = Vec::new();
         for schedule in &schedules {
             // Only enqueue once the scheduled time has arrived.
             let sched_utc = match schedule.scheduled_for {
@@ -197,11 +250,18 @@ impl TenantReindexScheduler {
             }
 
             // Fetch all workspaces under this tenant.
-            let workspaces: Vec<_> = WorkspaceEntity::Entity::find()
+            let workspaces: Vec<_> = match WorkspaceEntity::Entity::find()
                 .filter(WorkspaceEntity::Column::TenantId.eq(schedule.tenant_id))
-                .all(&app_context.db)
+                .all(&txn)
                 .await
-                .map_err(|e| Error::Message(e.to_string()))?;
+            {
+                Ok(workspaces) => workspaces,
+                Err(err) => {
+                    let _ = txn.rollback().await;
+                    let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+                    return Err(Error::Message(err.to_string()));
+                }
+            };
 
             for ws in workspaces {
                 let worker_class = match crate::controllers::extractors::resolve_worker_class(
@@ -224,40 +284,108 @@ impl TenantReindexScheduler {
                     workspace_id: ws.id,
                     worker_class,
                 };
-                if let Err(err) =
-                    crate::workers::reindex::enqueue_for_class(app_context, args).await
-                {
-                    tracing::warn!(
-                        tenant_id = %schedule.tenant_id,
-                        workspace_id = %ws.id,
-                        error = %err,
-                        "reindex scheduler: failed to enqueue"
-                    );
-                } else {
-                    tracing::info!(
-                        tenant_id = %schedule.tenant_id,
-                        workspace_id = %ws.id,
-                        "reindex scheduler: enqueued"
-                    );
-                }
+                dispatches.push((schedule.tenant_id, args));
             }
 
-            // Update scheduled_for to now (ticker sets this to prevent duplicate
-            // runs if a tick is missed).
+            // Advance before dispatch for the deliberate at-most-once policy. A crash or queue
+            // failure after this commit loses the current interval until the next one.
             let mut active = schedule.clone().into_active_model();
-            let new_sched: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now()
+            let new_sched: chrono::DateTime<chrono::FixedOffset> = tick
                 .checked_add_signed(chrono::Duration::minutes(5))
                 .unwrap()
                 .into();
             active.scheduled_for = ActiveValue::Set(Some(new_sched));
-            active.updated_at = ActiveValue::Set(chrono::Utc::now().into());
-            active
-                .update(&app_context.db)
-                .await
-                .map_err(|e| Error::Message(e.to_string()))?;
+            active.updated_at = ActiveValue::Set(tick.into());
+            if let Err(err) = active.update(&txn).await {
+                let _ = txn.rollback().await;
+                let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+                return Err(Error::Message(err.to_string()));
+            }
         }
 
+        if let Err(err) = txn.commit().await {
+            let _ = release_scheduler_ownership(ownership.take().unwrap()).await;
+            return Err(Error::Message(format!("scheduler ownership commit: {err}")));
+        }
+
+        let dispatch_errors = dispatch_reindex_batch(app_context, dispatches).await;
+        let release_error = release_scheduler_ownership(ownership.take().unwrap()).await;
+        if let Some(message) = scheduler_failure_message(
+            &dispatch_errors,
+            release_error.as_ref().err().map(String::as_str),
+        ) {
+            tracing::error!(error = %message, "reindex scheduler tick failed after dispatch attempts");
+            return Err(Error::Message(message));
+        }
         Ok(())
+    }
+}
+
+fn scheduler_failure_message(
+    dispatch_errors: &[String],
+    release_error: Option<&str>,
+) -> Option<String> {
+    if dispatch_errors.is_empty() {
+        return release_error
+            .map(|err| format!("reindex scheduler ownership release failed: {err}"));
+    }
+
+    let mut message = format!(
+        "reindex scheduler dispatch failed for {} workspace(s) after schedule advancement; interval is not retried: {}",
+        dispatch_errors.len(),
+        dispatch_errors.join("; ")
+    );
+    if let Some(err) = release_error {
+        message.push_str(&format!("; scheduler ownership release also failed: {err}"));
+    }
+    Some(message)
+}
+
+async fn dispatch_reindex_batch(
+    app_context: &AppContext,
+    dispatches: Vec<(Uuid, crate::workers::reindex::ReindexArgs)>,
+) -> Vec<String> {
+    let mut dispatch_errors = Vec::new();
+    for (tenant_id, args) in dispatches {
+        let workspace_id = args.workspace_id;
+        if let Err(err) = crate::workers::reindex::enqueue_for_class(app_context, args).await {
+            tracing::warn!(
+                tenant_id = %tenant_id,
+                workspace_id = %workspace_id,
+                error = %err,
+                "reindex scheduler: dispatch failed after schedule advancement"
+            );
+            dispatch_errors.push(format!("workspace {workspace_id}: {err}"));
+        } else {
+            tracing::info!(
+                tenant_id = %tenant_id,
+                workspace_id = %workspace_id,
+                "reindex scheduler: dispatched"
+            );
+        }
+    }
+    dispatch_errors
+}
+
+async fn release_scheduler_ownership(
+    ownership: crate::db::SchedulerOwnership,
+) -> Result<(), String> {
+    match ownership.release().await {
+        Ok(()) => {
+            tracing::info!(
+                ownership_key = "yorishiro:tenant-reindex-scheduler",
+                "reindex scheduler tick ownership released"
+            );
+            Ok(())
+        }
+        Err(err) => {
+            tracing::error!(
+                ownership_key = "yorishiro:tenant-reindex-scheduler",
+                error = %err,
+                "reindex scheduler tick ownership release failed"
+            );
+            Err(err)
+        }
     }
 }
 
@@ -270,9 +398,16 @@ fn is_due(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
-    use super::is_due;
+    use async_trait::async_trait;
+    use chrono::{TimeZone, Utc};
+    use uuid::Uuid;
+
+    use super::{dispatch_reindex_batch, is_due, scheduler_failure_message};
 
     const TICK: i64 = 1_700_000_000;
 
@@ -289,5 +424,150 @@ mod tests {
                 "scheduled offset {offset}"
             );
         }
+    }
+
+    struct FailingDispatcher {
+        attempts: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl crate::workers::dispatch::ReindexDispatcher for FailingDispatcher {
+        async fn dispatch(
+            &self,
+            _ctx: &loco_rs::app::AppContext,
+            _args: crate::workers::reindex::ReindexArgs,
+        ) -> loco_rs::Result<String> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            Err(loco_rs::Error::Message("dispatch failed".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_batch_attempts_every_workspace_and_aggregates_failures() {
+        let ctx = crate::workers::dispatch::test_context().await;
+        let dispatcher = Arc::new(FailingDispatcher {
+            attempts: AtomicUsize::new(0),
+        });
+        ctx.shared_store
+            .insert(dispatcher.clone() as Arc<dyn crate::workers::dispatch::ReindexDispatcher>);
+        let dispatches = (0..3)
+            .map(|_| {
+                (
+                    Uuid::now_v7(),
+                    crate::workers::reindex::ReindexArgs {
+                        workspace_id: Uuid::now_v7(),
+                        worker_class: crate::workers::embedding_sync::WorkerClass::Shared,
+                    },
+                )
+            })
+            .collect();
+
+        let errors = dispatch_reindex_batch(&ctx, dispatches).await;
+        assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(errors.len(), 3);
+    }
+
+    #[test]
+    fn dispatch_failure_remains_primary_when_release_also_fails() {
+        let message = scheduler_failure_message(
+            &[
+                "workspace one: enqueue failed".into(),
+                "workspace two: enqueue failed".into(),
+            ],
+            Some("unlock failed"),
+        )
+        .unwrap();
+
+        assert!(message.starts_with("reindex scheduler dispatch failed for 2 workspace(s)"));
+        assert!(message.contains("interval is not retried"));
+        assert!(message.contains("workspace one: enqueue failed"));
+        assert!(message.contains("scheduler ownership release also failed: unlock failed"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_task_advances_schedule_before_all_failed_dispatches() {
+        use loco_rs::app::AppContext;
+        use loco_rs::app::Hooks;
+        use migration::{Migrator, MigratorTrait};
+        use sea_orm::{ActiveModelTrait, ActiveValue, Database, EntityTrait};
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("scheduler.sqlite");
+        let uri = format!("sqlite://{}?mode=rwc", path.display());
+        crate::db::register_sqlite_extensions();
+        let db = Database::connect(&uri).await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let mut config = crate::app::App::load_config(&loco_rs::environment::Environment::Any(
+            "test_sqlite".into(),
+        ))
+        .await
+        .unwrap();
+        config.database.uri = uri;
+        let ctx = AppContext::builder(loco_rs::environment::Environment::Test, db, config).build();
+
+        let tenant = crate::models::_entities::tenant_tenants::ActiveModel {
+            name: ActiveValue::Set("scheduler-test".into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        for name in ["one", "two"] {
+            crate::models::_entities::workspace_workspaces::ActiveModel {
+                tenant_id: ActiveValue::Set(tenant.id),
+                name: ActiveValue::Set(name.into()),
+                status: ActiveValue::Set(
+                    crate::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE.into(),
+                ),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+        }
+        let initial = at(-1);
+        crate::models::_entities::tenant_reindex_schedules::ActiveModel {
+            tenant_id: ActiveValue::Set(tenant.id),
+            interval: ActiveValue::Set("P1D".into()),
+            scheduled_for: ActiveValue::Set(Some(initial.into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        let dispatcher = Arc::new(FailingDispatcher {
+            attempts: AtomicUsize::new(0),
+        });
+        ctx.shared_store
+            .insert(dispatcher.clone() as Arc<dyn crate::workers::dispatch::ReindexDispatcher>);
+        let task = super::TenantReindexScheduler;
+        let first = task
+            .run_at(&ctx, &loco_rs::task::Vars::default(), at(0))
+            .await;
+        assert!(first.is_err());
+        assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 2);
+
+        let schedule =
+            crate::models::_entities::tenant_reindex_schedules::Entity::find_by_id(tenant.id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+        let expected: chrono::DateTime<chrono::FixedOffset> = at(300).into();
+        assert_eq!(schedule.scheduled_for.unwrap(), expected);
+
+        let second = task
+            .run_at(&ctx, &loco_rs::task::Vars::default(), at(0))
+            .await;
+        assert!(second.is_ok());
+        assert_eq!(dispatcher.attempts.load(Ordering::SeqCst), 2);
+        let ownership =
+            crate::db::acquire_scheduler_ownership(&ctx, "yorishiro:tenant-reindex-scheduler")
+                .await
+                .unwrap()
+                .unwrap();
+        ownership.release().await.unwrap();
     }
 }
