@@ -23,6 +23,8 @@ use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilte
 use serde::Serialize;
 use uuid::Uuid;
 
+const REINDEX_GRACE: chrono::Duration = chrono::Duration::minutes(5);
+
 /// What a tenant has configured, for an endpoint to report.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScheduleDescription {
@@ -171,15 +173,22 @@ impl Task for TenantReindexScheduler {
         }
     }
 
-    async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
+    async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
+        self.run_at(app_context, vars, chrono::Utc::now()).await
+    }
+}
+
+impl TenantReindexScheduler {
+    async fn run_at(
+        &self,
+        app_context: &AppContext,
+        _vars: &Vars,
+        tick: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
         use crate::models::_entities::tenant_reindex_schedules as ScheduleEntity;
         use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::ReindexArgs;
-
-        let tick = chrono::Utc::now();
-        let grace = chrono::Duration::minutes(5);
-        let cutoff = tick - grace;
 
         // Fetch all scheduled tenants.
         let schedules = ScheduleEntity::Entity::find()
@@ -193,7 +202,7 @@ impl Task for TenantReindexScheduler {
                 Some(v) => chrono::DateTime::<chrono::Utc>::from(v),
                 None => continue,
             };
-            if sched_utc > tick && sched_utc > cutoff {
+            if !is_due(sched_utc, tick) {
                 continue;
             }
 
@@ -259,5 +268,39 @@ impl Task for TenantReindexScheduler {
         }
 
         Ok(())
+    }
+}
+
+fn is_due(
+    scheduled_for: chrono::DateTime<chrono::Utc>,
+    tick: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let cutoff = tick - REINDEX_GRACE;
+    !(scheduled_for > tick && scheduled_for > cutoff)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, TimeZone, Utc};
+
+    use super::is_due;
+
+    const TICK: i64 = 1_700_000_000;
+
+    fn at(offset: i64) -> chrono::DateTime<Utc> {
+        Utc.timestamp_opt(TICK + offset, 0).single().unwrap()
+    }
+
+    #[test]
+    fn due_decision_keeps_the_exact_tick_boundary() {
+        assert!(is_due(at(0), at(0)));
+        assert!(!is_due(at(1), at(0)));
+    }
+
+    #[test]
+    fn due_decision_keeps_the_five_minute_schedule_boundary() {
+        let five_minutes = Duration::minutes(5).num_seconds();
+        assert!(!is_due(at(five_minutes), at(0)));
+        assert!(is_due(at(-five_minutes), at(0)));
     }
 }
