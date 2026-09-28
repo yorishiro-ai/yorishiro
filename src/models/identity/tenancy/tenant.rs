@@ -9,14 +9,10 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_tenants;
 
-/// The nil UUID, reserved for infrastructure tenants that own no members and no data of their own (currently `ee/`'s official-templates publisher).
-/// Excluded from every count this module takes against `YORISHIRO_MAX_TENANTS`.
-pub(crate) const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
-
 /// Counts real (non-infrastructure) tenants: every row except `INFRASTRUCTURE_TENANT_ID`.
 pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
     tenant_tenants::Entity::find()
-        .filter(tenant_tenants::Column::Id.ne(INFRASTRUCTURE_TENANT_ID))
+        .filter(tenant_tenants::Column::Id.ne(super::INFRASTRUCTURE_TENANT_ID))
         .count(conn)
         .await
         .internal()
