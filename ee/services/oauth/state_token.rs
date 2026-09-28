@@ -92,7 +92,9 @@ fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState>
     }
 
     let issued_at: i64 = issued_at_str.parse().ok()?;
-    if now - issued_at > STATE_TTL_SECS || issued_at - now > 5 {
+    let outside_past_window = issued_at <= now && now.saturating_sub(issued_at) > STATE_TTL_SECS;
+    let outside_future_window = issued_at > now && issued_at.saturating_sub(now) > 5;
+    if outside_past_window || outside_future_window {
         // Small clock-skew allowance in the future direction; not an outright future-dated token.
         return None;
     }
@@ -189,5 +191,26 @@ mod tests {
         let state = format!("{payload}.{signature}");
 
         assert!(verify_at(KEY, &state, now).is_none());
+    }
+
+    #[test]
+    fn verify_handles_extreme_timestamps_without_overflow() {
+        for (issued_at, now) in [(i64::MIN, i64::MAX), (i64::MAX, i64::MIN)] {
+            let payload = format!("{issued_at}.deadbeef.verifier");
+            let signature = hmac_sign::sign(KEY, payload.as_bytes());
+            let state = format!("{payload}.{signature}");
+
+            assert!(verify_at(KEY, &state, now).is_none());
+        }
+    }
+
+    #[test]
+    fn production_wrappers_issue_and_verify_a_state() {
+        let issued = issue(KEY);
+        let verified = verify(KEY, &issued.state).expect("a production state must verify");
+        assert_eq!(
+            verified.csrf_hash,
+            hash_csrf_cookie(&issued.csrf_cookie_value)
+        );
     }
 }

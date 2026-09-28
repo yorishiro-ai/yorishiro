@@ -23,8 +23,6 @@ use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilte
 use serde::Serialize;
 use uuid::Uuid;
 
-const REINDEX_GRACE: chrono::Duration = chrono::Duration::minutes(5);
-
 /// What a tenant has configured, for an endpoint to report.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScheduleDescription {
@@ -75,16 +73,9 @@ pub async fn set(
         }
     }
 
-    // Compute the next scheduled time: now + 5 minutes grace.
-    // The grace period is 5 minutes: if the expected time has passed within
-    // the last 5 minutes, still enqueue it (the tick missed its window
-    // but is still within a reasonable window). Beyond that, skip and log.
+    // Compute the next scheduled time: now + 5 minutes.
+    // This is the interval until the next run, not a grace period for a missed run.
     //
-    // 5 minutes is chosen because it covers a tick that was delayed by
-    // a process restart or a brief queue unavailability. It is short enough
-    // that a missed daily run does not surprise an operator (they would
-    // notice the gap within a day). It is long enough to absorb a few
-    // minutes of queue backlog without silently dropping the run.
     let expected: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::minutes(5))
         .unwrap()
@@ -161,7 +152,6 @@ pub async fn get(
 /// `scheduler:` section). Each run enqueues a reindex job for every workspace
 /// under every scheduled tenant whose `scheduled_for` time has passed.
 ///
-/// The ticker uses the grace period documented on `set`: 5 minutes.
 pub struct TenantReindexScheduler;
 
 #[async_trait]
@@ -197,7 +187,7 @@ impl TenantReindexScheduler {
             .map_err(|e| Error::Message(e.to_string()))?;
 
         for schedule in &schedules {
-            // Only enqueue if the expected time has passed (within grace window).
+            // Only enqueue once the scheduled time has arrived.
             let sched_utc = match schedule.scheduled_for {
                 Some(v) => chrono::DateTime::<chrono::Utc>::from(v),
                 None => continue,
@@ -275,13 +265,12 @@ fn is_due(
     scheduled_for: chrono::DateTime<chrono::Utc>,
     tick: chrono::DateTime<chrono::Utc>,
 ) -> bool {
-    let cutoff = tick - REINDEX_GRACE;
-    !(scheduled_for > tick && scheduled_for > cutoff)
+    scheduled_for <= tick
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, TimeZone, Utc};
+    use chrono::{TimeZone, Utc};
 
     use super::is_due;
 
@@ -292,15 +281,13 @@ mod tests {
     }
 
     #[test]
-    fn due_decision_keeps_the_exact_tick_boundary() {
-        assert!(is_due(at(0), at(0)));
-        assert!(!is_due(at(1), at(0)));
-    }
-
-    #[test]
-    fn due_decision_keeps_the_five_minute_schedule_boundary() {
-        let five_minutes = Duration::minutes(5).num_seconds();
-        assert!(!is_due(at(five_minutes), at(0)));
-        assert!(is_due(at(-five_minutes), at(0)));
+    fn due_decision_keeps_the_exact_tick_boundary_matrix() {
+        for offset in [-301, 0, 1, 300, 301] {
+            assert_eq!(
+                is_due(at(offset), at(0)),
+                offset <= 0,
+                "scheduled offset {offset}"
+            );
+        }
     }
 }
