@@ -17,15 +17,6 @@ pub mod compute_credit_ledger;
 pub mod entity_column_preferences;
 #[path = "content/entity_embeddings.rs"]
 pub mod entity_embeddings;
-#[path = "content/entity_embeddings_1024.rs"]
-#[allow(dead_code)]
-pub(crate) mod entity_embeddings_1024;
-#[path = "content/entity_embeddings_1536.rs"]
-#[allow(dead_code)]
-pub(crate) mod entity_embeddings_1536;
-#[path = "content/entity_embeddings_768.rs"]
-#[allow(dead_code)]
-pub(crate) mod entity_embeddings_768;
 #[path = "content/entity_entities/mod.rs"]
 pub mod entity_entities;
 #[path = "content/entity_relations.rs"]

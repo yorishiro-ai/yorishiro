@@ -11,6 +11,10 @@ The Loco 1.1.0 generator hard-codes `src/models/_entities` as its output directo
 It also reads `src/models/mod.rs` and creates a hand-written extension at that root when one is missing.
 The root model files therefore remain as compatibility markers while their implementation sources live in feature areas.
 Controllers, tasks, workers, and hand-written model logic remain application code and are not generated.
+The area `mod.rs` files are organizational only; the root `#[path]` declarations are the compile bridge required by Loco 1.1.0 and by the existing caller paths.
+The unused width-specific embedding extensions are kept as zero-byte root generator markers and are deliberately not compiled.
+When a new table is added, Loco writes its extension at the root of `src/models/`.
+Move that implementation into the appropriate area and add its root `#[path]` compatibility declaration after generation.
 
 The checked-in `Makefile` target `entities` runs migrations and `cargo loco db entities` against disposable PostgreSQL.
 CI verifies that regeneration produces at least 10 entity files and compares the result with the checked-in tree.

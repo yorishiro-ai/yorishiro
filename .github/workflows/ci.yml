@@ -259,7 +259,7 @@ jobs:
           which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
           count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           if [ "$count" -lt 10 ]; then
-            echo "ERROR: Expected 20+ entity files, got $count after db entities."
+            echo "ERROR: Expected at least 10 entity files, got $count after db entities."
             exit 1
           fi
           echo "Generated $count entity files (had $count_before before)"
