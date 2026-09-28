@@ -38,8 +38,14 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
+  EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
+  EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
+  EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
+  EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
   EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
   EMBEDDING_MODEL_SIZE: "1112201288"
+  EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
+  EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
   EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
   EMBEDDING_TOKENIZER_SIZE: "17082660"
 
@@ -111,7 +117,45 @@ jobs:
         # and missing_panics_doc; new/changed code is expected to add those comments.
         run: cargo clippy --locked --workspace --lib -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
 
+  prepare-embedding:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore multilingual-e5-base cache
+        uses: actions/cache/restore@v4
+        id: embedding-cache
+        with:
+          path: |
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+
+      - name: Reject an uncacheable fork pull request miss
+        if: steps.embedding-cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::The immutable embedding cache is unavailable and fork pull requests cannot save GitHub Actions caches. Re-run after the cache is populated from a trusted branch."
+          exit 1
+
+      - name: Prepare and verify multilingual-e5-base artifacts
+        env:
+          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
+          TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
+        run: bash .github/scripts/embedding-cache.sh prepare
+
+      - name: Save verified multilingual-e5-base cache
+        if: steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+
   test:
+    needs: prepare-embedding
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -150,115 +194,22 @@ jobs:
           # collide (they compile different feature combinations).
           key: ${{ github.job }}-${{ matrix.backend }}
 
-      - name: Restore or fetch multilingual-e5-base artifacts
+      - name: Restore multilingual-e5-base cache
         uses: actions/cache/restore@v4
         id: embedding-cache
         with:
           path: |
-            ~/.cache/yorishiro/models/multilingual-e5-base/model.safetensors
-            ~/.cache/yorishiro/models/multilingual-e5-base/tokenizer.json
-          key: embedding-model-multilingual-e5-base-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
-      - name: Verify or download multilingual-e5-base artifacts
+      - name: Verify populated multilingual-e5-base cache
         env:
-          MODEL_URL: https://huggingface.co/intfloat/multilingual-e5-base/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/model.safetensors
-          TOKENIZER_URL: https://huggingface.co/intfloat/multilingual-e5-base/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/tokenizer.json
-        run: |
-          set -euo pipefail
-
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          source = Path("src/services/embedding/model_fetch.rs").read_text()
-          block = source.split("static MULTILINGUAL_E5_BASE", 1)[1].split(
-              "pub(super) const DEFAULT_MODEL", 1
-          )[0]
-          model, tokenizer = block.split("tokenizer: Artifact", 1)
-          expected = {
-              "EMBEDDING_MODEL_REVISION": (block, r'revision: "([^"]+)"'),
-              "EMBEDDING_MODEL_SHA256": (model, r'sha256: "([^"]+)"'),
-              "EMBEDDING_MODEL_SIZE": (model, r'size: ([0-9_]+)'),
-              "EMBEDDING_TOKENIZER_SHA256": (tokenizer, r'sha256: "([^"]+)"'),
-              "EMBEDDING_TOKENIZER_SIZE": (tokenizer, r'size: ([0-9_]+)'),
-          }
-          import re
-          for name, (haystack, pattern) in expected.items():
-              match = re.search(pattern, haystack)
-              actual = match.group(1).replace("_", "") if match else None
-              if actual != os.environ[name].replace("_", ""):
-                  raise SystemExit(f"{name} does not match model_fetch.rs")
-          PY
-
-          cache_dir="$HOME/.cache/yorishiro/models/multilingual-e5-base"
-          if [[ -L "$cache_dir" || ( -e "$cache_dir" && ! -d "$cache_dir" ) ]]; then
-            rm -rf -- "$cache_dir"
-          fi
-          mkdir -p "$cache_dir"
-
-          verify() {
-            local path=$1 expected_size=$2 expected_sha=$3
-            [[ -f "$path" && ! -L "$path" ]] || return 1
-            [[ "$(stat -c '%s' "$path")" == "$expected_size" ]] || return 1
-            [[ "$(sha256sum "$path" | cut -d' ' -f1)" == "$expected_sha" ]]
-          }
-
-          fetch() {
-            local path=$1 url=$2 expected_size=$3 expected_sha=$4
-            if verify "$path" "$expected_size" "$expected_sha"; then
-              return
-            fi
-
-            if [[ -L "$path" || -d "$path" ]]; then
-              rm -rf -- "$path"
-            else
-              rm -f -- "$path"
-            fi
-            local partial="${path}.partial"
-            if [[ -L "$partial" || -d "$partial" ]]; then
-              rm -rf -- "$partial"
-            elif [[ -f "$partial" ]]; then
-              partial_size=$(stat -c '%s' "$partial")
-              if [[ "$partial_size" -gt "$expected_size" ]]; then
-                rm -f -- "$partial"
-              elif [[ "$partial_size" == "$expected_size" ]]; then
-                if verify "$partial" "$expected_size" "$expected_sha"; then
-                  mv -f -- "$partial" "$path"
-                  return
-                fi
-                rm -f -- "$partial"
-              fi
-            fi
-            if ! curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
-              --continue-at - --output "$partial" "$url"; then
-              return 1
-            fi
-            if ! verify "$partial" "$expected_size" "$expected_sha"; then
-              echo "ERROR: downloaded artifact failed size or SHA-256 verification: $url" >&2
-              rm -f -- "$partial"
-              return 1
-            fi
-            mv -f -- "$partial" "$path"
-          }
-
-          fetch "$cache_dir/model.safetensors" "$MODEL_URL" \
-            "$EMBEDDING_MODEL_SIZE" "$EMBEDDING_MODEL_SHA256"
-          fetch "$cache_dir/tokenizer.json" "$TOKENIZER_URL" \
-            "$EMBEDDING_TOKENIZER_SIZE" "$EMBEDDING_TOKENIZER_SHA256"
-
-          verify "$cache_dir/model.safetensors" \
-            "$EMBEDDING_MODEL_SIZE" "$EMBEDDING_MODEL_SHA256"
-          verify "$cache_dir/tokenizer.json" \
-            "$EMBEDDING_TOKENIZER_SIZE" "$EMBEDDING_TOKENIZER_SHA256"
-
-      - name: Save verified multilingual-e5-base artifacts
-        if: steps.embedding-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.cache/yorishiro/models/multilingual-e5-base/model.safetensors
-            ~/.cache/yorishiro/models/multilingual-e5-base/tokenizer.json
-          key: embedding-model-multilingual-e5-base-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: bash .github/scripts/embedding-cache.sh verify
 
       - name: Build workspace
         run: cargo build --locked --workspace
