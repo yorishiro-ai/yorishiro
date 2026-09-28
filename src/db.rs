@@ -8,6 +8,7 @@ use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
 use sqlite_vec::sqlite3_vec_init;
+use sqlx::ConnectOptions;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqliteConnectOptions;
@@ -387,57 +388,15 @@ fn acquire_sqlite_scheduler_lock(
 }
 
 fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
-    let rest = uri
-        .strip_prefix("sqlite://")
-        .or_else(|| uri.strip_prefix("sqlite:"))
-        .ok_or_else(|| format!("unsupported SQLite database URI for scheduler lock: {uri}"))?;
-    let (database, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let pairs: Vec<_> = url::form_urlencoded::parse(query.as_bytes()).collect();
-    let last_mode = pairs
-        .iter()
-        .filter(|(key, _)| key == "mode")
-        .map(|(_, value)| value.as_ref())
-        .next_back();
-    if database == ":memory:" || last_mode == Some("memory") {
-        return Err(
-            "SQLite scheduler ownership requires a file database; in-memory SQLite is unsupported"
-                .into(),
-        );
-    }
-    // Normalize decoded query pairs so the effective duplicate mode is the last one, while
-    // SQLx remains the authority for supported parameter names and malformed values.
-    let mut normalized_query = url::form_urlencoded::Serializer::new(String::new());
-    let mut mode_seen = false;
-    for (key, value) in &pairs {
-        if key == "mode" {
-            mode_seen = true;
-            continue;
-        }
-        normalized_query.append_pair(key, value);
-    }
-    if let Some(mode) = last_mode {
-        normalized_query.append_pair("mode", mode);
-    } else if mode_seen {
-        unreachable!("mode_seen implies last_mode");
-    }
-    let normalized_query = normalized_query.finish();
-    let effective_uri = if normalized_query.is_empty() {
-        format!("sqlite:{database}")
-    } else {
-        format!("sqlite:{database}?{normalized_query}")
-    };
-    let options = SqliteConnectOptions::from_str(&effective_uri)
+    let options = SqliteConnectOptions::from_str(uri)
         .map_err(|err| format!("invalid SQLite database URI for scheduler lock: {err}"))?;
-    let database = options.get_filename();
-    if database
-        .to_str()
-        .is_some_and(|path| path.starts_with("file:sqlx-in-memory-"))
-    {
+    if sqlite_options_are_in_memory(&options) {
         return Err(
             "SQLite scheduler ownership requires a file database; in-memory SQLite is unsupported"
                 .into(),
         );
     }
+    let database = options.get_filename();
     if database.as_os_str().is_empty() {
         return Err("SQLite scheduler ownership requires a database file path".into());
     }
@@ -473,6 +432,23 @@ fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
         "{}.scheduler.lock",
         database.display()
     )))
+}
+
+fn sqlite_options_are_in_memory(options: &SqliteConnectOptions) -> bool {
+    let filename = options.get_filename();
+    if filename.as_os_str().is_empty() {
+        return true;
+    }
+    if filename
+        .to_str()
+        .is_some_and(|path| path.starts_with("file:sqlx-in-memory-"))
+    {
+        return true;
+    }
+    options
+        .to_url_lossy()
+        .query_pairs()
+        .any(|(key, value)| key == "mode" && value == "memory")
 }
 
 fn try_lock_sqlite_scheduler_file(path: &Path) -> Result<Option<File>, String> {
@@ -658,10 +634,12 @@ pub async fn reindex_workspace_with_lock(
 #[cfg(test)]
 mod tests {
     use sqlx::Connection;
+    use sqlx::sqlite::SqliteConnectOptions;
     use std::fs::OpenOptions;
     use std::io::BufRead;
     use std::io::Write;
     use std::process::{Command, Stdio};
+    use std::str::FromStr;
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -695,43 +673,38 @@ mod tests {
         let absolute_parent = dir.path().join("absolute");
         std::fs::create_dir(&absolute_parent).unwrap();
         let encoded_database = dir.path().join("encoded name.db");
-        let encoded_uri = format!(
+        let encoded_path_uri = format!(
             "sqlite://{}?mode=rwc",
             encoded_database.to_string_lossy().replace(' ', "%20")
         );
 
-        assert!(sqlite_scheduler_lock_path("sqlite::memory:").is_err());
-        assert!(sqlite_scheduler_lock_path("sqlite://?mode=memory").is_err());
-        assert!(
-            sqlite_scheduler_lock_path(&format!(
-                "sqlite://{}?mode=memory&mode=rw",
-                database.display()
-            ))
-            .is_ok()
-        );
-        assert!(
-            sqlite_scheduler_lock_path(&format!(
-                "sqlite://{}?mode=rw&mode=memory",
-                database.display()
-            ))
-            .is_err()
-        );
-        assert!(
-            match sqlite_scheduler_lock_path("sqlite://db.sqlite?mode=bad&mode=rw") {
-                Ok(_) => true,
-                Err(error) => {
-                    eprintln!("unexpected duplicate mode error: {error}");
-                    false
-                }
-            }
-        );
-        assert!(sqlite_scheduler_lock_path("sqlite://db.sqlite?mode=rw&mode=bad").is_err());
-        assert!(
-            sqlite_scheduler_lock_path(&format!(
-                "sqlite://{}?%6dode=%6demory&%6dode=rw",
-                database.display()
-            ))
-            .is_ok()
+        for uri in [
+            "sqlite::memory:".to_string(),
+            "sqlite://?mode=memory".to_string(),
+            format!("sqlite://{}?mode=memory&mode=rw", database.display()),
+            format!("sqlite://{}?mode=rw&mode=memory", database.display()),
+        ] {
+            let parsed = SqliteConnectOptions::from_str(&uri);
+            assert_eq!(
+                sqlite_scheduler_lock_path(&uri).is_ok(),
+                parsed
+                    .as_ref()
+                    .is_ok_and(|options| !super::sqlite_options_are_in_memory(options))
+            );
+        }
+        for uri in [
+            "sqlite://db.sqlite?mode=bad&mode=rw",
+            "sqlite://db.sqlite?mode=rw&mode=bad",
+        ] {
+            assert!(SqliteConnectOptions::from_str(uri).is_err());
+            assert!(sqlite_scheduler_lock_path(uri).is_err());
+        }
+        let encoded_uri = format!("sqlite://{}?%6dode=%6demory&%6dode=rw", database.display());
+        assert_eq!(
+            sqlite_scheduler_lock_path(&encoded_uri).is_ok(),
+            SqliteConnectOptions::from_str(&encoded_uri)
+                .as_ref()
+                .is_ok_and(|options| !super::sqlite_options_are_in_memory(options))
         );
         assert_eq!(
             sqlite_scheduler_lock_path(&format!(
@@ -754,7 +727,7 @@ mod tests {
             absolute_parent
         );
         assert_eq!(
-            sqlite_scheduler_lock_path(&encoded_uri)
+            sqlite_scheduler_lock_path(&encoded_path_uri)
                 .unwrap()
                 .file_name()
                 .unwrap(),
