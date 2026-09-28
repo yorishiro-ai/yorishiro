@@ -3,7 +3,6 @@ set -euo pipefail
 
 mode=${1:?usage: embedding-cache.sh <prepare|verify>}
 : "${CACHE_DIR:?}"
-: "${CACHE_HIT:?}"
 : "${MODEL_URL:?}"
 : "${TOKENIZER_URL:?}"
 : "${EMBEDDING_MODEL_ID:?}"
@@ -18,6 +17,7 @@ mode=${1:?usage: embedding-cache.sh <prepare|verify>}
 : "${EMBEDDING_TOKENIZER_SHA256:?}"
 : "${EMBEDDING_TOKENIZER_SIZE:?}"
 
+CACHE_HIT=${CACHE_HIT-}
 CACHE_DIR="${CACHE_DIR/#\~/$HOME}"
 
 python3 - <<'PY'
@@ -101,6 +101,10 @@ download() {
 
 case "$mode" in
   verify)
+    if [[ "$CACHE_HIT" != "true" ]]; then
+      echo "ERROR: embedding cache was not restored" >&2
+      exit 1
+    fi
     verify_all || {
       echo "ERROR: embedding cache is absent or invalid" >&2
       exit 1
