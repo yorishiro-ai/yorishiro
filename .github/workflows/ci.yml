@@ -37,6 +37,17 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
+  EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
+  EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
+  EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
+  EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
+  EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
+  EMBEDDING_MODEL_SIZE: "1112201288"
+  EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
+  EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
+  EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
+  EMBEDDING_TOKENIZER_SIZE: "17082660"
 
 jobs:
   check:
@@ -106,7 +117,45 @@ jobs:
         # and missing_panics_doc; new/changed code is expected to add those comments.
         run: cargo clippy --locked --workspace --lib -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
 
+  prepare-embedding:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore multilingual-e5-base cache
+        uses: actions/cache/restore@v4
+        id: embedding-cache
+        with:
+          path: |
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+
+      - name: Reject an uncacheable fork pull request miss
+        if: steps.embedding-cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::The immutable embedding cache is unavailable and fork pull requests cannot save GitHub Actions caches. Re-run after the cache is populated from a trusted branch."
+          exit 1
+
+      - name: Prepare and verify multilingual-e5-base artifacts
+        env:
+          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
+          TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
+        run: bash .github/scripts/embedding-cache.sh prepare
+
+      - name: Save verified multilingual-e5-base cache
+        if: steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+
   test:
+    needs: prepare-embedding
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -144,6 +193,23 @@ jobs:
           # Separate caches for each matrix entry so postgres and sqlite build artifacts don't
           # collide (they compile different feature combinations).
           key: ${{ github.job }}-${{ matrix.backend }}
+
+      - name: Restore multilingual-e5-base cache
+        uses: actions/cache/restore@v4
+        id: embedding-cache
+        with:
+          path: |
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
+            ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
+          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
+
+      - name: Verify populated multilingual-e5-base cache
+        env:
+          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: bash .github/scripts/embedding-cache.sh verify
 
       - name: Build workspace
         run: cargo build --locked --workspace
@@ -226,3 +292,20 @@ jobs:
             echo "ERROR: backend wrapper accepted a SQLite run as PostgreSQL"
             exit 1
           fi
+
+      - name: Verify embedding artifacts before cache save
+        run: |
+          set -euo pipefail
+          cache_dir="$HOME/.cache/yorishiro/models/multilingual-e5-base"
+
+          verify() {
+            local path=$1 expected_size=$2 expected_sha=$3
+            [[ -f "$path" && ! -L "$path" ]] || return 1
+            [[ "$(stat -c '%s' "$path")" == "$expected_size" ]] || return 1
+            [[ "$(sha256sum "$path" | cut -d' ' -f1)" == "$expected_sha" ]]
+          }
+
+          verify "$cache_dir/model.safetensors" \
+            "$EMBEDDING_MODEL_SIZE" "$EMBEDDING_MODEL_SHA256"
+          verify "$cache_dir/tokenizer.json" \
+            "$EMBEDDING_TOKENIZER_SIZE" "$EMBEDDING_TOKENIZER_SHA256"
