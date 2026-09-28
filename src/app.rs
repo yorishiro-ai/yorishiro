@@ -15,11 +15,75 @@ use loco_rs::{
 };
 use migration::Migrator;
 use std::path::Path;
+use std::sync::Arc;
 
 pub use startup::StartupReindexHandle;
 
 use crate::controllers;
 use crate::controllers::route_inventory::{Edition, RouteClass, RouteInventory};
+use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
+
+/// The single production adapter at Loco's worker integration point.
+pub(crate) struct LocoJobDispatcher;
+
+#[async_trait]
+impl EmbeddingSyncDispatcher for LocoJobDispatcher {
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: crate::workers::embedding_sync::EmbeddingSyncArgs,
+    ) -> loco_rs::Result<String> {
+        use crate::workers::embedding_sync::{
+            EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
+            EmbeddingSyncWorkerTenantPrivate, WorkerClass,
+        };
+        use loco_rs::bgworker::BackgroundWorker;
+
+        match args.worker_class {
+            WorkerClass::TenantPrivate => {
+                EmbeddingSyncWorkerTenantPrivate::perform_later(ctx, args).await
+            }
+            WorkerClass::Official => EmbeddingSyncWorkerOfficial::perform_later(ctx, args).await,
+            WorkerClass::Shared => EmbeddingSyncWorkerShared::perform_later(ctx, args).await,
+        }
+    }
+}
+
+#[async_trait]
+impl ReindexDispatcher for LocoJobDispatcher {
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: crate::workers::reindex::ReindexArgs,
+    ) -> loco_rs::Result<String> {
+        use crate::workers::embedding_sync::WorkerClass;
+        use crate::workers::reindex::{
+            ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
+        };
+        use loco_rs::bgworker::BackgroundWorker;
+
+        match args.worker_class {
+            WorkerClass::TenantPrivate => {
+                ReindexWorkerTenantPrivate::perform_later(ctx, args).await
+            }
+            WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args).await,
+            WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args).await,
+        }
+    }
+}
+
+#[async_trait]
+impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
+    async fn dispatch(
+        &self,
+        ctx: &AppContext,
+        args: crate::ee::workers::infer_fill::InferFillArgs,
+    ) -> loco_rs::Result<String> {
+        use loco_rs::bgworker::BackgroundWorker;
+
+        crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await
+    }
+}
 
 /// Refuses a request when no active licence is held, for the routes this is applied to.
 ///
@@ -115,6 +179,12 @@ impl Hooks for App {
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         let ctx = context::build(ctx).await?;
+        ctx.shared_store
+            .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);
+        ctx.shared_store
+            .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
+        ctx.shared_store.insert(Arc::new(LocoJobDispatcher)
+            as Arc<dyn crate::ee::workers::infer_fill::InferFillDispatcher>);
         crate::ee::services::boot::compose_context(&ctx);
         Ok(ctx)
     }

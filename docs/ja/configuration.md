@@ -69,6 +69,18 @@ cargo loco task reindex_embeddings workspace_id:<uuid>
 
 API からもリインデックスを登録できます：`POST /api/migration-jobs/reindex`（Migration スコープが必要）。起動時にワークスペースのモデル変更を自動検知し、リインデックスも走ります。
 
+### ディスパッチ境界の監査
+
+埋め込み同期とリインデックスの enqueue 経路には、Loco の `BackgroundWorker` 拡張点を本番実装として残したまま、キュー障害を決定的にテストするための小さなアプリケーション内ディスパッチ境界があります。
+本番アダプターは既存の Loco ワーカー統合点に 1 つだけ置いているため、ワーカー登録、タグ、キューモード、payload、実行処理は変わりません。
+REST と MCP のエンティティ書き込みは埋め込み同期の dispatch 前に commit し、リインデックス API も監査行を commit してから dispatch します。
+リインデックスの監査 detail は、観測可能な契約変更として意図的に `{ "job_id": ... }` から `{ "workspace_id": ... }` へ変更しました。
+キューの `job_id` は dispatch 中に割り当てられるため、この変更により append-only の監査ログと dispatch 前の commit 順序を維持します。
+リインデックス API のレスポンスは、ポーリングや運用上の追跡に使うキューの `job_id` を引き続き返します。
+スケジューラー、起動時リインデックス検出、ワークスペース埋め込みキー更新は、すでに同じリインデックス enqueue ヘルパーへ委譲するため、別の境界を追加していません。
+ワーカー登録、ワーカー実行、キューのルーティング probe は Loco 固有の処理です。ここを置き換えるとアプリケーションの dispatch 方針ではなく、フレームワークの動作をテストまたは置換するため、対象外としました。
+Enterprise の infer-fill も同じく狭い境界を使い、dispatch 前に永続ジョブ行を作成し、dispatch 失敗時は failed に更新します。
+
 ## Stripe webhook
 
 `YORISHIRO_STRIPE_WEBHOOK_SECRET` を設定すると、Stripe webhook の受信処理が有効になります。

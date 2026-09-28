@@ -208,16 +208,7 @@ pub async fn reindex_workspace(
         }));
     }
 
-    let job_id = reindex::enqueue_reindex(&ctx, workspace_id)
-        .await
-        .map_err(|e| {
-            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
-                e.to_string()
-            )))
-        })?;
-
-    // Recorded on the same RLS-scoped transaction as the request itself: this is a
-    // migration-scope operation that the audit log must capture.
+    // Record the operation before committing the request transaction.
     api_key_audit_log::record(
         authorized.txn(),
         api_key_audit_log::AuditActor {
@@ -227,10 +218,19 @@ pub async fn reindex_workspace(
             user_id: authorized.ctx.user_id,
         },
         api_key_audit_log::AuditAction::ReindexEmbeddings,
-        serde_json::json!({ "job_id": job_id }),
+        serde_json::json!({ "workspace_id": workspace_id }),
     )
     .await?;
     authorized.commit().await?;
+
+    // The audit row is durable before the queue boundary is crossed.
+    let job_id = reindex::enqueue_reindex(&ctx, workspace_id)
+        .await
+        .map_err(|e| {
+            ApiError(crate::error::YorishiroError::Internal(anyhow::anyhow!(
+                e.to_string()
+            )))
+        })?;
 
     Ok(Json(ReindexResponse { job_id }))
 }

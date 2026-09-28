@@ -20,6 +20,7 @@ use loco_rs::prelude::*;
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
+use yorishiro::workers::reindex::{self, ReindexArgs};
 
 use crate::requests::close_app_pools;
 
@@ -179,6 +180,58 @@ async fn each_worker_class_carries_its_own_tag() {
                 ),
                 (
                     "EmbeddingSyncWorkerTenantPrivate".to_string(),
+                    vec!["worker-class:tenant-private".to_string()]
+                ),
+            ]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn each_reindex_worker_class_carries_its_own_tag() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_sqlite_queue(|ctx, pool| async move {
+        for class in [
+            WorkerClass::Shared,
+            WorkerClass::Official,
+            WorkerClass::TenantPrivate,
+        ] {
+            reindex::enqueue_for_class(
+                &ctx,
+                ReindexArgs {
+                    workspace_id: Uuid::now_v7(),
+                    worker_class: class,
+                },
+            )
+            .await
+            .expect("enqueue");
+        }
+
+        let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
+        assert_eq!(jobs.len(), 3, "jobs: {jobs:?}");
+
+        let mut seen: Vec<(String, Vec<String>)> = jobs
+            .iter()
+            .map(|job| (job.name.clone(), job.tags.clone().unwrap_or_default()))
+            .collect();
+        seen.sort();
+
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    "ReindexWorkerOfficial".to_string(),
+                    vec!["worker-class:official".to_string()]
+                ),
+                (
+                    "ReindexWorkerShared".to_string(),
+                    vec!["worker-class:shared".to_string()]
+                ),
+                (
+                    "ReindexWorkerTenantPrivate".to_string(),
                     vec!["worker-class:tenant-private".to_string()]
                 ),
             ]
