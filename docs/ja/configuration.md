@@ -69,6 +69,13 @@ cargo loco task reindex_embeddings workspace_id:<uuid>
 
 API からもリインデックスを登録できます：`POST /api/migration-jobs/reindex`（Migration スコープが必要）。起動時にワークスペースのモデル変更を自動検知し、リインデックスも走ります。
 
+## Stripe webhook
+
+`YORISHIRO_STRIPE_WEBHOOK_SECRET` を設定すると、Stripe webhook の受信処理が有効になります。
+エンドポイントは、JSON を解析する前に、受信した生バイト列が `Stripe-Signature` の HMAC 検証と 300 秒の timestamp 許容範囲を通過したイベントだけを受け付けます。
+解析済みイベントは非公開の型付き境界を通って billing 処理へ渡されるため、ビジネスロジックが未検証の payload を受け取ることはありません。
+Loco の拡張点はアプリケーションの route や state を構成するためのものであり、プロバイダ固有の受信暗号検証を担当しないため、この境界は Stripe controller の内側に置いています。
+
 ## 検索クォータ
 
 | 変数 | 説明 |

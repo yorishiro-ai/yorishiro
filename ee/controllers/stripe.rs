@@ -1,9 +1,5 @@
 //! The single public HTTP entry point for Stripe webhooks.
 
-use crate::db;
-use crate::error::ResultExt;
-use crate::error::YorishiroError;
-use crate::models::tenancy;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -13,11 +9,297 @@ use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::Deserialize;
 
+use crate::db;
 use crate::ee::models::{billing, stripe_events};
+use crate::ee::services::non_empty_env;
 use crate::ee::services::plan::{Plan, StripePriceMapping};
-use crate::ee::services::{hmac_sign, non_empty_env};
+use crate::error::ResultExt;
+use crate::error::YorishiroError;
+use crate::models::tenancy;
+
+mod inbound {
+    use super::SIGNATURE_TOLERANCE_SECS;
+    use axum::http::HeaderMap;
+    use chrono::Utc;
+    use serde::Deserialize;
+
+    use crate::ee::services::hmac_sign;
+
+    #[derive(Debug)]
+    pub(super) enum Error {
+        MissingSignatureHeader,
+        Signature(&'static str),
+        InvalidJson(serde_json::Error),
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub(super) struct VerifiedStripeEvent {
+        pub(super) id: String,
+        #[serde(rename = "type")]
+        pub(super) event_type: String,
+        /// Unix timestamp of when Stripe created this event.
+        pub(super) created: i64,
+        pub(super) data: StripeEventData,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub(super) struct StripeEventData {
+        pub(super) object: serde_json::Value,
+    }
+
+    pub(super) fn verify(
+        headers: &HeaderMap,
+        payload: &[u8],
+        secret: &str,
+    ) -> Result<VerifiedStripeEvent, Error> {
+        verify_at(headers, payload, secret, Utc::now().timestamp())
+    }
+
+    fn verify_at(
+        headers: &HeaderMap,
+        payload: &[u8],
+        secret: &str,
+        now: i64,
+    ) -> Result<VerifiedStripeEvent, Error> {
+        let mut signature_headers = headers.get_all("stripe-signature").iter();
+        let Some(signature_value) = signature_headers.next() else {
+            return Err(Error::MissingSignatureHeader);
+        };
+        if signature_headers.next().is_some() {
+            return Err(Error::Signature("invalid Stripe-Signature header"));
+        }
+        let Ok(signature_header) = signature_value.to_str() else {
+            return Err(Error::MissingSignatureHeader);
+        };
+
+        verify_signature(payload, signature_header, secret, now).map_err(Error::Signature)?;
+        serde_json::from_slice(payload).map_err(Error::InvalidJson)
+    }
+
+    fn verify_signature(
+        payload: &[u8],
+        signature_header: &str,
+        secret: &str,
+        now: i64,
+    ) -> Result<(), &'static str> {
+        let mut timestamp: Option<i64> = None;
+        let mut candidates = Vec::new();
+        for part in signature_header.split(',') {
+            let mut kv = part.split('=');
+            let (Some(key), Some(value), None) = (kv.next(), kv.next(), kv.next()) else {
+                return Err("invalid Stripe-Signature header");
+            };
+            if !valid_key(key)
+                || value.is_empty()
+                || value
+                    .bytes()
+                    .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+            {
+                return Err("invalid Stripe-Signature header");
+            }
+            match key {
+                "t" if timestamp.is_some() => {
+                    return Err("invalid Stripe-Signature header");
+                }
+                "t" => timestamp = value.parse().ok(),
+                "v1" => candidates.push(value),
+                _ => {}
+            }
+        }
+        let timestamp = timestamp.ok_or("missing timestamp in Stripe-Signature header")?;
+        if now.abs_diff(timestamp) > SIGNATURE_TOLERANCE_SECS as u64 {
+            return Err("Stripe-Signature timestamp is outside the allowed tolerance");
+        }
+        if candidates.is_empty() {
+            return Err("missing v1 signature in Stripe-Signature header");
+        }
+
+        let mut signed_payload = format!("{timestamp}.").into_bytes();
+        signed_payload.extend_from_slice(payload);
+
+        if candidates
+            .iter()
+            .any(|candidate| hmac_sign::verify(secret.as_bytes(), &signed_payload, candidate))
+        {
+            Ok(())
+        } else {
+            Err("no v1 signature matched the computed HMAC")
+        }
+    }
+
+    fn valid_key(key: &str) -> bool {
+        !key.is_empty()
+            && key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use axum::http::{HeaderMap, HeaderValue};
+
+        const SECRET: &str = "whsec_test";
+        const NOW: i64 = 1_700_000_000;
+
+        fn headers(timestamp: i64, signatures: &[&str]) -> HeaderMap {
+            let value = std::iter::once(format!("t={timestamp}"))
+                .chain(signatures.iter().map(|signature| format!("v1={signature}")))
+                .collect::<Vec<_>>()
+                .join(",");
+            header(&value)
+        }
+
+        fn header(value: &str) -> HeaderMap {
+            let mut headers = HeaderMap::new();
+            headers.insert("stripe-signature", HeaderValue::from_str(value).unwrap());
+            headers
+        }
+
+        fn signed_header(timestamp: i64, payload: &[u8]) -> String {
+            let mut signed_payload = format!("{timestamp}.").into_bytes();
+            signed_payload.extend_from_slice(payload);
+            hmac_sign::sign(SECRET.as_bytes(), &signed_payload)
+        }
+
+        fn event() -> Vec<u8> {
+            br#"{"id":"evt_1","type":"test.event","created":1700000000,"data":{"object":{}}}"#
+                .to_vec()
+        }
+
+        #[test]
+        fn rejects_missing_and_malformed_headers() {
+            let payload = event();
+            let missing = verify_at(&HeaderMap::new(), &payload, SECRET, NOW).unwrap_err();
+            assert!(matches!(missing, Error::MissingSignatureHeader));
+
+            let mut malformed = HeaderMap::new();
+            malformed.insert("stripe-signature", HeaderValue::from_static("v1=abc"));
+            let error = verify_at(&malformed, &payload, SECRET, NOW).unwrap_err();
+            assert!(matches!(
+                error,
+                Error::Signature("missing timestamp in Stripe-Signature header")
+            ));
+        }
+
+        #[test]
+        fn rejects_duplicate_physical_headers_duplicate_t_and_malformed_segments() {
+            let payload = event();
+            let signature = signed_header(NOW, &payload);
+
+            let mut duplicate_headers = headers(NOW, &[&signature]);
+            duplicate_headers.append(
+                "stripe-signature",
+                HeaderValue::from_str(&format!("t={NOW},v1={signature}")).unwrap(),
+            );
+            assert!(matches!(
+                verify_at(&duplicate_headers, &payload, SECRET, NOW),
+                Err(Error::Signature("invalid Stripe-Signature header"))
+            ));
+
+            assert!(matches!(
+                verify_at(
+                    &header(&format!("t={NOW},t={NOW},v1={signature}")),
+                    &payload,
+                    SECRET,
+                    NOW
+                ),
+                Err(Error::Signature("invalid Stripe-Signature header"))
+            ));
+
+            for suffix in [",", ",,foo=bar", ",foo", ",foo=bar=baz", ",=bar", ",foo="] {
+                assert!(matches!(
+                    verify_at(
+                        &header(&format!("t={NOW},v1={signature}{suffix}")),
+                        &payload,
+                        SECRET,
+                        NOW
+                    ),
+                    Err(Error::Signature("invalid Stripe-Signature header"))
+                ));
+            }
+        }
+
+        #[test]
+        fn rejects_invalid_utf8_and_extreme_timestamps_without_overflow() {
+            let payload = event();
+            let mut invalid_utf8 = HeaderMap::new();
+            invalid_utf8.insert(
+                "stripe-signature",
+                HeaderValue::from_bytes(&[0xff]).unwrap(),
+            );
+            assert!(matches!(
+                verify_at(&invalid_utf8, &payload, SECRET, NOW),
+                Err(Error::MissingSignatureHeader)
+            ));
+
+            for timestamp in [i64::MIN, i64::MAX] {
+                let signature = signed_header(timestamp, &payload);
+                assert!(matches!(
+                    verify_at(&headers(timestamp, &[&signature]), &payload, SECRET, NOW),
+                    Err(Error::Signature(
+                        "Stripe-Signature timestamp is outside the allowed tolerance"
+                    ))
+                ));
+            }
+        }
+
+        #[test]
+        fn rejects_invalid_signatures_and_accepts_one_of_multiple_signatures() {
+            let payload = event();
+            let valid = signed_header(NOW, &payload);
+            let invalid = headers(NOW, &["not-hex"]);
+            assert!(matches!(
+                verify_at(&invalid, &payload, SECRET, NOW),
+                Err(Error::Signature(
+                    "no v1 signature matched the computed HMAC"
+                ))
+            ));
+
+            let multiple = headers(NOW, &["not-hex", &valid]);
+            assert!(verify_at(&multiple, &payload, SECRET, NOW).is_ok());
+
+            let non_v1 = header(&format!("t={NOW},v0=legacy,v1={valid}"));
+            assert!(verify_at(&non_v1, &payload, SECRET, NOW).is_ok());
+        }
+
+        #[test]
+        fn accepts_tolerance_boundaries_and_rejects_outside_them() {
+            let payload = event();
+            for timestamp in [
+                NOW - SIGNATURE_TOLERANCE_SECS,
+                NOW + SIGNATURE_TOLERANCE_SECS,
+            ] {
+                let signature = signed_header(timestamp, &payload);
+                assert!(
+                    verify_at(&headers(timestamp, &[&signature]), &payload, SECRET, NOW).is_ok()
+                );
+            }
+
+            for timestamp in [
+                NOW - SIGNATURE_TOLERANCE_SECS - 1,
+                NOW + SIGNATURE_TOLERANCE_SECS + 1,
+            ] {
+                let signature = signed_header(timestamp, &payload);
+                assert!(matches!(
+                    verify_at(&headers(timestamp, &[&signature]), &payload, SECRET, NOW),
+                    Err(Error::Signature(
+                        "Stripe-Signature timestamp is outside the allowed tolerance"
+                    ))
+                ));
+            }
+        }
+
+        #[test]
+        fn parses_only_after_signature_verification() {
+            let payload = br#"not json"#;
+            let signature = signed_header(NOW, payload);
+            let error = verify_at(&headers(NOW, &[&signature]), payload, SECRET, NOW).unwrap_err();
+            assert!(matches!(error, Error::InvalidJson(_)));
+        }
+    }
+}
 
 /// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible replay.
 /// Stripe's own guidance uses 5 minutes.
@@ -40,58 +322,6 @@ impl StripeConfig {
     }
 }
 
-/// Parses Stripe's `Stripe-Signature` header (`t=<unix ts>,v1=<hex hmac>[,v1=<hex hmac>...]`), checks the timestamp is within tolerance, and verifies at least one `v1` candidate matches the HMAC-SHA256 of `"{timestamp}.{body}"` computed with the webhook secret.
-/// Both checks are required: the timestamp check alone doesn't authenticate anything, and the signature check alone doesn't prevent a captured request from being replayed indefinitely.
-fn verify_stripe_signature(
-    payload: &[u8],
-    signature_header: &str,
-    secret: &str,
-) -> Result<(), &'static str> {
-    let mut timestamp: Option<i64> = None;
-    let mut candidates = Vec::new();
-    for part in signature_header.split(',') {
-        let mut kv = part.splitn(2, '=');
-        match (kv.next(), kv.next()) {
-            (Some("t"), Some(v)) => timestamp = v.parse().ok(),
-            (Some("v1"), Some(v)) => candidates.push(v),
-            _ => {}
-        }
-    }
-    let timestamp = timestamp.ok_or("missing timestamp in Stripe-Signature header")?;
-    if (Utc::now().timestamp() - timestamp).abs() > SIGNATURE_TOLERANCE_SECS {
-        return Err("Stripe-Signature timestamp is outside the allowed tolerance");
-    }
-    if candidates.is_empty() {
-        return Err("missing v1 signature in Stripe-Signature header");
-    }
-
-    let mut signed_payload = format!("{timestamp}.").into_bytes();
-    signed_payload.extend_from_slice(payload);
-
-    if candidates
-        .iter()
-        .any(|candidate| hmac_sign::verify(secret.as_bytes(), &signed_payload, candidate))
-    {
-        return Ok(());
-    }
-    Err("no v1 signature matched the computed HMAC")
-}
-
-#[derive(Deserialize)]
-struct StripeEvent {
-    id: String,
-    #[serde(rename = "type")]
-    event_type: String,
-    /// Unix timestamp of when Stripe created this event: used to detect a delayed/retried delivery that arrives after a newer event for the same customer has already landed.
-    created: i64,
-    data: StripeEventData,
-}
-
-#[derive(Deserialize)]
-struct StripeEventData {
-    object: serde_json::Value,
-}
-
 /// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
 /// Returns `impl IntoResponse` with raw status codes rather than going through `ApiError`: Stripe expects plain-text error bodies from webhooks, not the JSON `{"error": {...}}` envelope the rest of this API uses.
@@ -111,24 +341,19 @@ async fn stripe_webhook(
             .into_response();
     };
 
-    let Some(signature_header) = headers
-        .get("stripe-signature")
-        .and_then(|v| v.to_str().ok())
-    else {
-        return (StatusCode::BAD_REQUEST, "missing Stripe-Signature header").into_response();
-    };
-
-    if let Err(reason) = verify_stripe_signature(&body, signature_header, secret) {
-        tracing::warn!(
-            reason,
-            "rejected Stripe webhook: signature verification failed"
-        );
-        return (StatusCode::BAD_REQUEST, reason).into_response();
-    }
-
-    let event: StripeEvent = match serde_json::from_slice(&body) {
+    let event = match inbound::verify(&headers, &body, secret) {
         Ok(event) => event,
-        Err(err) => {
+        Err(inbound::Error::MissingSignatureHeader) => {
+            return (StatusCode::BAD_REQUEST, "missing Stripe-Signature header").into_response();
+        }
+        Err(inbound::Error::Signature(reason)) => {
+            tracing::warn!(
+                reason,
+                "rejected Stripe webhook: signature verification failed"
+            );
+            return (StatusCode::BAD_REQUEST, reason).into_response();
+        }
+        Err(inbound::Error::InvalidJson(err)) => {
             tracing::warn!(error = %err, "rejected Stripe webhook: invalid JSON body");
             return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response();
         }
@@ -172,7 +397,7 @@ async fn resolve_tenant_by_customer(
 async fn apply_stripe_event(
     ctx: &AppContext,
     config: &StripeConfig,
-    event: StripeEvent,
+    event: inbound::VerifiedStripeEvent,
 ) -> Result<(), YorishiroError> {
     let txn = ctx.db.begin().await.internal()?;
 

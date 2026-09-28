@@ -1,5 +1,5 @@
 use super::boot_request;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::ActiveValue;
@@ -93,6 +93,22 @@ fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) ->
         "type": "customer.subscription.deleted",
         "created": created,
         "data": { "object": { "customer": customer_id } }
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn checkout_completed_body(event_id: &str, created: i64, tenant_id: Uuid) -> Vec<u8> {
+    json!({
+        "id": event_id,
+        "type": "checkout.session.completed",
+        "created": created,
+        "data": {
+            "object": {
+                "client_reference_id": tenant_id,
+                "customer": "cus_checkout"
+            }
+        }
     })
     .to_string()
     .into_bytes()
@@ -284,6 +300,189 @@ async fn a_tampered_payload_is_rejected() {
                 400,
                 "response: {:?}",
                 response.text()
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Structural signature failures keep the webhook's plain-text 400 contract.
+#[tokio::test]
+#[serial(process_environment)]
+async fn malformed_signature_headers_have_exact_plain_text_rejections() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_stripe_env(async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
+            let body = subscription_updated_body("evt_header", 1_000, "cus_header");
+            let now = Utc::now().timestamp();
+            let signature = sign(WEBHOOK_SECRET, now, &body);
+
+            let missing = request
+                .post("/api/stripe/webhook")
+                .bytes(body.clone().into())
+                .await;
+            assert_eq!(missing.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(missing.text(), "missing Stripe-Signature header");
+
+            let invalid = request
+                .post("/api/stripe/webhook")
+                .add_header("stripe-signature", format!("t={now},v1=wrong"))
+                .bytes(body.clone().into())
+                .await;
+            assert_eq!(invalid.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(invalid.text(), "no v1 signature matched the computed HMAC");
+
+            let malformed = request
+                .post("/api/stripe/webhook")
+                .add_header(
+                    "stripe-signature",
+                    format!("t={now},v1={signature},malformed"),
+                )
+                .bytes(body.clone().into())
+                .await;
+            assert_eq!(malformed.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(malformed.text(), "invalid Stripe-Signature header");
+
+            let mut invalid_utf8 = HeaderValue::from_bytes(&[0xff]).unwrap();
+            invalid_utf8.set_sensitive(true);
+            let invalid_utf8_response = request
+                .post("/api/stripe/webhook")
+                .add_header("stripe-signature", invalid_utf8)
+                .bytes(body.into())
+                .await;
+            assert_eq!(invalid_utf8_response.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                invalid_utf8_response.text(),
+                "missing Stripe-Signature header"
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// A valid signature is checked before malformed JSON is reported.
+#[tokio::test]
+#[serial(process_environment)]
+async fn malformed_json_is_rejected_after_signature_verification() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_stripe_env(async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
+            let body = b"not json".to_vec();
+            let now = Utc::now().timestamp();
+            let valid_signature = sign(WEBHOOK_SECRET, now, &body);
+
+            let valid = request
+                .post("/api/stripe/webhook")
+                .add_header("stripe-signature", format!("t={now},v1={valid_signature}"))
+                .bytes(body.clone().into())
+                .await;
+            assert_eq!(valid.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(valid.text(), "invalid JSON body");
+
+            let invalid_signature = request
+                .post("/api/stripe/webhook")
+                .add_header("stripe-signature", format!("t={now},v1=wrong"))
+                .bytes(body.into())
+                .await;
+            assert_eq!(invalid_signature.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                invalid_signature.text(),
+                "no v1 signature matched the computed HMAC"
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// A delayed subscription event is accepted but cannot undo a newer applied event.
+#[tokio::test]
+#[serial(process_environment)]
+async fn a_stale_subscription_event_is_not_reapplied() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_stripe_env(async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
+            let tenant_id = create_tenant(&ctx.db, "stale").await;
+            billing::link_stripe_customer(&ctx.db, tenant_id, "cus_stale")
+                .await
+                .unwrap();
+
+            let newer_body = subscription_updated_body("evt_newer", 2_000, "cus_stale");
+            let now = Utc::now().timestamp();
+            let newer = request
+                .post("/api/stripe/webhook")
+                .add_header(
+                    "stripe-signature",
+                    format!("t={now},v1={}", sign(WEBHOOK_SECRET, now, &newer_body)),
+                )
+                .bytes(newer_body.into())
+                .await;
+            assert_eq!(newer.status_code(), StatusCode::OK);
+
+            let stale_body = subscription_deleted_body("evt_stale", 1_000, "cus_stale");
+            let stale = request
+                .post("/api/stripe/webhook")
+                .add_header(
+                    "stripe-signature",
+                    format!("t={now},v1={}", sign(WEBHOOK_SECRET, now, &stale_body)),
+                )
+                .bytes(stale_body.into())
+                .await;
+            assert_eq!(stale.status_code(), StatusCode::OK);
+            assert_eq!(stale.text(), "");
+            assert_eq!(
+                billing::get_billing(&ctx.db, tenant_id)
+                    .await
+                    .unwrap()
+                    .and_then(|record| record.plan),
+                Some("pro".into())
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Checkout completion links the Stripe customer so a later subscription event can resolve its tenant.
+#[tokio::test]
+#[serial(process_environment)]
+async fn checkout_completion_links_the_stripe_customer() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_stripe_env(async {
+        boot_request::<App, _, _>(|request, ctx| async move {
+            licence(&ctx);
+            let tenant_id = create_tenant(&ctx.db, "checkout").await;
+            let body = checkout_completed_body("evt_checkout", 1_000, tenant_id);
+            let now = Utc::now().timestamp();
+            let response = request
+                .post("/api/stripe/webhook")
+                .add_header(
+                    "stripe-signature",
+                    format!("t={now},v1={}", sign(WEBHOOK_SECRET, now, &body)),
+                )
+                .bytes(body.into())
+                .await;
+            assert_eq!(response.status_code(), StatusCode::OK);
+            assert_eq!(response.text(), "");
+            assert_eq!(
+                billing::get_billing(&ctx.db, tenant_id)
+                    .await
+                    .unwrap()
+                    .and_then(|record| record.stripe_customer_id),
+                Some("cus_checkout".into())
             );
         })
         .await;

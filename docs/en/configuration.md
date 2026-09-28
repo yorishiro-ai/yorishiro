@@ -67,6 +67,13 @@ This re-embeds every entity in the workspace with the new model. Until it finish
 
 You can also queue a reindex via the API: `POST /api/migration-jobs/reindex` (requires Migration scope). A reindex also runs automatically on startup if any workspace's model has changed.
 
+## Stripe webhooks
+
+Set `YORISHIRO_STRIPE_WEBHOOK_SECRET` to enable inbound Stripe webhook processing.
+The endpoint accepts only events whose raw request bytes pass Stripe's `Stripe-Signature` HMAC check and 300-second timestamp tolerance before JSON parsing.
+The parsed event then crosses a private typed boundary into billing processing, so business logic never receives an unverified payload.
+Loco extension points compose application routes and state, but they do not own provider-specific inbound cryptographic verification, so this boundary remains local to the Stripe controller.
+
 ## Search token quota
 
 | Variable | Description |
