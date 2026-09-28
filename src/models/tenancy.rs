@@ -408,118 +408,28 @@ async fn redeem_invite_at(
     }))
 }
 
-#[cfg(test)]
-mod tests {
-    use migration::{Migrator, MigratorTrait};
-    use sea_orm::{ActiveModelTrait, Database, TransactionTrait};
-
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support {
     use super::*;
 
-    async fn test_db() -> sea_orm::DatabaseConnection {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".into());
-        let db = Database::connect(url).await.unwrap();
-        Migrator::up(&db, None).await.unwrap();
-        db
+    pub async fn create_invite_at(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        email: &str,
+        role: MembershipRole,
+        ttl: Duration,
+        now: DateTime<Utc>,
+    ) -> Result<(workspace_invites::Model, String), YorishiroError> {
+        super::create_invite_at(conn, tenant_id, email, role, ttl, now).await
     }
 
-    #[tokio::test]
-    #[serial_test::serial(invite_model_tests)]
-    async fn invite_expiry_boundaries_match_database_gt_on_both_backends() {
-        let db = test_db().await;
-        let txn = db.begin().await.unwrap();
-        let tenant = tenant_tenants::ActiveModel {
-            name: ActiveValue::Set(format!("invite-boundary-{}", Uuid::new_v4())),
-            ..Default::default()
-        }
-        .insert(&txn)
-        .await
-        .unwrap();
-        let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let (at_expiry, token) = create_invite_at(
-            &txn,
-            tenant.id,
-            "at-expiry@example.com",
-            MembershipRole::Member,
-            Duration::microseconds(1),
-            now - Duration::microseconds(1),
-        )
-        .await
-        .unwrap();
-        assert_eq!(DateTime::<Utc>::from(at_expiry.expires_at), now);
-        assert!(redeem_invite_at(&txn, &token, now).await.unwrap().is_none());
-
-        let (just_before, token) = create_invite_at(
-            &txn,
-            tenant.id,
-            "before-expiry@example.com",
-            MembershipRole::Member,
-            Duration::microseconds(2),
-            now - Duration::microseconds(1),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            DateTime::<Utc>::from(just_before.expires_at),
-            now + Duration::microseconds(1)
-        );
-        assert!(redeem_invite_at(&txn, &token, now).await.unwrap().is_some());
-
-        let (just_after, token) = create_invite_at(
-            &txn,
-            tenant.id,
-            "after-expiry@example.com",
-            MembershipRole::Member,
-            Duration::microseconds(1),
-            now,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            DateTime::<Utc>::from(just_after.expires_at),
-            now + Duration::microseconds(1)
-        );
-        assert!(
-            redeem_invite_at(&txn, &token, now + Duration::microseconds(2))
-                .await
-                .unwrap()
-                .is_none()
-        );
-
-        txn.rollback().await.unwrap();
-    }
-
-    #[tokio::test]
-    #[serial_test::serial(invite_model_tests)]
-    async fn invite_issuance_uses_the_injected_timestamp_and_ttl() {
-        let db = test_db().await;
-        let txn = db.begin().await.unwrap();
-        let tenant = tenant_tenants::ActiveModel {
-            name: ActiveValue::Set(format!("invite-issuance-{}", Uuid::new_v4())),
-            ..Default::default()
-        }
-        .insert(&txn)
-        .await
-        .unwrap();
-        let now = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let ttl = Duration::hours(72);
-        let (invite, _) = create_invite_at(
-            &txn,
-            tenant.id,
-            "issuance@example.com",
-            MembershipRole::Member,
-            ttl,
-            now,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(DateTime::<Utc>::from(invite.expires_at), now + ttl);
-        txn.rollback().await.unwrap();
+    pub async fn redeem_invite_at(
+        conn: &impl ConnectionTrait,
+        raw_token: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<RedeemedInvite>, YorishiroError> {
+        super::redeem_invite_at(conn, raw_token, now).await
     }
 }
 
