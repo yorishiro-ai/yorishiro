@@ -38,3 +38,6 @@ The root marker files preserve the old `crate::models::<module>` paths for exist
 Intentionally rooted model modules are `pagination.rs` and the compatibility marker files in `src/models/`.
 `_entities/` is intentionally rooted and generated, not a feature-area model implementation.
 The nested `src/models/content/entity_entities/` directory is an implementation detail of the content model and still represents one table model.
+
+Tenancy is the one identity-area use-case model that spans several tables.
+Its compatibility module remains at `src/models/identity/tenancy.rs`, while private modules under `src/models/identity/tenancy/` separate tenant limits, users, memberships, invites, workspaces, and explicit cross-table orchestration.

@@ -39,3 +39,6 @@ CI は 10 個以上のエンティティファイルが生成されることと�
 意図的にルートへ残すモデルモジュールは `pagination.rs` と `src/models/` の互換マーカーファイルです。
 `_entities/` も意図的にルートへ残しますが、これは生成コードであり機能領域の手書き実装ではありません。
 `src/models/content/entity_entities/` は Content モデルの実装詳細であり、1 テーブル 1 モデルという単位は維持しています。
+
+Tenancy は複数のテーブルにまたがる Identity 領域のユースケースモデルです。
+互換モジュールは `src/models/identity/tenancy.rs` に残し、`src/models/identity/tenancy/` 以下の非公開モジュールでテナント制限、ユーザー、メンバーシップ、招待、ワークスペース、明示的な横断オーケストレーションを分離しています。

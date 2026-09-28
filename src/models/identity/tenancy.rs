@@ -1,101 +1,37 @@
-//! Control-plane CRUD for users, invites, and tenant memberships: signup, login, and the `admin create-invite` chain.
+//! Control-plane tenancy operations for signup, login, invites, memberships, and workspaces.
 //!
-//! Everything here runs on `ctx.db` (Loco's own migration-role connection), never the RLS-scoped tenant pool: no workspace exists yet for RLS to scope by, the same reasoning `TenantDb::connect`'s doc comment gives for the identity pool.
+//! These operations use Loco's control-plane connection rather than the RLS-scoped tenant pool because a new tenant has no workspace context yet.
+//! This module keeps the historical `crate::models::tenancy` API stable while its implementations live in private modules.
 
 use chrono::{DateTime, Duration, Utc};
-use loco_rs::hash;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, SqlErr,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::YorishiroError;
 use crate::models::_entities::{
-    tenant_memberships, tenant_tenants, user_users, workspace_invites, workspace_workspaces,
+    tenant_tenants, user_users, workspace_invites, workspace_workspaces,
 };
-use crate::services::auth::{ApiKeyScope, hash_key, random_hex};
+use crate::services::auth::ApiKeyScope;
 
-/// The nil UUID, reserved for infrastructure tenants that own no members and no data of their own (currently `ee/`'s official-templates publisher).
-/// Excluded from every count this module takes against `YORISHIRO_MAX_TENANTS`.
+#[path = "tenancy/invite.rs"]
+mod invite;
+#[path = "tenancy/membership.rs"]
+mod membership;
+#[path = "tenancy/orchestration.rs"]
+mod orchestration;
+#[path = "tenancy/tenant.rs"]
+mod tenant;
+#[path = "tenancy/users.rs"]
+mod users;
+#[path = "tenancy/workspace.rs"]
+mod workspace;
+
+/// The nil UUID reserved for infrastructure tenants that own no members and no data of their own.
+/// It is excluded from tenant-limit counts.
 pub const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 
-/// Counts real (non-infrastructure) tenants: every row except `INFRASTRUCTURE_TENANT_ID`.
-pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
-    tenant_tenants::Entity::find()
-        .filter(tenant_tenants::Column::Id.ne(INFRASTRUCTURE_TENANT_ID))
-        .count(conn)
-        .await
-        .internal()
-}
-
-/// Creates a tenant, enforcing a tenant cap against `count_tenants`.
-/// On Postgres `conn` must be a transaction: this takes `db::lock_for_update` before counting, to close the TOCTOU gap a bare count-then-insert would leave.
-/// On SQLite the lock is a no-op (see `db::lock_for_update`'s doc comment for why that is still race-safe) and the cap is not `YORISHIRO_MAX_TENANTS` but a hardcoded 1.
-pub async fn create_tenant(
-    conn: &impl ConnectionTrait,
-    name: &str,
-) -> Result<tenant_tenants::Model, YorishiroError> {
-    // SQLite has no database-enforced tenant isolation (no RLS, no roles), so a second tenant on that backend would be a silent isolation break rather than merely an unwanted one.
-    // The cap is hardcoded rather than read from YORISHIRO_MAX_TENANTS: an operator raising that variable must not be able to loosen a constraint that exists because the isolation mechanism itself is absent, not because of a configurable policy choice.
-    let effective_max = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        Some(1)
-    } else {
-        max_tenants_from_env()?
-    };
-
-    if let Some(max) = effective_max {
-        crate::db::lock_for_update(conn, "create_tenant")
-            .await
-            .internal()?;
-        let count = count_tenants(conn).await?;
-        if count >= max as u64 {
-            let remedy = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                "SQLite deployments are limited to a single tenant, since this backend has no \
-                 database-enforced isolation between tenants; use PostgreSQL for more than one"
-                    .to_string()
-            } else {
-                "raise YORISHIRO_MAX_TENANTS or delete an existing tenant".to_string()
-            };
-            return Err(YorishiroError::Conflict {
-                message: format!("this deployment has reached its tenant limit ({max}); {remedy}"),
-            });
-        }
-    }
-
-    let active = tenant_tenants::ActiveModel {
-        name: ActiveValue::Set(name.to_string()),
-        max_workspaces: ActiveValue::Set(None),
-        ..Default::default()
-    };
-    // `id` on SQLite is filled in by tenant_tenants::ActiveModel's before_save (crate::db::sqlite_generated_id), not here.
-    active.insert(conn).await.internal()
-}
-
-/// Reads and parses `YORISHIRO_MAX_TENANTS`.
-/// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and fails loudly rather than silently falling back to unlimited.
-pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
-    match std::env::var("YORISHIRO_MAX_TENANTS") {
-        Ok(raw) => {
-            let parsed = raw.parse::<i32>().map_err(|_| {
-                YorishiroError::Internal(anyhow::anyhow!(
-                    "YORISHIRO_MAX_TENANTS must be an integer, got '{raw}'"
-                ))
-            })?;
-            match parsed {
-                0 => Ok(None),
-                n if n < 0 => Err(YorishiroError::Internal(anyhow::anyhow!(
-                    "YORISHIRO_MAX_TENANTS must not be negative, got '{raw}'"
-                ))),
-                n => Ok(Some(n)),
-            }
-        }
-        Err(_) => Ok(None),
-    }
-}
-
-/// Mirrors the `tenant_memberships.role` check constraint (`owner`/`admin`/`member`/`viewer`).
+/// Mirrors the `tenant_memberships.role` check constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MembershipRole {
@@ -106,232 +42,43 @@ pub enum MembershipRole {
 }
 
 impl MembershipRole {
+    /// Returns the database representation of this role.
     pub fn as_db_str(self) -> &'static str {
         match self {
-            MembershipRole::Owner => "owner",
-            MembershipRole::Admin => "admin",
-            MembershipRole::Member => "member",
-            MembershipRole::Viewer => "viewer",
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Member => "member",
+            Self::Viewer => "viewer",
         }
     }
 
+    /// Parses a database role representation.
     pub fn from_db_str(s: &str) -> Option<Self> {
         match s {
-            "owner" => Some(MembershipRole::Owner),
-            "admin" => Some(MembershipRole::Admin),
-            "member" => Some(MembershipRole::Member),
-            "viewer" => Some(MembershipRole::Viewer),
+            "owner" => Some(Self::Owner),
+            "admin" => Some(Self::Admin),
+            "member" => Some(Self::Member),
+            "viewer" => Some(Self::Viewer),
             _ => None,
         }
     }
 
-    /// The highest API key scope a member with this role may be issued.
+    /// Returns the highest API key scope a member with this role may be issued.
     pub fn max_scope(self) -> ApiKeyScope {
         match self {
-            MembershipRole::Owner | MembershipRole::Admin => ApiKeyScope::Migration,
-            MembershipRole::Member => ApiKeyScope::Write,
-            MembershipRole::Viewer => ApiKeyScope::Read,
+            Self::Owner | Self::Admin => ApiKeyScope::Migration,
+            Self::Member => ApiKeyScope::Write,
+            Self::Viewer => ApiKeyScope::Read,
         }
     }
 
-    /// Whether this role may manage the tenant itself: members, workspaces, and everything `require_tenant_admin` gates.
+    /// Returns whether this role may manage the tenant and its workspaces.
     pub fn administers_tenant(self) -> bool {
-        matches!(self, MembershipRole::Owner | MembershipRole::Admin)
+        matches!(self, Self::Owner | Self::Admin)
     }
 }
 
-/// Creates a human user account.
-/// The password is hashed with `loco_rs::hash` (Argon2id) before ever reaching the database.
-///
-/// Takes `&impl ConnectionTrait` rather than a pool handle so a caller can compose this with `add_member` in one transaction: the two must succeed or fail together, or a failure between them leaves an orphaned user row that can never join a tenant (see `signup`, which wraps both in one transaction).
-pub async fn create_user(
-    conn: &impl ConnectionTrait,
-    email: &str,
-    password: &str,
-    display_name: Option<&str>,
-) -> Result<user_users::Model, YorishiroError> {
-    let password_hash =
-        hash::hash_password(password).map_err(|err| YorishiroError::Internal(err.into()))?;
-
-    let active = user_users::ActiveModel {
-        email: ActiveValue::Set(email.to_string()),
-        password_hash: ActiveValue::Set(Some(password_hash)),
-        display_name: ActiveValue::Set(display_name.map(str::to_string)),
-        ..Default::default()
-    };
-
-    active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!("a user with email '{email}' already exists"),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
-    })
-}
-
-/// Verifies an email/password pair against the stored Argon2id hash, returning the matching user on success.
-/// An OAuth-only account (`password_hash = NULL`) never matches, same as a wrong password: `loco_rs::hash::verify_password` needs a hash to compare against.
-pub async fn verify_login(
-    conn: &impl ConnectionTrait,
-    email: &str,
-    password: &str,
-) -> Result<Option<user_users::Model>, YorishiroError> {
-    let user = user_users::Entity::find()
-        .filter(user_users::Column::Email.eq(email))
-        .one(conn)
-        .await
-        .internal()?;
-
-    let Some(user) = user else {
-        return Ok(None);
-    };
-
-    let matches = user
-        .password_hash
-        .as_deref()
-        .is_some_and(|hash| hash::verify_password(password, hash));
-
-    Ok(matches.then_some(user))
-}
-
-/// Adds (or updates the role of) a user's membership in a tenant.
-///
-/// Takes `&impl ConnectionTrait` so a caller can compose this with `create_user` in one transaction, same reasoning as `create_user`'s doc comment.
-pub async fn add_member(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    user_id: Uuid,
-    role: MembershipRole,
-) -> Result<(), YorishiroError> {
-    use sea_orm::sea_query::OnConflict;
-
-    // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
-    let active = tenant_memberships::ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
-        tenant_id: ActiveValue::Set(tenant_id),
-        user_id: ActiveValue::Set(user_id),
-        role: ActiveValue::Set(role.as_db_str().to_string()),
-        ..Default::default()
-    };
-
-    tenant_memberships::Entity::insert(active)
-        .on_conflict(
-            OnConflict::columns([
-                tenant_memberships::Column::TenantId,
-                tenant_memberships::Column::UserId,
-            ])
-            .update_column(tenant_memberships::Column::Role)
-            .to_owned(),
-        )
-        .exec(conn)
-        .await
-        .internal()?;
-
-    Ok(())
-}
-
-/// Looks up a user by email, for `POST /api/members` (which attaches an *existing* account by email, never creates one).
-pub async fn get_user_by_email(
-    conn: &impl ConnectionTrait,
-    email: &str,
-) -> Result<Option<user_users::Model>, YorishiroError> {
-    user_users::Entity::find()
-        .filter(user_users::Column::Email.eq(email))
-        .one(conn)
-        .await
-        .internal()
-}
-
-/// Every member of a tenant, joined against their user row.
-pub async fn list_members(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    page: super::pagination::ListParams,
-) -> Result<Vec<MembershipRecord>, YorishiroError> {
-    let memberships = tenant_memberships::Entity::find()
-        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
-        .find_also_related(user_users::Entity)
-        .order_by_asc(tenant_memberships::Column::CreatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
-        .all(conn)
-        .await
-        .internal()?;
-
-    Ok(memberships
-        .into_iter()
-        .filter_map(|(membership, user)| {
-            let user = user?;
-            let role = MembershipRole::from_db_str(&membership.role)?;
-            Some(MembershipRecord {
-                user_id: user.id,
-                email: user.email,
-                display_name: user.display_name,
-                role,
-            })
-        })
-        .collect())
-}
-
-/// Looks up a single user's role within a tenant, or `None` if they aren't a member.
-pub async fn get_membership_role(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<Option<MembershipRole>, YorishiroError> {
-    let membership = tenant_memberships::Entity::find()
-        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
-        .filter(tenant_memberships::Column::UserId.eq(user_id))
-        .one(conn)
-        .await
-        .internal()?;
-
-    Ok(membership.and_then(|m| MembershipRole::from_db_str(&m.role)))
-}
-
-const INVITE_TOKEN_BYTES: usize = 24;
-
-/// Creates an invite token for `email` to join `tenant_id` with `role`.
-/// Returns the record alongside the plaintext token: like API keys, only its SHA-256 hash is persisted, so this is the only place the plaintext is ever available.
-/// Callers must surface it themselves (printed by the admin CLI today; a transactional-email integration is not provided).
-pub async fn create_invite(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    email: &str,
-    role: MembershipRole,
-    ttl: Duration,
-) -> Result<(workspace_invites::Model, String), YorishiroError> {
-    create_invite_at(conn, tenant_id, email, role, ttl, Utc::now()).await
-}
-
-async fn create_invite_at(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    email: &str,
-    role: MembershipRole,
-    ttl: Duration,
-    now: DateTime<Utc>,
-) -> Result<(workspace_invites::Model, String), YorishiroError> {
-    let token = random_hex(INVITE_TOKEN_BYTES);
-    let token_hash = hash_key(&token);
-    let expires_at = now + ttl;
-
-    let active = workspace_invites::ActiveModel {
-        tenant_id: ActiveValue::Set(tenant_id),
-        email: ActiveValue::Set(email.to_string()),
-        role: ActiveValue::Set(role.as_db_str().to_string()),
-        token_hash: ActiveValue::Set(token_hash),
-        expires_at: ActiveValue::Set(expires_at.into()),
-        ..Default::default()
-    };
-
-    let invite = active.insert(conn).await.internal()?;
-    Ok((invite, token))
-}
-
-/// A tenant member as reported to a caller: `GET /api/members`, and the response body of adding one via `POST /api/members`.
+/// A tenant member as reported by member-list and member-add operations.
 #[derive(Debug, Serialize)]
 pub struct MembershipRecord {
     pub user_id: Uuid,
@@ -340,72 +87,211 @@ pub struct MembershipRecord {
     pub role: MembershipRole,
 }
 
-/// What a redeemed invite grants: resolved once, since the invite row is consumed by the same call that reads it.
+/// The tenant, email, and role granted by a redeemed invite.
 pub struct RedeemedInvite {
     pub tenant_id: Uuid,
     pub email: String,
     pub role: MembershipRole,
 }
 
-/// Redeems an invite token: atomically marks it used and returns the tenant/email/role it grants, or `None` if the token doesn't match any invite, is already used, or has expired.
-///
-/// The lookup and the `used_at` update happen in a single statement (`UpdateMany` with all three conditions in its `WHERE`), so two concurrent redemptions of the same token can't both succeed: whichever commits first's `used_at IS NULL` no longer holds for the loser.
+/// A workspace summary returned by tenancy lookups and signup.
+#[derive(Clone, Serialize)]
+pub struct WorkspaceSummary {
+    pub id: Uuid,
+    pub name: String,
+}
+
+/// A user account returned by tenancy operations.
+#[derive(Serialize)]
+pub struct UserRecord {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<user_users::Model> for UserRecord {
+    fn from(model: user_users::Model) -> Self {
+        Self {
+            id: model.id,
+            email: model.email,
+            display_name: model.display_name,
+            created_at: model.created_at.into(),
+        }
+    }
+}
+
+/// Counts real tenants and excludes `INFRASTRUCTURE_TENANT_ID`.
+pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, YorishiroError> {
+    tenant::count_tenants(conn).await
+}
+
+/// Creates a tenant and enforces the configured tenant cap.
+/// On PostgreSQL, `conn` must be a transaction because the count and insert are protected by `db::lock_for_update`.
+/// On SQLite, the cap is hardcoded to one because the backend has no database-enforced tenant isolation, regardless of `YORISHIRO_MAX_TENANTS`.
+/// On SQLite, the generated tenant ID is supplied by the ActiveModel hook rather than by this function.
+pub async fn create_tenant(
+    conn: &impl ConnectionTrait,
+    name: &str,
+) -> Result<tenant_tenants::Model, YorishiroError> {
+    tenant::create_tenant(conn, name).await
+}
+
+/// Reads and parses `YORISHIRO_MAX_TENANTS`.
+/// An unset or zero value means unlimited, while a negative or non-integer value is a configuration error.
+pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
+    tenant::max_tenants_from_env()
+}
+
+/// Creates a human user account.
+/// The password is hashed with Argon2id before it reaches the database.
+/// The `ConnectionTrait` boundary lets callers compose user creation with membership insertion in one transaction.
+pub async fn create_user(
+    conn: &impl ConnectionTrait,
+    email: &str,
+    password: &str,
+    display_name: Option<&str>,
+) -> Result<user_users::Model, YorishiroError> {
+    users::create_user(conn, email, password, display_name).await
+}
+
+/// Verifies an email and password against the stored Argon2id hash.
+/// Accounts without a password hash never match.
+pub async fn verify_login(
+    conn: &impl ConnectionTrait,
+    email: &str,
+    password: &str,
+) -> Result<Option<user_users::Model>, YorishiroError> {
+    users::verify_login(conn, email, password).await
+}
+
+/// Adds a user's membership or updates the role of an existing membership.
+/// The `ConnectionTrait` boundary lets callers compose the upsert with other writes in one transaction.
+/// The upsert supplies SQLite's generated membership ID explicitly because conflict inserts bypass the ActiveModel hook.
+pub async fn add_member(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    role: MembershipRole,
+) -> Result<(), YorishiroError> {
+    membership::add_member(conn, tenant_id, user_id, role).await
+}
+
+/// Looks up an existing user by email without creating an account.
+pub async fn get_user_by_email(
+    conn: &impl ConnectionTrait,
+    email: &str,
+) -> Result<Option<user_users::Model>, YorishiroError> {
+    users::get_user_by_email(conn, email).await
+}
+
+/// Lists the members of a tenant using the supplied pagination parameters.
+pub async fn list_members(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<MembershipRecord>, YorishiroError> {
+    membership::list_members(conn, tenant_id, page).await
+}
+
+/// Looks up a user's role within a tenant.
+pub async fn get_membership_role(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<MembershipRole>, YorishiroError> {
+    membership::get_membership_role(conn, tenant_id, user_id).await
+}
+
+/// Creates an invite for the requested role and TTL and returns its record together with the plaintext token.
+/// Only the token hash is persisted, and the plaintext is available only to this caller.
+pub async fn create_invite(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    email: &str,
+    role: MembershipRole,
+    ttl: Duration,
+) -> Result<(workspace_invites::Model, String), YorishiroError> {
+    invite::create_invite(conn, tenant_id, email, role, ttl).await
+}
+
+/// Redeems an invite if its token is valid, unused, and unexpired.
+/// Redemption marks the invite used atomically, so concurrent attempts cannot both succeed.
 pub async fn redeem_invite(
     conn: &impl ConnectionTrait,
     raw_token: &str,
 ) -> Result<Option<RedeemedInvite>, YorishiroError> {
-    redeem_invite_at(conn, raw_token, Utc::now()).await
+    invite::redeem_invite(conn, raw_token).await
 }
 
-async fn redeem_invite_at(
+/// Lists a tenant's workspaces using the supplied pagination parameters.
+pub async fn list_workspaces(
     conn: &impl ConnectionTrait,
-    raw_token: &str,
-    now: DateTime<Utc>,
-) -> Result<Option<RedeemedInvite>, YorishiroError> {
-    let token_hash = hash_key(raw_token);
+    tenant_id: Uuid,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
+    workspace::list_workspaces(conn, tenant_id, page).await
+}
 
-    // Read first to build the response: the update itself does not return rows affected as model data, and a second SELECT after the UPDATE could observe a different row (e.g. one this same call just marked used) if invites were ever deletable, which they are not, so this is safe, not merely convenient.
-    let invite = workspace_invites::Entity::find()
-        .filter(workspace_invites::Column::TokenHash.eq(token_hash.clone()))
-        .filter(workspace_invites::Column::UsedAt.is_null())
-        .filter(workspace_invites::Column::ExpiresAt.gt(now))
-        .one(conn)
-        .await
-        .internal()?;
+/// Lists every workspace a user can log into across all of the user's tenant memberships.
+/// This lookup is deliberately unpaginated because login must distinguish exactly one workspace from multiple workspaces.
+pub async fn list_workspaces_for_user(
+    conn: &impl ConnectionTrait,
+    user_id: Uuid,
+) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
+    orchestration::list_workspaces_for_user(conn, user_id).await
+}
 
-    let Some(invite) = invite else {
-        return Ok(None);
-    };
+/// Returns the tenant that owns a workspace for the explicit workspace-login path.
+pub async fn get_workspace_tenant(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    workspace::get_workspace_tenant(conn, workspace_id).await
+}
 
-    let update_result = workspace_invites::Entity::update_many()
-        .col_expr(
-            workspace_invites::Column::UsedAt,
-            sea_orm::sea_query::Expr::value(now),
-        )
-        .filter(workspace_invites::Column::Id.eq(invite.id))
-        .filter(workspace_invites::Column::UsedAt.is_null())
-        .filter(workspace_invites::Column::ExpiresAt.gt(now))
-        .exec(conn)
-        .await
-        .internal()?;
+/// Creates a workspace under a tenant and enforces its `max_workspaces` cap, where `None` means unlimited.
+/// On PostgreSQL, `conn` must be a `DatabaseTransaction` because the per-tenant advisory lock is transaction-scoped.
+/// Creation and deletion share that lock so their count-and-write decisions serialize with each other.
+/// The workspace status is `Active` when `schema_id` is present and `SchemaPending` otherwise.
+/// The supplied embedding model and dimensions are not stamped at creation, and the workspace starts with null embedding metadata.
+/// The first successful embedding write stamps its model and dimensions, avoiding a sentinel stamp when no provider is configured.
+pub async fn create_workspace(
+    conn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    name: &str,
+    max_entities: Option<i32>,
+    schema_id: Option<Uuid>,
+    embedding: Option<(&str, i32)>,
+) -> Result<workspace_workspaces::Model, YorishiroError> {
+    orchestration::create_workspace(conn, tenant_id, name, max_entities, schema_id, embedding).await
+}
 
-    if update_result.rows_affected == 0 {
-        // Lost the race: another concurrent redemption already claimed this token between the read above and this UPDATE.
-        return Ok(None);
-    }
+/// Sets a tenant's optional `max_workspaces` cap.
+pub async fn set_tenant_max_workspaces(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    max_workspaces: Option<i32>,
+) -> Result<(), YorishiroError> {
+    tenant::set_tenant_max_workspaces(conn, tenant_id, max_workspaces).await
+}
 
-    let role = MembershipRole::from_db_str(&invite.role).ok_or_else(|| {
-        YorishiroError::Internal(anyhow::anyhow!(
-            "unknown membership role in database: {}",
-            invite.role
-        ))
-    })?;
+/// Fetches a workspace by ID.
+pub async fn get_workspace(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<workspace_workspaces::Model, YorishiroError> {
+    workspace::get_workspace(conn, workspace_id).await
+}
 
-    Ok(Some(RedeemedInvite {
-        tenant_id: invite.tenant_id,
-        email: invite.email,
-        role,
-    }))
+/// Deletes a workspace while refusing to remove a tenant's last remaining workspace.
+/// On PostgreSQL, `conn` must be a `DatabaseTransaction` because deletion uses the same transaction-scoped per-tenant advisory lock as workspace creation.
+/// The shared lock serializes the count and delete with concurrent workspace creation and deletion for the same tenant.
+pub async fn delete_workspace(
+    conn: &DatabaseTransaction,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    workspace::delete_workspace(conn, workspace_id).await
 }
 
 #[cfg(feature = "test-support")]
@@ -421,7 +307,7 @@ pub mod test_support {
         ttl: Duration,
         now: DateTime<Utc>,
     ) -> Result<(workspace_invites::Model, String), YorishiroError> {
-        super::create_invite_at(conn, tenant_id, email, role, ttl, now).await
+        invite::test_support::create_invite_at(conn, tenant_id, email, role, ttl, now).await
     }
 
     pub async fn redeem_invite_at(
@@ -429,260 +315,6 @@ pub mod test_support {
         raw_token: &str,
         now: DateTime<Utc>,
     ) -> Result<Option<RedeemedInvite>, YorishiroError> {
-        super::redeem_invite_at(conn, raw_token, now).await
-    }
-}
-
-#[derive(Clone, Serialize)]
-pub struct WorkspaceSummary {
-    pub id: Uuid,
-    pub name: String,
-}
-
-/// Every workspace under `tenant_id`, for the signup response (which workspaces the new member can now log into).
-pub async fn list_workspaces(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    page: super::pagination::ListParams,
-) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    let workspaces = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-        .order_by_asc(workspace_workspaces::Column::CreatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
-        .all(conn)
-        .await
-        .internal()?;
-
-    Ok(workspaces
-        .into_iter()
-        .map(|w| WorkspaceSummary {
-            id: w.id,
-            name: w.name,
-        })
-        .collect())
-}
-
-/// Every workspace `user_id` can log into: the union of workspaces under every tenant they hold a membership in.
-/// Used by `/auth/login` to resolve `workspace_id` automatically when the caller can only reach one.
-///
-/// Deliberately unpaginated: this drives sign-in, not a browsing UI, and its own caller (`resolve_login_workspace`) needs the true, complete set to tell "exactly one, resolve to it" from "more than one, the caller must say which."
-/// A default `LIMIT` here would silently hide a membership from a user who holds more workspaces than the page size, rather than list them.
-pub async fn list_workspaces_for_user(
-    conn: &impl ConnectionTrait,
-    user_id: Uuid,
-) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    let memberships = tenant_memberships::Entity::find()
-        .filter(tenant_memberships::Column::UserId.eq(user_id))
-        .all(conn)
-        .await
-        .internal()?;
-
-    let tenant_ids: Vec<Uuid> = memberships.into_iter().map(|m| m.tenant_id).collect();
-    if tenant_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let workspaces = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.is_in(tenant_ids))
-        .all(conn)
-        .await
-        .internal()?;
-
-    Ok(workspaces
-        .into_iter()
-        .map(|w| WorkspaceSummary {
-            id: w.id,
-            name: w.name,
-        })
-        .collect())
-}
-
-/// A workspace's id and owning tenant, for `/auth/login`'s explicit `workspace_id` path.
-pub async fn get_workspace_tenant(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<Uuid, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    workspace_workspaces::Entity::find_by_id(workspace_id)
-        .one(conn)
-        .await
-        .internal()?
-        .map(|w| w.tenant_id)
-        .ok_or_else(|| YorishiroError::not_found("workspace not found"))
-}
-
-/// The advisory-lock key serializing every operation that counts a tenant's workspaces before writing.
-/// `create_workspace` and `delete_workspace` share it deliberately: both decide from a count that the other invalidates, so they have to serialize against each other and not merely against themselves.
-fn workspace_count_lock_key(tenant_id: Uuid) -> String {
-    format!("workspace-count:{tenant_id}")
-}
-
-/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
-/// `None` means unlimited, which is the default so enterprise-edition deployments are never capped unless an operator explicitly sets a limit.
-///
-/// `embedding` is the deployment's model and dimension count. The workspace starts with `NULL`
-/// for both `embedding_model` and `embedding_dimensions`; `sync_embedding` stamps the first
-/// successful embed (first-write stamping), which avoids the defect where a workspace created
-/// without an embedding provider would receive a sentinel stamp that blocks future model resolution.
-///
-/// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` because this takes `db::lock_for_update` before counting, and `pg_advisory_xact_lock` is transaction-scoped: handed a pool the lock would be released by the end of its own implicit transaction, before the count and insert it is meant to guard.
-/// Taking the transaction in the signature makes passing a pool a compile error instead of a lock that silently does nothing.
-/// It shares `delete_workspace`'s per-tenant lock key, so a create and a delete racing on the same tenant serialize against each other rather than each counting a total the other is about to change.
-pub async fn create_workspace(
-    conn: &DatabaseTransaction,
-    tenant_id: Uuid,
-    name: &str,
-    max_entities: Option<i32>,
-    schema_id: Option<Uuid>,
-    _embedding: Option<(&str, i32)>,
-) -> Result<workspace_workspaces::Model, YorishiroError> {
-    use crate::models::_entities::tenant_tenants;
-    use crate::models::workspace_workspaces::WorkspaceStatus;
-
-    let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
-
-    if let Some(max) = tenant.max_workspaces {
-        crate::db::lock_for_update(conn, &workspace_count_lock_key(tenant_id))
-            .await
-            .internal()?;
-        let count = workspace_workspaces::Entity::find()
-            .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-            .count(conn)
-            .await
-            .internal()?;
-        if count >= max as u64 {
-            return Err(YorishiroError::Conflict {
-                message: format!(
-                    "tenant '{tenant_id}' has reached its workspace limit ({max}); \
-                     raise max_workspaces or delete an existing workspace"
-                ),
-            });
-        }
-    }
-
-    let active = workspace_workspaces::ActiveModel {
-        tenant_id: ActiveValue::Set(tenant_id),
-        name: ActiveValue::Set(name.to_string()),
-        max_entities: ActiveValue::Set(max_entities),
-        schema_id: ActiveValue::Set(schema_id),
-        status: ActiveValue::Set(
-            if schema_id.is_some() {
-                WorkspaceStatus::Active.as_db_str()
-            } else {
-                WorkspaceStatus::SchemaPending.as_db_str()
-            }
-            .to_string(),
-        ),
-        ..Default::default()
-    };
-
-    active.insert(conn).await.internal()
-}
-
-/// Sets a tenant's `max_workspaces` cap.
-///
-/// An enterprise-edition deployment never calls this (its tenants keep whatever cap they were created with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap that comes with a plan change.
-pub async fn set_tenant_max_workspaces(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-    max_workspaces: Option<i32>,
-) -> Result<(), YorishiroError> {
-    use crate::models::_entities::tenant_tenants;
-
-    let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
-
-    let mut active: tenant_tenants::ActiveModel = tenant.into();
-    active.max_workspaces = ActiveValue::Set(max_workspaces);
-    active.update(conn).await.internal()?;
-    Ok(())
-}
-
-/// Fetches a workspace by id.
-pub async fn get_workspace(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<workspace_workspaces::Model, YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    workspace_workspaces::Entity::find_by_id(workspace_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or_else(|| {
-            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
-        })
-}
-
-/// Deletes a workspace, refusing to remove a tenant's last one.
-///
-/// `db::lock_for_update` serializes concurrent deletes against the same tenant before counting its workspaces, so two requests racing to delete the tenant's last two workspaces cannot both see a spare one and proceed: a plain `DELETE ... WHERE EXISTS (another workspace)` reads a snapshot each transaction takes independently, which is exactly the race this avoids.
-///
-/// `conn` is a `&DatabaseTransaction` for the same reason `create_workspace`'s is: the advisory lock this takes is transaction-scoped, so handed a pool it would be released before the count and delete it guards, and the signature is what stops a caller from passing one.
-pub async fn delete_workspace(
-    conn: &DatabaseTransaction,
-    workspace_id: Uuid,
-) -> Result<(), YorishiroError> {
-    use crate::models::_entities::workspace_workspaces;
-
-    let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or_else(|| {
-            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
-        })?;
-
-    crate::db::lock_for_update(conn, &workspace_count_lock_key(workspace.tenant_id))
-        .await
-        .internal()?;
-
-    let remaining = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(workspace.tenant_id))
-        .count(conn)
-        .await
-        .internal()?;
-    if remaining <= 1 {
-        return Err(YorishiroError::Conflict {
-            message: "cannot delete a tenant's only remaining workspace".into(),
-        });
-    }
-
-    workspace_workspaces::Entity::delete_by_id(workspace_id)
-        .exec(conn)
-        .await
-        .internal()?;
-    Ok(())
-}
-
-#[derive(Serialize)]
-pub struct UserRecord {
-    pub id: Uuid,
-    pub email: String,
-    pub display_name: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
-
-impl From<user_users::Model> for UserRecord {
-    fn from(m: user_users::Model) -> Self {
-        Self {
-            id: m.id,
-            email: m.email,
-            display_name: m.display_name,
-            created_at: m.created_at.into(),
-        }
+        invite::test_support::redeem_invite_at(conn, raw_token, now).await
     }
 }
