@@ -1,13 +1,16 @@
 use super::boot_request;
+use async_trait::async_trait;
 use axum::http::StatusCode;
 use chrono::Utc;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Statement};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
 use yorishiro::ee::models::entity_fill;
 use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::workers::infer_fill::{InferFillArgs, TestInferFillDispatcher};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
@@ -663,6 +666,79 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
                 || get_on_infer_fill.json::<serde_json::Value>()["job_id"]
                     != serde_json::json!("test"),
             "the POST path must not serve job status"
+        );
+    })
+    .await;
+}
+
+struct FailingInferFillDispatcher {
+    args: Mutex<Option<InferFillArgs>>,
+}
+
+#[async_trait]
+impl TestInferFillDispatcher for FailingInferFillDispatcher {
+    async fn dispatch(
+        &self,
+        _ctx: &loco_rs::app::AppContext,
+        args: InferFillArgs,
+    ) -> loco_rs::Result<String> {
+        *self.args.lock().unwrap() = Some(args);
+        Err(loco_rs::Error::Message(
+            "fake infer-fill dispatch failure".into(),
+        ))
+    }
+}
+
+/// A dispatch failure leaves the durable infer-fill row failed rather than queued forever.
+#[tokio::test]
+async fn infer_fill_dispatch_failure_persists_failed_job() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let put_key = request
+            .put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .json(&serde_json::json!({
+                "base_url": "https://api.example.com/v1",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-test-key"
+            }))
+            .await;
+        assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT);
+
+        let dispatcher = Arc::new(FailingInferFillDispatcher {
+            args: Mutex::new(None),
+        });
+        yorishiro::ee::workers::infer_fill::install_test_infer_fill_dispatcher(
+            &ctx,
+            dispatcher.clone(),
+        );
+
+        let response = request
+            .post("/api/schemas/active/article/infer-fill")
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(response.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let args = dispatcher
+            .args
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("dispatcher must receive infer-fill args");
+        let job = inference_jobs::get(&ctx.db, args.job_id)
+            .await
+            .expect("read failed infer-fill job")
+            .expect("durable infer-fill job must exist");
+        assert_eq!(job.workspace_id, setup.workspace_id);
+        assert_eq!(job.schema_name, "article");
+        assert_eq!(job.status, InferenceJobStatus::Failed);
+        assert_eq!(
+            job.error.as_deref(),
+            Some("failed to enqueue infer-fill job: fake infer-fill dispatch failure")
         );
     })
     .await;

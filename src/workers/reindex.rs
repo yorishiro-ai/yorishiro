@@ -12,6 +12,8 @@
 //! jobs that belong to that tag. Without this, a tag-restricted worker would dequeue zero
 //! reindex jobs.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
@@ -22,6 +24,7 @@ use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::services::embedding;
+use crate::workers::dispatch::ReindexDispatcher;
 use crate::workers::embedding_sync::WorkerClass;
 
 /// Arguments for a reindex worker job: workspace id and the resolved worker class tag.
@@ -138,26 +141,33 @@ reindex_worker_for_class!(ReindexWorkerShared, WorkerClass::Shared);
 /// Exhaustively matched, with no `_` arm: a fourth `WorkerClass` without its worker type
 /// fails to compile rather than falling through to the wrong queue.
 pub async fn enqueue_for_class(ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<()> {
-    let _job_id = match args.worker_class {
-        WorkerClass::TenantPrivate => ReindexWorkerTenantPrivate::perform_later(ctx, args).await?,
-        WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args).await?,
-        WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args).await?,
-    };
-    // Job ID discarded: callers that need it unwrap the Option themselves.
-    Ok(())
+    let dispatcher = ctx
+        .shared_store
+        .get::<Arc<dyn ReindexDispatcher>>()
+        .ok_or_else(|| loco_rs::Error::Message("ReindexDispatcher missing".into()))?;
+    enqueue_for_class_with_dispatcher(ctx, args, dispatcher.as_ref()).await
 }
 
-/// Enqueue a reindex job for `workspace_id` through Loco's queue, tagged with the resolved worker class.
-///
-/// The caller must check that `ctx.queue_provider` is configured: a missing provider
-/// means `perform_later` would return a job ID while silently discarding the job,
-/// which is worse than no endpoint at all.
-///
-/// Returns the job ID assigned by the queue provider.
-///
-/// # Errors
-/// Returns `loco_rs::Error` when the queue is configured but the enqueue fails.
-pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::Result<String> {
+pub(crate) async fn enqueue_for_class_with_dispatcher(
+    ctx: &AppContext,
+    args: ReindexArgs,
+    dispatcher: &dyn ReindexDispatcher,
+) -> loco_rs::Result<()> {
+    dispatcher.dispatch(ctx, args).await.map(|_job_id| ())
+}
+
+/// Enqueue a reindex job with a substituted dispatcher.
+pub(crate) async fn enqueue_reindex_with_dispatcher(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+    dispatcher: &dyn ReindexDispatcher,
+) -> loco_rs::Result<String> {
+    if ctx.queue_provider.is_none() {
+        return Err(loco_rs::Error::Message(
+            "no queue provider configured".into(),
+        ));
+    }
+
     let worker_class = match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
         .await
     {
@@ -167,30 +177,111 @@ pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::R
             WorkerClass::Shared
         }
     };
-    let args = ReindexArgs {
-        workspace_id,
-        worker_class,
-    };
+    dispatcher
+        .dispatch(
+            ctx,
+            ReindexArgs {
+                workspace_id,
+                worker_class,
+            },
+        )
+        .await
+}
 
-    // Use perform_later so tags() is read through the correct worker type's impl.
-    // unwrap_or_else: perform_later returns Option<String> for the job_id in BackgroundQueue mode;
-    // if None, generate one so the caller has something to track.
-    let job_id = match ctx.queue_provider {
-        Some(_) => match worker_class {
-            WorkerClass::TenantPrivate => {
-                ReindexWorkerTenantPrivate::perform_later(ctx, args.clone()).await
+/// Enqueue a reindex job for `workspace_id` through Loco's queue.
+pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::Result<String> {
+    if ctx.queue_provider.is_none() {
+        return Err(loco_rs::Error::Message(
+            "no queue provider configured".into(),
+        ));
+    }
+    let dispatcher = ctx
+        .shared_store
+        .get::<Arc<dyn ReindexDispatcher>>()
+        .ok_or_else(|| loco_rs::Error::Message("ReindexDispatcher missing".into()))?;
+    enqueue_reindex_with_dispatcher(ctx, workspace_id, dispatcher.as_ref()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    struct RecordingDispatcher {
+        args: Mutex<Vec<ReindexArgs>>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl ReindexDispatcher for RecordingDispatcher {
+        async fn dispatch(&self, _ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
+            self.args.lock().unwrap().push(args);
+            if self.fail {
+                Err(loco_rs::Error::Message("dispatch failed".into()))
+            } else {
+                Ok("reindex-job".into())
             }
-            WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args.clone()).await,
-            WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args.clone()).await,
         }
-        .ok()
-        .unwrap_or_else(|| Uuid::new_v4().to_string()),
-        None => {
-            return Err(loco_rs::Error::Message(
-                "no queue provider configured".into(),
-            ));
-        }
-    };
+    }
 
-    Ok(job_id)
+    #[tokio::test]
+    async fn dispatches_the_original_args_and_returns_success() {
+        let ctx = crate::workers::dispatch::test_context().await;
+        let args = ReindexArgs {
+            workspace_id: Uuid::now_v7(),
+            worker_class: WorkerClass::TenantPrivate,
+        };
+        let dispatcher = RecordingDispatcher {
+            args: Mutex::new(Vec::new()),
+            fail: false,
+        };
+
+        enqueue_for_class_with_dispatcher(&ctx, args.clone(), &dispatcher)
+            .await
+            .expect("dispatch");
+
+        let recorded = dispatcher.args.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].workspace_id, args.workspace_id);
+        assert_eq!(recorded[0].worker_class, args.worker_class);
+    }
+
+    #[tokio::test]
+    async fn preserves_dispatch_failure() {
+        let ctx = crate::workers::dispatch::test_context().await;
+        let dispatcher = RecordingDispatcher {
+            args: Mutex::new(Vec::new()),
+            fail: true,
+        };
+
+        let error = enqueue_for_class_with_dispatcher(
+            &ctx,
+            ReindexArgs {
+                workspace_id: Uuid::now_v7(),
+                worker_class: WorkerClass::Shared,
+            },
+            &dispatcher,
+        )
+        .await
+        .expect_err("dispatch must fail");
+
+        assert_eq!(error.to_string(), "dispatch failed");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_missing_queue_before_dispatch() {
+        let ctx = crate::workers::dispatch::test_context().await;
+        let dispatcher = RecordingDispatcher {
+            args: Mutex::new(Vec::new()),
+            fail: false,
+        };
+
+        let error = enqueue_reindex_with_dispatcher(&ctx, Uuid::now_v7(), &dispatcher)
+            .await
+            .expect_err("missing queue must fail");
+
+        assert_eq!(error.to_string(), "no queue provider configured");
+        assert!(dispatcher.args.lock().unwrap().is_empty());
+    }
 }

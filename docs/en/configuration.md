@@ -173,6 +173,19 @@ With SQLite, dequeueing is serialized, while durable queue recovery still works.
 `YORISHIRO_QUEUE_WORKERS` controls the number of concurrent dequeue loops in one worker process.
 `YORISHIRO_QUEUE_REAPER_AGE_MINUTES` controls how long a job may remain processing before the reaper recovers it.
 
+### Dispatch seam inventory
+
+Embedding sync and reindex enqueue paths use a small application-owned dispatch seam because their callers need deterministic tests for queue failure while Loco's `BackgroundWorker` extension point remains the production implementation.
+The single production adapter lives at the existing Loco worker integration point, so worker registration, tags, queue modes, payloads, and execution remain unchanged.
+Entity REST and MCP writes commit before they dispatch embedding sync, and the reindex endpoint commits its audit row before it dispatches.
+The reindex audit detail intentionally changed from `{ "job_id": ... }` to `{ "workspace_id": ... }` as an observable contract change.
+This preserves the append-only audit log and commit-before-dispatch ordering because the queue assigns `job_id` only during dispatch.
+The reindex API response still returns the queue `job_id` for polling or operational tracking.
+
+The scheduler, startup reindex detector, and workspace embedding-key update do not add another seam because they already delegate to the reindex enqueue helper.
+Worker registration, worker execution, and the queue-routing probe remain Loco-specific because substitution there would test or replace framework behavior rather than application dispatch policy.
+Infer-fill uses the same narrow seam in the Enterprise edition, while its durable job row is created before dispatch and marked failed when dispatch fails.
+
 ## Tenant reindex schedule
 
 You can configure a deployment to automatically reindex every workspace under a tenant on a regular interval. The schedule runs through the normal reindex flow (same as the manual `reindex_embeddings` task), so it respects the same workspace provider and model version checks.

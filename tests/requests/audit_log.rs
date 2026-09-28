@@ -1,8 +1,13 @@
 use super::boot_request;
+use async_trait::async_trait;
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
+use yorishiro::workers::dispatch::TestReindexDispatcher;
+use yorishiro::workers::reindex::ReindexArgs;
 
 use super::fixtures::{self, TenantArgs, issue_api_key};
 
@@ -166,6 +171,94 @@ async fn undo_migration_job_is_recorded() {
         assert_eq!(body[0]["action"], "undo_migration_job");
         assert_eq!(body[0]["detail"]["job_id"], job_id.to_string());
         assert_eq!(body[0]["detail"]["restored"], 1);
+    })
+    .await;
+}
+
+struct AuditBeforeDispatch {
+    detail: Mutex<Option<serde_json::Value>>,
+}
+
+#[async_trait]
+impl TestReindexDispatcher for AuditBeforeDispatch {
+    async fn dispatch(
+        &self,
+        ctx: &loco_rs::app::AppContext,
+        args: ReindexArgs,
+    ) -> loco_rs::Result<String> {
+        let row = yorishiro::models::api_key_audit_log::Entity::find()
+            .filter(
+                yorishiro::models::_entities::api_key_audit_log::Column::WorkspaceId
+                    .eq(args.workspace_id),
+            )
+            .one(&ctx.db)
+            .await
+            .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+            .expect("reindex audit row must be committed before dispatch");
+        *self.detail.lock().unwrap() = Some(row.detail);
+        Ok("fake-reindex-job".into())
+    }
+}
+
+/// Reindex intentionally records workspace identity rather than the queue job ID.
+/// The audit row is append-only and commits before dispatch, while the queue assigns its job ID during dispatch.
+/// The response still exposes the queue job ID returned by the dispatcher.
+#[tokio::test]
+async fn reindex_audit_detail_is_workspace_id_and_is_committed_before_dispatch() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let setup = setup(&ctx, "reindex-audit").await;
+        let dispatcher = Arc::new(AuditBeforeDispatch {
+            detail: Mutex::new(None),
+        });
+        yorishiro::workers::dispatch::install_test_reindex_dispatcher(&ctx, dispatcher.clone());
+
+        let response = request
+            .post("/api/migration-jobs/reindex")
+            .add_header("Authorization", format!("Bearer {}", setup.migration_key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            response.text()
+        );
+        assert_eq!(
+            response.json::<serde_json::Value>()["job_id"],
+            "fake-reindex-job"
+        );
+
+        let expected = serde_json::json!({ "workspace_id": setup.workspace_id });
+        assert_eq!(dispatcher.detail.lock().unwrap().as_ref(), Some(&expected));
+        assert!(
+            !dispatcher
+                .detail
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("job_id")
+        );
+
+        let log = request
+            .get("/api/audit-log")
+            .add_header("Authorization", format!("Bearer {}", setup.audit_key))
+            .await;
+        assert_eq!(
+            log.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            log.text()
+        );
+        let body: Vec<serde_json::Value> = log.json();
+        assert_eq!(body.len(), 1, "body: {body:?}");
+        assert_eq!(body[0]["action"], "reindex_embeddings");
+        assert_eq!(body[0]["detail"], expected);
+        assert!(body[0]["detail"].get("job_id").is_none());
     })
     .await;
 }
