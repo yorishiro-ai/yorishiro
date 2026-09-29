@@ -10,6 +10,10 @@ inputs:
     description: Rust targets to add (e.g. x86_64-unknown-linux-musl)
     required: false
     default: ''
+  toolchain:
+    description: Rust toolchain to install
+    required: false
+    default: '1.97.0'
   # Kept as a no-op input for callers that still pass it (windows-weekly.yml).
   # Sccache was replaced by Swatinem/rust-cache in ci.yml and release.yml.
   use-sccache:
@@ -21,8 +25,9 @@ runs:
   using: composite
   steps:
     - name: Set up Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
       with:
+        toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
 
     - name: Add targets

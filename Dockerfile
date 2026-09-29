@@ -26,7 +26,7 @@ COPY . .
 # edition-specific build to select here.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --release --bin yorishiro \
+    cargo build --locked --release --bin yorishiro \
     && cp target/release/yorishiro /usr/local/bin/yorishiro
 
 # No libstdc++6 here: `readelf -V` on the built binary shows no GLIBCXX version requirement and

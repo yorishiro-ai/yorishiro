@@ -102,7 +102,7 @@ jobs:
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: cargo build --release --bin yorishiro
+        run: cargo build --locked --release --bin yorishiro
 
       - name: Install nfpm
         env:

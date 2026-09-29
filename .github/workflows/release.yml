@@ -81,7 +81,43 @@ jobs:
 
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
 
-          cargo generate-lockfile 2>/dev/null || true
+          cp Cargo.lock Cargo.lock.before
+          cargo check
+          python3 - "$VERSION" <<'PY'
+          import copy
+          import sys
+          import tomllib
+
+          version = sys.argv[1]
+          with open("Cargo.lock", "rb") as lock:
+              after_bytes = lock.read()
+          with open("Cargo.lock.before", "rb") as lock:
+              before = tomllib.load(lock)
+          after = tomllib.loads(after_bytes.decode())
+
+          def root_packages(lock):
+              return [package for package in lock.get("package", []) if package.get("name") == "yorishiro"]
+
+          before_roots = root_packages(before)
+          after_roots = root_packages(after)
+          if len(before_roots) != 1 or len(after_roots) != 1:
+              raise SystemExit("Cargo.lock must contain exactly one yorishiro package entry before and after")
+          if after_roots[0].get("version") != version:
+              raise SystemExit("Cargo.lock root package version does not match the release version")
+
+          normalized_before = copy.deepcopy(before)
+          normalized_after = copy.deepcopy(after)
+          normalized_after["package"] = [
+              version_package if version_package.get("name") != "yorishiro" else {
+                  **version_package,
+                  "version": before_roots[0]["version"],
+              }
+              for version_package in normalized_after["package"]
+          ]
+          if normalized_before != normalized_after:
+              raise SystemExit("Cargo.lock changed outside the root yorishiro package version")
+          PY
+          rm Cargo.lock.before
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -141,7 +177,7 @@ jobs:
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: cargo build --release --bin yorishiro
+        run: cargo build --locked --release --bin yorishiro
 
       - name: Install nfpm
         env:

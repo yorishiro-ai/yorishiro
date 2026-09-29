@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Rust 1.97+ (`rustup` recommended)
+- Rust 1.94 is the supported MSRV. Normal production builds use the pinned Rust 1.97 toolchain (`rustup` recommended).
 - Cargo
 - For PostgreSQL development: a running PostgreSQL instance with `vector` and `pg_trgm` extensions
 - For SQLite development: `sqlite3`
