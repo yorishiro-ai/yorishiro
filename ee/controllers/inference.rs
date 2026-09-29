@@ -4,25 +4,26 @@
 //! A workspace with none configured gets a 422 rather than a fall back to `default` values: a caller who asked for inference and silently received defaults would have no way to tell that nothing was inferred.
 
 use crate::controllers::ApiError;
+use crate::db::AppContextBackend;
 use crate::error::{ResultExt, YorishiroError};
-use crate::services::auth::{ApiKeyScope, require_scope};
+use crate::services::auth::{ApiKeyScope, AuthContext, require_scope};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 
 use crate::ee::models::inference_jobs;
 use crate::ee::models::inference_jobs::InferenceJobStatus;
+use crate::ee::models::inference_proposals;
 use crate::ee::models::llm_keys;
 use crate::ee::services::authz;
 
 /// `POST /api/schemas/active/{name}/infer-fill`
 ///
-/// Enqueues an async infer-fill job. The same "compute and write immediately" shape the
-/// embedding-sync worker types use — accepted guesses land straight into `entity_entities`,
-/// reversible through `POST /api/migration-jobs/{job_id}/undo`.
+/// Enqueues an async infer-fill job whose answers are stored as reviewable proposals.
 ///
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
 #[derive(Debug, Serialize)]
@@ -83,8 +84,10 @@ pub struct InferJobStatus {
     pub job_id: String,
     /// One of `queued`, `running`, `completed`, `failed`.
     pub status: InferenceJobStatus,
-    /// Fields the model proposed and wrote to `entity_entities`. Only present on `completed`.
+    /// Fields the worker applied directly. Legacy jobs may populate this count.
     pub applied: Option<i64>,
+    /// Fields stored as proposals. Only present on `completed`.
+    pub proposed: Option<i64>,
     /// Entities skipped: nothing missing, the model declined to guess, or the guess didn't fit. Only present on `completed`.
     pub skipped: Option<i64>,
     /// Error message if the job failed.
@@ -121,6 +124,7 @@ async fn infer_job_status(
         job_id,
         status,
         applied: completed.then_some(result.applied),
+        proposed: completed.then_some(result.proposed),
         skipped: completed.then_some(result.skipped),
         error: result.error,
     }))
@@ -162,6 +166,105 @@ pub fn inference_job_status_routes() -> Routes {
     Routes::new()
         .prefix("api/inference-jobs")
         .add("/{job_id}", axum::routing::get(infer_job_status))
+        .add("/{job_id}/proposals", axum::routing::get(list_proposals))
+        .add("/{job_id}/confirm", axum::routing::post(confirm_proposals))
+        .add("/{job_id}/reject", axum::routing::post(reject_proposals))
+        .add("/{job_id}/discard", axum::routing::post(discard_proposals))
+}
+
+async fn authorized_job(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+    job_id: &str,
+    scope: ApiKeyScope,
+) -> Result<(AuthContext, uuid::Uuid), ApiError> {
+    let auth_ctx = authz::authenticate_workspace(ctx, headers).await?;
+    require_scope(&auth_ctx, scope)?;
+    let parsed = uuid::Uuid::parse_str(job_id)
+        .map_err(|_| YorishiroError::not_found("infer-fill job not found"))?;
+    let job = inference_jobs::get(&ctx.db, parsed)
+        .await?
+        .ok_or_else(|| YorishiroError::not_found("infer-fill job not found"))?;
+    if job.workspace_id != auth_ctx.workspace_id {
+        return Err(YorishiroError::ScopeInsufficient {
+            message: "cannot access infer-fill jobs for another workspace".into(),
+            hint: "verify the job belongs to your workspace".into(),
+        }
+        .into());
+    }
+    Ok((auth_ctx, parsed))
+}
+
+/// `GET /api/inference-jobs/{job_id}/proposals`
+#[utoipa::path(get, path = "/api/inference-jobs/{job_id}/proposals", params(("job_id" = String, Path)), responses((status = 200, body = [crate::controllers::openapi::InferenceProposalResponse]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise")]
+async fn list_proposals(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<Vec<inference_proposals::ProposalRecord>>, ApiError> {
+    let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Read).await?;
+    let txn = proposal_transaction(&ctx, &auth_ctx).await?;
+    let proposals = inference_proposals::for_job(&txn, auth_ctx.workspace_id, job_id).await?;
+    drop(txn);
+    Ok(Json(proposals))
+}
+
+#[utoipa::path(post, path = "/api/inference-jobs/{job_id}/reject", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+async fn reject_proposals(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
+    let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Schema).await?;
+    let txn = proposal_transaction(&ctx, &auth_ctx).await?;
+    let report = inference_proposals::reject(&txn, auth_ctx.workspace_id, job_id).await?;
+    txn.commit().await.internal()?;
+    Ok(Json(report))
+}
+
+#[utoipa::path(post, path = "/api/inference-jobs/{job_id}/discard", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+async fn discard_proposals(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
+    let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Schema).await?;
+    let txn = proposal_transaction(&ctx, &auth_ctx).await?;
+    let report = inference_proposals::discard(&txn, auth_ctx.workspace_id, job_id).await?;
+    txn.commit().await.internal()?;
+    Ok(Json(report))
+}
+
+async fn proposal_transaction(
+    ctx: &AppContext,
+    auth_ctx: &AuthContext,
+) -> Result<sea_orm::DatabaseTransaction, ApiError> {
+    if ctx.is_sqlite() {
+        return Ok(ctx.db.begin().await.internal()?);
+    }
+    let db = ctx
+        .shared_store
+        .get::<crate::db::DbHandle>()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))?;
+    Ok(db
+        .tenant
+        .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
+        .await
+        .internal()?)
+}
+
+#[utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+async fn confirm_proposals(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<inference_proposals::ConfirmReport>, ApiError> {
+    let (auth_ctx, job_id) = authorized_job(&ctx, &headers, &job_id, ApiKeyScope::Schema).await?;
+    let txn = proposal_transaction(&ctx, &auth_ctx).await?;
+    let report =
+        inference_proposals::confirm(&txn, auth_ctx.workspace_id, job_id, auth_ctx.user_id).await?;
+    txn.commit().await.internal()?;
+    Ok(Json(report))
 }
 
 /// `PUT /api/workspace/llm-key`
@@ -235,7 +338,11 @@ pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::route_inventory::R
 }
 
 pub(crate) fn job_status_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
-    vec![crate::controllers::route_inventory::path_doc(
-        __path_infer_job_status,
-    )]
+    vec![
+        crate::controllers::route_inventory::path_doc(__path_infer_job_status),
+        crate::controllers::route_inventory::path_doc(__path_list_proposals),
+        crate::controllers::route_inventory::path_doc(__path_confirm_proposals),
+        crate::controllers::route_inventory::path_doc(__path_reject_proposals),
+        crate::controllers::route_inventory::path_doc(__path_discard_proposals),
+    ]
 }

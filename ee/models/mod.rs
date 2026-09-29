@@ -9,6 +9,7 @@ pub mod embedding_keys;
 pub mod entity_columns;
 pub mod entity_fill;
 pub mod inference_jobs;
+pub mod inference_proposals;
 pub mod llm_keys;
 pub mod marketplace;
 pub mod oauth_users;

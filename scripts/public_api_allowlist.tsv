@@ -8,3 +8,56 @@ src/workers/dispatch.rs	trait	TestReindexDispatcher	Test-only dispatcher substit
 src/workers/dispatch.rs	fn	install_test_reindex_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 ee/workers/infer_fill.rs	trait	TestInferFillDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 ee/workers/infer_fill.rs	fn	install_test_infer_fill_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
+ee/controllers/inference.rs	field	InferJobStatus::proposed	Public JSON response field for the durable proposal count.
+ee/models/inference_jobs.rs	field	InferenceJobRecord::proposed	Public durable job record field for the proposal count.
+ee/models/inference_jobs.rs	fn	complete_proposals	Enterprise worker lifecycle operation for proposal-producing jobs.
+ee/models/inference_proposals.rs	const	PENDING	Proposal status value used by the worker and REST lifecycle.
+ee/models/inference_proposals.rs	const	CONFIRMED	Proposal status value used by the REST lifecycle.
+ee/models/inference_proposals.rs	const	REJECTED	Proposal status value used by the REST lifecycle.
+ee/models/inference_proposals.rs	const	DISCARDED	Proposal status value used by the REST lifecycle.
+ee/models/inference_proposals.rs	const	STALE	Proposal status value used by confirmation validation.
+ee/models/inference_proposals.rs	const	INVALID	Proposal status value used by confirmation validation.
+ee/models/inference_proposals.rs	enum	ProposalStatus	Serialized proposal lifecycle status.
+ee/models/inference_proposals.rs	struct	ProposalRecord	Serialized proposal response record.
+ee/models/inference_proposals.rs	field	ProposalRecord::id	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::job_id	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::workspace_id	Serialized proposal response field for isolation context.
+ee/models/inference_proposals.rs	field	ProposalRecord::entity_id	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::schema_id	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::schema_version	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::source_field	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::proposed	Serialized proposal response field.
+ee/models/inference_proposals.rs	field	ProposalRecord::status	Serialized proposal response field.
+ee/models/inference_proposals.rs	struct	ConfirmReport	Serialized proposal confirmation response.
+ee/models/inference_proposals.rs	field	ConfirmReport::job_id	Serialized confirmation response field.
+ee/models/inference_proposals.rs	field	ConfirmReport::confirmed	Serialized confirmation response field.
+ee/models/inference_proposals.rs	field	ConfirmReport::stale	Serialized confirmation response field.
+ee/models/inference_proposals.rs	field	ConfirmReport::invalid	Serialized confirmation response field.
+ee/models/inference_proposals.rs	struct	ProposalActionReport	Serialized proposal action response.
+ee/models/inference_proposals.rs	field	ProposalActionReport::job_id	Serialized proposal action response field.
+ee/models/inference_proposals.rs	field	ProposalActionReport::changed	Serialized proposal action response field.
+ee/models/inference_proposals.rs	fn	record_batch	Proposal persistence operation used by the worker.
+ee/models/inference_proposals.rs	fn	for_job	Proposal listing operation used by the controller.
+ee/models/inference_proposals.rs	fn	reject	Proposal lifecycle operation used by the controller.
+ee/models/inference_proposals.rs	fn	discard	Proposal lifecycle operation used by the controller.
+ee/models/inference_proposals.rs	fn	confirm	Proposal lifecycle operation used by the controller.
+ee/models/mod.rs	mod	inference_proposals	Enterprise proposal model module.
+src/controllers/openapi.rs	field	InferJobStatusResponse::proposed	OpenAPI field for the durable proposal count.
+src/controllers/openapi.rs	struct	InferenceProposalResponse	OpenAPI proposal response schema.
+src/controllers/openapi.rs	field	InferenceProposalResponse::id	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::job_id	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::workspace_id	OpenAPI proposal response field for isolation context.
+src/controllers/openapi.rs	field	InferenceProposalResponse::entity_id	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::schema_id	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::schema_version	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::source_field	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::proposed	OpenAPI proposal response field.
+src/controllers/openapi.rs	field	InferenceProposalResponse::status	OpenAPI proposal response field.
+src/controllers/openapi.rs	struct	ProposalActionResponse	OpenAPI proposal action response schema.
+src/controllers/openapi.rs	field	ProposalActionResponse::job_id	OpenAPI proposal action response field.
+src/controllers/openapi.rs	field	ProposalActionResponse::changed	OpenAPI proposal action response field.
+src/controllers/openapi.rs	struct	ProposalConfirmResponse	OpenAPI proposal confirmation response schema.
+src/controllers/openapi.rs	field	ProposalConfirmResponse::job_id	OpenAPI confirmation response field.
+src/controllers/openapi.rs	field	ProposalConfirmResponse::confirmed	OpenAPI confirmation response field.
+src/controllers/openapi.rs	field	ProposalConfirmResponse::stale	OpenAPI confirmation response field.
+src/controllers/openapi.rs	field	ProposalConfirmResponse::invalid	OpenAPI confirmation response field.

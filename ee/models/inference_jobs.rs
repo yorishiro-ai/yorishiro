@@ -68,6 +68,7 @@ pub struct InferenceJobRecord {
     pub schema_name: String,
     pub status: InferenceJobStatus,
     pub applied: i64,
+    pub proposed: i64,
     pub skipped: i64,
     pub error: Option<String>,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
@@ -90,6 +91,7 @@ impl TryFrom<Model> for InferenceJobRecord {
             schema_name: row.schema_name,
             status,
             applied: row.applied,
+            proposed: row.proposed,
             skipped: row.skipped,
             error: row.error,
             created_at: row.created_at,
@@ -168,6 +170,33 @@ pub async fn complete(
             Expr::value(InferenceJobStatus::Completed.as_db_str()),
         )
         .col_expr(Column::Applied, Expr::value(applied))
+        .col_expr(Column::Skipped, Expr::value(skipped))
+        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(Column::Id.eq(id))
+        .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+    if result.rows_affected == 0 {
+        validate_existing_status(conn, id).await?;
+    }
+    Ok(())
+}
+
+/// Completes a proposal-producing job without claiming that entity data was applied.
+pub(crate) async fn complete_proposals(
+    conn: &impl ConnectionTrait,
+    id: Uuid,
+    proposed: i64,
+    skipped: i64,
+) -> Result<(), YorishiroError> {
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(InferenceJobStatus::Completed.as_db_str()),
+        )
+        .col_expr(Column::Applied, Expr::value(0))
+        .col_expr(Column::Proposed, Expr::value(proposed))
         .col_expr(Column::Skipped, Expr::value(skipped))
         .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(Column::Id.eq(id))

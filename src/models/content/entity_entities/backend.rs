@@ -12,11 +12,16 @@ pub(super) async fn insert_snapshot(
     conn.execute_raw(Statement::from_sql_and_values(
         conn.get_database_backend(),
         "INSERT INTO entity_snapshots \
-            (job_id, workspace_id, entity_id, schema_id, schema_version, data) \
-         SELECT $1, workspace_id, id, schema_id, schema_version, data \
+            (id, job_id, workspace_id, entity_id, schema_id, schema_version, data) \
+         SELECT $1, $2, workspace_id, id, schema_id, schema_version, data \
            FROM entity_entities \
-          WHERE workspace_id = $2 AND id = $3",
-        [job_id.into(), workspace_id.into(), entity_id.into()],
+          WHERE workspace_id = $3 AND id = $4",
+        [
+            Uuid::now_v7().into(),
+            job_id.into(),
+            workspace_id.into(),
+            entity_id.into(),
+        ],
     ))
     .await
     .map(|result| result.rows_affected())
