@@ -6,8 +6,8 @@ use crate::models::schema_schemas::SchemaStatus;
 use crate::models::{entity_entities, schema_schemas};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, Set, SqlErr,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    SqlErr,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -125,6 +125,17 @@ pub async fn record_batch(
     schema_version: i32,
     fields: impl IntoIterator<Item = (Uuid, String, Value)>,
 ) -> Result<i64, YorishiroError> {
+    let Some(job) = crate::ee::models::inference_jobs::get(conn, job_id).await? else {
+        return Err(YorishiroError::not_found("infer-fill job not found"));
+    };
+    if job.workspace_id != workspace_id {
+        return Err(YorishiroError::not_found("infer-fill job not found"));
+    }
+    if job.status != crate::ee::models::inference_jobs::InferenceJobStatus::Running {
+        return Err(YorishiroError::Conflict {
+            message: format!("inference job '{job_id}' is not running"),
+        });
+    }
     let mut inserted = 0;
     for (entity_id, source_field, proposed) in fields {
         let result = ActiveModel {
@@ -168,6 +179,39 @@ pub async fn for_job(
         .collect()
 }
 
+async fn require_completed_job(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let Some(job) = crate::ee::models::inference_jobs::get(conn, job_id).await? else {
+        return Err(YorishiroError::not_found("infer-fill job not found"));
+    };
+    if job.workspace_id != workspace_id {
+        return Err(YorishiroError::not_found("infer-fill job not found"));
+    }
+    if job.status != crate::ee::models::inference_jobs::InferenceJobStatus::Completed {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "inference job '{job_id}' is not completed and its proposals cannot be changed"
+            ),
+        });
+    }
+    let has_proposals = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::JobId.eq(job_id))
+        .one(conn)
+        .await
+        .internal()?
+        .is_some();
+    if !has_proposals {
+        return Err(YorishiroError::Conflict {
+            message: format!("inference job '{job_id}' did not produce proposals"),
+        });
+    }
+    Ok(())
+}
+
 async fn transition_pending(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -186,11 +230,21 @@ async fn transition_pending(
     Ok(result.rows_affected as i64)
 }
 
+/// Closes pending proposals when their parent job fails without deleting their audit history.
+pub(crate) async fn discard_pending_for_job(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<i64, YorishiroError> {
+    transition_pending(conn, workspace_id, job_id, ProposalStatus::Discarded).await
+}
+
 pub async fn reject(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
+    require_completed_job(conn, workspace_id, job_id).await?;
     Ok(ProposalActionReport {
         job_id,
         changed: transition_pending(conn, workspace_id, job_id, ProposalStatus::Rejected).await?,
@@ -202,6 +256,7 @@ pub async fn discard(
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
+    require_completed_job(conn, workspace_id, job_id).await?;
     Ok(ProposalActionReport {
         job_id,
         changed: transition_pending(conn, workspace_id, job_id, ProposalStatus::Discarded).await?,
@@ -214,6 +269,7 @@ pub async fn confirm(
     job_id: Uuid,
     updated_by: Option<Uuid>,
 ) -> Result<ConfirmReport, YorishiroError> {
+    require_completed_job(conn, workspace_id, job_id).await?;
     crate::db::lock_for_update(conn, &format!("inference-proposals:{job_id}"))
         .await
         .internal()?;
@@ -240,6 +296,7 @@ pub async fn confirm(
     let mut invalid = 0;
 
     for (entity_id, proposals) in by_entity {
+        lock_entity_for_confirmation(conn, workspace_id, entity_id).await?;
         let target = schema_schemas::get_by_id(conn, workspace_id, proposals[0].schema_id).await?;
         let active = schema_schemas::get_active_schema(conn, workspace_id, &target.name).await?;
         let existing = match entity_entities::get(conn, workspace_id, entity_id).await {
@@ -290,18 +347,22 @@ pub async fn confirm(
         }
 
         entity_entities::snapshot(conn, workspace_id, entity_id, job_id).await?;
-        let active_model = entity_entities::ActiveModel {
-            id: ActiveValue::Unchanged(entity_id),
-            data: ActiveValue::Set(Value::Object(data)),
-            schema_id: ActiveValue::Set(target.id),
-            schema_version: ActiveValue::Set(target.version),
-            updated_by: ActiveValue::Set(updated_by),
-            ..Default::default()
-        };
-        active_model
-            .update_without_returning(conn)
-            .await
-            .internal()?;
+        if !entity_entities::update_if_unchanged(
+            conn,
+            workspace_id,
+            &existing,
+            Value::Object(data),
+            target.id,
+            target.version,
+            updated_by,
+        )
+        .await?
+        {
+            entity_entities::delete_snapshot(conn, workspace_id, entity_id, job_id).await?;
+            mark_entity(conn, workspace_id, job_id, entity_id, STALE).await?;
+            stale += proposals.len() as i64;
+            continue;
+        }
         mark_entity(conn, workspace_id, job_id, entity_id, CONFIRMED).await?;
         confirmed += proposals.len() as i64;
     }
@@ -312,6 +373,23 @@ pub async fn confirm(
         stale,
         invalid,
     })
+}
+
+async fn lock_entity_for_confirmation(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    entity_id: Uuid,
+) -> Result<(), YorishiroError> {
+    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
+        conn.execute_raw(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "SELECT id FROM entity_entities WHERE workspace_id = $1 AND id = $2 FOR UPDATE",
+            [workspace_id.into(), entity_id.into()],
+        ))
+        .await
+        .internal()?;
+    }
+    Ok(())
 }
 
 async fn mark_entity(

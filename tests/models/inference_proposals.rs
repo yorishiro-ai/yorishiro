@@ -82,7 +82,7 @@ async fn proposals_are_idempotent_and_confirmation_is_validated_and_undoable() {
     inference_jobs::create(&db, job_id, workspace_id, "notes")
         .await
         .expect("create job");
-
+    inference_jobs::claim(&db, job_id).await.expect("claim job");
     let first = inference_proposals::record_batch(
         &db,
         workspace_id,
@@ -105,6 +105,9 @@ async fn proposals_are_idempotent_and_confirmation_is_validated_and_undoable() {
     .expect("retry proposal");
     assert_eq!(first, 1);
     assert_eq!(retry, 0);
+    inference_jobs::complete(&db, job_id, 0, 0)
+        .await
+        .expect("complete job");
     assert_eq!(
         entity_entities::get(&db, workspace_id, entity.id)
             .await
@@ -157,6 +160,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
     inference_jobs::create(&db, invalid_job, workspace_id, "notes")
         .await
         .unwrap();
+    inference_jobs::claim(&db, invalid_job).await.unwrap();
     inference_proposals::record_batch(
         &db,
         workspace_id,
@@ -167,6 +171,9 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
     )
     .await
     .unwrap();
+    inference_jobs::complete(&db, invalid_job, 0, 0)
+        .await
+        .unwrap();
     let invalid = inference_proposals::confirm(&db, workspace_id, invalid_job, None)
         .await
         .unwrap();
@@ -176,6 +183,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
         inference_jobs::create(&db, job_id, workspace_id, "notes")
             .await
             .unwrap();
+        inference_jobs::claim(&db, job_id).await.unwrap();
         inference_proposals::record_batch(
             &db,
             workspace_id,
@@ -186,6 +194,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
         )
         .await
         .unwrap();
+        inference_jobs::complete(&db, job_id, 0, 0).await.unwrap();
         let changed = if rejected {
             inference_proposals::reject(&db, workspace_id, job_id)
                 .await
@@ -205,5 +214,104 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
             .unwrap()
             .data,
         json!({"title": "original"})
+    );
+}
+
+#[tokio::test]
+async fn incomplete_and_failed_jobs_cannot_change_proposals() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let (db, workspace_id, entity) = database().await;
+    let active = schema_schemas::get_active_schema(&db, workspace_id, "notes")
+        .await
+        .unwrap();
+
+    for failed in [false, true] {
+        let job_id = Uuid::now_v7();
+        inference_jobs::create(&db, job_id, workspace_id, "notes")
+            .await
+            .unwrap();
+        inference_jobs::claim(&db, job_id).await.unwrap();
+        inference_proposals::record_batch(
+            &db,
+            workspace_id,
+            job_id,
+            active.id,
+            active.version,
+            [(entity.id, "body".into(), json!("not actionable"))],
+        )
+        .await
+        .unwrap();
+        if failed {
+            inference_jobs::fail(&db, job_id, "provider failed")
+                .await
+                .unwrap();
+        }
+        assert!(
+            inference_proposals::confirm(&db, workspace_id, job_id, None)
+                .await
+                .is_err()
+        );
+        assert!(
+            inference_proposals::reject(&db, workspace_id, job_id)
+                .await
+                .is_err()
+        );
+        assert!(
+            inference_proposals::discard(&db, workspace_id, job_id)
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn edited_entities_make_pending_proposals_stale() {
+    if !super::super::require_sqlite_backend() {
+        return;
+    }
+    let (db, workspace_id, entity) = database().await;
+    let active = schema_schemas::get_active_schema(&db, workspace_id, "notes")
+        .await
+        .unwrap();
+    let job_id = Uuid::now_v7();
+    inference_jobs::create(&db, job_id, workspace_id, "notes")
+        .await
+        .unwrap();
+    inference_jobs::claim(&db, job_id).await.unwrap();
+    inference_proposals::record_batch(
+        &db,
+        workspace_id,
+        job_id,
+        active.id,
+        active.version,
+        [(entity.id, "body".into(), json!("inferred"))],
+    )
+    .await
+    .unwrap();
+    inference_jobs::complete(&db, job_id, 0, 0).await.unwrap();
+
+    entity_entities::update(
+        &db,
+        workspace_id,
+        entity_entities::UpdateEntityInput {
+            id: entity.id,
+            data: json!({"title": "edited", "body": "already filled"}),
+            updated_by: None,
+        },
+    )
+    .await
+    .unwrap();
+    let report = inference_proposals::confirm(&db, workspace_id, job_id, None)
+        .await
+        .unwrap();
+    assert_eq!(report.stale, 1);
+    assert_eq!(
+        entity_entities::get(&db, workspace_id, entity.id)
+            .await
+            .unwrap()
+            .data,
+        json!({"title": "edited", "body": "already filled"})
     );
 }

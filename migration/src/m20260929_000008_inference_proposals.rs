@@ -112,11 +112,20 @@ impl MigrationTrait for Migration {
             "inference_proposals",
         )
         .await?;
+        // Proposal delivery validates the parent job while running on the RLS-scoped tenant pool.
+        // The job row itself remains workspace-checked in the model because inference_jobs has no
+        // RLS policy.
+        helpers::grant(manager, "SELECT", "inference_jobs").await?;
 
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        helpers::pg_only(
+            manager,
+            "REVOKE SELECT ON inference_jobs FROM yorishiro_app;",
+        )
+        .await?;
         manager
             .drop_table(
                 Table::drop()

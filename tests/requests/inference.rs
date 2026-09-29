@@ -36,8 +36,17 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
+    setup_named(ctx, "acme", "main", "owner@example.com").await
+}
+
+async fn setup_named(
+    ctx: &loco_rs::app::AppContext,
+    tenant_name: &str,
+    workspace_name: &str,
+    email: &str,
+) -> Setup {
     let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("acme".into()),
+        name: sea_orm::ActiveValue::Set(tenant_name.into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
@@ -45,14 +54,14 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
         .expect("insert tenant");
     let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
+        name: sea_orm::ActiveValue::Set(workspace_name.into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
         ..Default::default()
     };
     let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
         .await
         .expect("insert workspace");
-    let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
+    let owner = tenancy::create_user(&ctx.db, email, "hunter2-hunter2", None)
         .await
         .expect("create owner");
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
@@ -320,6 +329,9 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
             .await
             .expect("create proposal job");
+        inference_jobs::claim(&ctx.db, job_id)
+            .await
+            .expect("claim proposal job");
         {
             let txn = db
                 .tenant
@@ -347,6 +359,9 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             )
             .await
             .expect("record proposal");
+            inference_jobs::complete(&ctx.db, job_id, 0, 0)
+                .await
+                .expect("complete proposal job");
             txn.commit().await.expect("commit apply");
         }
 
@@ -420,6 +435,9 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
             .await
             .expect("create proposal job");
+        inference_jobs::claim(&ctx.db, job_id)
+            .await
+            .expect("claim proposal job");
         let txn = db
             .tenant
             .begin_for_workspace(setup.tenant_id, setup.workspace_id)
@@ -439,6 +457,9 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         )
         .await
         .expect("record invalid proposal");
+        inference_jobs::complete(&ctx.db, job_id, 0, 0)
+            .await
+            .expect("complete proposal job");
         let report = yorishiro::ee::models::inference_proposals::confirm(
             &txn,
             setup.workspace_id,
@@ -464,6 +485,210 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         txn.rollback().await.expect("rollback txn");
     })
     .await;
+}
+
+async fn create_completed_proposal(
+    ctx: &loco_rs::app::AppContext,
+    setup: &Setup,
+    entity: Uuid,
+    job_id: Uuid,
+    value: serde_json::Value,
+) {
+    let db = ctx.shared_store.get::<DbHandle>().unwrap();
+    inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+        .await
+        .expect("create proposal job");
+    inference_jobs::claim(&ctx.db, job_id)
+        .await
+        .expect("claim proposal job");
+    let txn = db
+        .tenant
+        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+        .await
+        .expect("begin tenant txn");
+    let schema =
+        yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
+            .await
+            .expect("active schema");
+    yorishiro::ee::models::inference_proposals::record_batch(
+        &txn,
+        setup.workspace_id,
+        job_id,
+        schema.id,
+        schema.version,
+        [(entity, "summary".into(), value)],
+    )
+    .await
+    .expect("record proposal");
+    inference_jobs::complete(&ctx.db, job_id, 0, 0)
+        .await
+        .expect("complete proposal job");
+    txn.commit().await.expect("commit proposal");
+}
+
+#[tokio::test]
+async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let entity = create_entity(&request, &setup).await;
+        let rejected_job = Uuid::new_v4();
+        let discarded_job = Uuid::new_v4();
+        create_completed_proposal(
+            &ctx,
+            &setup,
+            entity,
+            rejected_job,
+            serde_json::json!("reject me"),
+        )
+        .await;
+        create_completed_proposal(
+            &ctx,
+            &setup,
+            entity,
+            discarded_job,
+            serde_json::json!("discard me"),
+        )
+        .await;
+
+        let listed = request
+            .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            listed.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            listed.text()
+        );
+        let proposals: serde_json::Value = listed.json();
+        assert_eq!(proposals.as_array().unwrap().len(), 1);
+        assert_eq!(proposals[0]["status"], "pending");
+        assert_eq!(proposals[0]["proposed"], "reject me");
+
+        let rejected = request
+            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            rejected.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            rejected.text()
+        );
+        assert_eq!(rejected.json::<serde_json::Value>()["changed"], 1);
+
+        let discarded = request
+            .post(&format!("/api/inference-jobs/{discarded_job}/discard"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            discarded.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            discarded.text()
+        );
+        assert_eq!(discarded.json::<serde_json::Value>()["changed"], 1);
+
+        let other = setup_named(&ctx, "other-tenant", "other", "other@example.com").await;
+        let denied = request
+            .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", other.key))
+            .await;
+        assert_eq!(
+            denied.status_code(),
+            StatusCode::FORBIDDEN,
+            "response: {:?}",
+            denied.text()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let entity = create_entity(&request, &setup).await;
+        let queued_job = Uuid::new_v4();
+        create_pending_proposal(&ctx, &setup, entity, queued_job).await;
+        let queued = request
+            .post(&format!("/api/inference-jobs/{queued_job}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            queued.status_code(),
+            StatusCode::CONFLICT,
+            "response: {:?}",
+            queued.text()
+        );
+
+        let failed_job = Uuid::new_v4();
+        create_pending_proposal(&ctx, &setup, entity, failed_job).await;
+        inference_jobs::fail(&ctx.db, failed_job, "provider failed")
+            .await
+            .expect("fail proposal job");
+        let failed = request
+            .post(&format!("/api/inference-jobs/{failed_job}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            failed.status_code(),
+            StatusCode::CONFLICT,
+            "response: {:?}",
+            failed.text()
+        );
+
+        let listed = request
+            .get(&format!("/api/inference-jobs/{failed_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        let proposals: serde_json::Value = listed.json();
+        assert_eq!(proposals[0]["status"], "discarded");
+    })
+    .await;
+}
+
+async fn create_pending_proposal(
+    ctx: &loco_rs::app::AppContext,
+    setup: &Setup,
+    entity: Uuid,
+    job_id: Uuid,
+) {
+    let db = ctx.shared_store.get::<DbHandle>().unwrap();
+    inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+        .await
+        .expect("create proposal job");
+    inference_jobs::claim(&ctx.db, job_id)
+        .await
+        .expect("claim proposal job");
+    let txn = db
+        .tenant
+        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+        .await
+        .expect("begin tenant txn");
+    let schema =
+        yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
+            .await
+            .expect("active schema");
+    yorishiro::ee::models::inference_proposals::record_batch(
+        &txn,
+        setup.workspace_id,
+        job_id,
+        schema.id,
+        schema.version,
+        [(entity, "summary".into(), serde_json::json!("pending"))],
+    )
+    .await
+    .expect("record proposal");
+    txn.commit().await.expect("commit proposal");
 }
 
 /// `infer_job_status` is registered on its own path (`GET /api/inference-jobs/{job_id}`),
