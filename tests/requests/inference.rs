@@ -2,12 +2,11 @@ use super::boot_request;
 use async_trait::async_trait;
 use axum::http::StatusCode;
 use chrono::Utc;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Statement};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
-use yorishiro::ee::models::entity_fill;
 use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::ee::workers::infer_fill::{InferFillArgs, TestInferFillDispatcher};
@@ -88,6 +87,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
 
         let missing = request
@@ -165,6 +165,7 @@ async fn a_non_http_base_url_is_refused() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
 
         for bad_url in [
@@ -255,13 +256,8 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     .await;
 }
 
-/// Creates one schema, one entity on it, and returns the entity's id alongside a
-/// `entity_fill::OutdatedEntity` view of it (as `entities_on_outdated_schema` would produce),
-/// for tests exercising `apply_answers` directly without a real or stubbed LLM endpoint.
-async fn create_entity(
-    request: &axum_test::TestServer,
-    setup: &Setup,
-) -> entity_fill::OutdatedEntity {
+/// Creates one schema and one entity for the infer-fill request tests.
+async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
         .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -305,46 +301,57 @@ async fn create_entity(
         .parse()
         .unwrap();
 
-    entity_fill::OutdatedEntity {
-        id: entity_id,
-        entity_type: "note".to_string(),
-        data: serde_json::json!({ "title": "original" }),
-    }
+    entity_id
 }
 
-/// `apply_answers` writes a model's already-resolved answer straight into `entity_entities`, with
-/// no separate confirm step, and the snapshot it takes is readable by base's own, unchanged
-/// `POST /api/migration-jobs/{job_id}/undo`: this is `infer_fill`'s own write path, factored out
-/// so it is testable without a real or stubbed LLM endpoint.
+/// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
-async fn apply_answers_writes_directly_and_undo_reverses_it() {
+async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
     if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+            .await
+            .expect("create proposal job");
         {
             let txn = db
                 .tenant
                 .begin_for_workspace(setup.tenant_id, setup.workspace_id)
                 .await
                 .expect("begin tenant txn");
-            let mut answers = serde_json::Map::new();
-            answers.insert("summary".to_string(), serde_json::json!("a stub summary"));
-            let applied =
-                entity_fill::apply_answers(&txn, setup.workspace_id, &entity, job_id, answers)
-                    .await
-                    .expect("apply_answers");
-            assert!(applied, "the write should have landed");
+            let schema = yorishiro::models::schema_schemas::get_active_schema(
+                &txn,
+                setup.workspace_id,
+                "note",
+            )
+            .await
+            .expect("active schema");
+            yorishiro::ee::models::inference_proposals::record_batch(
+                &txn,
+                setup.workspace_id,
+                job_id,
+                schema.id,
+                schema.version,
+                [(
+                    entity,
+                    "summary".into(),
+                    serde_json::json!("a stub summary"),
+                )],
+            )
+            .await
+            .expect("record proposal");
             txn.commit().await.expect("commit apply");
         }
 
         let get_entity = request
-            .get(&format!("/api/entities/{}", entity.id))
+            .get(&format!("/api/entities/{}", entity))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(
@@ -354,13 +361,23 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
             get_entity.text()
         );
         let fetched: serde_json::Value = get_entity.json();
-        assert_eq!(
-            fetched["data"]["summary"], "a stub summary",
-            "the answer must be written directly, not merely recorded: {fetched:?}"
+        assert!(
+            fetched["data"].get("summary").is_none(),
+            "the proposal must not be written before confirmation: {fetched:?}"
         );
 
-        // POST /api/migration-jobs/{job_id}/undo is base's own, unchanged endpoint: apply_answers's
-        // snapshot must be readable by it with no glue code of its own.
+        let confirm = request
+            .post(&format!("/api/inference-jobs/{job_id}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            confirm.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            confirm.text()
+        );
+
+        // The accepted write is snapshot-backed and remains undoable through the base endpoint.
         let undo = request
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -375,7 +392,7 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
         assert_eq!(undo_report["restored"], 1, "undo report: {undo_report:?}");
 
         let get_after_undo = request
-            .get(&format!("/api/entities/{}", entity.id))
+            .get(&format!("/api/entities/{}", entity))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         let fetched_after_undo: serde_json::Value = get_after_undo.json();
@@ -387,36 +404,50 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
     .await;
 }
 
-/// A write that fails for a reason specific to this entity (its schema no longer accepts the
-/// merged data) must not leave a snapshot behind: leaving one would let a later, unrelated edit to
-/// the same entity be misattributed to this job on undo.
+/// Invalid proposals are marked invalid and do not leave a snapshot behind.
 #[tokio::test]
-async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
+async fn invalid_proposals_do_not_leave_a_snapshot() {
     if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+            .await
+            .expect("create proposal job");
         let txn = db
             .tenant
             .begin_for_workspace(setup.tenant_id, setup.workspace_id)
             .await
             .expect("begin tenant txn");
-        // "summary" has no declared type constraint that would reject a value, so a non-string answer for a field the schema does declare as a string is what actually gets refused: entity_entities::update validates the merged data against the schema, and this shape does not match it.
-        let mut answers = serde_json::Map::new();
-        answers.insert("title".to_string(), serde_json::json!(12345));
-        let applied =
-            entity_fill::apply_answers(&txn, setup.workspace_id, &entity, job_id, answers)
+        let schema =
+            yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
-                .expect("apply_answers");
-        assert!(
-            !applied,
-            "a schema-rejected write must be reported as skipped"
-        );
+                .expect("active schema");
+        yorishiro::ee::models::inference_proposals::record_batch(
+            &txn,
+            setup.workspace_id,
+            job_id,
+            schema.id,
+            schema.version,
+            [(entity, "summary".into(), serde_json::json!(12345))],
+        )
+        .await
+        .expect("record invalid proposal");
+        let report = yorishiro::ee::models::inference_proposals::confirm(
+            &txn,
+            setup.workspace_id,
+            job_id,
+            None,
+        )
+        .await
+        .expect("confirm invalid proposal");
+        assert_eq!(report.invalid, 1);
 
         // No snapshot should remain for this job_id.
         let remaining = yorishiro::models::_entities::entity_snapshots::Entity::find()
@@ -431,116 +462,6 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
         assert_eq!(remaining, 0, "a rejected write must not leave a snapshot");
 
         txn.rollback().await.expect("rollback txn");
-    })
-    .await;
-}
-
-/// Sets up one schema and one entity, then locks `entity_entities` in `lock_mode` from a second
-/// connection and calls `apply_answers` with a short `lock_timeout`, returning its result as a
-/// string (its `Err` message, or `"Ok(bool)"` if it somehow succeeded) for the caller to assert on.
-///
-/// `yorishiro_app` is granted per-table (see loco-architecture.md), not the owner of any table, so it cannot DROP or REVOKE its own way into a failure; locking the table from a second connection is a failure `apply_answers` can genuinely hit without needing privileges the RLS role does not have.
-async fn apply_answers_with_content_entities_locked(
-    request: &axum_test::TestServer,
-    ctx: &loco_rs::app::AppContext,
-    lock_mode: &'static str,
-) -> String {
-    let setup = setup(ctx).await;
-    let entity = create_entity(request, &setup).await;
-
-    let db = ctx.shared_store.get::<DbHandle>().unwrap();
-    let mut blocker = db.identity.acquire().await.expect("acquire blocker conn");
-    sqlx::query("BEGIN")
-        .execute(&mut *blocker)
-        .await
-        .expect("begin blocker txn");
-    let lock_statement = match lock_mode {
-        "EXCLUSIVE" => "LOCK TABLE entity_entities IN EXCLUSIVE MODE",
-        "ACCESS EXCLUSIVE" => "LOCK TABLE entity_entities IN ACCESS EXCLUSIVE MODE",
-        other => panic!("unexpected lock mode {other:?}"),
-    };
-    sqlx::query(lock_statement)
-        .execute(&mut *blocker)
-        .await
-        .expect("lock entity_entities");
-
-    let job_id = Uuid::new_v4();
-    let result = {
-        let txn = db
-            .tenant
-            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
-            .await
-            .expect("begin tenant txn");
-        txn.execute_raw(Statement::from_string(
-            sea_orm::DatabaseBackend::Postgres,
-            "SET LOCAL lock_timeout = '50ms'",
-        ))
-        .await
-        .expect("set lock_timeout");
-
-        let mut answers = serde_json::Map::new();
-        answers.insert("summary".to_string(), serde_json::json!("a stub summary"));
-        let result =
-            entity_fill::apply_answers(&txn, setup.workspace_id, &entity, job_id, answers).await;
-        // Rolls back on drop: the lock_timeout is transaction-local, and anything apply_answers
-        // did before failing is undone along with it.
-        match result {
-            Ok(applied) => format!("Ok({applied})"),
-            Err(err) => err.to_string(),
-        }
-    };
-
-    sqlx::query("ROLLBACK")
-        .execute(&mut *blocker)
-        .await
-        .expect("release blocker lock");
-    // The pool does not consider this connection returned until it drops: the next
-    // begin_for_workspace call hangs until this one is, so it must go before that call.
-    drop(blocker);
-
-    result
-}
-
-/// `EXCLUSIVE` still admits the plain `SELECT` `entity_entities::get` runs inside `update`, so the
-/// failure lands specifically on `update`'s write, exercising `apply_answers`'s
-/// `Err(err) => Err(err)` arm rather than the one on the snapshot's own read.
-#[tokio::test]
-async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let message = apply_answers_with_content_entities_locked(&request, &ctx, "EXCLUSIVE").await;
-        assert!(
-            message.contains("lock timeout"),
-            "expected the lock timeout itself, not a downstream error: {message}"
-        );
-        assert!(
-            !message.contains("transaction is aborted"),
-            "the old code's masked failure mode must not reappear: {message}"
-        );
-    })
-    .await;
-}
-
-/// `ACCESS EXCLUSIVE` also blocks `snapshot`'s own `INSERT ... SELECT`, isolating the failure to
-/// that statement instead of `update`'s.
-#[tokio::test]
-async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let message =
-            apply_answers_with_content_entities_locked(&request, &ctx, "ACCESS EXCLUSIVE").await;
-        assert!(
-            message.contains("lock timeout"),
-            "expected the lock timeout itself, not a downstream error: {message}"
-        );
-        assert!(
-            !message.contains("transaction is aborted"),
-            "the old code's masked failure mode must not reappear: {message}"
-        );
     })
     .await;
 }

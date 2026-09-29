@@ -65,6 +65,7 @@ async fn persisted_row_with_unknown_status_returns_internal_error() {
         schema_name: "notes".into(),
         status: "paused".into(),
         applied: 0,
+        proposed: 0,
         skipped: 0,
         error: None,
         created_at: now,
@@ -76,6 +77,7 @@ async fn persisted_row_with_unknown_status_returns_internal_error() {
         schema_name: Set(row.schema_name.clone()),
         status: Set(row.status.clone()),
         applied: Set(row.applied),
+        proposed: Set(row.proposed),
         skipped: Set(row.skipped),
         error: Set(row.error.clone()),
         created_at: Set(row.created_at),
@@ -205,6 +207,7 @@ async fn claim_rejects_stale_and_invalid_rows() {
         schema_name: Set("notes".into()),
         status: Set("paused".into()),
         applied: Set(0),
+        proposed: Set(0),
         skipped: Set(0),
         error: Set(None),
         ..Default::default()
