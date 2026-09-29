@@ -2,7 +2,7 @@
 
 ## 必要なもの
 
-- Rust 1.97+（`rustup`推奨）
+- サポート対象の MSRV は Rust 1.94 です。本番向けの通常ビルドは固定した Rust 1.97 ツールチェーンを使います（`rustup` 推奨）。
 - Cargo
 - PostgreSQL 開発用：`vector` と `pg_trgm` 拡張がインストールされた PostgreSQL インスタンス
 - SQLite 開発用：`sqlite3`

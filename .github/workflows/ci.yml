@@ -117,6 +117,17 @@ jobs:
         # and missing_panics_doc; new/changed code is expected to add those comments.
         run: cargo clippy --locked --workspace --lib -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
 
+  msrv:
+    name: MSRV (Rust 1.94)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/rust-setup
+        with:
+          toolchain: '1.94.0'
+      - run: rustc +1.94.0 --version --verbose
+      - run: cargo +1.94.0 check --locked --workspace
+
   prepare-embedding:
     runs-on: ubuntu-latest
     steps:
@@ -215,7 +226,7 @@ jobs:
         run: cargo build --locked --workspace
 
       - name: Install sea-orm-cli with postgres-vector feature
-        run: cargo install sea-orm-cli --version 2.0.2 --features postgres-vector,sqlx-postgres,sqlx-sqlite
+        run: cargo install sea-orm-cli --locked --version 2.0.4 --features postgres-vector,sqlx-postgres,sqlx-sqlite
 
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'

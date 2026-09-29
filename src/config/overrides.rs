@@ -77,12 +77,12 @@ fn apply_queue_overrides(value: &mut Value, database_url: Option<&str>) -> Resul
 
     let configured_uri = queue_uri(value);
     let kind = kind.to_owned();
-    if let Some(uri) = &queue_url {
-        if queue_kind_for_uri(uri) != Some(kind.as_str()) {
-            return Err(Error::Message(format!(
-                "QUEUE_URL is not compatible with queue kind {kind}"
-            )));
-        }
+    if let Some(uri) = &queue_url
+        && queue_kind_for_uri(uri) != Some(kind.as_str())
+    {
+        return Err(Error::Message(format!(
+            "QUEUE_URL is not compatible with queue kind {kind}"
+        )));
     }
     let uri = queue_url
         .or_else(|| {
