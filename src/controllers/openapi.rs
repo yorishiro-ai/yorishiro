@@ -595,9 +595,38 @@ pub struct InferJobStatusResponse {
     #[schema(nullable = true)]
     pub applied: Option<i64>,
     #[schema(nullable = true)]
+    pub proposed: Option<i64>,
+    #[schema(nullable = true)]
     pub skipped: Option<i64>,
     #[schema(nullable = true)]
     pub error: Option<String>,
+}
+
+#[derive(ToSchema)]
+pub struct InferenceProposalResponse {
+    pub id: Uuid,
+    pub job_id: Uuid,
+    pub workspace_id: Uuid,
+    pub entity_id: Uuid,
+    pub schema_id: Uuid,
+    pub schema_version: i32,
+    pub source_field: String,
+    pub proposed: Value,
+    pub status: String,
+}
+
+#[derive(ToSchema)]
+pub struct ProposalActionResponse {
+    pub job_id: Uuid,
+    pub changed: i64,
+}
+
+#[derive(ToSchema)]
+pub struct ProposalConfirmResponse {
+    pub job_id: Uuid,
+    pub confirmed: i64,
+    pub stale: i64,
+    pub invalid: i64,
 }
 
 #[derive(ToSchema)]

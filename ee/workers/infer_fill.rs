@@ -2,7 +2,7 @@
 //!
 //! `POST /api/schemas/active/{name}/infer-fill` enqueues this worker via Loco's queue.
 //! The worker processes entities one-by-one, calling the LLM to propose missing field
-//! values and writing accepted guesses to `entity_entities`.
+//! values and storing them as reviewable proposals.
 //!
 //! An advisory lock (`db::lock_for_update`) serializes one infer-fill per workspace,
 //! matching the pattern `reindex_embeddings` already uses.
@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::db::{self, DbHandle};
 use crate::ee::models::entity_fill;
 use crate::ee::models::inference_jobs;
+use crate::ee::models::inference_proposals;
 use crate::ee::models::llm_keys;
 use crate::ee::services::inference::InferenceClient;
 use crate::error::ResultExt;
@@ -108,7 +109,7 @@ async fn perform_infer_fill(
 
     let client = InferenceClient::new(config);
 
-    let mut applied = 0i64;
+    let mut proposed = 0i64;
     let mut skipped = 0i64;
 
     for row in &rows {
@@ -138,29 +139,28 @@ async fn perform_infer_fill(
             continue;
         }
 
-        let ok = entity_fill::apply_answers(
+        let written = inference_proposals::record_batch(
             &schema_txn,
             args.workspace_id,
-            &entity_fill::OutdatedEntity {
-                id: row.id,
-                entity_type: row.entity_type.clone(),
-                data: row.data.clone(),
-            },
             job_id,
-            answers,
+            active.id,
+            active.version,
+            answers
+                .into_iter()
+                .map(|(field, value)| (row.id, field, value)),
         )
         .await
         .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
-        if ok {
-            applied += 1;
-        } else {
+        if written == 0 {
             skipped += 1;
+        } else {
+            proposed += written;
         }
     }
 
     schema_txn.commit().await.internal()?;
-    Ok((applied, skipped))
+    Ok((proposed, skipped))
 }
 
 /// Infer-fill worker.
@@ -191,8 +191,8 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         }
 
         match perform_infer_fill(&self.ctx, &args, job_id).await {
-            Ok((applied, skipped)) => {
-                inference_jobs::complete(&self.ctx.db, job_id, applied, skipped)
+            Ok((proposed, skipped)) => {
+                inference_jobs::complete_proposals(&self.ctx.db, job_id, proposed, skipped)
                     .await
                     .internal()?;
                 Ok(())

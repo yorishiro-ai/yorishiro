@@ -1,6 +1,6 @@
 //! Finding the entities `infer_fill` should consider.
 //!
-//! `infer_fill` writes a model's guess straight into `entity_entities`, the same "compute and write immediately" shape the embedding-sync worker types use: no separate proposal/confirm step, since a guess is reversible the same way any other write is, through base's own `entity_entities::snapshot`/`undo_job` (`POST /api/migration-jobs/{job_id}/undo`).
+//! Finding the entities eligible for infer-fill remains separate from proposal persistence.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::entity_entities as content_entities_entity;

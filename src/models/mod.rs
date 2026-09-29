@@ -29,6 +29,7 @@ pub mod export;
 pub mod import;
 #[path = "system/inference_jobs.rs"]
 pub mod inference_jobs;
+pub(crate) mod inference_proposals;
 #[path = "content/recall.rs"]
 pub mod recall;
 #[path = "content/schema_schemas.rs"]

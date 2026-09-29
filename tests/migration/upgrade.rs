@@ -648,7 +648,7 @@ async fn upgrade_000007_creates_fork_history_and_integrity_objects() {
 async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
     with_database("upgrade_rollbacks", |db| Box::pin(async move {
         Migrator::up(db, None).await.expect("all migrations");
-        for _ in 0..8 {
+        for _ in 0..migration::Migrator::migrations().len() {
             Migrator::down(db, Some(1)).await.expect("one rollback step");
         }
         let tenant_table_count: i64 = match db.get_database_backend() {

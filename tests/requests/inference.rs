@@ -2,12 +2,11 @@ use super::boot_request;
 use async_trait::async_trait;
 use axum::http::StatusCode;
 use chrono::Utc;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Statement};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
-use yorishiro::ee::models::entity_fill;
 use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::ee::workers::infer_fill::{InferFillArgs, TestInferFillDispatcher};
@@ -37,8 +36,17 @@ struct Setup {
 }
 
 async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
+    setup_named(ctx, "acme", "main", "owner@example.com").await
+}
+
+async fn setup_named(
+    ctx: &loco_rs::app::AppContext,
+    tenant_name: &str,
+    workspace_name: &str,
+    email: &str,
+) -> Setup {
     let tenant = tenant_tenants::ActiveModel {
-        name: sea_orm::ActiveValue::Set("acme".into()),
+        name: sea_orm::ActiveValue::Set(tenant_name.into()),
         ..Default::default()
     };
     let tenant = sea_orm::ActiveModelTrait::insert(tenant, &ctx.db)
@@ -46,14 +54,14 @@ async fn setup(ctx: &loco_rs::app::AppContext) -> Setup {
         .expect("insert tenant");
     let workspace = workspace_workspaces::ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-        name: sea_orm::ActiveValue::Set("main".into()),
+        name: sea_orm::ActiveValue::Set(workspace_name.into()),
         status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_string()),
         ..Default::default()
     };
     let workspace = sea_orm::ActiveModelTrait::insert(workspace, &ctx.db)
         .await
         .expect("insert workspace");
-    let owner = tenancy::create_user(&ctx.db, "owner@example.com", "hunter2-hunter2", None)
+    let owner = tenancy::create_user(&ctx.db, email, "hunter2-hunter2", None)
         .await
         .expect("create owner");
     tenancy::add_member(&ctx.db, tenant.id, owner.id, MembershipRole::Owner)
@@ -88,6 +96,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
 
         let missing = request
@@ -165,6 +174,7 @@ async fn a_non_http_base_url_is_refused() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
 
         for bad_url in [
@@ -255,13 +265,8 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     .await;
 }
 
-/// Creates one schema, one entity on it, and returns the entity's id alongside a
-/// `entity_fill::OutdatedEntity` view of it (as `entities_on_outdated_schema` would produce),
-/// for tests exercising `apply_answers` directly without a real or stubbed LLM endpoint.
-async fn create_entity(
-    request: &axum_test::TestServer,
-    setup: &Setup,
-) -> entity_fill::OutdatedEntity {
+/// Creates one schema and one entity for the infer-fill request tests.
+async fn create_entity(request: &axum_test::TestServer, setup: &Setup) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
         .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -305,46 +310,63 @@ async fn create_entity(
         .parse()
         .unwrap();
 
-    entity_fill::OutdatedEntity {
-        id: entity_id,
-        entity_type: "note".to_string(),
-        data: serde_json::json!({ "title": "original" }),
-    }
+    entity_id
 }
 
-/// `apply_answers` writes a model's already-resolved answer straight into `entity_entities`, with
-/// no separate confirm step, and the snapshot it takes is readable by base's own, unchanged
-/// `POST /api/migration-jobs/{job_id}/undo`: this is `infer_fill`'s own write path, factored out
-/// so it is testable without a real or stubbed LLM endpoint.
+/// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
-async fn apply_answers_writes_directly_and_undo_reverses_it() {
+async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
     if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+            .await
+            .expect("create proposal job");
+        inference_jobs::claim(&ctx.db, job_id)
+            .await
+            .expect("claim proposal job");
         {
             let txn = db
                 .tenant
                 .begin_for_workspace(setup.tenant_id, setup.workspace_id)
                 .await
                 .expect("begin tenant txn");
-            let mut answers = serde_json::Map::new();
-            answers.insert("summary".to_string(), serde_json::json!("a stub summary"));
-            let applied =
-                entity_fill::apply_answers(&txn, setup.workspace_id, &entity, job_id, answers)
-                    .await
-                    .expect("apply_answers");
-            assert!(applied, "the write should have landed");
+            let schema = yorishiro::models::schema_schemas::get_active_schema(
+                &txn,
+                setup.workspace_id,
+                "note",
+            )
+            .await
+            .expect("active schema");
+            yorishiro::ee::models::inference_proposals::record_batch(
+                &txn,
+                setup.workspace_id,
+                job_id,
+                schema.id,
+                schema.version,
+                [(
+                    entity,
+                    "summary".into(),
+                    serde_json::json!("a stub summary"),
+                )],
+            )
+            .await
+            .expect("record proposal");
+            inference_jobs::complete(&ctx.db, job_id, 0, 0)
+                .await
+                .expect("complete proposal job");
             txn.commit().await.expect("commit apply");
         }
 
         let get_entity = request
-            .get(&format!("/api/entities/{}", entity.id))
+            .get(&format!("/api/entities/{}", entity))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         assert_eq!(
@@ -354,13 +376,23 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
             get_entity.text()
         );
         let fetched: serde_json::Value = get_entity.json();
-        assert_eq!(
-            fetched["data"]["summary"], "a stub summary",
-            "the answer must be written directly, not merely recorded: {fetched:?}"
+        assert!(
+            fetched["data"].get("summary").is_none(),
+            "the proposal must not be written before confirmation: {fetched:?}"
         );
 
-        // POST /api/migration-jobs/{job_id}/undo is base's own, unchanged endpoint: apply_answers's
-        // snapshot must be readable by it with no glue code of its own.
+        let confirm = request
+            .post(&format!("/api/inference-jobs/{job_id}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            confirm.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            confirm.text()
+        );
+
+        // The accepted write is snapshot-backed and remains undoable through the base endpoint.
         let undo = request
             .post(&format!("/api/migration-jobs/{job_id}/undo"))
             .add_header("Authorization", format!("Bearer {}", setup.key))
@@ -375,7 +407,7 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
         assert_eq!(undo_report["restored"], 1, "undo report: {undo_report:?}");
 
         let get_after_undo = request
-            .get(&format!("/api/entities/{}", entity.id))
+            .get(&format!("/api/entities/{}", entity))
             .add_header("Authorization", format!("Bearer {}", setup.key))
             .await;
         let fetched_after_undo: serde_json::Value = get_after_undo.json();
@@ -387,36 +419,56 @@ async fn apply_answers_writes_directly_and_undo_reverses_it() {
     .await;
 }
 
-/// A write that fails for a reason specific to this entity (its schema no longer accepts the
-/// merged data) must not leave a snapshot behind: leaving one would let a later, unrelated edit to
-/// the same entity be misattributed to this job on undo.
+/// Invalid proposals are marked invalid and do not leave a snapshot behind.
 #[tokio::test]
-async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
+async fn invalid_proposals_do_not_leave_a_snapshot() {
     if !super::super::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
         let setup = setup(&ctx).await;
         let entity = create_entity(&request, &setup).await;
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let job_id = Uuid::new_v4();
+        inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
+            .await
+            .expect("create proposal job");
+        inference_jobs::claim(&ctx.db, job_id)
+            .await
+            .expect("claim proposal job");
         let txn = db
             .tenant
             .begin_for_workspace(setup.tenant_id, setup.workspace_id)
             .await
             .expect("begin tenant txn");
-        // "summary" has no declared type constraint that would reject a value, so a non-string answer for a field the schema does declare as a string is what actually gets refused: entity_entities::update validates the merged data against the schema, and this shape does not match it.
-        let mut answers = serde_json::Map::new();
-        answers.insert("title".to_string(), serde_json::json!(12345));
-        let applied =
-            entity_fill::apply_answers(&txn, setup.workspace_id, &entity, job_id, answers)
+        let schema =
+            yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
                 .await
-                .expect("apply_answers");
-        assert!(
-            !applied,
-            "a schema-rejected write must be reported as skipped"
-        );
+                .expect("active schema");
+        yorishiro::ee::models::inference_proposals::record_batch(
+            &txn,
+            setup.workspace_id,
+            job_id,
+            schema.id,
+            schema.version,
+            [(entity, "summary".into(), serde_json::json!(12345))],
+        )
+        .await
+        .expect("record invalid proposal");
+        inference_jobs::complete(&ctx.db, job_id, 0, 0)
+            .await
+            .expect("complete proposal job");
+        let report = yorishiro::ee::models::inference_proposals::confirm(
+            &txn,
+            setup.workspace_id,
+            job_id,
+            None,
+        )
+        .await
+        .expect("confirm invalid proposal");
+        assert_eq!(report.invalid, 1);
 
         // No snapshot should remain for this job_id.
         let remaining = yorishiro::models::_entities::entity_snapshots::Entity::find()
@@ -435,114 +487,319 @@ async fn apply_answers_removes_its_snapshot_when_the_write_is_rejected() {
     .await;
 }
 
-/// Sets up one schema and one entity, then locks `entity_entities` in `lock_mode` from a second
-/// connection and calls `apply_answers` with a short `lock_timeout`, returning its result as a
-/// string (its `Err` message, or `"Ok(bool)"` if it somehow succeeded) for the caller to assert on.
-///
-/// `yorishiro_app` is granted per-table (see loco-architecture.md), not the owner of any table, so it cannot DROP or REVOKE its own way into a failure; locking the table from a second connection is a failure `apply_answers` can genuinely hit without needing privileges the RLS role does not have.
-async fn apply_answers_with_content_entities_locked(
-    request: &axum_test::TestServer,
+async fn create_completed_proposal(
     ctx: &loco_rs::app::AppContext,
-    lock_mode: &'static str,
-) -> String {
-    let setup = setup(ctx).await;
-    let entity = create_entity(request, &setup).await;
-
+    setup: &Setup,
+    entity: Uuid,
+    job_id: Uuid,
+    value: serde_json::Value,
+) {
     let db = ctx.shared_store.get::<DbHandle>().unwrap();
-    let mut blocker = db.identity.acquire().await.expect("acquire blocker conn");
-    sqlx::query("BEGIN")
-        .execute(&mut *blocker)
+    inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
         .await
-        .expect("begin blocker txn");
-    let lock_statement = match lock_mode {
-        "EXCLUSIVE" => "LOCK TABLE entity_entities IN EXCLUSIVE MODE",
-        "ACCESS EXCLUSIVE" => "LOCK TABLE entity_entities IN ACCESS EXCLUSIVE MODE",
-        other => panic!("unexpected lock mode {other:?}"),
-    };
-    sqlx::query(lock_statement)
-        .execute(&mut *blocker)
+        .expect("create proposal job");
+    inference_jobs::claim(&ctx.db, job_id)
         .await
-        .expect("lock entity_entities");
-
-    let job_id = Uuid::new_v4();
-    let result = {
-        let txn = db
-            .tenant
-            .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+        .expect("claim proposal job");
+    let txn = db
+        .tenant
+        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+        .await
+        .expect("begin tenant txn");
+    let schema =
+        yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
             .await
-            .expect("begin tenant txn");
-        txn.execute_raw(Statement::from_string(
-            sea_orm::DatabaseBackend::Postgres,
-            "SET LOCAL lock_timeout = '50ms'",
-        ))
+            .expect("active schema");
+    yorishiro::ee::models::inference_proposals::record_batch(
+        &txn,
+        setup.workspace_id,
+        job_id,
+        schema.id,
+        schema.version,
+        [(entity, "summary".into(), value)],
+    )
+    .await
+    .expect("record proposal");
+    inference_jobs::complete(&ctx.db, job_id, 0, 0)
         .await
-        .expect("set lock_timeout");
+        .expect("complete proposal job");
+    txn.commit().await.expect("commit proposal");
+}
 
-        let mut answers = serde_json::Map::new();
-        answers.insert("summary".to_string(), serde_json::json!("a stub summary"));
-        let result =
-            entity_fill::apply_answers(&txn, setup.workspace_id, &entity, job_id, answers).await;
-        // Rolls back on drop: the lock_timeout is transaction-local, and anything apply_answers
-        // did before failing is undone along with it.
-        match result {
-            Ok(applied) => format!("Ok({applied})"),
-            Err(err) => err.to_string(),
+#[tokio::test]
+async fn proposals_can_be_listed_rejected_and_discarded_only_in_their_workspace() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let entity = create_entity(&request, &setup).await;
+        let rejected_job = Uuid::new_v4();
+        let discarded_job = Uuid::new_v4();
+        create_completed_proposal(
+            &ctx,
+            &setup,
+            entity,
+            rejected_job,
+            serde_json::json!("reject me"),
+        )
+        .await;
+        create_completed_proposal(
+            &ctx,
+            &setup,
+            entity,
+            discarded_job,
+            serde_json::json!("discard me"),
+        )
+        .await;
+
+        let listed = request
+            .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            listed.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            listed.text()
+        );
+        let proposals: serde_json::Value = listed.json();
+        assert_eq!(proposals.as_array().unwrap().len(), 1);
+        assert_eq!(proposals[0]["status"], "pending");
+        assert_eq!(proposals[0]["proposed"], "reject me");
+
+        let rejected = request
+            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            rejected.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            rejected.text()
+        );
+        assert_eq!(rejected.json::<serde_json::Value>()["changed"], 1);
+
+        let discarded = request
+            .post(&format!("/api/inference-jobs/{discarded_job}/discard"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            discarded.status_code(),
+            StatusCode::OK,
+            "response: {:?}",
+            discarded.text()
+        );
+        assert_eq!(discarded.json::<serde_json::Value>()["changed"], 1);
+
+        let other = setup_named(&ctx, "other-tenant", "other", "other@example.com").await;
+        let denied = request
+            .get(&format!("/api/inference-jobs/{rejected_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", other.key))
+            .await;
+        assert_eq!(
+            denied.status_code(),
+            StatusCode::FORBIDDEN,
+            "response: {:?}",
+            denied.text()
+        );
+    })
+    .await;
+}
+
+/// A terminal action that wins the per-job lock must prevent an overlapping confirmation from
+/// writing the entity. This uses two real PostgreSQL transactions rather than a sequential replay.
+#[tokio::test]
+async fn terminal_proposal_actions_serialize_against_confirmation() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let entity = create_entity(&request, &setup).await;
+        let db = ctx.shared_store.get::<DbHandle>().unwrap().clone();
+
+        for terminal_action in ["reject", "discard"] {
+            let job_id = Uuid::new_v4();
+            create_completed_proposal(
+                &ctx,
+                &setup,
+                entity,
+                job_id,
+                serde_json::json!(format!("must not apply: {terminal_action}")),
+            )
+            .await;
+
+            let terminal_db = db.clone();
+            let confirm_db = db.clone();
+            let terminal_setup = setup.workspace_id;
+            let terminal_tenant = setup.tenant_id;
+            let confirm_tenant = setup.tenant_id;
+            let barrier = Arc::new(tokio::sync::Barrier::new(2));
+            let confirm_barrier = barrier.clone();
+            // Hold the action lock before starting confirmation. The confirmation races in a
+            // separate task, but cannot pass the lock until this terminal action commits.
+            let terminal_txn = terminal_db
+                .tenant
+                .begin_for_workspace(terminal_tenant, terminal_setup)
+                .await
+                .expect("begin terminal proposal transaction");
+            yorishiro::db::lock_for_update(&terminal_txn, &format!("inference-proposals:{job_id}"))
+                .await
+                .expect("hold proposal action lock");
+            let confirm = tokio::spawn(async move {
+                let txn = confirm_db
+                    .tenant
+                    .begin_for_workspace(confirm_tenant, terminal_setup)
+                    .await
+                    .expect("begin confirmation transaction");
+                confirm_barrier.wait().await;
+                let result = yorishiro::ee::models::inference_proposals::confirm(
+                    &txn,
+                    terminal_setup,
+                    job_id,
+                    None,
+                )
+                .await;
+                if result.is_ok() {
+                    txn.commit().await.expect("commit confirmation");
+                }
+                result
+            });
+            barrier.wait().await;
+            let terminal_result = if terminal_action == "reject" {
+                yorishiro::ee::models::inference_proposals::reject(
+                    &terminal_txn,
+                    terminal_setup,
+                    job_id,
+                )
+                .await
+            } else {
+                yorishiro::ee::models::inference_proposals::discard(
+                    &terminal_txn,
+                    terminal_setup,
+                    job_id,
+                )
+                .await
+            }
+            .expect("terminal proposal action");
+            terminal_txn.commit().await.expect("commit terminal action");
+            let confirm_result = confirm.await.expect("join confirmation task");
+
+            assert_eq!(terminal_result.changed, 1);
+            assert!(
+                confirm_result.is_err(),
+                "confirmation must observe the terminal {terminal_action}"
+            );
+
+            let entity_after =
+                yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity)
+                    .await
+                    .expect("read entity after race");
+            assert_eq!(entity_after.data["summary"], serde_json::Value::Null);
+            let proposals = yorishiro::ee::models::inference_proposals::for_job(
+                &ctx.db,
+                setup.workspace_id,
+                job_id,
+            )
+            .await
+            .expect("read terminal proposal");
+            assert_eq!(
+                proposals[0].status.to_string(),
+                if terminal_action == "reject" {
+                    "rejected"
+                } else {
+                    "discarded"
+                }
+            );
         }
-    };
+    })
+    .await;
+}
 
-    sqlx::query("ROLLBACK")
-        .execute(&mut *blocker)
+#[tokio::test]
+async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    boot_request::<App, _, _>(|request, ctx| async move {
+        licence(&ctx);
+        let setup = setup(&ctx).await;
+        let entity = create_entity(&request, &setup).await;
+        let queued_job = Uuid::new_v4();
+        create_pending_proposal(&ctx, &setup, entity, queued_job).await;
+        let queued = request
+            .post(&format!("/api/inference-jobs/{queued_job}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            queued.status_code(),
+            StatusCode::CONFLICT,
+            "response: {:?}",
+            queued.text()
+        );
+
+        let failed_job = Uuid::new_v4();
+        create_pending_proposal(&ctx, &setup, entity, failed_job).await;
+        inference_jobs::fail(&ctx.db, failed_job, "provider failed")
+            .await
+            .expect("fail proposal job");
+        let failed = request
+            .post(&format!("/api/inference-jobs/{failed_job}/confirm"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        assert_eq!(
+            failed.status_code(),
+            StatusCode::CONFLICT,
+            "response: {:?}",
+            failed.text()
+        );
+
+        let listed = request
+            .get(&format!("/api/inference-jobs/{failed_job}/proposals"))
+            .add_header("Authorization", format!("Bearer {}", setup.key))
+            .await;
+        let proposals: serde_json::Value = listed.json();
+        assert_eq!(proposals[0]["status"], "discarded");
+    })
+    .await;
+}
+
+async fn create_pending_proposal(
+    ctx: &loco_rs::app::AppContext,
+    setup: &Setup,
+    entity: Uuid,
+    job_id: Uuid,
+) {
+    let db = ctx.shared_store.get::<DbHandle>().unwrap();
+    inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
         .await
-        .expect("release blocker lock");
-    // The pool does not consider this connection returned until it drops: the next
-    // begin_for_workspace call hangs until this one is, so it must go before that call.
-    drop(blocker);
-
-    result
-}
-
-/// `EXCLUSIVE` still admits the plain `SELECT` `entity_entities::get` runs inside `update`, so the
-/// failure lands specifically on `update`'s write, exercising `apply_answers`'s
-/// `Err(err) => Err(err)` arm rather than the one on the snapshot's own read.
-#[tokio::test]
-async fn an_infrastructure_failure_surfaces_as_itself_not_a_masked_abort_error() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let message = apply_answers_with_content_entities_locked(&request, &ctx, "EXCLUSIVE").await;
-        assert!(
-            message.contains("lock timeout"),
-            "expected the lock timeout itself, not a downstream error: {message}"
-        );
-        assert!(
-            !message.contains("transaction is aborted"),
-            "the old code's masked failure mode must not reappear: {message}"
-        );
-    })
-    .await;
-}
-
-/// `ACCESS EXCLUSIVE` also blocks `snapshot`'s own `INSERT ... SELECT`, isolating the failure to
-/// that statement instead of `update`'s.
-#[tokio::test]
-async fn an_infrastructure_failure_on_snapshot_surfaces_as_itself() {
-    if !super::super::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let message =
-            apply_answers_with_content_entities_locked(&request, &ctx, "ACCESS EXCLUSIVE").await;
-        assert!(
-            message.contains("lock timeout"),
-            "expected the lock timeout itself, not a downstream error: {message}"
-        );
-        assert!(
-            !message.contains("transaction is aborted"),
-            "the old code's masked failure mode must not reappear: {message}"
-        );
-    })
-    .await;
+        .expect("create proposal job");
+    inference_jobs::claim(&ctx.db, job_id)
+        .await
+        .expect("claim proposal job");
+    let txn = db
+        .tenant
+        .begin_for_workspace(setup.tenant_id, setup.workspace_id)
+        .await
+        .expect("begin tenant txn");
+    let schema =
+        yorishiro::models::schema_schemas::get_active_schema(&txn, setup.workspace_id, "note")
+            .await
+            .expect("active schema");
+    yorishiro::ee::models::inference_proposals::record_batch(
+        &txn,
+        setup.workspace_id,
+        job_id,
+        schema.id,
+        schema.version,
+        [(entity, "summary".into(), serde_json::json!("pending"))],
+    )
+    .await
+    .expect("record proposal");
+    txn.commit().await.expect("commit proposal");
 }
 
 /// `infer_job_status` is registered on its own path (`GET /api/inference-jobs/{job_id}`),

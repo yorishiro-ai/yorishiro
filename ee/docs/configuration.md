@@ -28,7 +28,17 @@ Loco provides application composition and queue extension points, but it does no
 Configure a workspace LLM key with `PUT /api/workspace/llm-key`, then start a fill with `POST /api/schemas/active/{name}/infer-fill`.
 The response contains a durable `job_id` and the initial `queued` status.
 Poll `GET /api/inference-jobs/{job_id}` with a read-scoped key until the status is `completed` or `failed`.
-The job record stores its status, applied and skipped counts, and a serialized error message, so polling continues to work after a server restart.
+The job record stores its status, proposed, applied, and skipped counts, and a serialized error message, so polling continues to work after a server restart.
+Infer-fill stores each model answer as a `pending` proposal instead of writing guessed data to the entity.
+List proposals with `GET /api/inference-jobs/{job_id}/proposals`, then explicitly confirm, reject, or discard them with `POST /api/inference-jobs/{job_id}/confirm`, `/reject`, or `/discard`.
+Confirmation validates the merged entity against the target schema, snapshots accepted writes for `POST /api/migration-jobs/{job_id}/undo`, and marks stale or invalid proposals without changing the entity.
+Proposal delivery is idempotent for the same job, entity, schema version, and source field.
+All proposal actions require the workspace's schema scope, while listing requires read scope.
+The workspace key is never included in job records, proposal responses, or logs, and a missing workspace key rejects the request before a job is created.
+Proposal confirmation, rejection, and discard are allowed only after the parent job is `completed`.
+If a job enters `failed`, its pending proposals are automatically marked `discarded` and cannot be confirmed.
+Completed proposals remain reviewable until an explicit confirm, reject, or discard action; there is currently no automatic retention cleanup.
+Inference jobs do not currently support expiry or cancellation, so those states are not accepted by the API or stored in the database.
 The job is claimed only while it is `queued`.
 If a worker crashes after claiming it, the durable row remains `running` and is not automatically retried, because retrying could start a second inference while the original worker is still active.
 Operators must reconcile a `running` job before retrying it through an operational procedure.
