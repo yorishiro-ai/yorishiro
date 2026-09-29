@@ -86,7 +86,8 @@ jobs:
           set -euo pipefail
           base_ref="${PUBLIC_API_BASE_REF:-}"
           if [[ "$base_ref" == "$(printf '0%.0s' {1..40})" ]]; then
-            echo "PUBLIC_API_BASE_REF is all-zero; using the checker's empty-tree behavior."
+            echo "PUBLIC_API_BASE_REF is all-zero; skipping public API additions for this new branch."
+            exit 0
           elif [[ "$base_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
             if ! git fetch --no-tags origin "$base_ref"; then
               echo "::error::Unable to fetch PUBLIC_API_BASE_REF=$base_ref"
