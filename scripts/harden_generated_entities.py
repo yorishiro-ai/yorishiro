@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remove generated Debug leaks from entities that contain secret columns."""
+"""Remove generated Debug and serialization leaks from secret-bearing entities."""
 
 from __future__ import annotations
 
@@ -9,18 +9,38 @@ from pathlib import Path
 
 
 ENTITY_DIR = Path("src/models/_entities")
-SECRET_FIELDS = {
+SUSPICIOUS_EXACT_FIELDS = {
     "access_token",
     "api_key",
+    "api_token",
+    "authorization",
     "client_secret",
     "id_token",
+    "password",
     "private_key",
     "refresh_token",
     "secret",
+    "service_key",
     "signing_key",
     "token",
     "webhook_secret",
 }
+SUSPICIOUS_SUFFIXES = (
+    "_access_token",
+    "_api_key",
+    "_api_token",
+    "_authorization",
+    "_client_secret",
+    "_id_token",
+    "_password",
+    "_private_key",
+    "_refresh_token",
+    "_secret",
+    "_service_key",
+    "_signing_key",
+    "_token",
+    "_webhook_secret",
+)
 
 
 def model_span(source: str) -> tuple[int, int] | None:
@@ -30,7 +50,7 @@ def model_span(source: str) -> tuple[int, int] | None:
     return match.start("body"), match.end("body")
 
 
-def secret_fields(source: str) -> list[str]:
+def model_fields(source: str) -> list[str]:
     span = model_span(source)
     if span is None:
         return []
@@ -38,22 +58,42 @@ def secret_fields(source: str) -> list[str]:
     return re.findall(r"^\s*pub\s+(\w+)\s*:", body, re.MULTILINE).copy()
 
 
-def harden_model(source: str) -> str:
-    span = model_span(source)
-    if span is None:
-        return source
+def suspicious_field(field: str) -> bool:
+    return field in SUSPICIOUS_EXACT_FIELDS or field.endswith(SUSPICIOUS_SUFFIXES)
 
-    fields = [field for field in secret_fields(source) if field in SECRET_FIELDS]
-    if not fields:
-        return source
 
-    struct_start = source.find("pub struct Model")
+def public_fields(source: str) -> list[str]:
+    return re.findall(r"^\s*pub\s+(\w+)\s*:", source, re.MULTILINE).copy()
+
+
+def model_derive(source: str, struct_start: int) -> tuple[int, int, str]:
     derive_start = source.rfind("#[derive(", 0, struct_start)
     derive_end = source.find(")]", derive_start, struct_start)
     if derive_start < 0 or derive_end < 0:
         raise ValueError("Model derive is missing")
+    derive = source[derive_start : derive_end + 2]
+    if "DeriveEntityModel" not in derive:
+        raise ValueError("Model derive is missing or unsupported")
+    return derive_start, derive_end, derive
 
-    derives = source[derive_start : derive_end + 2]
+
+def harden_model(source: str) -> str:
+    span = model_span(source)
+    if span is None:
+        suspicious = [field for field in public_fields(source) if suspicious_field(field)]
+        if suspicious:
+            raise ValueError(
+                "unsupported generated entity shape for suspicious fields: "
+                + ", ".join(suspicious)
+            )
+        return source
+
+    fields = [field for field in model_fields(source) if suspicious_field(field)]
+    if not fields:
+        return source
+
+    struct_start = source.find("pub struct Model")
+    derive_start, derive_end, derives = model_derive(source, struct_start)
     derive_items = [item.strip() for item in derives[9:-2].split(",")]
     derive_items = [item for item in derive_items if item != "Debug"]
     replacement = "#[derive(" + ", ".join(derive_items) + ")]"
@@ -79,15 +119,19 @@ def harden_model(source: str) -> str:
 def verify(source: str, path: Path) -> None:
     span = model_span(source)
     if span is None:
+        suspicious = [field for field in public_fields(source) if suspicious_field(field)]
+        if suspicious:
+            raise ValueError(
+                f"{path}: unsupported generated entity shape for suspicious fields: "
+                + ", ".join(suspicious)
+            )
         return
-    fields = [field for field in secret_fields(source) if field in SECRET_FIELDS]
+    fields = [field for field in model_fields(source) if suspicious_field(field)]
     if not fields:
         return
 
     struct_start = source.find("pub struct Model")
-    derive_start = source.rfind("#[derive(", 0, struct_start)
-    derive_end = source.find(")]", derive_start, struct_start)
-    derive = source[derive_start : derive_end + 2]
+    _, _, derive = model_derive(source, struct_start)
     if re.search(r"(?:^|,\s*)Debug(?:,|\))", derive):
         raise ValueError(f"{path}: secret-bearing Model still derives Debug")
     body = source[slice(*model_span(source))]
@@ -105,9 +149,9 @@ def main() -> int:
     for path in sorted(ENTITY_DIR.glob("*.rs")):
         original = path.read_text()
         hardened = harden_model(original)
+        verify(hardened, path)
         if hardened != original:
             path.write_text(hardened)
-        verify(hardened, path)
     return 0
 
 

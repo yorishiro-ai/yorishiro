@@ -69,6 +69,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check generated entity hardener
+        run: python3 scripts/test_harden_generated_entities.py
+
       - name: Check test harness usage
         run: |
           # Only tests/requests/mod.rs may call the raw loco helpers directly.
@@ -267,6 +270,7 @@ jobs:
           count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
+          python3 scripts/harden_generated_entities.py
           which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
           count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           if [ "$count" -lt 10 ]; then

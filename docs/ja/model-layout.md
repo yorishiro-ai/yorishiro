@@ -27,7 +27,10 @@ CI は 10 個以上のエンティティファイルが生成されることと�
 
 SeaORM 2.0.4 には、生成される `Debug` derive をテーブルごとに置き換える設定がありません。
 そのため `make entities` はコード生成後に `scripts/harden_generated_entities.py` を実行します。
-この後処理は秘密情報を示す名前の生成モデルフィールドを検出し、モデルの derive から `Debug` を削除し、該当フィールドに `serde(skip_serializing)` を追加します。
+この後処理は明示的な疑わしい名前のポリシーを使います。
+認証情報を表す完全一致名と、`_api_token`、`_service_key`、`_password`、`_authorization` などの認証情報サフィックスを保護し、`key` や `*_hash` のような一般的な名前は対象にしません。
+モデルの derive から `Debug` を削除し、疑わしいフィールドすべてに `serde(skip_serializing)` を追加します。
+疑わしいフィールドが対応していない生成形式に現れた場合は、露出を黙って許可せず後処理を失敗させます。
 アプリケーションが所有する `src/models/identity/workspace_llm_keys.rs` と `src/models/identity/workspace_embedding_keys.rs` は `api_key` を含めない安全な `Debug` 実装を提供し、生成されたクエリと書き込みの型はそのまま維持します。
 `_entities` は手で編集せず、生成コマンドを変更する場合も生成後のハードニング処理をエンティティのワークフローに残してください。
 

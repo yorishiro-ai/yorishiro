@@ -26,7 +26,9 @@ All generated files were byte-identical to the baseline after restoring those th
 
 SeaORM 2.0.4 does not provide a per-table option to replace the generated `Debug` derive.
 The `make entities` target therefore runs `scripts/harden_generated_entities.py` after code generation.
-That post-processor detects generated model fields with secret names, removes `Debug` from the model derive, and adds `serde(skip_serializing)` to those fields.
+That post-processor uses an explicit suspicious-name policy: exact credential names and qualified credential suffixes such as `_api_token`, `_service_key`, `_password`, and `_authorization` are protected, while generic names such as `key` and `*_hash` are not.
+It removes `Debug` from the model derive and adds `serde(skip_serializing)` to every suspicious field.
+If a suspicious field appears in an unsupported generated shape, the post-processor fails instead of silently leaving the field exposed.
 The application-owned modules `src/models/identity/workspace_llm_keys.rs` and `src/models/identity/workspace_embedding_keys.rs` provide safe `Debug` implementations that omit `api_key` while preserving the generated query and write types.
 Do not edit `_entities` by hand, and keep the post-generation hardening step in the entity workflow when changing the generator command.
 
