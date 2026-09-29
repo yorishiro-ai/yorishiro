@@ -74,7 +74,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           status=0
-          cargo outdated --workspace --root-deps-only --format json > /tmp/outdated.json || status=$?
+          # cargo-outdated resolves latest direct dependency candidates in a temporary manifest.
+          # Its latest libsqlite3-sys candidate conflicts with SQLx 0.9's <0.38.0 constraint,
+          # while this application must retain the direct =0.37.0 FFI pin for sqlite-vec.
+          # Exclude only that native-link package from candidate construction, not the workspace
+          # members or any other direct dependency report.
+          cargo outdated --workspace --root-deps-only --exclude libsqlite3-sys --format json > /tmp/outdated.json || status=$?
           if [ "$status" -ne 0 ]; then
             echo "::error::cargo outdated exited $status -- see the step log above. Not reporting this as 'nothing outdated'."
             exit 1
