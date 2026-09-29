@@ -26,6 +26,8 @@ use crate::models::schema_schemas;
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InferFillArgs {
+    #[serde(default)]
+    pub(crate) lifecycle_id: Option<Uuid>,
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub schema_name: String,
@@ -179,6 +181,15 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
+        if let Some(id) = args.lifecycle_id
+            && !crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id)
+                .await
+                .unwrap_or(false)
+        {
+            return Err(loco_rs::Error::Message(
+                "worker concurrency limit reached".into(),
+            ));
+        }
         let job_id = args.job_id;
         let claimed = inference_jobs::claim(&self.ctx.db, job_id)
             .await
@@ -195,6 +206,15 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 inference_jobs::complete_proposals(&self.ctx.db, job_id, proposed, skipped)
                     .await
                     .internal()?;
+                if let Some(id) = args.lifecycle_id {
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                        &self.ctx.db,
+                        id,
+                        "completed",
+                        None,
+                    )
+                    .await;
+                }
                 Ok(())
             }
             Err(e) => {
@@ -202,6 +222,15 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     inference_jobs::fail(&self.ctx.db, job_id, &e.to_string()).await
                 {
                     tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
+                }
+                if let Some(id) = args.lifecycle_id {
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                        &self.ctx.db,
+                        id,
+                        "failed",
+                        Some(&e.to_string()),
+                    )
+                    .await;
                 }
                 Err(e)
             }
@@ -240,6 +269,7 @@ pub async fn enqueue_infer_fill(
             enqueue_infer_fill_with_dispatcher(
                 ctx,
                 InferFillArgs {
+                    lifecycle_id: None,
                     job_id,
                     workspace_id,
                     schema_name,
@@ -302,6 +332,7 @@ mod tests {
     async fn dispatches_the_original_args_and_returns_success() {
         let ctx = crate::workers::dispatch::test_context().await;
         let args = InferFillArgs {
+            lifecycle_id: None,
             job_id: Uuid::now_v7(),
             workspace_id: Uuid::now_v7(),
             schema_name: "note".into(),
@@ -334,6 +365,7 @@ mod tests {
         let error = enqueue_infer_fill_with_dispatcher(
             &ctx,
             InferFillArgs {
+                lifecycle_id: None,
                 job_id: Uuid::now_v7(),
                 workspace_id: Uuid::now_v7(),
                 schema_name: "note".into(),

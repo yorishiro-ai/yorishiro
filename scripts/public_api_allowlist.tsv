@@ -61,3 +61,5 @@ src/controllers/openapi.rs	field	ProposalConfirmResponse::job_id	OpenAPI confirm
 src/controllers/openapi.rs	field	ProposalConfirmResponse::confirmed	OpenAPI confirmation response field.
 src/controllers/openapi.rs	field	ProposalConfirmResponse::stale	OpenAPI confirmation response field.
 src/controllers/openapi.rs	field	ProposalConfirmResponse::invalid	OpenAPI confirmation response field.
+src/workers/embedding_sync.rs	field	EmbeddingSyncArgs::lifecycle_id	Optional internal lifecycle correlation carried through the existing serialized worker payload.
+src/workers/reindex.rs	field	ReindexArgs::lifecycle_id	Optional internal lifecycle correlation carried through the existing serialized worker payload.

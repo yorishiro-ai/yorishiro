@@ -33,6 +33,8 @@ use crate::workers::embedding_sync::WorkerClass;
 /// tag-restricted worker processes dequeue only their own jobs.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReindexArgs {
+    #[serde(default)]
+    pub lifecycle_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
 }
@@ -42,6 +44,15 @@ pub struct ReindexArgs {
 ///
 /// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
+    if let Some(id) = args.lifecycle_id
+        && !crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
+            .await
+            .unwrap_or(false)
+    {
+        return Err(loco_rs::Error::Message(
+            "worker concurrency limit reached".into(),
+        ));
+    }
     // Build and verify the provider: a reindex fails fast if the provider is
     // unconfigured, same as the task.
     let provider = embedding::build_embedding_provider()
@@ -80,6 +91,10 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         )));
     }
 
+    if let Some(id) = args.lifecycle_id {
+        let _ = crate::models::queue_job_lifecycles::Entity::finish(&ctx.db, id, "completed", None)
+            .await;
+    }
     Ok(())
 }
 
@@ -125,7 +140,23 @@ macro_rules! reindex_worker_for_class {
             }
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-                perform_reindex(&self.ctx, &args).await
+                let result = perform_reindex(&self.ctx, &args).await;
+                if let Some(id) = args.lifecycle_id {
+                    let status = if result.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    };
+                    let message = result.as_ref().err().map(ToString::to_string);
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                        &self.ctx.db,
+                        id,
+                        status,
+                        message.as_deref(),
+                    )
+                    .await;
+                }
+                result
             }
         }
     };
@@ -181,6 +212,7 @@ pub(crate) async fn enqueue_reindex_with_dispatcher(
         .dispatch(
             ctx,
             ReindexArgs {
+                lifecycle_id: None,
                 workspace_id,
                 worker_class,
             },
@@ -229,6 +261,7 @@ mod tests {
     async fn dispatches_the_original_args_and_returns_success() {
         let ctx = crate::workers::dispatch::test_context().await;
         let args = ReindexArgs {
+            lifecycle_id: None,
             workspace_id: Uuid::now_v7(),
             worker_class: WorkerClass::TenantPrivate,
         };
@@ -258,6 +291,7 @@ mod tests {
         let error = enqueue_for_class_with_dispatcher(
             &ctx,
             ReindexArgs {
+                lifecycle_id: None,
                 workspace_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,
             },

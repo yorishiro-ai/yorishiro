@@ -14,6 +14,7 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
+use sea_orm::EntityTrait;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -26,12 +27,41 @@ use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
 /// The single production adapter at Loco's worker integration point.
 pub(crate) struct LocoJobDispatcher;
 
+async fn queue_concurrency_policy(
+    ctx: &AppContext,
+    workspace_id: uuid::Uuid,
+    class: &str,
+) -> (Option<String>, Option<i32>) {
+    let workspace =
+        crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .ok()
+            .flatten();
+    let Some(workspace) = workspace else {
+        return (None, None);
+    };
+    let plan = crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
+        .one(&ctx.db)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|billing| billing.plan)
+        .and_then(|value| crate::ee::services::plan::Plan::from_db_str(&value).ok());
+    let limit = match class {
+        "official" => plan.map(|value| value.compute_policy().base_official_concurrency as i32),
+        "tenant_private" | "shared" => Some(1),
+        _ => None,
+    };
+    (plan.map(|value| value.as_str().to_owned()), limit)
+}
+
 #[async_trait]
 impl EmbeddingSyncDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
         ctx: &AppContext,
-        args: crate::workers::embedding_sync::EmbeddingSyncArgs,
+        mut args: crate::workers::embedding_sync::EmbeddingSyncArgs,
     ) -> loco_rs::Result<String> {
         use crate::workers::embedding_sync::{
             EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
@@ -39,12 +69,57 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         };
         use loco_rs::bgworker::BackgroundWorker;
 
-        match args.worker_class {
+        let lifecycle_id = uuid::Uuid::now_v7();
+        let worker_class = args.worker_class.as_db_str();
+        let (plan, concurrency_limit) =
+            queue_concurrency_policy(ctx, args.workspace_id, worker_class).await;
+        let concurrency_key = plan.as_deref().map_or_else(
+            || worker_class.to_owned(),
+            |plan| format!("{worker_class}:{plan}"),
+        );
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            &ctx.db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "embedding_sync",
+                worker_class,
+                workspace_id: Some(args.workspace_id),
+                plan: plan.as_deref(),
+                concurrency_key: Some(&concurrency_key),
+                concurrency_limit,
+            },
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        args.lifecycle_id = Some(lifecycle_id);
+        let result = match args.worker_class {
             WorkerClass::TenantPrivate => {
                 EmbeddingSyncWorkerTenantPrivate::perform_later(ctx, args).await
             }
             WorkerClass::Official => EmbeddingSyncWorkerOfficial::perform_later(ctx, args).await,
             WorkerClass::Shared => EmbeddingSyncWorkerShared::perform_later(ctx, args).await,
+        };
+        match result {
+            Ok(job_id) => {
+                crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
+                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                Ok(job_id)
+            }
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    "unavailable",
+                    Some(&error.to_string()),
+                )
+                .await;
+                Err(error)
+            }
         }
     }
 }
@@ -54,7 +129,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
         ctx: &AppContext,
-        args: crate::workers::reindex::ReindexArgs,
+        mut args: crate::workers::reindex::ReindexArgs,
     ) -> loco_rs::Result<String> {
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::{
@@ -62,12 +137,57 @@ impl ReindexDispatcher for LocoJobDispatcher {
         };
         use loco_rs::bgworker::BackgroundWorker;
 
-        match args.worker_class {
+        let lifecycle_id = uuid::Uuid::now_v7();
+        let worker_class = args.worker_class.as_db_str();
+        let (plan, concurrency_limit) =
+            queue_concurrency_policy(ctx, args.workspace_id, worker_class).await;
+        let concurrency_key = plan.as_deref().map_or_else(
+            || worker_class.to_owned(),
+            |plan| format!("{worker_class}:{plan}"),
+        );
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            &ctx.db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "reindex",
+                worker_class,
+                workspace_id: Some(args.workspace_id),
+                plan: plan.as_deref(),
+                concurrency_key: Some(&concurrency_key),
+                concurrency_limit,
+            },
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        args.lifecycle_id = Some(lifecycle_id);
+        let result = match args.worker_class {
             WorkerClass::TenantPrivate => {
                 ReindexWorkerTenantPrivate::perform_later(ctx, args).await
             }
             WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args).await,
             WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args).await,
+        };
+        match result {
+            Ok(job_id) => {
+                crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
+                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                Ok(job_id)
+            }
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    "unavailable",
+                    Some(&error.to_string()),
+                )
+                .await;
+                Err(error)
+            }
         }
     }
 }
@@ -77,11 +197,50 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
         ctx: &AppContext,
-        args: crate::ee::workers::infer_fill::InferFillArgs,
+        mut args: crate::ee::workers::infer_fill::InferFillArgs,
     ) -> loco_rs::Result<String> {
         use loco_rs::bgworker::BackgroundWorker;
 
-        crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await
+        let lifecycle_id = uuid::Uuid::now_v7();
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            &ctx.db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "infer_fill",
+                worker_class: "shared",
+                workspace_id: Some(args.workspace_id),
+                plan: None,
+                concurrency_key: Some("shared"),
+                concurrency_limit: Some(1),
+            },
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        args.lifecycle_id = Some(lifecycle_id);
+        let result =
+            crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await;
+        match result {
+            Ok(job_id) => {
+                crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
+                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                Ok(job_id)
+            }
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    "unavailable",
+                    Some(&error.to_string()),
+                )
+                .await;
+                Err(error)
+            }
+        }
     }
 }
 

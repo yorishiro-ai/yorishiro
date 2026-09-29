@@ -134,6 +134,8 @@ pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
 /// A deleted entity is not found on that re-read, and the job is a no-op.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
+    #[serde(default)]
+    pub lifecycle_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
     pub worker_class: WorkerClass,
@@ -145,6 +147,15 @@ pub struct EmbeddingSyncArgs {
 ///
 /// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> loco_rs::Result<()> {
+    if let Some(id) = args.lifecycle_id
+        && !crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
+            .await
+            .unwrap_or(false)
+    {
+        return Err(loco_rs::Error::Message(
+            "worker concurrency limit reached".into(),
+        ));
+    }
     let provider = match crate::controllers::extractors::resolve_embedding_provider(
         ctx,
         args.workspace_id,
@@ -227,7 +238,23 @@ macro_rules! embedding_sync_worker_for_class {
             }
 
             async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-                perform_embedding_sync(&self.ctx, &args).await
+                let result = perform_embedding_sync(&self.ctx, &args).await;
+                if let Some(id) = args.lifecycle_id {
+                    let status = if result.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    };
+                    let message = result.as_ref().err().map(ToString::to_string);
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                        &self.ctx.db,
+                        id,
+                        status,
+                        message.as_deref(),
+                    )
+                    .await;
+                }
+                result
             }
         }
     };
@@ -293,6 +320,7 @@ pub(crate) async fn enqueue_after_write_with_dispatcher(
         }
     };
     let args = EmbeddingSyncArgs {
+        lifecycle_id: None,
         workspace_id,
         entity_id,
         worker_class,
@@ -331,6 +359,7 @@ mod tests {
     async fn dispatches_the_original_args_and_returns_success() {
         let ctx = crate::workers::dispatch::test_context().await;
         let args = EmbeddingSyncArgs {
+            lifecycle_id: None,
             workspace_id: Uuid::now_v7(),
             entity_id: Uuid::now_v7(),
             worker_class: WorkerClass::Official,
@@ -362,6 +391,7 @@ mod tests {
         let error = enqueue_for_class_with_dispatcher(
             &ctx,
             EmbeddingSyncArgs {
+                lifecycle_id: None,
                 workspace_id: Uuid::now_v7(),
                 entity_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,

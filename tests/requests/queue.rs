@@ -112,6 +112,7 @@ where
 
 fn args_for(class: WorkerClass) -> EmbeddingSyncArgs {
     EmbeddingSyncArgs {
+        lifecycle_id: None,
         workspace_id: Uuid::now_v7(),
         entity_id: Uuid::now_v7(),
         worker_class: class,
@@ -202,6 +203,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
             reindex::enqueue_for_class(
                 &ctx,
                 ReindexArgs {
+                    lifecycle_id: None,
                     workspace_id: Uuid::now_v7(),
                     worker_class: class,
                 },

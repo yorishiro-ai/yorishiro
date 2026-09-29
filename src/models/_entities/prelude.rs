@@ -12,6 +12,7 @@ pub use super::entity_relations::Entity as EntityRelations;
 pub use super::entity_snapshots::Entity as EntitySnapshots;
 pub use super::inference_jobs::Entity as InferenceJobs;
 pub use super::inference_proposals::Entity as InferenceProposals;
+pub use super::queue_job_lifecycles::Entity as QueueJobLifecycles;
 pub use super::schema_schemas::Entity as SchemaSchemas;
 pub use super::stripe_events::Entity as StripeEvents;
 pub use super::system_maintenance::Entity as SystemMaintenance;
