@@ -3,7 +3,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "workspace_embedding_keys")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -13,6 +13,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub model: String,
     #[sea_orm(column_type = "Text")]
+    #[serde(skip_serializing)]
     pub api_key: String,
     pub dimensions: i32,
     pub send_dimensions_param: bool,
