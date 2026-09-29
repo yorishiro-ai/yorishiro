@@ -244,6 +244,7 @@ pub async fn reject(
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
+    lock_job_for_action(conn, job_id).await?;
     require_completed_job(conn, workspace_id, job_id).await?;
     Ok(ProposalActionReport {
         job_id,
@@ -256,6 +257,7 @@ pub async fn discard(
     workspace_id: Uuid,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
+    lock_job_for_action(conn, job_id).await?;
     require_completed_job(conn, workspace_id, job_id).await?;
     Ok(ProposalActionReport {
         job_id,
@@ -269,10 +271,8 @@ pub async fn confirm(
     job_id: Uuid,
     updated_by: Option<Uuid>,
 ) -> Result<ConfirmReport, YorishiroError> {
+    lock_job_for_action(conn, job_id).await?;
     require_completed_job(conn, workspace_id, job_id).await?;
-    crate::db::lock_for_update(conn, &format!("inference-proposals:{job_id}"))
-        .await
-        .internal()?;
     let pending: Vec<ProposalRecord> = for_job(conn, workspace_id, job_id)
         .await?
         .into_iter()
@@ -302,7 +302,15 @@ pub async fn confirm(
         let existing = match entity_entities::get(conn, workspace_id, entity_id).await {
             Ok(value) => value,
             Err(YorishiroError::NotFound { .. }) => {
-                mark_entity(conn, workspace_id, job_id, entity_id, STALE).await?;
+                ensure_entity_marked(
+                    conn,
+                    workspace_id,
+                    job_id,
+                    entity_id,
+                    STALE,
+                    proposals.len(),
+                )
+                .await?;
                 stale += proposals.len() as i64;
                 continue;
             }
@@ -317,13 +325,29 @@ pub async fn confirm(
                     .is_none_or(|object| object.contains_key(&proposal.source_field))
             });
         if stale_entity {
-            mark_entity(conn, workspace_id, job_id, entity_id, STALE).await?;
+            ensure_entity_marked(
+                conn,
+                workspace_id,
+                job_id,
+                entity_id,
+                STALE,
+                proposals.len(),
+            )
+            .await?;
             stale += proposals.len() as i64;
             continue;
         }
 
         let Some(object) = existing.data.as_object() else {
-            mark_entity(conn, workspace_id, job_id, entity_id, INVALID).await?;
+            ensure_entity_marked(
+                conn,
+                workspace_id,
+                job_id,
+                entity_id,
+                INVALID,
+                proposals.len(),
+            )
+            .await?;
             invalid += proposals.len() as i64;
             continue;
         };
@@ -332,14 +356,30 @@ pub async fn confirm(
             data.insert(proposal.source_field.clone(), proposal.proposed.clone());
         }
         let Some(type_def) = target.definition.entity_types.get(&existing.entity_type) else {
-            mark_entity(conn, workspace_id, job_id, entity_id, INVALID).await?;
+            ensure_entity_marked(
+                conn,
+                workspace_id,
+                job_id,
+                entity_id,
+                INVALID,
+                proposals.len(),
+            )
+            .await?;
             invalid += proposals.len() as i64;
             continue;
         };
         match entity_entities::validate_data(type_def, &Value::Object(data.clone())) {
             Ok(()) => {}
             Err(YorishiroError::ValidationFailed { .. }) => {
-                mark_entity(conn, workspace_id, job_id, entity_id, INVALID).await?;
+                ensure_entity_marked(
+                    conn,
+                    workspace_id,
+                    job_id,
+                    entity_id,
+                    INVALID,
+                    proposals.len(),
+                )
+                .await?;
                 invalid += proposals.len() as i64;
                 continue;
             }
@@ -359,11 +399,27 @@ pub async fn confirm(
         .await?
         {
             entity_entities::delete_snapshot(conn, workspace_id, entity_id, job_id).await?;
-            mark_entity(conn, workspace_id, job_id, entity_id, STALE).await?;
+            ensure_entity_marked(
+                conn,
+                workspace_id,
+                job_id,
+                entity_id,
+                STALE,
+                proposals.len(),
+            )
+            .await?;
             stale += proposals.len() as i64;
             continue;
         }
-        mark_entity(conn, workspace_id, job_id, entity_id, CONFIRMED).await?;
+        ensure_entity_marked(
+            conn,
+            workspace_id,
+            job_id,
+            entity_id,
+            CONFIRMED,
+            proposals.len(),
+        )
+        .await?;
         confirmed += proposals.len() as i64;
     }
 
@@ -373,6 +429,15 @@ pub async fn confirm(
         stale,
         invalid,
     })
+}
+
+async fn lock_job_for_action(
+    conn: &impl ConnectionTrait,
+    job_id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(conn, &format!("inference-proposals:{job_id}"))
+        .await
+        .internal()
 }
 
 async fn lock_entity_for_confirmation(
@@ -392,14 +457,15 @@ async fn lock_entity_for_confirmation(
     Ok(())
 }
 
-async fn mark_entity(
+async fn ensure_entity_marked(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
     entity_id: Uuid,
     status: &str,
+    expected: usize,
 ) -> Result<(), YorishiroError> {
-    Entity::update_many()
+    let result = Entity::update_many()
         .col_expr(Column::Status, Expr::value(status))
         .col_expr(Column::UpdatedAt, Expr::value(chrono::Utc::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -409,5 +475,10 @@ async fn mark_entity(
         .exec(conn)
         .await
         .internal()?;
+    if result.rows_affected as usize != expected {
+        return Err(YorishiroError::Conflict {
+            message: format!("inference job '{job_id}' changed while confirming its proposals"),
+        });
+    }
     Ok(())
 }
