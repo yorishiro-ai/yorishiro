@@ -85,7 +85,7 @@ jobs:
         run: make public-api-check
         env:
           PUBLIC_API_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          PUBLIC_API_HEAD_REF: ${{ github.sha }}
+          PUBLIC_API_HEAD_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Check for allow(dead_code)
         run: |
