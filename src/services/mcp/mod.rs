@@ -509,8 +509,6 @@ mod tests {
             names.len(),
             "duplicate {label} MCP tool names: {names:?}"
         );
-        println!("{label} MCP tools: {names:?}");
-
         for tool in tools {
             assert!(
                 tool.description

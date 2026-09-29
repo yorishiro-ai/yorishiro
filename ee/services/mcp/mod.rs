@@ -52,8 +52,6 @@ mod tests {
             assert_eq!(schema["type"], "object");
             assert!(jsonschema::meta::options().is_valid(&schema));
         }
-        println!("enterprise MCP tools: {sorted_names:?}");
-
         let docs = include_str!("../../../docs/en/mcp-tools.md");
         let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
         let end = "<!-- END GENERATED MCP INVENTORY -->";
