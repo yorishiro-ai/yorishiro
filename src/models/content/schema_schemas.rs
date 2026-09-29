@@ -385,15 +385,7 @@ pub async fn create_schema(
     use super::_entities::schema_schemas::Column;
 
     validate_definition(&definition)?;
-    tracing::debug!("create_schema: validation OK");
-
     let name = definition.name.clone();
-    tracing::debug!(
-        "create_schema: name={}, ws={}, tenant={}",
-        name,
-        workspace_id,
-        tenant_id
-    );
 
     lock_version(conn, workspace_id, &name).await?;
 
