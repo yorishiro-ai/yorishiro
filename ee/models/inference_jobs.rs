@@ -194,9 +194,24 @@ pub(crate) async fn reconcile_attempt(
         txn.rollback().await.internal()?;
         return Ok(false);
     }
-    if row.attempt != target_attempt - 1
-        || row.status == InferenceJobStatus::Completed.as_db_str()
-        || row.status == InferenceJobStatus::Failed.as_db_str()
+    if row.status == InferenceJobStatus::Failed.as_db_str() && row.attempt == target_attempt {
+        let result = Entity::update_many()
+            .col_expr(
+                Column::Status,
+                Expr::value(InferenceJobStatus::Running.as_db_str()),
+            )
+            .col_expr(Column::Error, Expr::value(Option::<String>::None))
+            .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+            .filter(Column::Id.eq(id))
+            .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
+            .filter(Column::Attempt.eq(target_attempt))
+            .exec(&txn)
+            .await
+            .internal()?;
+        txn.commit().await.internal()?;
+        return Ok(result.rows_affected == 1);
+    }
+    if row.attempt != target_attempt - 1 || row.status == InferenceJobStatus::Completed.as_db_str()
     {
         txn.rollback().await.internal()?;
         return Ok(false);
@@ -364,4 +379,58 @@ async fn validate_existing_status(
         InferenceJobRecord::try_from(row)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{ActiveModelTrait, Database, Set};
+
+    #[tokio::test]
+    async fn reconcile_recovers_after_failure_before_retry() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let tenant = crate::models::_entities::tenant_tenants::ActiveModel {
+            name: Set("reconcile-tenant".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let workspace = crate::models::_entities::workspace_workspaces::ActiveModel {
+            tenant_id: Set(tenant.id),
+            name: Set("reconcile-workspace".into()),
+            status: Set("active".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let id = Uuid::now_v7();
+        create(&db, id, workspace.id, "notes").await.unwrap();
+        assert!(claim(&db, id).await.unwrap());
+        let attempt = get(&db, id).await.unwrap().unwrap().attempt;
+        assert!(
+            fail_attempt(&db, id, attempt, "provider failed")
+                .await
+                .unwrap()
+        );
+        assert!(reconcile_attempt(&db, id, attempt).await.unwrap());
+        assert!(!fail_attempt(&db, id, attempt - 1, "stale").await.unwrap());
+        assert!(
+            complete_proposals_attempt(&db, id, attempt, 2, 0)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !complete_proposals_attempt(&db, id, attempt, 9, 0)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            get(&db, id).await.unwrap().unwrap().status,
+            InferenceJobStatus::Completed
+        );
+    }
 }
