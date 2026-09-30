@@ -33,7 +33,10 @@ If the queue provider is absent or unreachable, the row is marked `unavailable` 
 
 Run workers with the existing class tags.
 Do not start an untagged worker and expect it to consume class-routed jobs.
-Inspect rows grouped by `worker_class` and `status`, then compare `queue_start_seconds` values with the plan objective.
-An increasing `queued` or `unavailable` count means capacity or provider health must be restored before an SLA conclusion is made.
+The admission path emits structured tracing fields `queue_start_seconds` and `lifecycle_id` when a job starts.
+Export or filter those existing tracing events in the deployment's log/observability system; no separate metrics endpoint is added by this issue.
+Capacity deferrals emit `worker capacity saturated`, retry transitions emit `retrying`, and provider or policy failures emit `unavailable` with a diagnostic field.
+Inspect lifecycle rows grouped by `worker_class` and `status`, then compare recorded start times with the plan objective.
+An increasing `queued`, `retrying`, or `unavailable` count means capacity or provider health must be restored before an SLA conclusion is made.
 
 This issue does not add numeric priority, preemption, burst credits, RabbitMQ, SQS, contributed compute, or WASM execution.

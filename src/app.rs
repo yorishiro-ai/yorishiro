@@ -31,29 +31,35 @@ async fn queue_concurrency_policy(
     ctx: &AppContext,
     workspace_id: uuid::Uuid,
     class: &str,
-) -> (Option<String>, Option<i32>) {
+) -> Result<(String, i32), String> {
     let workspace =
         crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
             .one(&ctx.db)
             .await
-            .ok()
-            .flatten();
+            .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
     let Some(workspace) = workspace else {
-        return (None, None);
+        return Err("queue policy unavailable: workspace does not exist".into());
     };
     let plan = crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
         .one(&ctx.db)
         .await
-        .ok()
-        .flatten()
-        .and_then(|billing| billing.plan)
-        .and_then(|value| crate::ee::services::plan::Plan::from_db_str(&value).ok());
+        .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?
+        .ok_or_else(|| "queue policy unavailable: billing row is missing".to_owned())?
+        .plan
+        .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())
+        .and_then(|value| {
+            crate::ee::services::plan::Plan::from_db_str(&value).map_err(|error| error.to_string())
+        })?;
     let limit = match class {
-        "official" => plan.map(|value| value.compute_policy().base_official_concurrency as i32),
-        "tenant_private" | "shared" => Some(1),
-        _ => None,
+        "official" => plan.compute_policy().base_official_concurrency as i32,
+        "tenant_private" | "shared" => 1,
+        _ => {
+            return Err(format!(
+                "queue policy unavailable: unknown worker class {class}"
+            ));
+        }
     };
-    (plan.map(|value| value.as_str().to_owned()), limit)
+    Ok((plan.as_str().to_owned(), limit))
 }
 
 #[async_trait]
@@ -71,12 +77,40 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
 
         let lifecycle_id = uuid::Uuid::now_v7();
         let worker_class = args.worker_class.as_db_str();
-        let (plan, concurrency_limit) =
-            queue_concurrency_policy(ctx, args.workspace_id, worker_class).await;
-        let concurrency_key = plan.as_deref().map_or_else(
-            || worker_class.to_owned(),
-            |plan| format!("{worker_class}:{plan}"),
-        );
+        let (plan, concurrency_limit) = match queue_concurrency_policy(
+            ctx,
+            args.workspace_id,
+            worker_class,
+        )
+        .await
+        {
+            Ok(policy) => policy,
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
+                    &ctx.db,
+                    crate::models::queue_job_lifecycles::Enqueue {
+                        id: lifecycle_id,
+                        job_name: "embedding_sync",
+                        worker_class,
+                        workspace_id: Some(args.workspace_id),
+                        plan: None,
+                        concurrency_key: Some(worker_class),
+                        concurrency_limit: Some(0),
+                    },
+                )
+                .await;
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    "unavailable",
+                    Some(&error),
+                )
+                .await;
+                tracing::error!(workspace_id = %args.workspace_id, worker_class, diagnostic = %error, "queue policy unavailable");
+                return Err(loco_rs::Error::Message(error));
+            }
+        };
+        let concurrency_key = format!("{worker_class}:{plan}");
         crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
             crate::models::queue_job_lifecycles::Enqueue {
@@ -84,9 +118,9 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                 job_name: "embedding_sync",
                 worker_class,
                 workspace_id: Some(args.workspace_id),
-                plan: plan.as_deref(),
+                plan: Some(&plan),
                 concurrency_key: Some(&concurrency_key),
-                concurrency_limit,
+                concurrency_limit: Some(concurrency_limit),
             },
         )
         .await
@@ -139,12 +173,40 @@ impl ReindexDispatcher for LocoJobDispatcher {
 
         let lifecycle_id = uuid::Uuid::now_v7();
         let worker_class = args.worker_class.as_db_str();
-        let (plan, concurrency_limit) =
-            queue_concurrency_policy(ctx, args.workspace_id, worker_class).await;
-        let concurrency_key = plan.as_deref().map_or_else(
-            || worker_class.to_owned(),
-            |plan| format!("{worker_class}:{plan}"),
-        );
+        let (plan, concurrency_limit) = match queue_concurrency_policy(
+            ctx,
+            args.workspace_id,
+            worker_class,
+        )
+        .await
+        {
+            Ok(policy) => policy,
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
+                    &ctx.db,
+                    crate::models::queue_job_lifecycles::Enqueue {
+                        id: lifecycle_id,
+                        job_name: "reindex",
+                        worker_class,
+                        workspace_id: Some(args.workspace_id),
+                        plan: None,
+                        concurrency_key: Some(worker_class),
+                        concurrency_limit: Some(0),
+                    },
+                )
+                .await;
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    "unavailable",
+                    Some(&error),
+                )
+                .await;
+                tracing::error!(workspace_id = %args.workspace_id, worker_class, diagnostic = %error, "queue policy unavailable");
+                return Err(loco_rs::Error::Message(error));
+            }
+        };
+        let concurrency_key = format!("{worker_class}:{plan}");
         crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
             crate::models::queue_job_lifecycles::Enqueue {
@@ -152,9 +214,9 @@ impl ReindexDispatcher for LocoJobDispatcher {
                 job_name: "reindex",
                 worker_class,
                 workspace_id: Some(args.workspace_id),
-                plan: plan.as_deref(),
+                plan: Some(&plan),
                 concurrency_key: Some(&concurrency_key),
-                concurrency_limit,
+                concurrency_limit: Some(concurrency_limit),
             },
         )
         .await

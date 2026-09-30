@@ -44,15 +44,6 @@ pub struct ReindexArgs {
 ///
 /// Shared by all three worker types below, which differ only in the tag `tags()` returns.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
-    if let Some(id) = args.lifecycle_id
-        && !crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
-            .await
-            .unwrap_or(false)
-    {
-        return Err(loco_rs::Error::Message(
-            "worker concurrency limit reached".into(),
-        ));
-    }
     // Build and verify the provider: a reindex fails fast if the provider is
     // unconfigured, same as the task.
     let provider = embedding::build_embedding_provider()
@@ -140,21 +131,53 @@ macro_rules! reindex_worker_for_class {
             }
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
+                let admitted = if let Some(id) = args.lifecycle_id {
+                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
+                    {
+                        Ok(crate::models::queue_job_lifecycles::Admission::Started) => true,
+                        Ok(
+                            crate::models::queue_job_lifecycles::Admission::Duplicate
+                            | crate::models::queue_job_lifecycles::Admission::Terminal,
+                        ) => return Ok(()),
+                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated) => {
+                            crate::models::queue_job_lifecycles::Entity::defer(
+                                &self.ctx.db,
+                                id,
+                                "worker capacity saturated",
+                            )
+                            .await
+                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            return Ok(());
+                        }
+                        Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+                    }
+                } else {
+                    true
+                };
                 let result = perform_reindex(&self.ctx, &args).await;
-                if let Some(id) = args.lifecycle_id {
-                    let status = if result.is_ok() {
-                        "completed"
-                    } else {
-                        "failed"
-                    };
-                    let message = result.as_ref().err().map(ToString::to_string);
-                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
-                        &self.ctx.db,
-                        id,
-                        status,
-                        message.as_deref(),
-                    )
-                    .await;
+                if admitted {
+                    if let Some(id) = args.lifecycle_id {
+                        if result.is_ok() {
+                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                                &self.ctx.db,
+                                id,
+                                "completed",
+                                None,
+                            )
+                            .await;
+                        } else if let Some(error) = result.as_ref().err() {
+                            crate::models::queue_job_lifecycles::Entity::defer(
+                                &self.ctx.db,
+                                id,
+                                &error.to_string(),
+                            )
+                            .await
+                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            return Ok(());
+                        }
+                    }
                 }
                 result
             }

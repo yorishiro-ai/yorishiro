@@ -181,15 +181,29 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
-        if let Some(id) = args.lifecycle_id
-            && !crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id)
-                .await
-                .unwrap_or(false)
-        {
-            return Err(loco_rs::Error::Message(
-                "worker concurrency limit reached".into(),
-            ));
-        }
+        let admitted = if let Some(id) = args.lifecycle_id {
+            match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await {
+                Ok(crate::models::queue_job_lifecycles::Admission::Started) => true,
+                Ok(
+                    crate::models::queue_job_lifecycles::Admission::Duplicate
+                    | crate::models::queue_job_lifecycles::Admission::Terminal,
+                ) => return Ok(()),
+                Ok(crate::models::queue_job_lifecycles::Admission::Saturated) => {
+                    crate::models::queue_job_lifecycles::Entity::defer(
+                        &self.ctx.db,
+                        id,
+                        "worker capacity saturated",
+                    )
+                    .await
+                    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                    Self::perform_later(&self.ctx, args.clone()).await?;
+                    return Ok(());
+                }
+                Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+            }
+        } else {
+            true
+        };
         let job_id = args.job_id;
         let claimed = inference_jobs::claim(&self.ctx.db, job_id)
             .await
@@ -206,7 +220,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 inference_jobs::complete_proposals(&self.ctx.db, job_id, proposed, skipped)
                     .await
                     .internal()?;
-                if let Some(id) = args.lifecycle_id {
+                if admitted && let Some(id) = args.lifecycle_id {
                     let _ = crate::models::queue_job_lifecycles::Entity::finish(
                         &self.ctx.db,
                         id,
@@ -223,14 +237,16 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 {
                     tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
                 }
-                if let Some(id) = args.lifecycle_id {
-                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                if admitted && let Some(id) = args.lifecycle_id {
+                    crate::models::queue_job_lifecycles::Entity::defer(
                         &self.ctx.db,
                         id,
-                        "failed",
-                        Some(&e.to_string()),
+                        &e.to_string(),
                     )
-                    .await;
+                    .await
+                    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                    Self::perform_later(&self.ctx, args.clone()).await?;
+                    return Ok(());
                 }
                 Err(e)
             }

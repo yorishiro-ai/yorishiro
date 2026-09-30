@@ -40,6 +40,7 @@ impl Entity {
             completed_at: Set(None),
             failed_at: Set(None),
             cancelled_at: Set(None),
+            admitted_at: Set(None),
             attempt: Set(0),
             concurrency_key: Set(enqueue.concurrency_key.map(str::to_owned)),
             concurrency_limit: Set(enqueue.concurrency_limit),
@@ -65,11 +66,35 @@ impl Entity {
         row.update(db).await.map(|_| ())
     }
 
-    pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
+    pub(crate) async fn defer(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        error: &str,
+    ) -> Result<(), DbErr> {
+        let mut row = Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .ok_or(DbErr::RecordNotFound("queue lifecycle".into()))?
+            .into_active_model();
+        let now = Utc::now().fixed_offset();
+        row.status = Set("retrying".to_owned());
+        row.retry_at = Set(Some(now));
+        row.error = Set(Some(error.to_owned()));
+        tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
+        row.update(db).await.map(|_| ())
+    }
+
+    pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
         let initial = Entity::find_by_id(id).one(db).await?;
         let Some(initial) = initial else {
             return Err(DbErr::RecordNotFound("queue lifecycle".into()));
         };
+        if initial.status == "running" {
+            return Ok(Admission::Duplicate);
+        }
+        if matches!(initial.status.as_str(), "completed" | "cancelled") {
+            return Ok(Admission::Terminal);
+        }
         let limit = initial.concurrency_limit;
         let key = initial.concurrency_key;
         let txn = db.begin().await?;
@@ -83,7 +108,7 @@ impl Entity {
                     .await?;
                 if in_flight >= u64::try_from(std::cmp::Ord::max(limit, 0)).unwrap_or(0) {
                     txn.rollback().await?;
-                    return Ok(false);
+                    return Ok(Admission::Saturated);
                 }
             }
         }
@@ -92,6 +117,7 @@ impl Entity {
             .col_expr(Column::Status, Expr::value("running"))
             .col_expr(Column::ClaimAt, Expr::value(now))
             .col_expr(Column::StartAt, Expr::value(now))
+            .col_expr(Column::AdmittedAt, Expr::value(now))
             .col_expr(
                 Column::FailedAt,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
@@ -106,7 +132,18 @@ impl Entity {
             .exec(&txn)
             .await?;
         txn.commit().await?;
-        Ok(result.rows_affected == 1)
+        if result.rows_affected == 1 {
+            tracing::info!(
+                lifecycle_id = %id,
+                queue_start_seconds = std::cmp::Ord::max((now - initial.enqueue_at).num_seconds(), 0),
+                "queue job admitted"
+            );
+        }
+        Ok(if result.rows_affected == 1 {
+            Admission::Started
+        } else {
+            Admission::Duplicate
+        })
     }
 
     pub(crate) async fn finish(
@@ -132,6 +169,14 @@ impl Entity {
         }
         row.update(db).await.map(|_| ())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Admission {
+    Started,
+    Duplicate,
+    Saturated,
+    Terminal,
 }
 
 pub(crate) struct Enqueue<'a> {
@@ -176,6 +221,7 @@ mod tests {
             completed_at: None,
             failed_at: None,
             cancelled_at: None,
+            admitted_at: Some(start_at),
             attempt: 1,
             concurrency_key: None,
             concurrency_limit: None,

@@ -33,7 +33,11 @@ Redis はプロバイダー側のジョブ状態を提供しますが、Redis �
 
 既存のクラスタグを指定してワーカーを起動してください。
 タグなしワーカーはクラスルーティングされたジョブを処理しません。
-`worker_class` と `status` で行を集計し、`queue_start_seconds` をプランの目標と比較してください。
-`queued` または `unavailable` が増え続ける場合、SLA を判断する前に容量またはプロバイダーの健全性を復旧してください。
+開始時には、既存の構造化 tracing に `queue_start_seconds` と `lifecycle_id` が出力されます。
+デプロイ先のログ・可観測性基盤で、このイベントをエクスポートまたは絞り込んでください。
+この Issue では別のメトリクスエンドポイントは追加しません。
+容量による延期は `worker capacity saturated`、再試行への遷移は `retrying`、プロバイダーまたはポリシーの失敗は diagnostic フィールド付きの `unavailable` として出力されます。
+ライフサイクル行を `worker_class` と `status` で集計し、記録された開始時刻をプランの目標と比較してください。
+`queued`、`retrying`、または `unavailable` が増え続ける場合、SLA を判断する前に容量またはプロバイダーの健全性を復旧してください。
 
 この Issue では、数値優先度、プリエンプション、バーストクレジット、RabbitMQ、SQS、提供計算、WASM 実行は追加しません。
