@@ -112,7 +112,12 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             }
         };
         let concurrency_key = format!("{worker_class}:{plan}");
-        let scheduling = crate::services::queue::decide(args.worker_class);
+        let scheduling = crate::services::queue::decide_for_dispatch(&ctx.db, args.worker_class)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(error = %error, "queue starvation lookup failed");
+                crate::services::queue::decide(args.worker_class)
+            });
         tracing::info!(
             lifecycle_id = %lifecycle_id,
             worker_class,
@@ -244,7 +249,12 @@ impl ReindexDispatcher for LocoJobDispatcher {
             }
         };
         let concurrency_key = format!("{worker_class}:{plan}");
-        let scheduling = crate::services::queue::decide(args.worker_class);
+        let scheduling = crate::services::queue::decide_for_dispatch(&ctx.db, args.worker_class)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(error = %error, "queue starvation lookup failed");
+                crate::services::queue::decide(args.worker_class)
+            });
         tracing::info!(
             lifecycle_id = %lifecycle_id,
             worker_class,
@@ -336,6 +346,15 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
         use loco_rs::bgworker::BackgroundWorker;
 
         let lifecycle_id = uuid::Uuid::now_v7();
+        let scheduling =
+            crate::services::queue::decide(crate::workers::embedding_sync::WorkerClass::Shared);
+        tracing::info!(
+            lifecycle_id = %lifecycle_id,
+            worker_class = "shared",
+            scheduling_priority = scheduling.priority,
+            fallback = scheduling.fallback,
+            "queue scheduling decision"
+        );
         crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
             crate::models::queue_job_lifecycles::Enqueue {
@@ -351,8 +370,12 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
         .await
         .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
         args.lifecycle_id = Some(lifecycle_id);
-        let result =
-            crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await;
+        let result = crate::ee::workers::infer_fill::InferFillWorker::perform_later_with_priority(
+            ctx,
+            args,
+            Some(scheduling.priority),
+        )
+        .await;
         match result {
             Ok(job_id) => {
                 if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
@@ -456,6 +479,7 @@ impl Hooks for App {
         environment: &Environment,
         config: Config,
     ) -> Result<BootResult> {
+        crate::config::validate_queue_policy(&config)?;
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         startup::register_sqlite_extensions();

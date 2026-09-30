@@ -44,22 +44,34 @@ Redis はプロバイダー側のジョブ状態を提供しますが、Redis �
 ライフサイクル行を `worker_class` と `status` で集計し、記録された開始時刻をプランの目標と比較してください。
 `queued`、`retrying`、または `unavailable` が増え続ける場合、SLA を判断する前に容量またはプロバイダーの健全性を復旧してください。
 
-この Issue では、数値優先度、プリエンプション、バーストクレジット、RabbitMQ、SQS、提供計算、WASM 実行は追加しません。
+この Issue では、プリエンプション、バーストクレジット、RabbitMQ、SQS、提供計算、WASM 実行は追加しません。
 
 ## 優先度と容量
 
-Loco 1.2.0が提供する検証済みのスケジューリング機能を使用します。対応するすべてのproviderは整数priorityを受け付け、高い値を先に処理し、同じpriorityでは`run_at`、次に安定したprovider job idで順序を決めます。
+Loco 1.2.0が提供する検証済みのスケジューリング機能を使用します。対応providerは整数priorityを受け付けます。
+
+PostgreSQLとSQLiteは`ORDER BY priority DESC, run_at, id`で処理対象のジョブを選ぶため、そのqueryから見える行の順序は決定的です。
+
+Redisはpriority順のZSETの先頭1000件だけをscanし、その後tagの一致を確認してpriority、`run_at`、idで候補を並べます。
+
+workerに一致しない先行エントリがある場合、tag付きRedis jobがこの上限を超えて次のpolling cycleまでskipされることがあります。
 
 Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorityを割り当てます。
 
 ライフサイクルのadmission lockは`worker_class:plan`単位でcapacityを予約するため、capacityが埋まったクラスが別のクラスのcapacityを消費することはありません。
 
-capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、同じpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
+capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、bounded agingで調整したpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
 
 予約capacityとstarvation protectionが必要な場合は、クラスごとにworker processを起動します。使用するtagは`--worker=worker-class:tenant-private`、`--worker=worker-class:official`、`--worker=worker-class:shared`です。
 
 複数クラスをまとめたworkerも利用できますが、その`num_workers`は共有polling poolであり、クラスごとのworker予約にはなりません。
 
-providerのpriority保証は、固定しているLoco 1.2.0のPostgres、SQLite、Redis実装のソースで確認しています。
+providerの挙動は固定しているLoco 1.2.0のソースで確認し、全providerに同じordering保証があるとは扱わずproviderごとに記載しています。
+
+retry時はdurableなライフサイクルのenqueue時刻に基づくbounded priority agingを使用します。
+
+2回の1分間agingを経た待機中の低いクラスはpriority 300となり、providerの古い`run_at`によるtie-breakを通じて新しいtenant-private workを追い越せます。
+
+低いクラスが1分間queuedで待機した場合、そのworkがadmitされるまで新しく到着する高いクラスにはpriority 50を割り当てます。
 
 scheduling decision、クラス、priority、capacity limit、active capacity、saturation、fallbackは構造化tracing fieldとして出力します。

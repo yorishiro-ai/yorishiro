@@ -254,10 +254,22 @@ impl Entity {
             .await?;
         txn.commit().await?;
         if result.rows_affected == 1 {
+            let active_capacity = if let Some(ref key) = key {
+                Some(
+                    Entity::find()
+                        .filter(Column::ConcurrencyKey.eq(key.clone()))
+                        .filter(Column::Status.eq("running"))
+                        .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
+                        .count(db)
+                        .await?,
+                )
+            } else {
+                None
+            };
             tracing::info!(
                 lifecycle_id = %id,
                 worker_class = %initial.worker_class,
-                active_capacity = 1,
+                active_capacity = ?active_capacity,
                 capacity_limit = ?initial.concurrency_limit,
                 queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(initial.enqueue_at).num_seconds(), 0),
                 "queue job admitted"

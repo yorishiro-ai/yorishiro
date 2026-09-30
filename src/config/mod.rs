@@ -5,6 +5,7 @@ mod validate;
 
 pub use init::init;
 pub use load::load;
+pub(crate) use validate::validate_queue_policy;
 
 pub const CANONICAL_CONFIG_FILE: &str = "yorishiro.yaml";
 const CONFIG_PATH_ENV: &str = "YORISHIRO_CONFIG_PATH";

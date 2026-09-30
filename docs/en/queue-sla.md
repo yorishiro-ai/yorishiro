@@ -42,22 +42,34 @@ Capacity deferrals emit `worker capacity saturated`, retry transitions emit `ret
 Inspect lifecycle rows grouped by `worker_class` and `status`, then compare recorded start times with the plan objective.
 An increasing `queued`, `retrying`, or `unavailable` count means capacity or provider health must be restored before an SLA conclusion is made.
 
-This issue does not add numeric priority, preemption, burst credits, RabbitMQ, SQS, contributed compute, or WASM execution.
+This issue does not add preemption, burst credits, RabbitMQ, SQS, contributed compute, or WASM execution.
 
 ## Priority and capacity
 
-Loco 1.2.0 provides the verified scheduling primitive used here: every supported provider accepts an integer priority, dequeues higher values first, and resolves equal priorities by `run_at` and then the stable provider job id.
+Loco 1.2.0 provides the verified scheduling primitive used here: supported providers accept an integer priority.
+
+PostgreSQL and SQLite select due jobs with `ORDER BY priority DESC, run_at, id`, so their ordering is deterministic for rows visible to that query.
+
+Redis scans only the first 1000 priority-ordered ZSET entries before filtering tags and sorting candidates by priority, `run_at`, and id.
+
+A tagged Redis job beyond that bounded scan can therefore be skipped for a polling cycle when earlier entries do not match the worker.
 
 Yorishiro assigns `tenant_private` priority 300, `official` priority 200, and `shared` priority 100.
 
 The lifecycle admission lock reserves capacity by `worker_class:plan`, so a saturated class cannot consume another class's capacity.
 
-Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with the same priority rather than being silently rerouted.
+Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with its bounded age-adjusted priority rather than being silently rerouted.
 
 Run class-specific worker processes when reserved capacity and starvation protection are required: `--worker=worker-class:tenant-private`, `--worker=worker-class:official`, and `--worker=worker-class:shared`.
 
 A combined worker is supported, but its `num_workers` is a shared polling pool and is not a reservation of one worker per class.
 
-The provider priority guarantee is validated against Loco's Postgres, SQLite, and Redis implementations at the pinned 1.2.0 source.
+Provider behavior is validated against the pinned Loco 1.2.0 source and documented per provider rather than treated as one universal ordering guarantee.
+
+Retries use bounded priority aging based on the durable lifecycle enqueue time.
+
+After two one-minute aging steps, a waiting lower class reaches priority 300 and can pass newer tenant-private work through the provider's older `run_at` tie-break.
+
+When a lower class has been queued for one minute, new higher-class arrivals are assigned priority 50 until that waiting work is admitted.
 
 Scheduling decisions, class, priority, capacity limit, active capacity, saturation, and fallback are emitted as structured tracing fields.

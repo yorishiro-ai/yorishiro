@@ -11,10 +11,14 @@
 //! Booting the whole application on SQLite instead would be more faithful and would bring the entire `tests/`-is-PostgreSQL-only question with it, which is a much larger surface than two assertions justify.
 
 use futures::FutureExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
 use loco_rs::app::Hooks;
-use loco_rs::bgworker::sqlt;
+use loco_rs::bgworker::{self, BackgroundWorker, Queue, sqlt};
 use loco_rs::boot::{self, BootResult};
-use loco_rs::config::{QueueConfig, SqliteQueueConfig, WorkerMode};
+use loco_rs::config::{PostgresQueueConfig, QueueConfig, SqliteQueueConfig, WorkerMode};
 use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
@@ -25,6 +29,101 @@ use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
 use yorishiro::workers::reindex::{self, ReindexArgs};
 
 use crate::requests::close_app_pools;
+
+const COMPETING_TAG: &str = "queue-test:competing";
+static COMPETING_ORDER: std::sync::OnceLock<Mutex<Vec<String>>> = std::sync::OnceLock::new();
+static COMPETING_HITS: AtomicUsize = AtomicUsize::new(0);
+static COMPETING_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+struct CompetingArgs {
+    name: String,
+}
+
+struct CompetingWorker;
+
+#[async_trait]
+impl BackgroundWorker<CompetingArgs> for CompetingWorker {
+    fn build(_ctx: &AppContext) -> Self {
+        Self
+    }
+
+    fn tags() -> Vec<String> {
+        vec![COMPETING_TAG.to_owned()]
+    }
+
+    async fn perform(&self, args: CompetingArgs) -> loco_rs::Result<()> {
+        COMPETING_ORDER
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("competing order lock")
+            .push(args.name);
+        COMPETING_HITS.fetch_add(1, Ordering::SeqCst);
+        COMPETING_NOTIFY
+            .get_or_init(tokio::sync::Notify::new)
+            .notify_waiters();
+        Ok(())
+    }
+}
+
+async fn assert_competing_priority_order(queue: Arc<Queue>) {
+    COMPETING_ORDER
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("competing order lock")
+        .clear();
+    COMPETING_HITS.store(0, Ordering::SeqCst);
+    queue
+        .register(CompetingWorker)
+        .await
+        .expect("register competing worker");
+    queue
+        .enqueue(
+            CompetingWorker::class_name(),
+            None,
+            CompetingArgs {
+                name: "low".to_owned(),
+            },
+            Some(vec![COMPETING_TAG.to_owned()]),
+            Some(100),
+        )
+        .await
+        .expect("enqueue low priority job");
+    queue
+        .enqueue(
+            CompetingWorker::class_name(),
+            None,
+            CompetingArgs {
+                name: "high".to_owned(),
+            },
+            Some(vec![COMPETING_TAG.to_owned()]),
+            Some(300),
+        )
+        .await
+        .expect("enqueue high priority job");
+
+    let running_queue = queue.clone();
+    let handle =
+        tokio::spawn(async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await });
+    while COMPETING_HITS.load(Ordering::SeqCst) < 2 {
+        COMPETING_NOTIFY
+            .get_or_init(tokio::sync::Notify::new)
+            .notified()
+            .await;
+    }
+    queue.shutdown().expect("stop competing worker");
+    handle
+        .await
+        .expect("join competing worker")
+        .expect("run competing worker");
+    assert_eq!(
+        *COMPETING_ORDER
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("competing order lock"),
+        vec!["high", "low"]
+    );
+}
 
 /// Boots the app against a throwaway PostgreSQL database with `BackgroundQueue` and a SQLite queue file, and hands the test both the context and a pool onto that same queue file.
 ///
@@ -65,7 +164,7 @@ where
             connect_timeout: 5000,
             idle_timeout: 5000,
             poll_interval_sec: 1,
-            num_workers: 0,
+            num_workers: 1,
             reaper: None,
         }));
 
@@ -285,4 +384,58 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
         );
     })
     .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(queue_postgres)]
+async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
+    let directory = tempfile::tempdir().expect("queue tempdir");
+    let uri = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("competing.sqlite3").display()
+    );
+    let config = SqliteQueueConfig {
+        uri,
+        dangerously_flush: true,
+        enable_logging: false,
+        max_connections: 2,
+        min_connections: 1,
+        connect_timeout: 5_000,
+        idle_timeout: 5_000,
+        poll_interval_sec: 1,
+        num_workers: 1,
+        reaper: None,
+    };
+    let provider = bgworker::sqlt::create_provider(&config)
+        .await
+        .expect("SQLite queue");
+    let queue = Arc::new(provider);
+    queue.setup().await.expect("set up SQLite queue");
+    assert_competing_priority_order(queue).await;
+}
+
+#[tokio::test]
+#[serial_test::serial(queue_postgres)]
+async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    let config = PostgresQueueConfig {
+        uri: std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL"),
+        dangerously_flush: true,
+        enable_logging: false,
+        max_connections: 2,
+        min_connections: 1,
+        connect_timeout: 5_000,
+        idle_timeout: 5_000,
+        poll_interval_sec: 1,
+        num_workers: 1,
+        reaper: None,
+    };
+    let provider = bgworker::pg::create_provider(&config)
+        .await
+        .expect("Postgres queue");
+    let queue = Arc::new(provider);
+    queue.setup().await.expect("set up Postgres queue");
+    assert_competing_priority_order(queue).await;
 }
