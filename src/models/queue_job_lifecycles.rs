@@ -75,6 +75,9 @@ impl Entity {
         error: &str,
     ) -> Result<(), DbErr> {
         let now = Utc::now().fixed_offset();
+        if let Some(attempt) = attempt {
+            return Self::defer_at(db, id, attempt, error, now).await;
+        }
         let result = Entity::update_many()
             .col_expr(Column::Status, Expr::value("retrying"))
             .col_expr(Column::RetryAt, Expr::value(now))
@@ -91,6 +94,38 @@ impl Entity {
             } else {
                 Column::Status.is_in(["queued", "retrying"])
             })
+            .exec(db)
+            .await?;
+        tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
+        if result.rows_affected == 0 {
+            return Err(DbErr::RecordNotFound("active queue lease".into()));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn defer_at(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        attempt: i32,
+        error: &str,
+        now: DateTimeWithTimeZone,
+    ) -> Result<(), DbErr> {
+        let result = Entity::update_many()
+            .col_expr(Column::Status, Expr::value("retrying"))
+            .col_expr(Column::RetryAt, Expr::value(now))
+            .col_expr(
+                Column::LeaseUntil,
+                Expr::value(Option::<DateTimeWithTimeZone>::None),
+            )
+            .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
+            .filter(Column::Id.eq(id))
+            .filter(Column::Attempt.eq(attempt))
+            .filter(Column::Status.eq("running"))
+            .filter(
+                Column::LeaseUntil
+                    .is_not_null()
+                    .and(Column::LeaseUntil.lte(now)),
+            )
             .exec(db)
             .await?;
         tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
@@ -529,7 +564,7 @@ mod tests {
             Entity::start_at(&db, expired, expired_at).await.unwrap(),
             Admission::Saturated { attempt: Some(1) }
         );
-        Entity::defer(&db, expired, Some(1), "capacity")
+        Entity::defer_at(&db, expired, 1, "capacity", expired_at)
             .await
             .unwrap();
         let row = Entity::find_by_id(expired).one(&db).await.unwrap().unwrap();
@@ -547,5 +582,43 @@ mod tests {
             Entity::start_at(&db, expired, expired_at).await.unwrap(),
             Admission::Started { attempt: 2 }
         );
+    }
+
+    #[tokio::test]
+    async fn renewed_expired_saturation_cannot_be_deferred() {
+        let db = database().await;
+        let active = uuid::Uuid::now_v7();
+        let expired = uuid::Uuid::now_v7();
+        enqueue(&db, active, Some(1)).await;
+        enqueue(&db, expired, Some(1)).await;
+        let first = Utc.timestamp_opt(8_000, 0).single().unwrap().fixed_offset();
+        assert_eq!(
+            Entity::start_at(&db, expired, first).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        let observed = first + lease_duration() + chrono::Duration::seconds(1);
+        assert_eq!(
+            Entity::start_at(&db, active, observed).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        assert_eq!(
+            Entity::start_at(&db, expired, observed).await.unwrap(),
+            Admission::Saturated { attempt: Some(1) }
+        );
+        let renewed = observed + chrono::Duration::seconds(1);
+        assert!(Entity::renew_at(&db, expired, 1, renewed).await.unwrap());
+        assert!(
+            Entity::defer_at(&db, expired, 1, "capacity", observed)
+                .await
+                .is_err()
+        );
+        let row = Entity::find_by_id(expired).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "running");
+        assert_eq!(row.attempt, 1);
+        assert!(row.lease_until.unwrap() > observed);
+        assert!(matches!(
+            Entity::start_at(&db, expired, renewed).await.unwrap(),
+            Admission::Duplicate { attempt: 1 }
+        ));
     }
 }

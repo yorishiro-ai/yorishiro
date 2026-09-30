@@ -136,13 +136,23 @@ macro_rules! reindex_worker_for_class {
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
                         Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
-                            crate::models::queue_job_lifecycles::Entity::defer(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                "worker capacity saturated",
-                            )
-                            .await
+                            match attempt {
+                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
+                                    &self.ctx.db,
+                                    id,
+                                    attempt,
+                                    "worker capacity saturated",
+                                    chrono::Utc::now().fixed_offset(),
+                                )
+                                .await,
+                                None => crate::models::queue_job_lifecycles::Entity::defer(
+                                    &self.ctx.db,
+                                    id,
+                                    None,
+                                    "worker capacity saturated",
+                                )
+                                .await,
+                            }
                             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
                             $worker_ty::perform_later(&self.ctx, args.clone()).await?;
                             return Ok(());
