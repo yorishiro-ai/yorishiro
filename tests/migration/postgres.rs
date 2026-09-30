@@ -64,25 +64,38 @@ async fn scratch_db(name: &str) -> (sea_orm::DatabaseConnection, String) {
     (db, unique_name)
 }
 
-async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) {
-    db.close().await.expect("close scratch database pool");
-    let base = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
+async fn close_scratch_db(db: sea_orm::DatabaseConnection, name: &str) -> Result<(), String> {
+    let mut errors = Vec::new();
+    if let Err(error) = db.close().await {
+        errors.push(format!("close scratch database pool: {error}"));
+    }
+    let base = std::env::var("DATABASE_URL")
+        .map_err(|error| format!("read DATABASE_URL for scratch cleanup: {error}"))?;
     let (without_query, query) = match base.split_once('?') {
         Some((head, q)) => (head, format!("?{q}")),
         None => (base.as_str(), String::new()),
     };
     let prefix = without_query
         .rsplit_once('/')
-        .expect("DATABASE_URL has no database path segment")
+        .ok_or_else(|| "DATABASE_URL has no database path segment".to_owned())?
         .0;
     let admin = Database::connect(format!("{prefix}/postgres{query}"))
         .await
-        .expect("connect to the admin database for scratch cleanup");
-    admin
+        .map_err(|error| format!("connect to the admin database for scratch cleanup: {error}"))?;
+    if let Err(error) = admin
         .execute_unprepared(&format!("DROP DATABASE IF EXISTS {name}"))
         .await
-        .expect("drop scratch database");
-    admin.close().await.expect("close scratch admin pool");
+    {
+        errors.push(format!("drop scratch database {name}: {error}"));
+    }
+    if let Err(error) = admin.close().await {
+        errors.push(format!("close scratch admin pool: {error}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
 }
 
 async fn with_scratch_db<F>(name: &str, test: F)
@@ -91,9 +104,15 @@ where
 {
     let (db, database_name) = scratch_db(name).await;
     let result = AssertUnwindSafe(test(&db)).catch_unwind().await;
-    close_scratch_db(db, &database_name).await;
-    if let Err(panic) = result {
-        std::panic::resume_unwind(panic);
+    let cleanup = close_scratch_db(db, &database_name).await;
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(error)) => panic!("scratch database cleanup failed: {error}"),
+        (Err(panic), Ok(())) => std::panic::resume_unwind(panic),
+        (Err(panic), Err(error)) => {
+            eprintln!("scratch database cleanup also failed: {error}");
+            std::panic::resume_unwind(panic);
+        }
     }
 }
 
