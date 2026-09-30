@@ -241,11 +241,22 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
             return Ok(());
         }
 
-        let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
+        let attempt = inference_jobs::get(&self.ctx.db, job_id)
+            .await
+            .internal()?
+            .map(|job| job.attempt)
+            .or(attempt);
+        let Some(attempt) = attempt else {
+            return Err(loco_rs::Error::Message(
+                "claimed infer-fill job disappeared".into(),
+            ));
+        };
+
+        let heartbeat = args.lifecycle_id.map(|id| {
             crate::models::queue_job_lifecycles::Entity::heartbeat(self.ctx.db.clone(), id, attempt)
         });
 
-        match perform_infer_fill(&self.ctx, &args, job_id, attempt).await {
+        match perform_infer_fill(&self.ctx, &args, job_id, Some(attempt)).await {
             Ok((proposed, skipped)) => {
                 if let Some(heartbeat) = heartbeat {
                     heartbeat.abort();
@@ -253,7 +264,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 let owned = inference_jobs::complete_proposals_attempt(
                     &self.ctx.db,
                     job_id,
-                    attempt.unwrap_or(1),
+                    attempt,
                     proposed,
                     skipped,
                 )
@@ -266,7 +277,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     let _ = crate::models::queue_job_lifecycles::Entity::finish(
                         &self.ctx.db,
                         id,
-                        attempt,
+                        Some(attempt),
                         "completed",
                         None,
                     )
@@ -281,7 +292,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 let owned = match inference_jobs::fail_attempt(
                     &self.ctx.db,
                     job_id,
-                    attempt.unwrap_or(1),
+                    attempt,
                     &e.to_string(),
                 )
                 .await
@@ -296,18 +307,13 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     && admitted
                     && let Some(id) = args.lifecycle_id
                 {
-                    inference_jobs::retry(
-                        &self.ctx.db,
-                        job_id,
-                        &e.to_string(),
-                        attempt.unwrap_or(1),
-                    )
-                    .await
-                    .internal()?;
+                    inference_jobs::retry(&self.ctx.db, job_id, &e.to_string(), attempt)
+                        .await
+                        .internal()?;
                     crate::models::queue_job_lifecycles::Entity::defer(
                         &self.ctx.db,
                         id,
-                        attempt,
+                        Some(attempt),
                         &e.to_string(),
                     )
                     .await
