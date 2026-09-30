@@ -10,7 +10,7 @@
 //! This passed locally and failed in CI for exactly that reason: the local cluster already had the role from earlier runs, so the race had nothing to lose.
 use futures::FutureExt;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{ConnectionTrait, Database, Statement};
+use sea_orm::{ConnectionTrait, Database, Statement, TransactionTrait};
 use serial_test::serial;
 use std::panic::AssertUnwindSafe;
 
@@ -66,6 +66,18 @@ async fn privilege(db: &sea_orm::DatabaseConnection, action: &str) -> bool {
     .expect("read privilege")
 }
 
+async fn rls_enabled(db: &sea_orm::DatabaseConnection) -> bool {
+    db.query_one_raw(Statement::from_string(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT relrowsecurity FROM pg_class WHERE oid = 'inference_jobs'::regclass",
+    ))
+    .await
+    .expect("query RLS state")
+    .expect("RLS state row")
+    .try_get_by_index(0)
+    .expect("read RLS state")
+}
+
 #[tokio::test]
 #[serial(postgres_cluster)]
 async fn all_migrations_apply_to_a_fresh_postgres_database() {
@@ -107,10 +119,15 @@ async fn inference_job_attempt_migration_grants_update_to_app_role() {
     Migrator::down(&db, Some(1))
         .await
         .expect("roll back the privilege migration");
+    assert!(privilege(&db, "SELECT").await);
     assert!(!privilege(&db, "UPDATE").await);
+    assert!(!rls_enabled(&db).await);
     Migrator::up(&db, None)
         .await
         .expect("reapply the privilege migration");
+    assert!(privilege(&db, "SELECT").await);
+    assert!(privilege(&db, "UPDATE").await);
+    assert!(rls_enabled(&db).await);
 }
 
 #[tokio::test]
@@ -140,17 +157,18 @@ async fn inference_job_rls_isolates_workspace_reads_and_updates() {
         db.execute_unprepared(&sql).await.expect("seed RLS fixture");
     }
 
-    db.execute_unprepared("SET ROLE yorishiro_app")
+    let txn = db.begin().await.expect("begin pinned RLS transaction");
+    txn.execute_unprepared("SET ROLE yorishiro_app")
         .await
         .expect("assume tenant role");
-    db.execute_unprepared(&format!(
+    txn.execute_unprepared(&format!(
         "SELECT set_config('app.current_workspace', '{workspace_a}', false)"
     ))
     .await
     .expect("set workspace A session config");
 
     let assertions = AssertUnwindSafe(async {
-        let visible: i64 = db
+        let visible: i64 = txn
             .query_one_raw(Statement::from_string(
                 sea_orm::DatabaseBackend::Postgres,
                 "SELECT COUNT(*) FROM inference_jobs",
@@ -162,14 +180,14 @@ async fn inference_job_rls_isolates_workspace_reads_and_updates() {
             .expect("read visible jobs count");
         assert_eq!(visible, 1);
 
-        let updated = db
+        let updated = txn
             .execute_unprepared(&format!(
                 "UPDATE inference_jobs SET status = 'running' WHERE id = '{job_a}'"
             ))
             .await
             .expect("update own workspace job");
         assert_eq!(updated.rows_affected(), 1);
-        let cross_update = db
+        let cross_update = txn
             .execute_unprepared(&format!(
                 "UPDATE inference_jobs SET status = 'running' WHERE id = '{job_b}'"
             ))
@@ -177,7 +195,7 @@ async fn inference_job_rls_isolates_workspace_reads_and_updates() {
             .expect("attempt cross-workspace update");
         assert_eq!(cross_update.rows_affected(), 0);
 
-        let cross_visible: i64 = db
+        let cross_visible: i64 = txn
             .query_one_raw(Statement::from_string(
                 sea_orm::DatabaseBackend::Postgres,
                 format!("SELECT COUNT(*) FROM inference_jobs WHERE id = '{job_b}'"),
@@ -192,12 +210,15 @@ async fn inference_job_rls_isolates_workspace_reads_and_updates() {
     .catch_unwind()
     .await;
 
-    db.execute_unprepared("RESET app.current_workspace")
+    txn.execute_unprepared("RESET app.current_workspace")
         .await
         .expect("reset workspace session config");
-    db.execute_unprepared("RESET ROLE")
+    txn.execute_unprepared("RESET ROLE")
         .await
         .expect("reset tenant role");
+    txn.rollback()
+        .await
+        .expect("rollback pinned RLS transaction");
     if let Err(panic) = assertions {
         std::panic::resume_unwind(panic);
     }
