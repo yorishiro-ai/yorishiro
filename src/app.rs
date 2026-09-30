@@ -136,13 +136,20 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         };
         match result {
             Ok(job_id) => {
-                crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
                     &ctx.db,
                     lifecycle_id,
                     &job_id,
                 )
                 .await
-                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                {
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        provider_job_id = %job_id,
+                        diagnostic = %error,
+                        "provider job dispatched but lifecycle correlation write failed"
+                    );
+                }
                 Ok(job_id)
             }
             Err(error) => {
@@ -234,13 +241,20 @@ impl ReindexDispatcher for LocoJobDispatcher {
         };
         match result {
             Ok(job_id) => {
-                crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
                     &ctx.db,
                     lifecycle_id,
                     &job_id,
                 )
                 .await
-                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                {
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        provider_job_id = %job_id,
+                        diagnostic = %error,
+                        "provider job dispatched but lifecycle correlation write failed"
+                    );
+                }
                 Ok(job_id)
             }
             Err(error) => {
@@ -287,13 +301,20 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
             crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await;
         match result {
             Ok(job_id) => {
-                crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
                     &ctx.db,
                     lifecycle_id,
                     &job_id,
                 )
                 .await
-                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                {
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        provider_job_id = %job_id,
+                        diagnostic = %error,
+                        "provider job dispatched but lifecycle correlation write failed"
+                    );
+                }
                 Ok(job_id)
             }
             Err(error) => {
