@@ -237,11 +237,11 @@ macro_rules! embedding_sync_worker_for_class {
                             crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
-                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated) => {
+                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
                             crate::models::queue_job_lifecycles::Entity::defer(
                                 &self.ctx.db,
                                 id,
-                                None,
+                                attempt,
                                 "worker capacity saturated",
                             )
                             .await

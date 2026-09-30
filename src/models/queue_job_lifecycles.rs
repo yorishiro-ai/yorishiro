@@ -175,12 +175,15 @@ impl Entity {
                 let in_flight = Entity::find()
                     .filter(Column::ConcurrencyKey.eq(key.clone()))
                     .filter(Column::Status.eq("running"))
+                    .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
                     .filter(Column::Id.ne(id))
                     .count(&txn)
                     .await?;
                 if in_flight >= u64::try_from(std::cmp::Ord::max(limit, 0)).unwrap_or(0) {
                     txn.rollback().await?;
-                    return Ok(Admission::Saturated);
+                    return Ok(Admission::Saturated {
+                        attempt: (initial.status == "running").then_some(initial.attempt),
+                    });
                 }
             }
         }
@@ -275,7 +278,7 @@ pub(crate) enum Admission {
     Started { attempt: i32 },
     Recovered { attempt: i32 },
     Duplicate { attempt: i32 },
-    Saturated,
+    Saturated { attempt: Option<i32> },
     Terminal,
 }
 
@@ -283,7 +286,7 @@ impl Admission {
     pub(crate) fn attempt(self) -> Option<i32> {
         match self {
             Self::Started { attempt } | Self::Recovered { attempt } => Some(attempt),
-            Self::Duplicate { .. } | Self::Saturated | Self::Terminal => None,
+            Self::Duplicate { .. } | Self::Saturated { .. } | Self::Terminal => None,
         }
     }
 }
@@ -490,7 +493,7 @@ mod tests {
         );
         assert_eq!(
             Entity::start_at(&db, waiting, now).await.unwrap(),
-            Admission::Saturated
+            Admission::Saturated { attempt: None }
         );
         Entity::defer(&db, waiting, None, "capacity").await.unwrap();
         let row = Entity::find_by_id(waiting).one(&db).await.unwrap().unwrap();
@@ -498,10 +501,51 @@ mod tests {
         assert!(row.lease_until.is_none());
         assert_eq!(
             Entity::start_at(&db, waiting, now).await.unwrap(),
-            Admission::Saturated
+            Admission::Saturated { attempt: None }
         );
         let row = Entity::find_by_id(waiting).one(&db).await.unwrap().unwrap();
         assert_eq!(row.status, "retrying");
         assert_eq!(row.attempt, 0);
+    }
+
+    #[tokio::test]
+    async fn expired_saturation_defers_with_its_attempt_and_recovers_later() {
+        let db = database().await;
+        let active = uuid::Uuid::now_v7();
+        let expired = uuid::Uuid::now_v7();
+        enqueue(&db, active, Some(1)).await;
+        enqueue(&db, expired, Some(1)).await;
+        let first = Utc.timestamp_opt(7_000, 0).single().unwrap().fixed_offset();
+        assert_eq!(
+            Entity::start_at(&db, expired, first).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        let expired_at = first + lease_duration() + chrono::Duration::seconds(1);
+        assert_eq!(
+            Entity::start_at(&db, active, expired_at).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        assert_eq!(
+            Entity::start_at(&db, expired, expired_at).await.unwrap(),
+            Admission::Saturated { attempt: Some(1) }
+        );
+        Entity::defer(&db, expired, Some(1), "capacity")
+            .await
+            .unwrap();
+        let row = Entity::find_by_id(expired).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "retrying");
+        assert_eq!(row.attempt, 1);
+        assert!(
+            Entity::finish(&db, expired, Some(1), "completed", None)
+                .await
+                .is_err()
+        );
+        Entity::finish(&db, active, Some(1), "completed", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            Entity::start_at(&db, expired, expired_at).await.unwrap(),
+            Admission::Started { attempt: 2 }
+        );
     }
 }
