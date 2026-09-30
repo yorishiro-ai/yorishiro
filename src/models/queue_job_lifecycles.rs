@@ -2,7 +2,7 @@ pub(crate) use super::_entities::queue_job_lifecycles::{ActiveModel, Column, Ent
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ExprTrait, IntoActiveModel, TransactionTrait};
+use sea_orm::{ExprTrait, IntoActiveModel, QuerySelect, TransactionTrait};
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -41,6 +41,7 @@ impl Entity {
             failed_at: Set(None),
             cancelled_at: Set(None),
             admitted_at: Set(None),
+            lease_until: Set(None),
             attempt: Set(0),
             concurrency_key: Set(enqueue.concurrency_key.map(str::to_owned)),
             concurrency_limit: Set(enqueue.concurrency_limit),
@@ -69,41 +70,70 @@ impl Entity {
     pub(crate) async fn defer(
         db: &impl ConnectionTrait,
         id: Uuid,
+        attempt: Option<i32>,
         error: &str,
     ) -> Result<(), DbErr> {
-        let mut row = Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .ok_or(DbErr::RecordNotFound("queue lifecycle".into()))?
-            .into_active_model();
         let now = Utc::now().fixed_offset();
-        row.status = Set("retrying".to_owned());
-        row.retry_at = Set(Some(now));
-        row.error = Set(Some(error.to_owned()));
+        let result = Entity::update_many()
+            .col_expr(Column::Status, Expr::value("retrying"))
+            .col_expr(Column::RetryAt, Expr::value(now))
+            .col_expr(
+                Column::LeaseUntil,
+                Expr::value(Option::<DateTimeWithTimeZone>::None),
+            )
+            .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
+            .filter(Column::Id.eq(id))
+            .filter(if let Some(attempt) = attempt {
+                Column::Attempt
+                    .eq(attempt)
+                    .and(Column::Status.eq("running"))
+            } else {
+                Column::Status.is_in(["queued", "retrying"])
+            })
+            .exec(db)
+            .await?;
         tracing::warn!(lifecycle_id = %id, diagnostic = error, "queue job deferred for retry");
-        row.update(db).await.map(|_| ())
+        if result.rows_affected == 0 {
+            return Err(DbErr::RecordNotFound("active queue lease".into()));
+        }
+        Ok(())
     }
 
     pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
-        let initial = Entity::find_by_id(id).one(db).await?;
+        Self::start_at(db, id, Utc::now().fixed_offset()).await
+    }
+
+    pub(crate) async fn start_at(
+        db: &DatabaseConnection,
+        id: Uuid,
+        now: DateTimeWithTimeZone,
+    ) -> Result<Admission, DbErr> {
+        let txn = db.begin().await?;
+        let initial = Entity::find_by_id(id).lock_exclusive().one(&txn).await?;
         let Some(initial) = initial else {
+            txn.rollback().await?;
             return Err(DbErr::RecordNotFound("queue lifecycle".into()));
         };
         if initial.status == "running" {
-            return Ok(Admission::Duplicate);
+            if running_lease_is_live(initial.lease_until, now) {
+                txn.rollback().await?;
+                return Ok(Admission::Duplicate);
+            }
+            tracing::warn!(lifecycle_id = %id, "reclaiming expired queue lease");
         }
         if matches!(initial.status.as_str(), "completed" | "cancelled") {
+            txn.rollback().await?;
             return Ok(Admission::Terminal);
         }
         let limit = initial.concurrency_limit;
         let key = initial.concurrency_key;
-        let txn = db.begin().await?;
         if let Some(ref key) = key {
             crate::db::lock_for_update(&txn, &format!("queue-concurrency:{key}")).await?;
             if let Some(limit) = limit {
                 let in_flight = Entity::find()
                     .filter(Column::ConcurrencyKey.eq(key.clone()))
                     .filter(Column::Status.eq("running"))
+                    .filter(Column::Id.ne(id))
                     .count(&txn)
                     .await?;
                 if in_flight >= u64::try_from(std::cmp::Ord::max(limit, 0)).unwrap_or(0) {
@@ -112,7 +142,8 @@ impl Entity {
                 }
             }
         }
-        let now = Utc::now().fixed_offset();
+        let recovered = initial.status == "running";
+        let lease_until = now + chrono::Duration::minutes(5);
         let result = Entity::update_many()
             .col_expr(Column::Status, Expr::value("running"))
             .col_expr(Column::ClaimAt, Expr::value(now))
@@ -126,21 +157,34 @@ impl Entity {
                 Column::RetryAt,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
             )
+            .col_expr(Column::LeaseUntil, Expr::value(lease_until))
             .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
             .filter(Column::Id.eq(id))
-            .filter(Column::Status.is_in(["queued", "failed", "retrying"]))
+            .filter(if recovered {
+                Column::Status.eq("running")
+            } else {
+                Column::Status.is_in(["queued", "failed", "retrying"])
+            })
             .exec(&txn)
             .await?;
         txn.commit().await?;
         if result.rows_affected == 1 {
             tracing::info!(
                 lifecycle_id = %id,
-                queue_start_seconds = std::cmp::Ord::max((now - initial.enqueue_at).num_seconds(), 0),
+                queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(initial.enqueue_at).num_seconds(), 0),
                 "queue job admitted"
             );
         }
         Ok(if result.rows_affected == 1 {
-            Admission::Started
+            if recovered {
+                Admission::Recovered {
+                    attempt: initial.attempt + 1,
+                }
+            } else {
+                Admission::Started {
+                    attempt: initial.attempt + 1,
+                }
+            }
         } else {
             Admission::Duplicate
         })
@@ -149,34 +193,60 @@ impl Entity {
     pub(crate) async fn finish(
         db: &impl ConnectionTrait,
         id: Uuid,
+        attempt: Option<i32>,
         status: &str,
         error: Option<&str>,
     ) -> Result<(), DbErr> {
-        let mut row = Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .ok_or(DbErr::RecordNotFound("queue lifecycle".into()))?
-            .into_active_model();
-        row.status = Set(status.to_owned());
-        row.error = Set(error.map(str::to_owned));
         let now = Utc::now().fixed_offset();
+        let mut update = Entity::update_many()
+            .col_expr(Column::Status, Expr::value(status))
+            .col_expr(
+                Column::LeaseUntil,
+                Expr::value(Option::<DateTimeWithTimeZone>::None),
+            )
+            .col_expr(Column::Error, Expr::value(error.map(str::to_owned)))
+            .filter(Column::Id.eq(id));
+        if let Some(attempt) = attempt {
+            update = update.filter(Column::Attempt.eq(attempt));
+        }
         match status {
-            "completed" => row.completed_at = Set(Some(now)),
-            "failed" => row.failed_at = Set(Some(now)),
-            "retrying" => row.retry_at = Set(Some(now)),
-            "cancelled" => row.cancelled_at = Set(Some(now)),
+            "completed" => update = update.col_expr(Column::CompletedAt, Expr::value(now)),
+            "failed" => update = update.col_expr(Column::FailedAt, Expr::value(now)),
+            "retrying" => update = update.col_expr(Column::RetryAt, Expr::value(now)),
+            "cancelled" => update = update.col_expr(Column::CancelledAt, Expr::value(now)),
             _ => {}
         }
-        row.update(db).await.map(|_| ())
+        let result = update.exec(db).await?;
+        if result.rows_affected == 0 {
+            return Err(DbErr::RecordNotFound("active queue lease".into()));
+        }
+        Ok(())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Admission {
-    Started,
+    Started { attempt: i32 },
+    Recovered { attempt: i32 },
     Duplicate,
     Saturated,
     Terminal,
+}
+
+impl Admission {
+    pub(crate) fn attempt(self) -> Option<i32> {
+        match self {
+            Self::Started { attempt } | Self::Recovered { attempt } => Some(attempt),
+            Self::Duplicate | Self::Saturated | Self::Terminal => None,
+        }
+    }
+}
+
+fn running_lease_is_live(
+    lease_until: Option<DateTimeWithTimeZone>,
+    now: DateTimeWithTimeZone,
+) -> bool {
+    lease_until.is_none_or(|lease| lease > now)
 }
 
 pub(crate) struct Enqueue<'a> {
@@ -222,6 +292,7 @@ mod tests {
             failed_at: None,
             cancelled_at: None,
             admitted_at: Some(start_at),
+            lease_until: Some(start_at + chrono::Duration::minutes(5)),
             attempt: 1,
             concurrency_key: None,
             concurrency_limit: None,
@@ -234,5 +305,19 @@ mod tests {
                 .map(|start| (start - row.enqueue_at).num_seconds()),
             Some(75)
         );
+    }
+
+    #[test]
+    fn live_lease_is_duplicate_but_expired_lease_is_recoverable() {
+        let now = Utc.timestamp_opt(2_000, 0).single().unwrap().fixed_offset();
+        assert!(super::running_lease_is_live(
+            Some(now + chrono::Duration::seconds(1)),
+            now
+        ));
+        assert!(!super::running_lease_is_live(
+            Some(now - chrono::Duration::seconds(1)),
+            now
+        ));
+        assert!(super::running_lease_is_live(None, now));
     }
 }

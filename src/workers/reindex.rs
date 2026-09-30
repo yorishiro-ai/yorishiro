@@ -83,8 +83,14 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
     }
 
     if let Some(id) = args.lifecycle_id {
-        let _ = crate::models::queue_job_lifecycles::Entity::finish(&ctx.db, id, "completed", None)
-            .await;
+        let _ = crate::models::queue_job_lifecycles::Entity::finish(
+            &ctx.db,
+            id,
+            None,
+            "completed",
+            None,
+        )
+        .await;
     }
     Ok(())
 }
@@ -131,10 +137,10 @@ macro_rules! reindex_worker_for_class {
             }
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-                let admitted = if let Some(id) = args.lifecycle_id {
+                let admission = if let Some(id) = args.lifecycle_id {
                     match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
                     {
-                        Ok(crate::models::queue_job_lifecycles::Admission::Started) => true,
+                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
                         Ok(
                             crate::models::queue_job_lifecycles::Admission::Duplicate
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
@@ -143,6 +149,7 @@ macro_rules! reindex_worker_for_class {
                             crate::models::queue_job_lifecycles::Entity::defer(
                                 &self.ctx.db,
                                 id,
+                                None,
                                 "worker capacity saturated",
                             )
                             .await
@@ -153,8 +160,10 @@ macro_rules! reindex_worker_for_class {
                         Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
                     }
                 } else {
-                    true
+                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
                 };
+                let admitted = admission.attempt().is_some();
+                let attempt = admission.attempt();
                 let result = perform_reindex(&self.ctx, &args).await;
                 if admitted {
                     if let Some(id) = args.lifecycle_id {
@@ -162,6 +171,7 @@ macro_rules! reindex_worker_for_class {
                             let _ = crate::models::queue_job_lifecycles::Entity::finish(
                                 &self.ctx.db,
                                 id,
+                                attempt,
                                 "completed",
                                 None,
                             )
@@ -170,6 +180,7 @@ macro_rules! reindex_worker_for_class {
                             crate::models::queue_job_lifecycles::Entity::defer(
                                 &self.ctx.db,
                                 id,
+                                attempt,
                                 &error.to_string(),
                             )
                             .await

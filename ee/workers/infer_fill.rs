@@ -181,9 +181,14 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
-        let admitted = if let Some(id) = args.lifecycle_id {
+        let admission = if let Some(id) = args.lifecycle_id {
             match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await {
-                Ok(crate::models::queue_job_lifecycles::Admission::Started) => true,
+                Ok(
+                    admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. }
+                    | crate::models::queue_job_lifecycles::Admission::Recovered {
+                        ..
+                    }),
+                ) => admission,
                 Ok(
                     crate::models::queue_job_lifecycles::Admission::Duplicate
                     | crate::models::queue_job_lifecycles::Admission::Terminal,
@@ -192,6 +197,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     crate::models::queue_job_lifecycles::Entity::defer(
                         &self.ctx.db,
                         id,
+                        None,
                         "worker capacity saturated",
                     )
                     .await
@@ -202,12 +208,21 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
             }
         } else {
-            true
+            crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
         };
+        let recovered = matches!(
+            admission,
+            crate::models::queue_job_lifecycles::Admission::Recovered { .. }
+        );
+        let admitted = admission.attempt().is_some();
+        let attempt = admission.attempt();
         let job_id = args.job_id;
-        let claimed = inference_jobs::claim(&self.ctx.db, job_id)
-            .await
-            .internal()?;
+        let claimed = if recovered {
+            inference_jobs::reclaim_running(&self.ctx.db, job_id).await
+        } else {
+            inference_jobs::claim(&self.ctx.db, job_id).await
+        }
+        .internal()?;
         if !claimed {
             // A duplicate delivery is harmless after the first worker claims the row.
             // This also makes a reaped delivery harmless while the original worker may
@@ -224,6 +239,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     let _ = crate::models::queue_job_lifecycles::Entity::finish(
                         &self.ctx.db,
                         id,
+                        attempt,
                         "completed",
                         None,
                     )
@@ -238,9 +254,13 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
                 }
                 if admitted && let Some(id) = args.lifecycle_id {
+                    inference_jobs::retry(&self.ctx.db, job_id, &e.to_string())
+                        .await
+                        .internal()?;
                     crate::models::queue_job_lifecycles::Entity::defer(
                         &self.ctx.db,
                         id,
+                        attempt,
                         &e.to_string(),
                     )
                     .await

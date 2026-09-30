@@ -158,6 +158,28 @@ pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, Yorish
     Ok(false)
 }
 
+/// Reclaims the job owned by a worker whose lifecycle lease expired.
+pub(crate) async fn reclaim_running(
+    conn: &impl ConnectionTrait,
+    id: Uuid,
+) -> Result<bool, YorishiroError> {
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(InferenceJobStatus::Running.as_db_str()),
+        )
+        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(Column::Id.eq(id))
+        .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+    if result.rows_affected == 0 {
+        validate_existing_status(conn, id).await?;
+    }
+    Ok(result.rows_affected == 1)
+}
+
 pub async fn complete(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -237,6 +259,30 @@ pub async fn fail(
             .await?;
     }
     Ok(())
+}
+
+/// Returns a failed job to the claimable queue state for a durable retry.
+pub(crate) async fn retry(
+    conn: &impl ConnectionTrait,
+    id: Uuid,
+    message: &str,
+) -> Result<bool, YorishiroError> {
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(InferenceJobStatus::Queued.as_db_str()),
+        )
+        .col_expr(Column::Error, Expr::value(message))
+        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(Column::Id.eq(id))
+        .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+    if result.rows_affected == 0 {
+        validate_existing_status(conn, id).await?;
+    }
+    Ok(result.rows_affected == 1)
 }
 
 async fn validate_existing_status(

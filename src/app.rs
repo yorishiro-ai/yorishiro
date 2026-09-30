@@ -102,6 +102,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                 let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
+                    None,
                     "unavailable",
                     Some(&error),
                 )
@@ -148,6 +149,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                 let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
+                    None,
                     "unavailable",
                     Some(&error.to_string()),
                 )
@@ -198,6 +200,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                 let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
+                    None,
                     "unavailable",
                     Some(&error),
                 )
@@ -244,6 +247,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                 let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
+                    None,
                     "unavailable",
                     Some(&error.to_string()),
                 )
@@ -296,6 +300,7 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
                 let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
+                    None,
                     "unavailable",
                     Some(&error.to_string()),
                 )

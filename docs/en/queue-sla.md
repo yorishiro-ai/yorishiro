@@ -15,6 +15,9 @@ The original enqueue timestamp is retained across provider retry and redelivery,
 The lifecycle status is `queued`, `running`, `retrying`, `completed`, `failed`, `cancelled`, or `unavailable`.
 Missing queue capacity and provider failures are not counted as successful starts.
 Duplicate delivery is ignored after the lifecycle row is running or terminal.
+Running rows carry a five-minute lease.
+Live redelivery is `Duplicate`; redelivery after the lease expires reclaims the row and increments `attempt`.
+Terminal updates are guarded by the admitted attempt, so an old worker cannot finish or retry a reclaimed attempt.
 
 ## Capacity and diagnostics
 
@@ -26,7 +29,7 @@ PostgreSQL and SQLite use the application database for lifecycle durability.
 Redis supplies provider job state, while lifecycle durability remains in the application database because Redis job inspection is provider-specific.
 Provider-native queued, processing, completed, failed, and cancelled states should be combined with lifecycle rows for operations dashboards.
 
-If the lifecycle table cannot be written, dispatch fails rather than reporting an unobserved SLA success.
+If the primary entity write fails after the lifecycle row is committed, the dispatch failure is reported in lifecycle diagnostics and structured logs; it cannot be rolled back into the already-committed lifecycle transaction.
 If the queue provider is absent or unreachable, the row is marked `unavailable` by the caller and the request receives the provider error.
 
 ## Operations
