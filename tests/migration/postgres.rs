@@ -9,7 +9,7 @@
 //! Run in parallel against a cluster where that role does not exist yet, both reach `CREATE ROLE` at once and one fails with `duplicate key value violates unique constraint "pg_authid_rolname_index"` — the migration's own `EXCEPTION WHEN duplicate_object` catches a role that already existed, not two transactions creating it simultaneously.
 //! This passed locally and failed in CI for exactly that reason: the local cluster already had the role from earlier runs, so the race had nothing to lose.
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{ConnectionTrait, Database};
+use sea_orm::{ConnectionTrait, Database, Statement};
 use serial_test::serial;
 
 /// A throwaway database, dropped and recreated so each run starts from nothing.
@@ -52,6 +52,18 @@ async fn scratch_db(name: &str) -> sea_orm::DatabaseConnection {
         .expect("connect to scratch database")
 }
 
+async fn privilege(db: &sea_orm::DatabaseConnection, action: &str) -> bool {
+    db.query_one_raw(Statement::from_string(
+        sea_orm::DatabaseBackend::Postgres,
+        format!("SELECT has_table_privilege('yorishiro_app', 'inference_jobs', '{action}')"),
+    ))
+    .await
+    .expect("query privilege")
+    .expect("privilege row")
+    .try_get_by_index(0)
+    .expect("read privilege")
+}
+
 #[tokio::test]
 #[serial(postgres_cluster)]
 async fn all_migrations_apply_to_a_fresh_postgres_database() {
@@ -78,4 +90,23 @@ async fn all_migrations_roll_back_and_reapply_on_postgres() {
     Migrator::up(&db, None)
         .await
         .expect("reapply after rollback");
+}
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+async fn inference_job_attempt_migration_grants_update_to_app_role() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    let db = scratch_db("yorishiro_migtest_attempt_privileges").await;
+    Migrator::up(&db, None).await.expect("run all migrations");
+    assert!(privilege(&db, "SELECT").await);
+    assert!(privilege(&db, "UPDATE").await);
+    Migrator::down(&db, Some(1))
+        .await
+        .expect("roll back the privilege migration");
+    assert!(!privilege(&db, "UPDATE").await);
+    Migrator::up(&db, None)
+        .await
+        .expect("reapply the privilege migration");
 }

@@ -19,6 +19,8 @@ use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
 use yorishiro::app::App;
+use yorishiro::models::_entities::{tenant_billing, tenant_tenants, workspace_workspaces};
+use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
 use yorishiro::workers::reindex::{self, ReindexArgs};
 
@@ -30,7 +32,7 @@ use crate::requests::close_app_pools;
 /// The config is therefore supplied here rather than by flipping a mode: `H::load_config` returns an owned `Config`, and `boot_test_with_create_db` already mutates `database.uri` on it before calling `H::boot`, so setting `workers` and `queue` the same way touches nothing process-wide and leaves every `ForegroundBlocking` test in this binary unaffected.
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
-    F: FnOnce(AppContext, sqlx::SqlitePool) -> Fut,
+    F: FnOnce(AppContext, sqlx::SqlitePool, Uuid) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -75,8 +77,33 @@ where
             .await
             .expect("connect to the queue file");
 
-        // Run the test.
-        test(boot_res.app_context.clone(), pool.clone()).await;
+        let tenant = tenant_tenants::ActiveModel {
+            name: sea_orm::ActiveValue::Set("queue-test-tenant".into()),
+            ..Default::default()
+        }
+        .insert(&boot_res.app_context.db)
+        .await
+        .expect("insert queue test tenant");
+        let workspace = workspace_workspaces::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            name: sea_orm::ActiveValue::Set("queue-test-workspace".into()),
+            status: sea_orm::ActiveValue::Set(WORKSPACE_STATUS_ACTIVE.to_owned()),
+            ..Default::default()
+        }
+        .insert(&boot_res.app_context.db)
+        .await
+        .expect("insert queue test workspace");
+        tenant_billing::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
+            plan: sea_orm::ActiveValue::Set(Some("free".into())),
+            ..Default::default()
+        }
+        .insert(&boot_res.app_context.db)
+        .await
+        .expect("insert queue test billing");
+
+        // Run the test with a real workspace and billing policy.
+        test(boot_res.app_context.clone(), pool.clone(), workspace.id).await;
 
         // Shut down the queue provider first so its worker threads release their
         // PostgreSQL connections, then close pools — all inside the catch_unwind
@@ -110,10 +137,10 @@ where
     }
 }
 
-fn args_for(class: WorkerClass) -> EmbeddingSyncArgs {
+fn args_for(class: WorkerClass, workspace_id: Uuid) -> EmbeddingSyncArgs {
     EmbeddingSyncArgs {
         lifecycle_id: None,
-        workspace_id: Uuid::now_v7(),
+        workspace_id,
         entity_id: Uuid::now_v7(),
         worker_class: class,
     }
@@ -127,8 +154,8 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    with_sqlite_queue(|ctx, pool| async move {
-        embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Shared))
+    with_sqlite_queue(|ctx, pool, workspace_id| async move {
+        embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Shared, workspace_id))
             .await
             .expect("enqueue");
 
@@ -148,13 +175,13 @@ async fn each_worker_class_carries_its_own_tag() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    with_sqlite_queue(|ctx, pool| async move {
+    with_sqlite_queue(|ctx, pool, workspace_id| async move {
         for class in [
             WorkerClass::Shared,
             WorkerClass::Official,
             WorkerClass::TenantPrivate,
         ] {
-            embedding_sync::enqueue_for_class(&ctx, args_for(class))
+            embedding_sync::enqueue_for_class(&ctx, args_for(class, workspace_id))
                 .await
                 .expect("enqueue");
         }
@@ -194,7 +221,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
     if !super::super::require_postgres_backend() {
         return;
     }
-    with_sqlite_queue(|ctx, pool| async move {
+    with_sqlite_queue(|ctx, pool, workspace_id| async move {
         for class in [
             WorkerClass::Shared,
             WorkerClass::Official,
@@ -204,7 +231,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
                 &ctx,
                 ReindexArgs {
                     lifecycle_id: None,
-                    workspace_id: Uuid::now_v7(),
+                    workspace_id,
                     worker_class: class,
                 },
             )
