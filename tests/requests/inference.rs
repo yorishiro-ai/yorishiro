@@ -665,6 +665,8 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
                 .await;
                 if result.is_ok() {
                     txn.commit().await.expect("commit confirmation");
+                } else {
+                    txn.rollback().await.expect("rollback confirmation");
                 }
                 result
             });
