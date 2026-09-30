@@ -183,6 +183,8 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
+        let mut already_reconciled = false;
+        let has_lifecycle = args.lifecycle_id.is_some();
         let admission = if let Some(id) = args.lifecycle_id {
             match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await {
                 Ok(
@@ -191,10 +193,17 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                         ..
                     }),
                 ) => admission,
-                Ok(
-                    crate::models::queue_job_lifecycles::Admission::Duplicate
-                    | crate::models::queue_job_lifecycles::Admission::Terminal,
-                ) => return Ok(()),
+                Ok(crate::models::queue_job_lifecycles::Admission::Duplicate { attempt }) => {
+                    if !inference_jobs::reconcile_attempt(&self.ctx.db, args.job_id, attempt)
+                        .await
+                        .internal()?
+                    {
+                        return Ok(());
+                    }
+                    already_reconciled = true;
+                    crate::models::queue_job_lifecycles::Admission::Started { attempt }
+                }
+                Ok(crate::models::queue_job_lifecycles::Admission::Terminal) => return Ok(()),
                 Ok(crate::models::queue_job_lifecycles::Admission::Saturated) => {
                     crate::models::queue_job_lifecycles::Entity::defer(
                         &self.ctx.db,
@@ -212,26 +221,16 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         } else {
             crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
         };
-        let recovered = matches!(
-            admission,
-            crate::models::queue_job_lifecycles::Admission::Recovered { .. }
-        );
         let admitted = admission.attempt().is_some();
         let attempt = admission.attempt();
         let job_id = args.job_id;
-        let claimed = if recovered {
-            inference_jobs::reclaim_running(
-                &self.ctx.db,
-                job_id,
-                attempt.expect("recovered admission has an attempt") - 1,
-            )
-            .await
+        let claimed = if already_reconciled {
+            Ok(true)
+        } else if has_lifecycle {
+            let attempt = attempt.expect("lifecycle admission has an attempt");
+            inference_jobs::reconcile_attempt(&self.ctx.db, job_id, attempt).await
         } else {
-            if let Some(attempt) = attempt {
-                inference_jobs::claim_attempt(&self.ctx.db, job_id, Some(attempt - 1)).await
-            } else {
-                inference_jobs::claim(&self.ctx.db, job_id).await
-            }
+            inference_jobs::claim(&self.ctx.db, job_id).await
         }
         .internal()?;
         if !claimed {

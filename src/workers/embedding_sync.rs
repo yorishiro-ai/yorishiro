@@ -234,7 +234,7 @@ macro_rules! embedding_sync_worker_for_class {
                     {
                         Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
                         Ok(
-                            crate::models::queue_job_lifecycles::Admission::Duplicate
+                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
                         Ok(crate::models::queue_job_lifecycles::Admission::Saturated) => {

@@ -157,7 +157,9 @@ impl Entity {
         if initial.status == "running" {
             if running_lease_is_live(initial.lease_until, now) {
                 txn.rollback().await?;
-                return Ok(Admission::Duplicate);
+                return Ok(Admission::Duplicate {
+                    attempt: initial.attempt,
+                });
             }
             tracing::warn!(lifecycle_id = %id, "reclaiming expired queue lease");
         }
@@ -226,7 +228,9 @@ impl Entity {
                 }
             }
         } else {
-            Admission::Duplicate
+            Admission::Duplicate {
+                attempt: initial.attempt,
+            }
         })
     }
 
@@ -270,7 +274,7 @@ impl Entity {
 pub(crate) enum Admission {
     Started { attempt: i32 },
     Recovered { attempt: i32 },
-    Duplicate,
+    Duplicate { attempt: i32 },
     Saturated,
     Terminal,
 }
@@ -279,7 +283,7 @@ impl Admission {
     pub(crate) fn attempt(self) -> Option<i32> {
         match self {
             Self::Started { attempt } | Self::Recovered { attempt } => Some(attempt),
-            Self::Duplicate | Self::Saturated | Self::Terminal => None,
+            Self::Duplicate { .. } | Self::Saturated | Self::Terminal => None,
         }
     }
 }
@@ -408,10 +412,10 @@ mod tests {
             Entity::start_at(&db, id, now).await.unwrap(),
             Admission::Started { attempt: 1 }
         );
-        assert_eq!(
+        assert!(matches!(
             Entity::start_at(&db, id, now).await.unwrap(),
-            Admission::Duplicate
-        );
+            Admission::Duplicate { .. }
+        ));
         assert!(Entity::renew_at(&db, id, 1, now).await.unwrap());
         let row = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
         assert_eq!(row.lease_until, Some(now + lease_duration()));
@@ -467,5 +471,37 @@ mod tests {
             admissions.iter().filter(|a| a.attempt().is_some()).count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn saturation_defers_without_consuming_or_duplicating_the_retry() {
+        let db = database().await;
+        let active = uuid::Uuid::now_v7();
+        let waiting = uuid::Uuid::now_v7();
+        enqueue(&db, active, Some(1)).await;
+        enqueue(&db, waiting, Some(1)).await;
+        let now = Utc.timestamp_opt(6_000, 0).single().unwrap().fixed_offset();
+        assert!(
+            Entity::start_at(&db, active, now)
+                .await
+                .unwrap()
+                .attempt()
+                .is_some()
+        );
+        assert_eq!(
+            Entity::start_at(&db, waiting, now).await.unwrap(),
+            Admission::Saturated
+        );
+        Entity::defer(&db, waiting, None, "capacity").await.unwrap();
+        let row = Entity::find_by_id(waiting).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "retrying");
+        assert!(row.lease_until.is_none());
+        assert_eq!(
+            Entity::start_at(&db, waiting, now).await.unwrap(),
+            Admission::Saturated
+        );
+        let row = Entity::find_by_id(waiting).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "retrying");
+        assert_eq!(row.attempt, 0);
     }
 }

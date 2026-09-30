@@ -6,7 +6,7 @@ use chrono::Utc;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
-    QueryFilter, Set,
+    QueryFilter, QuerySelect, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -172,28 +172,53 @@ pub(crate) async fn claim_attempt(
     Ok(false)
 }
 
-/// Reclaims the job owned by a worker whose lifecycle lease expired.
-pub(crate) async fn reclaim_running(
-    conn: &impl ConnectionTrait,
+/// Repairs the inference row after lifecycle admission committed before the worker claimed it.
+/// The target attempt is the lifecycle attempt, so repeated deliveries and recovery are idempotent.
+pub(crate) async fn reconcile_attempt(
+    conn: &sea_orm::DatabaseConnection,
     id: Uuid,
-    expected_attempt: i32,
+    target_attempt: i32,
 ) -> Result<bool, YorishiroError> {
+    let txn = conn.begin().await.internal()?;
+    let Some(row) = Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&txn)
+        .await
+        .internal()?
+    else {
+        txn.rollback().await.internal()?;
+        return Err(YorishiroError::not_found("infer-fill job not found"));
+    };
+    InferenceJobRecord::try_from(row.clone())?;
+    if row.status == InferenceJobStatus::Running.as_db_str() && row.attempt == target_attempt {
+        txn.rollback().await.internal()?;
+        return Ok(false);
+    }
+    if row.attempt != target_attempt - 1
+        || row.status == InferenceJobStatus::Completed.as_db_str()
+        || row.status == InferenceJobStatus::Failed.as_db_str()
+    {
+        txn.rollback().await.internal()?;
+        return Ok(false);
+    }
     let result = Entity::update_many()
         .col_expr(
             Column::Status,
             Expr::value(InferenceJobStatus::Running.as_db_str()),
         )
+        .col_expr(Column::Attempt, Expr::value(target_attempt))
         .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
-        .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
         .filter(Column::Id.eq(id))
-        .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
-        .filter(Column::Attempt.eq(expected_attempt))
-        .exec(conn)
+        .filter(Column::Attempt.eq(target_attempt - 1))
+        .filter(Column::Status.is_in([
+            InferenceJobStatus::Queued.as_db_str(),
+            InferenceJobStatus::Running.as_db_str(),
+            InferenceJobStatus::Failed.as_db_str(),
+        ]))
+        .exec(&txn)
         .await
         .internal()?;
-    if result.rows_affected == 0 {
-        validate_existing_status(conn, id).await?;
-    }
+    txn.commit().await.internal()?;
     Ok(result.rows_affected == 1)
 }
 
