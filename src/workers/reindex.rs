@@ -33,6 +33,8 @@ use crate::workers::embedding_sync::WorkerClass;
 /// tag-restricted worker processes dequeue only their own jobs.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReindexArgs {
+    #[serde(default)]
+    pub lifecycle_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub worker_class: WorkerClass,
 }
@@ -125,7 +127,78 @@ macro_rules! reindex_worker_for_class {
             }
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-                perform_reindex(&self.ctx, &args).await
+                let admission = if let Some(id) = args.lifecycle_id {
+                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
+                    {
+                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
+                        Ok(
+                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+                            | crate::models::queue_job_lifecycles::Admission::Terminal,
+                        ) => return Ok(()),
+                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
+                            match attempt {
+                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
+                                    &self.ctx.db,
+                                    id,
+                                    attempt,
+                                    "worker capacity saturated",
+                                    chrono::Utc::now().fixed_offset(),
+                                )
+                                .await,
+                                None => crate::models::queue_job_lifecycles::Entity::defer(
+                                    &self.ctx.db,
+                                    id,
+                                    None,
+                                    "worker capacity saturated",
+                                )
+                                .await,
+                            }
+                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            return Ok(());
+                        }
+                        Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+                    }
+                } else {
+                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
+                };
+                let admitted = admission.attempt().is_some();
+                let attempt = admission.attempt();
+                let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
+                    crate::models::queue_job_lifecycles::Entity::heartbeat(
+                        self.ctx.db.clone(), id, attempt,
+                    )
+                });
+                let result = perform_reindex(&self.ctx, &args).await;
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
+                }
+                if admitted {
+                    if let Some(id) = args.lifecycle_id {
+                        if result.is_ok() {
+                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                                &self.ctx.db,
+                                id,
+                                attempt,
+                                "completed",
+                                None,
+                            )
+                            .await;
+                        } else if let Some(error) = result.as_ref().err() {
+                            crate::models::queue_job_lifecycles::Entity::defer(
+                                &self.ctx.db,
+                                id,
+                                attempt,
+                                &error.to_string(),
+                            )
+                            .await
+                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            return Ok(());
+                        }
+                    }
+                }
+                result
             }
         }
     };
@@ -181,6 +254,7 @@ pub(crate) async fn enqueue_reindex_with_dispatcher(
         .dispatch(
             ctx,
             ReindexArgs {
+                lifecycle_id: None,
                 workspace_id,
                 worker_class,
             },
@@ -229,6 +303,7 @@ mod tests {
     async fn dispatches_the_original_args_and_returns_success() {
         let ctx = crate::workers::dispatch::test_context().await;
         let args = ReindexArgs {
+            lifecycle_id: None,
             workspace_id: Uuid::now_v7(),
             worker_class: WorkerClass::TenantPrivate,
         };
@@ -258,6 +333,7 @@ mod tests {
         let error = enqueue_for_class_with_dispatcher(
             &ctx,
             ReindexArgs {
+                lifecycle_id: None,
                 workspace_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,
             },

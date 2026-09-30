@@ -6,8 +6,8 @@ use crate::models::schema_schemas::SchemaStatus;
 use crate::models::{entity_entities, schema_schemas};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-    SqlErr,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set, SqlErr,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -125,15 +125,49 @@ pub async fn record_batch(
     schema_version: i32,
     fields: impl IntoIterator<Item = (Uuid, String, Value)>,
 ) -> Result<i64, YorishiroError> {
-    let Some(job) = crate::ee::models::inference_jobs::get(conn, job_id).await? else {
+    record_batch_attempt(
+        conn,
+        workspace_id,
+        job_id,
+        None,
+        schema_id,
+        schema_version,
+        fields,
+    )
+    .await
+}
+
+pub(crate) async fn record_batch_attempt(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+    attempt: Option<i32>,
+    schema_id: Uuid,
+    schema_version: i32,
+    fields: impl IntoIterator<Item = (Uuid, String, Value)>,
+) -> Result<i64, YorishiroError> {
+    let Some(row) = crate::models::_entities::inference_jobs::Entity::find_by_id(job_id)
+        .lock_exclusive()
+        .one(conn)
+        .await
+        .internal()?
+    else {
         return Err(YorishiroError::not_found("infer-fill job not found"));
     };
+    let job = crate::ee::models::inference_jobs::InferenceJobRecord::try_from(row)?;
     if job.workspace_id != workspace_id {
         return Err(YorishiroError::not_found("infer-fill job not found"));
     }
     if job.status != crate::ee::models::inference_jobs::InferenceJobStatus::Running {
         return Err(YorishiroError::Conflict {
             message: format!("inference job '{job_id}' is not running"),
+        });
+    }
+    if let Some(attempt) = attempt
+        && job.attempt != attempt
+    {
+        return Err(YorishiroError::Conflict {
+            message: format!("inference job '{job_id}' attempt is stale"),
         });
     }
     let mut inserted = 0;

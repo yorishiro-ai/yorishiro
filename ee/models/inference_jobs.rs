@@ -5,7 +5,8 @@ use crate::models::inference_jobs::{ActiveModel, Column, Entity, Model};
 use chrono::Utc;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
+    QueryFilter, QuerySelect, Set, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -71,6 +72,7 @@ pub struct InferenceJobRecord {
     pub proposed: i64,
     pub skipped: i64,
     pub error: Option<String>,
+    pub(crate) attempt: i32,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
     pub updated_at: chrono::DateTime<chrono::FixedOffset>,
 }
@@ -94,6 +96,7 @@ impl TryFrom<Model> for InferenceJobRecord {
             proposed: row.proposed,
             skipped: row.skipped,
             error: row.error,
+            attempt: row.attempt,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -114,6 +117,7 @@ pub async fn create(
         applied: Set(0),
         skipped: Set(0),
         error: ActiveValue::Set(None),
+        attempt: Set(0),
         ..Default::default()
     };
     active.insert(conn).await.internal()?;
@@ -135,17 +139,27 @@ pub async fn get(
 /// Claims a queued job exactly once.
 /// A running job is never reclaimed because its worker may still be executing an inference.
 pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, YorishiroError> {
-    let result = Entity::update_many()
+    claim_attempt(conn, id, None).await
+}
+
+pub(crate) async fn claim_attempt(
+    conn: &impl ConnectionTrait,
+    id: Uuid,
+    expected_attempt: Option<i32>,
+) -> Result<bool, YorishiroError> {
+    let mut update = Entity::update_many()
         .col_expr(
             Column::Status,
             Expr::value(InferenceJobStatus::Running.as_db_str()),
         )
+        .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
         .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(Column::Id.eq(id))
-        .filter(Column::Status.eq(InferenceJobStatus::Queued.as_db_str()))
-        .exec(conn)
-        .await
-        .internal()?;
+        .filter(Column::Status.eq(InferenceJobStatus::Queued.as_db_str()));
+    if let Some(attempt) = expected_attempt {
+        update = update.filter(Column::Attempt.eq(attempt));
+    }
+    let result = update.exec(conn).await.internal()?;
     if result.rows_affected == 1 {
         return Ok(true);
     }
@@ -156,6 +170,71 @@ pub async fn claim(conn: &impl ConnectionTrait, id: Uuid) -> Result<bool, Yorish
         InferenceJobRecord::try_from(row)?;
     }
     Ok(false)
+}
+
+/// Repairs the inference row after lifecycle admission committed before the worker claimed it.
+/// The target attempt is the lifecycle attempt, so repeated deliveries and recovery are idempotent.
+pub(crate) async fn reconcile_attempt(
+    conn: &sea_orm::DatabaseConnection,
+    id: Uuid,
+    target_attempt: i32,
+) -> Result<bool, YorishiroError> {
+    let txn = conn.begin().await.internal()?;
+    let Some(row) = Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&txn)
+        .await
+        .internal()?
+    else {
+        txn.rollback().await.internal()?;
+        return Err(YorishiroError::not_found("infer-fill job not found"));
+    };
+    InferenceJobRecord::try_from(row.clone())?;
+    if row.status == InferenceJobStatus::Running.as_db_str() && row.attempt == target_attempt {
+        txn.rollback().await.internal()?;
+        return Ok(false);
+    }
+    if row.status == InferenceJobStatus::Failed.as_db_str() && row.attempt == target_attempt {
+        let result = Entity::update_many()
+            .col_expr(
+                Column::Status,
+                Expr::value(InferenceJobStatus::Running.as_db_str()),
+            )
+            .col_expr(Column::Error, Expr::value(Option::<String>::None))
+            .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+            .filter(Column::Id.eq(id))
+            .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
+            .filter(Column::Attempt.eq(target_attempt))
+            .exec(&txn)
+            .await
+            .internal()?;
+        txn.commit().await.internal()?;
+        return Ok(result.rows_affected == 1);
+    }
+    if row.attempt != target_attempt - 1 || row.status == InferenceJobStatus::Completed.as_db_str()
+    {
+        txn.rollback().await.internal()?;
+        return Ok(false);
+    }
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(InferenceJobStatus::Running.as_db_str()),
+        )
+        .col_expr(Column::Attempt, Expr::value(target_attempt))
+        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(Column::Id.eq(id))
+        .filter(Column::Attempt.eq(target_attempt - 1))
+        .filter(Column::Status.is_in([
+            InferenceJobStatus::Queued.as_db_str(),
+            InferenceJobStatus::Running.as_db_str(),
+            InferenceJobStatus::Failed.as_db_str(),
+        ]))
+        .exec(&txn)
+        .await
+        .internal()?;
+    txn.commit().await.internal()?;
+    Ok(result.rows_affected == 1)
 }
 
 pub async fn complete(
@@ -184,12 +263,13 @@ pub async fn complete(
 }
 
 /// Completes a proposal-producing job without claiming that entity data was applied.
-pub(crate) async fn complete_proposals(
+pub(crate) async fn complete_proposals_attempt(
     conn: &impl ConnectionTrait,
     id: Uuid,
+    attempt: i32,
     proposed: i64,
     skipped: i64,
-) -> Result<(), YorishiroError> {
+) -> Result<bool, YorishiroError> {
     let result = Entity::update_many()
         .col_expr(
             Column::Status,
@@ -201,13 +281,14 @@ pub(crate) async fn complete_proposals(
         .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(Column::Id.eq(id))
         .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
+        .filter(Column::Attempt.eq(attempt))
         .exec(conn)
         .await
         .internal()?;
     if result.rows_affected == 0 {
         validate_existing_status(conn, id).await?;
     }
-    Ok(())
+    Ok(result.rows_affected == 1)
 }
 
 pub async fn fail(
@@ -239,6 +320,57 @@ pub async fn fail(
     Ok(())
 }
 
+pub(crate) async fn fail_attempt(
+    conn: &impl ConnectionTrait,
+    id: Uuid,
+    attempt: i32,
+    message: &str,
+) -> Result<bool, YorishiroError> {
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(InferenceJobStatus::Failed.as_db_str()),
+        )
+        .col_expr(Column::Error, Expr::value(message))
+        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(Column::Id.eq(id))
+        .filter(Column::Status.eq(InferenceJobStatus::Running.as_db_str()))
+        .filter(Column::Attempt.eq(attempt))
+        .exec(conn)
+        .await
+        .internal()?;
+    if result.rows_affected == 0 {
+        validate_existing_status(conn, id).await?;
+    }
+    Ok(result.rows_affected == 1)
+}
+
+/// Returns a failed job to the claimable queue state for a durable retry.
+pub(crate) async fn retry(
+    conn: &impl ConnectionTrait,
+    id: Uuid,
+    message: &str,
+    attempt: i32,
+) -> Result<bool, YorishiroError> {
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(InferenceJobStatus::Queued.as_db_str()),
+        )
+        .col_expr(Column::Error, Expr::value(message))
+        .col_expr(Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(Column::Id.eq(id))
+        .filter(Column::Status.eq(InferenceJobStatus::Failed.as_db_str()))
+        .filter(Column::Attempt.eq(attempt))
+        .exec(conn)
+        .await
+        .internal()?;
+    if result.rows_affected == 0 {
+        validate_existing_status(conn, id).await?;
+    }
+    Ok(result.rows_affected == 1)
+}
+
 async fn validate_existing_status(
     conn: &impl ConnectionTrait,
     id: Uuid,
@@ -247,4 +379,58 @@ async fn validate_existing_status(
         InferenceJobRecord::try_from(row)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{ActiveModelTrait, Database, Set};
+
+    #[tokio::test]
+    async fn reconcile_recovers_after_failure_before_retry() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let tenant = crate::models::_entities::tenant_tenants::ActiveModel {
+            name: Set("reconcile-tenant".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let workspace = crate::models::_entities::workspace_workspaces::ActiveModel {
+            tenant_id: Set(tenant.id),
+            name: Set("reconcile-workspace".into()),
+            status: Set("active".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let id = Uuid::now_v7();
+        create(&db, id, workspace.id, "notes").await.unwrap();
+        assert!(claim(&db, id).await.unwrap());
+        let attempt = get(&db, id).await.unwrap().unwrap().attempt;
+        assert!(
+            fail_attempt(&db, id, attempt, "provider failed")
+                .await
+                .unwrap()
+        );
+        assert!(reconcile_attempt(&db, id, attempt).await.unwrap());
+        assert!(!fail_attempt(&db, id, attempt - 1, "stale").await.unwrap());
+        assert!(
+            complete_proposals_attempt(&db, id, attempt, 2, 0)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !complete_proposals_attempt(&db, id, attempt, 9, 0)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            get(&db, id).await.unwrap().unwrap().status,
+            InferenceJobStatus::Completed
+        );
+    }
 }

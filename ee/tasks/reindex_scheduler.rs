@@ -281,6 +281,7 @@ impl TenantReindexScheduler {
                     }
                 };
                 let args = ReindexArgs {
+                    lifecycle_id: None,
                     workspace_id: ws.id,
                     worker_class,
                 };
@@ -455,6 +456,7 @@ mod tests {
                 (
                     Uuid::now_v7(),
                     crate::workers::reindex::ReindexArgs {
+                        lifecycle_id: None,
                         workspace_id: Uuid::now_v7(),
                         worker_class: crate::workers::embedding_sync::WorkerClass::Shared,
                     },

@@ -19,6 +19,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,8 @@ pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
 /// A deleted entity is not found on that re-read, and the job is a no-op.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
+    #[serde(default)]
+    pub lifecycle_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
     pub worker_class: WorkerClass,
@@ -227,7 +230,78 @@ macro_rules! embedding_sync_worker_for_class {
             }
 
             async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-                perform_embedding_sync(&self.ctx, &args).await
+                let admission = if let Some(id) = args.lifecycle_id {
+                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
+                    {
+                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
+                        Ok(
+                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+                            | crate::models::queue_job_lifecycles::Admission::Terminal,
+                        ) => return Ok(()),
+                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
+                            match attempt {
+                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
+                                    &self.ctx.db,
+                                    id,
+                                    attempt,
+                                    "worker capacity saturated",
+                                    Utc::now().fixed_offset(),
+                                )
+                                .await,
+                                None => crate::models::queue_job_lifecycles::Entity::defer(
+                                    &self.ctx.db,
+                                    id,
+                                    None,
+                                    "worker capacity saturated",
+                                )
+                                .await,
+                            }
+                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            return Ok(());
+                        }
+                        Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+                    }
+                } else {
+                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
+                };
+                let admitted = admission.attempt().is_some();
+                let attempt = admission.attempt();
+                let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
+                    crate::models::queue_job_lifecycles::Entity::heartbeat(
+                        self.ctx.db.clone(), id, attempt,
+                    )
+                });
+                let result = perform_embedding_sync(&self.ctx, &args).await;
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
+                }
+                if admitted {
+                    if let Some(id) = args.lifecycle_id {
+                        if result.is_ok() {
+                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                                &self.ctx.db,
+                                id,
+                                attempt,
+                                "completed",
+                                None,
+                            )
+                            .await;
+                        } else if let Some(error) = result.as_ref().err() {
+                            crate::models::queue_job_lifecycles::Entity::defer(
+                                &self.ctx.db,
+                                id,
+                                attempt,
+                                &error.to_string(),
+                            )
+                            .await
+                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            return Ok(());
+                        }
+                    }
+                }
+                result
             }
         }
     };
@@ -293,6 +367,7 @@ pub(crate) async fn enqueue_after_write_with_dispatcher(
         }
     };
     let args = EmbeddingSyncArgs {
+        lifecycle_id: None,
         workspace_id,
         entity_id,
         worker_class,
@@ -331,6 +406,7 @@ mod tests {
     async fn dispatches_the_original_args_and_returns_success() {
         let ctx = crate::workers::dispatch::test_context().await;
         let args = EmbeddingSyncArgs {
+            lifecycle_id: None,
             workspace_id: Uuid::now_v7(),
             entity_id: Uuid::now_v7(),
             worker_class: WorkerClass::Official,
@@ -362,6 +438,7 @@ mod tests {
         let error = enqueue_for_class_with_dispatcher(
             &ctx,
             EmbeddingSyncArgs {
+                lifecycle_id: None,
                 workspace_id: Uuid::now_v7(),
                 entity_id: Uuid::now_v7(),
                 worker_class: WorkerClass::Shared,

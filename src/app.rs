@@ -14,6 +14,7 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
+use sea_orm::EntityTrait;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -26,12 +27,47 @@ use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
 /// The single production adapter at Loco's worker integration point.
 pub(crate) struct LocoJobDispatcher;
 
+async fn queue_concurrency_policy(
+    ctx: &AppContext,
+    workspace_id: uuid::Uuid,
+    class: &str,
+) -> Result<(String, i32), String> {
+    let workspace =
+        crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
+    let Some(workspace) = workspace else {
+        return Err("queue policy unavailable: workspace does not exist".into());
+    };
+    let plan = crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
+        .one(&ctx.db)
+        .await
+        .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?
+        .ok_or_else(|| "queue policy unavailable: billing row is missing".to_owned())?
+        .plan
+        .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())
+        .and_then(|value| {
+            crate::ee::services::plan::Plan::from_db_str(&value).map_err(|error| error.to_string())
+        })?;
+    let limit = match class {
+        "official" => plan.compute_policy().base_official_concurrency as i32,
+        "tenant_private" | "shared" => 1,
+        _ => {
+            return Err(format!(
+                "queue policy unavailable: unknown worker class {class}"
+            ));
+        }
+    };
+    Ok((plan.as_str().to_owned(), limit))
+}
+
 #[async_trait]
 impl EmbeddingSyncDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
         ctx: &AppContext,
-        args: crate::workers::embedding_sync::EmbeddingSyncArgs,
+        mut args: crate::workers::embedding_sync::EmbeddingSyncArgs,
     ) -> loco_rs::Result<String> {
         use crate::workers::embedding_sync::{
             EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared,
@@ -39,12 +75,94 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         };
         use loco_rs::bgworker::BackgroundWorker;
 
-        match args.worker_class {
+        let lifecycle_id = uuid::Uuid::now_v7();
+        let worker_class = args.worker_class.as_db_str();
+        let (plan, concurrency_limit) = match queue_concurrency_policy(
+            ctx,
+            args.workspace_id,
+            worker_class,
+        )
+        .await
+        {
+            Ok(policy) => policy,
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
+                    &ctx.db,
+                    crate::models::queue_job_lifecycles::Enqueue {
+                        id: lifecycle_id,
+                        job_name: "embedding_sync",
+                        worker_class,
+                        workspace_id: Some(args.workspace_id),
+                        plan: None,
+                        concurrency_key: Some(worker_class),
+                        concurrency_limit: Some(0),
+                    },
+                )
+                .await;
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    None,
+                    "unavailable",
+                    Some(&error),
+                )
+                .await;
+                tracing::error!(workspace_id = %args.workspace_id, worker_class, diagnostic = %error, "queue policy unavailable");
+                return Err(loco_rs::Error::Message(error));
+            }
+        };
+        let concurrency_key = format!("{worker_class}:{plan}");
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            &ctx.db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "embedding_sync",
+                worker_class,
+                workspace_id: Some(args.workspace_id),
+                plan: Some(&plan),
+                concurrency_key: Some(&concurrency_key),
+                concurrency_limit: Some(concurrency_limit),
+            },
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        args.lifecycle_id = Some(lifecycle_id);
+        let result = match args.worker_class {
             WorkerClass::TenantPrivate => {
                 EmbeddingSyncWorkerTenantPrivate::perform_later(ctx, args).await
             }
             WorkerClass::Official => EmbeddingSyncWorkerOfficial::perform_later(ctx, args).await,
             WorkerClass::Shared => EmbeddingSyncWorkerShared::perform_later(ctx, args).await,
+        };
+        match result {
+            Ok(job_id) => {
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
+                {
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        provider_job_id = %job_id,
+                        diagnostic = %error,
+                        "provider job dispatched but lifecycle correlation write failed"
+                    );
+                }
+                Ok(job_id)
+            }
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    None,
+                    "unavailable",
+                    Some(&error.to_string()),
+                )
+                .await;
+                Err(error)
+            }
         }
     }
 }
@@ -54,7 +172,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
         ctx: &AppContext,
-        args: crate::workers::reindex::ReindexArgs,
+        mut args: crate::workers::reindex::ReindexArgs,
     ) -> loco_rs::Result<String> {
         use crate::workers::embedding_sync::WorkerClass;
         use crate::workers::reindex::{
@@ -62,12 +180,94 @@ impl ReindexDispatcher for LocoJobDispatcher {
         };
         use loco_rs::bgworker::BackgroundWorker;
 
-        match args.worker_class {
+        let lifecycle_id = uuid::Uuid::now_v7();
+        let worker_class = args.worker_class.as_db_str();
+        let (plan, concurrency_limit) = match queue_concurrency_policy(
+            ctx,
+            args.workspace_id,
+            worker_class,
+        )
+        .await
+        {
+            Ok(policy) => policy,
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
+                    &ctx.db,
+                    crate::models::queue_job_lifecycles::Enqueue {
+                        id: lifecycle_id,
+                        job_name: "reindex",
+                        worker_class,
+                        workspace_id: Some(args.workspace_id),
+                        plan: None,
+                        concurrency_key: Some(worker_class),
+                        concurrency_limit: Some(0),
+                    },
+                )
+                .await;
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    None,
+                    "unavailable",
+                    Some(&error),
+                )
+                .await;
+                tracing::error!(workspace_id = %args.workspace_id, worker_class, diagnostic = %error, "queue policy unavailable");
+                return Err(loco_rs::Error::Message(error));
+            }
+        };
+        let concurrency_key = format!("{worker_class}:{plan}");
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            &ctx.db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "reindex",
+                worker_class,
+                workspace_id: Some(args.workspace_id),
+                plan: Some(&plan),
+                concurrency_key: Some(&concurrency_key),
+                concurrency_limit: Some(concurrency_limit),
+            },
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        args.lifecycle_id = Some(lifecycle_id);
+        let result = match args.worker_class {
             WorkerClass::TenantPrivate => {
                 ReindexWorkerTenantPrivate::perform_later(ctx, args).await
             }
             WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args).await,
             WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args).await,
+        };
+        match result {
+            Ok(job_id) => {
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
+                {
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        provider_job_id = %job_id,
+                        diagnostic = %error,
+                        "provider job dispatched but lifecycle correlation write failed"
+                    );
+                }
+                Ok(job_id)
+            }
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    None,
+                    "unavailable",
+                    Some(&error.to_string()),
+                )
+                .await;
+                Err(error)
+            }
         }
     }
 }
@@ -77,11 +277,58 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
         ctx: &AppContext,
-        args: crate::ee::workers::infer_fill::InferFillArgs,
+        mut args: crate::ee::workers::infer_fill::InferFillArgs,
     ) -> loco_rs::Result<String> {
         use loco_rs::bgworker::BackgroundWorker;
 
-        crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await
+        let lifecycle_id = uuid::Uuid::now_v7();
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            &ctx.db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id: lifecycle_id,
+                job_name: "infer_fill",
+                worker_class: "shared",
+                workspace_id: Some(args.workspace_id),
+                plan: None,
+                concurrency_key: Some("shared"),
+                concurrency_limit: Some(1),
+            },
+        )
+        .await
+        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        args.lifecycle_id = Some(lifecycle_id);
+        let result =
+            crate::ee::workers::infer_fill::InferFillWorker::perform_later(ctx, args).await;
+        match result {
+            Ok(job_id) => {
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
+                {
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        provider_job_id = %job_id,
+                        diagnostic = %error,
+                        "provider job dispatched but lifecycle correlation write failed"
+                    );
+                }
+                Ok(job_id)
+            }
+            Err(error) => {
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                    &ctx.db,
+                    lifecycle_id,
+                    None,
+                    "unavailable",
+                    Some(&error.to_string()),
+                )
+                .await;
+                Err(error)
+            }
+        }
     }
 }
 

@@ -68,6 +68,7 @@ async fn set_embedding_key(
             // path that the reindex scheduler uses (see #307).
             use crate::workers::reindex::{ReindexArgs, enqueue_for_class};
             let args = ReindexArgs {
+                lifecycle_id: None,
                 workspace_id: auth_ctx.workspace_id,
                 worker_class: crate::controllers::extractors::resolve_worker_class(
                     &ctx,

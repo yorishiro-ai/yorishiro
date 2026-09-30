@@ -20,6 +20,7 @@ pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
     pub proposed: i64,
+    pub attempt: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

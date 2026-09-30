@@ -26,6 +26,8 @@ use crate::models::schema_schemas;
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InferFillArgs {
+    #[serde(default)]
+    pub(crate) lifecycle_id: Option<Uuid>,
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub schema_name: String,
@@ -69,6 +71,7 @@ async fn perform_infer_fill(
     ctx: &AppContext,
     args: &InferFillArgs,
     job_id: Uuid,
+    attempt: Option<i32>,
 ) -> loco_rs::Result<(i64, i64)> {
     let config = llm_keys::get(&ctx.db, args.workspace_id)
         .await
@@ -139,10 +142,11 @@ async fn perform_infer_fill(
             continue;
         }
 
-        let written = inference_proposals::record_batch(
+        let written = inference_proposals::record_batch_attempt(
             &schema_txn,
             args.workspace_id,
             job_id,
+            attempt,
             active.id,
             active.version,
             answers
@@ -179,10 +183,70 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
     }
 
     async fn perform(&self, args: InferFillArgs) -> loco_rs::Result<()> {
+        let mut already_reconciled = false;
+        let has_lifecycle = args.lifecycle_id.is_some();
+        let admission = if let Some(id) = args.lifecycle_id {
+            match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await {
+                Ok(
+                    admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. }
+                    | crate::models::queue_job_lifecycles::Admission::Recovered {
+                        ..
+                    }),
+                ) => admission,
+                Ok(crate::models::queue_job_lifecycles::Admission::Duplicate { attempt }) => {
+                    if !inference_jobs::reconcile_attempt(&self.ctx.db, args.job_id, attempt)
+                        .await
+                        .internal()?
+                    {
+                        return Ok(());
+                    }
+                    already_reconciled = true;
+                    crate::models::queue_job_lifecycles::Admission::Started { attempt }
+                }
+                Ok(crate::models::queue_job_lifecycles::Admission::Terminal) => return Ok(()),
+                Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
+                    match attempt {
+                        Some(attempt) => {
+                            crate::models::queue_job_lifecycles::Entity::defer_at(
+                                &self.ctx.db,
+                                id,
+                                attempt,
+                                "worker capacity saturated",
+                                chrono::Utc::now().fixed_offset(),
+                            )
+                            .await
+                        }
+                        None => {
+                            crate::models::queue_job_lifecycles::Entity::defer(
+                                &self.ctx.db,
+                                id,
+                                None,
+                                "worker capacity saturated",
+                            )
+                            .await
+                        }
+                    }
+                    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                    Self::perform_later(&self.ctx, args.clone()).await?;
+                    return Ok(());
+                }
+                Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
+            }
+        } else {
+            crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
+        };
+        let admitted = admission.attempt().is_some();
+        let attempt = admission.attempt();
         let job_id = args.job_id;
-        let claimed = inference_jobs::claim(&self.ctx.db, job_id)
-            .await
-            .internal()?;
+        let claimed = if already_reconciled {
+            Ok(true)
+        } else if has_lifecycle {
+            let attempt = attempt.expect("lifecycle admission has an attempt");
+            inference_jobs::reconcile_attempt(&self.ctx.db, job_id, attempt).await
+        } else {
+            inference_jobs::claim(&self.ctx.db, job_id).await
+        }
+        .internal()?;
         if !claimed {
             // A duplicate delivery is harmless after the first worker claims the row.
             // This also makes a reaped delivery harmless while the original worker may
@@ -190,18 +254,85 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
             return Ok(());
         }
 
-        match perform_infer_fill(&self.ctx, &args, job_id).await {
+        let attempt = inference_jobs::get(&self.ctx.db, job_id)
+            .await
+            .internal()?
+            .map(|job| job.attempt)
+            .or(attempt);
+        let Some(attempt) = attempt else {
+            return Err(loco_rs::Error::Message(
+                "claimed infer-fill job disappeared".into(),
+            ));
+        };
+
+        let heartbeat = args.lifecycle_id.map(|id| {
+            crate::models::queue_job_lifecycles::Entity::heartbeat(self.ctx.db.clone(), id, attempt)
+        });
+
+        match perform_infer_fill(&self.ctx, &args, job_id, Some(attempt)).await {
             Ok((proposed, skipped)) => {
-                inference_jobs::complete_proposals(&self.ctx.db, job_id, proposed, skipped)
-                    .await
-                    .internal()?;
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
+                }
+                let owned = inference_jobs::complete_proposals_attempt(
+                    &self.ctx.db,
+                    job_id,
+                    attempt,
+                    proposed,
+                    skipped,
+                )
+                .await
+                .internal()?;
+                if owned
+                    && admitted
+                    && let Some(id) = args.lifecycle_id
+                {
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                        &self.ctx.db,
+                        id,
+                        Some(attempt),
+                        "completed",
+                        None,
+                    )
+                    .await;
+                }
                 Ok(())
             }
             Err(e) => {
-                if let Err(update_error) =
-                    inference_jobs::fail(&self.ctx.db, job_id, &e.to_string()).await
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
+                }
+                let owned = match inference_jobs::fail_attempt(
+                    &self.ctx.db,
+                    job_id,
+                    attempt,
+                    &e.to_string(),
+                )
+                .await
                 {
-                    tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
+                    Ok(owned) => owned,
+                    Err(update_error) => {
+                        tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
+                        false
+                    }
+                };
+                if owned
+                    && admitted
+                    && let Some(id) = args.lifecycle_id
+                {
+                    inference_jobs::retry(&self.ctx.db, job_id, &e.to_string(), attempt)
+                        .await
+                        .internal()?;
+                    crate::models::queue_job_lifecycles::Entity::defer(
+                        &self.ctx.db,
+                        id,
+                        Some(attempt),
+                        &e.to_string(),
+                    )
+                    .await
+                    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+                    Self::perform_later(&self.ctx, args.clone()).await?;
+                    return Ok(());
                 }
                 Err(e)
             }
@@ -240,6 +371,7 @@ pub async fn enqueue_infer_fill(
             enqueue_infer_fill_with_dispatcher(
                 ctx,
                 InferFillArgs {
+                    lifecycle_id: None,
                     job_id,
                     workspace_id,
                     schema_name,
@@ -302,6 +434,7 @@ mod tests {
     async fn dispatches_the_original_args_and_returns_success() {
         let ctx = crate::workers::dispatch::test_context().await;
         let args = InferFillArgs {
+            lifecycle_id: None,
             job_id: Uuid::now_v7(),
             workspace_id: Uuid::now_v7(),
             schema_name: "note".into(),
@@ -334,6 +467,7 @@ mod tests {
         let error = enqueue_infer_fill_with_dispatcher(
             &ctx,
             InferFillArgs {
+                lifecycle_id: None,
                 job_id: Uuid::now_v7(),
                 workspace_id: Uuid::now_v7(),
                 schema_name: "note".into(),

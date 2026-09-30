@@ -188,6 +188,7 @@ fn spawn_startup_reindex(ctx: AppContext) {
                     }
                 };
                 let args = crate::workers::reindex::ReindexArgs {
+                    lifecycle_id: None,
                     workspace_id: ws.id,
                     worker_class,
                 };
