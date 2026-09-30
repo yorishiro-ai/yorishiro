@@ -58,7 +58,7 @@ Yorishiro assigns `tenant_private` priority 300, `official` priority 200, and `s
 
 The lifecycle admission lock reserves capacity by `worker_class:plan`, so a saturated class cannot consume another class's capacity.
 
-Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with its bounded age-adjusted priority rather than being silently rerouted.
+Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with its class priority rather than being silently rerouted.
 
 Run class-specific worker processes when reserved capacity and starvation protection are required: `--worker=worker-class:tenant-private`, `--worker=worker-class:official`, and `--worker=worker-class:shared`.
 
@@ -66,10 +66,10 @@ A combined worker is supported, but its `num_workers` is a shared polling pool a
 
 Provider behavior is validated against the pinned Loco 1.2.0 source and documented per provider rather than treated as one universal ordering guarantee.
 
-Retries use bounded priority aging based on the durable lifecycle enqueue time.
+Starvation protection is admission-side and durable rather than reprioritizing an already queued provider row.
 
-After two one-minute aging steps, a waiting lower class reaches priority 300 and can pass newer tenant-private work through the provider's older `run_at` tie-break.
+When a lower-class lifecycle has remained `queued` or `retrying` for one minute, a new higher-class dispatch observes that durable row and receives priority 50 until the lower-class work is admitted.
 
-When a lower class has been queued for one minute, new higher-class arrivals are assigned priority 50 until that waiting work is admitted.
+This protects continuous arrivals after the threshold, while jobs already ahead in a provider remain subject to that provider's ordering and bounded-scan behavior.
 
 Scheduling decisions, class, priority, capacity limit, active capacity, saturation, and fallback are emitted as structured tracing fields.

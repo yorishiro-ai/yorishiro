@@ -60,7 +60,7 @@ Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorit
 
 ライフサイクルのadmission lockは`worker_class:plan`単位でcapacityを予約するため、capacityが埋まったクラスが別のクラスのcapacityを消費することはありません。
 
-capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、bounded agingで調整したpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
+capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、クラスのpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
 
 予約capacityとstarvation protectionが必要な場合は、クラスごとにworker processを起動します。使用するtagは`--worker=worker-class:tenant-private`、`--worker=worker-class:official`、`--worker=worker-class:shared`です。
 
@@ -68,10 +68,10 @@ capacityが埋まった場合の決定的なfallbackは、ジョブを優先さ�
 
 providerの挙動は固定しているLoco 1.2.0のソースで確認し、全providerに同じordering保証があるとは扱わずproviderごとに記載しています。
 
-retry時はdurableなライフサイクルのenqueue時刻に基づくbounded priority agingを使用します。
+starvation protectionは、providerのqueued rowを後からreprioritizeするのではなく、durableなadmission boundaryで行います。
 
-2回の1分間agingを経た待機中の低いクラスはpriority 300となり、providerの古い`run_at`によるtie-breakを通じて新しいtenant-private workを追い越せます。
+低いクラスのライフサイクルが1分間`queued`または`retrying`で待機した場合、そのdurable rowを観測した新しい高いクラスのdispatchには、低いクラスのworkがadmitされるまでpriority 50を割り当てます。
 
-低いクラスが1分間queuedで待機した場合、そのworkがadmitされるまで新しく到着する高いクラスにはpriority 50を割り当てます。
+これにより閾値到達後の連続到着から保護しますが、provider内ですでに先行しているジョブはproviderのorderingとbounded scanの挙動に従います。
 
 scheduling decision、クラス、priority、capacity limit、active capacity、saturation、fallbackは構造化tracing fieldとして出力します。

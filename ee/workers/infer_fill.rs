@@ -227,18 +227,9 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                         }
                     }
                     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                    let scheduling = crate::services::queue::decide_for_lifecycle(
-                        &self.ctx.db,
-                        id,
+                    let scheduling = crate::services::queue::decide(
                         crate::workers::embedding_sync::WorkerClass::Shared,
-                    )
-                    .await
-                    .unwrap_or_else(|error| {
-                        tracing::warn!(lifecycle_id = %id, error = %error, "queue aging lookup failed");
-                        crate::services::queue::decide(
-                            crate::workers::embedding_sync::WorkerClass::Shared,
-                        )
-                    });
+                    );
                     Self::perform_later_with_priority(
                         &self.ctx,
                         args.clone(),
@@ -348,18 +339,9 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     )
                     .await
                     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                    let scheduling = crate::services::queue::decide_for_lifecycle(
-                        &self.ctx.db,
-                        id,
+                    let scheduling = crate::services::queue::decide(
                         crate::workers::embedding_sync::WorkerClass::Shared,
-                    )
-                    .await
-                    .unwrap_or_else(|error| {
-                        tracing::warn!(lifecycle_id = %id, error = %error, "queue aging lookup failed");
-                        crate::services::queue::decide(
-                            crate::workers::embedding_sync::WorkerClass::Shared,
-                        )
-                    });
+                    );
                     Self::perform_later_with_priority(
                         &self.ctx,
                         args.clone(),

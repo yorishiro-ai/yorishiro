@@ -11,14 +11,17 @@
 //! Booting the whole application on SQLite instead would be more faithful and would bring the entire `tests/`-is-PostgreSQL-only question with it, which is a much larger surface than two assertions justify.
 
 use futures::FutureExt;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use loco_rs::app::Hooks;
 use loco_rs::bgworker::{self, BackgroundWorker, Queue, sqlt};
 use loco_rs::boot::{self, BootResult};
-use loco_rs::config::{PostgresQueueConfig, QueueConfig, SqliteQueueConfig, WorkerMode};
+use loco_rs::config::{
+    PostgresQueueConfig, QueueConfig, RedisQueueConfig, SqliteQueueConfig, WorkerMode,
+};
 use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
@@ -31,12 +34,14 @@ use yorishiro::workers::reindex::{self, ReindexArgs};
 use crate::requests::close_app_pools;
 
 const COMPETING_TAG: &str = "queue-test:competing";
-static COMPETING_ORDER: std::sync::OnceLock<Mutex<Vec<String>>> = std::sync::OnceLock::new();
-static COMPETING_HITS: AtomicUsize = AtomicUsize::new(0);
-static COMPETING_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+static COMPETING_ORDER: std::sync::OnceLock<Mutex<Vec<(String, String)>>> =
+    std::sync::OnceLock::new();
+static COMPETING_PROGRESS: std::sync::OnceLock<tokio::sync::watch::Sender<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 struct CompetingArgs {
+    run_id: String,
     name: String,
 }
 
@@ -57,22 +62,17 @@ impl BackgroundWorker<CompetingArgs> for CompetingWorker {
             .get_or_init(|| Mutex::new(Vec::new()))
             .lock()
             .expect("competing order lock")
-            .push(args.name);
-        COMPETING_HITS.fetch_add(1, Ordering::SeqCst);
-        COMPETING_NOTIFY
-            .get_or_init(tokio::sync::Notify::new)
-            .notify_waiters();
+            .push((args.run_id.clone(), args.name));
+        if let Some(progress) = COMPETING_PROGRESS.get() {
+            let mut counts = progress.borrow().clone();
+            *counts.entry(args.run_id).or_default() += 1;
+            let _ = progress.send(counts);
+        }
         Ok(())
     }
 }
 
 async fn assert_competing_priority_order(queue: Arc<Queue>) {
-    COMPETING_ORDER
-        .get_or_init(|| Mutex::new(Vec::new()))
-        .lock()
-        .expect("competing order lock")
-        .clear();
-    COMPETING_HITS.store(0, Ordering::SeqCst);
     queue
         .register(CompetingWorker)
         .await
@@ -82,6 +82,7 @@ async fn assert_competing_priority_order(queue: Arc<Queue>) {
             CompetingWorker::class_name(),
             None,
             CompetingArgs {
+                run_id: "priority".to_owned(),
                 name: "low".to_owned(),
             },
             Some(vec![COMPETING_TAG.to_owned()]),
@@ -94,6 +95,7 @@ async fn assert_competing_priority_order(queue: Arc<Queue>) {
             CompetingWorker::class_name(),
             None,
             CompetingArgs {
+                run_id: "priority".to_owned(),
                 name: "high".to_owned(),
             },
             Some(vec![COMPETING_TAG.to_owned()]),
@@ -102,26 +104,44 @@ async fn assert_competing_priority_order(queue: Arc<Queue>) {
         .await
         .expect("enqueue high priority job");
 
+    finish_competing_order(queue, "priority", vec!["high", "low"]).await;
+}
+
+async fn finish_competing_order(queue: Arc<Queue>, run_id: &str, expected: Vec<&str>) {
+    let progress = COMPETING_PROGRESS.get_or_init(|| {
+        let (sender, _receiver) = tokio::sync::watch::channel(HashMap::new());
+        sender
+    });
+    let mut counts = progress.borrow().clone();
+    counts.insert(run_id.to_owned(), 0);
+    let _ = progress.send(counts);
+    let mut progress = progress.subscribe();
     let running_queue = queue.clone();
     let handle =
         tokio::spawn(async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await });
-    while COMPETING_HITS.load(Ordering::SeqCst) < 2 {
-        COMPETING_NOTIFY
-            .get_or_init(tokio::sync::Notify::new)
-            .notified()
-            .await;
-    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while progress.borrow().get(run_id).copied().unwrap_or_default() < 2 {
+            progress.changed().await.expect("competing worker progress");
+        }
+    })
+    .await
+    .expect("competing jobs completed");
     queue.shutdown().expect("stop competing worker");
     handle
         .await
         .expect("join competing worker")
         .expect("run competing worker");
+    let actual = COMPETING_ORDER
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("competing order lock")
+        .iter()
+        .filter(|(existing_run, _)| existing_run == run_id)
+        .map(|(_, name)| name.clone())
+        .collect::<Vec<_>>();
     assert_eq!(
-        *COMPETING_ORDER
-            .get_or_init(|| Mutex::new(Vec::new()))
-            .lock()
-            .expect("competing order lock"),
-        vec!["high", "low"]
+        actual,
+        expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
     );
 }
 
@@ -438,4 +458,217 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
     let queue = Arc::new(provider);
     queue.setup().await.expect("set up Postgres queue");
     assert_competing_priority_order(queue).await;
+}
+
+#[tokio::test]
+#[serial_test::serial(queue_postgres)]
+async fn sqlite_equal_priority_order_uses_controlled_job_ids() {
+    let run_id = "equal-sqlite";
+    let directory = tempfile::tempdir().expect("queue tempdir");
+    let uri = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("equal.sqlite3").display()
+    );
+    let config = SqliteQueueConfig {
+        uri: uri.clone(),
+        dangerously_flush: true,
+        enable_logging: false,
+        max_connections: 2,
+        min_connections: 1,
+        connect_timeout: 5_000,
+        idle_timeout: 5_000,
+        poll_interval_sec: 1,
+        num_workers: 1,
+        reaper: None,
+    };
+    let provider = bgworker::sqlt::create_provider(&config)
+        .await
+        .expect("SQLite queue");
+    let queue = Arc::new(provider);
+    queue.setup().await.expect("set up SQLite queue");
+    queue
+        .register(CompetingWorker)
+        .await
+        .expect("register competing worker");
+    let pool = sqlx::SqlitePool::connect(&uri)
+        .await
+        .expect("connect SQLite queue");
+    for (id, name) in [("job-b", "id-b"), ("job-a", "id-a")] {
+        let generated_id = queue
+            .enqueue(
+                CompetingWorker::class_name(),
+                None,
+                CompetingArgs {
+                    run_id: run_id.to_owned(),
+                    name: name.to_owned(),
+                },
+                Some(vec![COMPETING_TAG.to_owned()]),
+                Some(200),
+            )
+            .await
+            .expect("enqueue SQLite equal-priority job");
+        sqlx::query("UPDATE sqlt_loco_queue SET id = ?, run_at = ? WHERE id = ?")
+            .bind(id)
+            .bind("2000-01-01 00:00:00")
+            .bind(generated_id)
+            .execute(&pool)
+            .await
+            .expect("control SQLite equal-priority job");
+    }
+    let ordered: Vec<(String,)> = sqlx::query_as(
+        "SELECT id FROM sqlt_loco_queue WHERE status = 'queued' ORDER BY priority DESC, run_at, id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read SQLite equal-priority order");
+    assert_eq!(ordered, vec![("job-a".to_owned(),), ("job-b".to_owned(),)]);
+    pool.close().await;
+}
+
+#[tokio::test]
+#[serial_test::serial(queue_postgres)]
+async fn postgres_equal_priority_order_uses_controlled_job_ids() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    let uri = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
+    let run_id = "equal-postgres";
+    let config = PostgresQueueConfig {
+        uri: uri.clone(),
+        dangerously_flush: true,
+        enable_logging: false,
+        max_connections: 2,
+        min_connections: 1,
+        connect_timeout: 5_000,
+        idle_timeout: 5_000,
+        poll_interval_sec: 1,
+        num_workers: 1,
+        reaper: None,
+    };
+    let provider = bgworker::pg::create_provider(&config)
+        .await
+        .expect("Postgres queue");
+    let queue = Arc::new(provider);
+    queue.setup().await.expect("set up Postgres queue");
+    let pool = sqlx::PgPool::connect(&uri)
+        .await
+        .expect("connect Postgres queue");
+    for (id, name) in [("job-b", "id-b"), ("job-a", "id-a")] {
+        let generated_id = queue
+            .enqueue(
+                CompetingWorker::class_name(),
+                None,
+                CompetingArgs {
+                    run_id: run_id.to_owned(),
+                    name: name.to_owned(),
+                },
+                Some(vec![COMPETING_TAG.to_owned()]),
+                Some(200),
+            )
+            .await
+            .expect("enqueue Postgres equal-priority job");
+        sqlx::query("UPDATE pg_loco_queue SET id = $1, run_at = $2 WHERE id = $3")
+            .bind(id)
+            .bind("2000-01-01T00:00:00Z")
+            .bind(generated_id)
+            .execute(&pool)
+            .await
+            .expect("control Postgres equal-priority job");
+    }
+    let ordered: Vec<(String,)> = sqlx::query_as(
+        "SELECT id FROM pg_loco_queue WHERE status = 'queued' ORDER BY priority DESC, run_at, id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read Postgres equal-priority order");
+    assert_eq!(ordered, vec![("job-a".to_owned(),), ("job-b".to_owned(),)]);
+    pool.close().await;
+}
+
+#[tokio::test]
+#[serial_test::serial(queue_postgres)]
+async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
+    let Ok(uri) = std::env::var("QUEUE_URL") else {
+        return;
+    };
+    if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
+        return;
+    }
+    let config = RedisQueueConfig {
+        uri,
+        dangerously_flush: true,
+        queues: None,
+        num_workers: 1,
+        reaper: None,
+    };
+    let queue = Arc::new(
+        bgworker::redis::create_provider(&config)
+            .await
+            .expect("Redis queue"),
+    );
+    queue.setup().await.expect("set up Redis queue");
+    queue
+        .register(CompetingWorker)
+        .await
+        .expect("register competing worker");
+    let run_id = "bounded-redis";
+    for index in 0..1001 {
+        queue
+            .enqueue(
+                CompetingWorker::class_name(),
+                None,
+                CompetingArgs {
+                    run_id: run_id.to_owned(),
+                    name: format!("mismatch-{index}"),
+                },
+                Some(vec!["queue-test:other".to_owned()]),
+                Some(200),
+            )
+            .await
+            .expect("enqueue Redis mismatch");
+    }
+    queue
+        .enqueue(
+            CompetingWorker::class_name(),
+            None,
+            CompetingArgs {
+                run_id: run_id.to_owned(),
+                name: "matching-beyond-scan".to_owned(),
+            },
+            Some(vec![COMPETING_TAG.to_owned()]),
+            Some(200),
+        )
+        .await
+        .expect("enqueue Redis matching job");
+    let progress = COMPETING_PROGRESS.get_or_init(|| {
+        let (sender, _receiver) = tokio::sync::watch::channel(HashMap::new());
+        sender
+    });
+    let mut counts = progress.borrow().clone();
+    counts.insert(run_id.to_owned(), 0);
+    let _ = progress.send(counts);
+    let mut progress = progress.subscribe();
+    let running_queue = queue.clone();
+    let handle =
+        tokio::spawn(async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await });
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if progress.borrow().get(run_id).copied().unwrap_or_default() > 0 {
+                    return;
+                }
+                progress.changed().await.expect("Redis worker progress");
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_err(),
+        "matching job outside Redis bounded scan was processed"
+    );
+    queue.shutdown().expect("stop Redis worker");
+    handle
+        .await
+        .expect("join Redis worker")
+        .expect("run Redis worker");
+    queue.clear().await.expect("clear Redis queue");
 }

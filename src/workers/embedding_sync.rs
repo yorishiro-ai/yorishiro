@@ -239,16 +239,7 @@ macro_rules! embedding_sync_worker_for_class {
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
                         Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
-                            let scheduling = crate::services::queue::decide_for_lifecycle(
-                                &self.ctx.db,
-                                id,
-                                $class,
-                            )
-                            .await
-                            .unwrap_or_else(|error| {
-                                tracing::warn!(lifecycle_id = %id, error = %error, "queue aging lookup failed");
-                                crate::services::queue::decide($class)
-                            });
+                            let scheduling = crate::services::queue::decide($class);
                             tracing::warn!(
                                 lifecycle_id = %id,
                                 worker_class = $class.as_db_str(),
@@ -318,16 +309,7 @@ macro_rules! embedding_sync_worker_for_class {
                             )
                             .await
                             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            let scheduling = crate::services::queue::decide_for_lifecycle(
-                                &self.ctx.db,
-                                id,
-                                $class,
-                            )
-                            .await
-                            .unwrap_or_else(|error| {
-                                tracing::warn!(lifecycle_id = %id, error = %error, "queue aging lookup failed");
-                                crate::services::queue::decide($class)
-                            });
+                            let scheduling = crate::services::queue::decide($class);
                             $worker_ty::perform_later_with_priority(
                                 &self.ctx,
                                 args.clone(),

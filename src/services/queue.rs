@@ -18,8 +18,7 @@ pub(crate) const fn priority(class: WorkerClass) -> i32 {
     }
 }
 
-const AGING_INTERVAL_SECONDS: i64 = 60;
-const MAX_AGING_STEPS: i64 = 2;
+const STARVATION_WAIT_SECONDS: i64 = 60;
 const STARVATION_PRIORITY: i32 = 50;
 
 /// A queue decision recorded for operators and deterministic unit tests.
@@ -28,38 +27,6 @@ pub(crate) struct Decision {
     pub(crate) class: WorkerClass,
     pub(crate) priority: i32,
     pub(crate) fallback: bool,
-}
-
-/// Adds at most two bounded aging steps to an older retry.
-///
-/// A shared job reaches priority 300 after two minutes, which ties the
-/// tenant-private band and wins that tie through the provider's older
-/// `run_at` ordering. The cap prevents an old job from permanently reversing
-/// the class policy.
-pub(crate) fn decide_after_wait(class: WorkerClass, waited_seconds: i64) -> Decision {
-    let steps = (waited_seconds / AGING_INTERVAL_SECONDS).clamp(0, MAX_AGING_STEPS);
-    Decision {
-        class,
-        priority: priority(class) + (steps as i32 * 100),
-        fallback: steps > 0,
-    }
-}
-
-/// Recomputes priority from the durable lifecycle enqueue timestamp on retry.
-pub(crate) async fn decide_for_lifecycle(
-    db: &sea_orm::DatabaseConnection,
-    lifecycle_id: uuid::Uuid,
-    class: WorkerClass,
-) -> Result<Decision, sea_orm::DbErr> {
-    let lifecycle = crate::models::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| sea_orm::DbErr::RecordNotFound("queue lifecycle".into()))?;
-    let waited_seconds = Utc::now()
-        .signed_duration_since(lifecycle.enqueue_at)
-        .num_seconds()
-        .max(0);
-    Ok(decide_after_wait(class, waited_seconds))
 }
 
 /// Demotes a newly arriving higher class while an older lower class is waiting.
@@ -80,9 +47,9 @@ pub(crate) async fn decide_for_dispatch(
     if lower_classes.is_empty() {
         return Ok(decide(class));
     }
-    let cutoff = Utc::now() - chrono::Duration::seconds(AGING_INTERVAL_SECONDS);
+    let cutoff = Utc::now() - chrono::Duration::seconds(STARVATION_WAIT_SECONDS);
     let waiting = crate::models::queue_job_lifecycles::Entity::find()
-        .filter(crate::models::queue_job_lifecycles::Column::Status.eq("queued"))
+        .filter(crate::models::queue_job_lifecycles::Column::Status.is_in(["queued", "retrying"]))
         .filter(
             crate::models::queue_job_lifecycles::Column::WorkerClass
                 .is_in(lower_classes.iter().copied()),
@@ -109,7 +76,11 @@ pub(crate) async fn decide_for_dispatch(
 /// is the starvation guard: work in another class can continue while this job
 /// waits.
 pub(crate) fn decide(class: WorkerClass) -> Decision {
-    decide_after_wait(class, 0)
+    Decision {
+        class,
+        priority: priority(class),
+        fallback: false,
+    }
 }
 
 #[cfg(test)]
@@ -128,13 +99,5 @@ mod tests {
         let decision = decide(WorkerClass::Official);
         assert_eq!(decision.class, WorkerClass::Official);
         assert!(!decision.fallback);
-    }
-
-    #[test]
-    fn aging_is_bounded_and_promotes_older_lower_classes() {
-        assert_eq!(decide_after_wait(WorkerClass::Shared, 0).priority, 100);
-        assert_eq!(decide_after_wait(WorkerClass::Shared, 120).priority, 300);
-        assert_eq!(decide_after_wait(WorkerClass::Shared, 600).priority, 300);
-        assert!(decide_after_wait(WorkerClass::Shared, 60).fallback);
     }
 }
