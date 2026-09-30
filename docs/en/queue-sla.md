@@ -43,3 +43,21 @@ Inspect lifecycle rows grouped by `worker_class` and `status`, then compare reco
 An increasing `queued`, `retrying`, or `unavailable` count means capacity or provider health must be restored before an SLA conclusion is made.
 
 This issue does not add numeric priority, preemption, burst credits, RabbitMQ, SQS, contributed compute, or WASM execution.
+
+## Priority and capacity
+
+Loco 1.2.0 provides the verified scheduling primitive used here: every supported provider accepts an integer priority, dequeues higher values first, and resolves equal priorities by `run_at` and then the stable provider job id.
+
+Yorishiro assigns `tenant_private` priority 300, `official` priority 200, and `shared` priority 100.
+
+The lifecycle admission lock reserves capacity by `worker_class:plan`, so a saturated class cannot consume another class's capacity.
+
+Capacity saturation is a deterministic fallback: the job remains tagged for its preferred class, is recorded as retrying, and is re-enqueued with the same priority rather than being silently rerouted.
+
+Run class-specific worker processes when reserved capacity and starvation protection are required: `--worker=worker-class:tenant-private`, `--worker=worker-class:official`, and `--worker=worker-class:shared`.
+
+A combined worker is supported, but its `num_workers` is a shared polling pool and is not a reservation of one worker per class.
+
+The provider priority guarantee is validated against Loco's Postgres, SQLite, and Redis implementations at the pinned 1.2.0 source.
+
+Scheduling decisions, class, priority, capacity limit, active capacity, saturation, and fallback are emitted as structured tracing fields.

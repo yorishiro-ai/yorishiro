@@ -136,6 +136,14 @@ macro_rules! reindex_worker_for_class {
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
                         Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
+                            let scheduling = crate::services::queue::decide($class);
+                            tracing::warn!(
+                                lifecycle_id = %id,
+                                worker_class = $class.as_db_str(),
+                                scheduling_priority = scheduling.priority,
+                                fallback = scheduling.fallback,
+                                "worker capacity saturated; preserving class reservation"
+                            );
                             match attempt {
                                 Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
                                     &self.ctx.db,
@@ -154,7 +162,12 @@ macro_rules! reindex_worker_for_class {
                                 .await,
                             }
                             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            $worker_ty::perform_later_with_priority(
+                                &self.ctx,
+                                args.clone(),
+                                Some(scheduling.priority),
+                            )
+                            .await?;
                             return Ok(());
                         }
                         Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
@@ -193,7 +206,13 @@ macro_rules! reindex_worker_for_class {
                             )
                             .await
                             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            let scheduling = crate::services::queue::decide($class);
+                            $worker_ty::perform_later_with_priority(
+                                &self.ctx,
+                                args.clone(),
+                                Some(scheduling.priority),
+                            )
+                            .await?;
                             return Ok(());
                         }
                     }

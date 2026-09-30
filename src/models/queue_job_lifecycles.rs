@@ -212,6 +212,14 @@ impl Entity {
                     .count(&txn)
                     .await?;
                 if in_flight >= u64::try_from(std::cmp::Ord::max(limit, 0)).unwrap_or(0) {
+                    tracing::warn!(
+                        lifecycle_id = %id,
+                        worker_class = %initial.worker_class,
+                        concurrency_key = %key,
+                        active_capacity = in_flight,
+                        capacity_limit = limit,
+                        "queue capacity saturated"
+                    );
                     txn.rollback().await?;
                     return Ok(Admission::Saturated {
                         attempt: (initial.status == "running").then_some(initial.attempt),
@@ -248,6 +256,9 @@ impl Entity {
         if result.rows_affected == 1 {
             tracing::info!(
                 lifecycle_id = %id,
+                worker_class = %initial.worker_class,
+                active_capacity = 1,
+                capacity_limit = ?initial.concurrency_limit,
                 queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(initial.enqueue_at).num_seconds(), 0),
                 "queue job admitted"
             );

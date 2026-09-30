@@ -112,6 +112,14 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             }
         };
         let concurrency_key = format!("{worker_class}:{plan}");
+        let scheduling = crate::services::queue::decide(args.worker_class);
+        tracing::info!(
+            lifecycle_id = %lifecycle_id,
+            worker_class,
+            scheduling_priority = scheduling.priority,
+            fallback = scheduling.fallback,
+            "queue scheduling decision"
+        );
         crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
             crate::models::queue_job_lifecycles::Enqueue {
@@ -129,10 +137,29 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         args.lifecycle_id = Some(lifecycle_id);
         let result = match args.worker_class {
             WorkerClass::TenantPrivate => {
-                EmbeddingSyncWorkerTenantPrivate::perform_later(ctx, args).await
+                EmbeddingSyncWorkerTenantPrivate::perform_later_with_priority(
+                    ctx,
+                    args,
+                    Some(scheduling.priority),
+                )
+                .await
             }
-            WorkerClass::Official => EmbeddingSyncWorkerOfficial::perform_later(ctx, args).await,
-            WorkerClass::Shared => EmbeddingSyncWorkerShared::perform_later(ctx, args).await,
+            WorkerClass::Official => {
+                EmbeddingSyncWorkerOfficial::perform_later_with_priority(
+                    ctx,
+                    args,
+                    Some(scheduling.priority),
+                )
+                .await
+            }
+            WorkerClass::Shared => {
+                EmbeddingSyncWorkerShared::perform_later_with_priority(
+                    ctx,
+                    args,
+                    Some(scheduling.priority),
+                )
+                .await
+            }
         };
         match result {
             Ok(job_id) => {
@@ -217,6 +244,14 @@ impl ReindexDispatcher for LocoJobDispatcher {
             }
         };
         let concurrency_key = format!("{worker_class}:{plan}");
+        let scheduling = crate::services::queue::decide(args.worker_class);
+        tracing::info!(
+            lifecycle_id = %lifecycle_id,
+            worker_class,
+            scheduling_priority = scheduling.priority,
+            fallback = scheduling.fallback,
+            "queue scheduling decision"
+        );
         crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
             crate::models::queue_job_lifecycles::Enqueue {
@@ -234,10 +269,29 @@ impl ReindexDispatcher for LocoJobDispatcher {
         args.lifecycle_id = Some(lifecycle_id);
         let result = match args.worker_class {
             WorkerClass::TenantPrivate => {
-                ReindexWorkerTenantPrivate::perform_later(ctx, args).await
+                ReindexWorkerTenantPrivate::perform_later_with_priority(
+                    ctx,
+                    args,
+                    Some(scheduling.priority),
+                )
+                .await
             }
-            WorkerClass::Official => ReindexWorkerOfficial::perform_later(ctx, args).await,
-            WorkerClass::Shared => ReindexWorkerShared::perform_later(ctx, args).await,
+            WorkerClass::Official => {
+                ReindexWorkerOfficial::perform_later_with_priority(
+                    ctx,
+                    args,
+                    Some(scheduling.priority),
+                )
+                .await
+            }
+            WorkerClass::Shared => {
+                ReindexWorkerShared::perform_later_with_priority(
+                    ctx,
+                    args,
+                    Some(scheduling.priority),
+                )
+                .await
+            }
         };
         match result {
             Ok(job_id) => {

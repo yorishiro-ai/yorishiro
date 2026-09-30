@@ -189,9 +189,15 @@ async fn each_worker_class_carries_its_own_tag() {
         let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
         assert_eq!(jobs.len(), 3, "jobs: {jobs:?}");
 
-        let mut seen: Vec<(String, Vec<String>)> = jobs
+        let mut seen: Vec<(String, Vec<String>, i32)> = jobs
             .iter()
-            .map(|job| (job.name.clone(), job.tags.clone().unwrap_or_default()))
+            .map(|job| {
+                (
+                    job.name.clone(),
+                    job.tags.clone().unwrap_or_default(),
+                    job.priority,
+                )
+            })
             .collect();
         seen.sort();
 
@@ -200,15 +206,18 @@ async fn each_worker_class_carries_its_own_tag() {
             vec![
                 (
                     "EmbeddingSyncWorkerOfficial".to_string(),
-                    vec!["worker-class:official".to_string()]
+                    vec!["worker-class:official".to_string()],
+                    200,
                 ),
                 (
                     "EmbeddingSyncWorkerShared".to_string(),
-                    vec!["worker-class:shared".to_string()]
+                    vec!["worker-class:shared".to_string()],
+                    100,
                 ),
                 (
                     "EmbeddingSyncWorkerTenantPrivate".to_string(),
-                    vec!["worker-class:tenant-private".to_string()]
+                    vec!["worker-class:tenant-private".to_string()],
+                    300,
                 ),
             ]
         );
@@ -242,9 +251,15 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
         let jobs = sqlt::get_jobs(&pool, None, None).await.expect("get_jobs");
         assert_eq!(jobs.len(), 3, "jobs: {jobs:?}");
 
-        let mut seen: Vec<(String, Vec<String>)> = jobs
+        let mut seen: Vec<(String, Vec<String>, i32)> = jobs
             .iter()
-            .map(|job| (job.name.clone(), job.tags.clone().unwrap_or_default()))
+            .map(|job| {
+                (
+                    job.name.clone(),
+                    job.tags.clone().unwrap_or_default(),
+                    job.priority,
+                )
+            })
             .collect();
         seen.sort();
 
@@ -253,15 +268,18 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
             vec![
                 (
                     "ReindexWorkerOfficial".to_string(),
-                    vec!["worker-class:official".to_string()]
+                    vec!["worker-class:official".to_string()],
+                    200,
                 ),
                 (
                     "ReindexWorkerShared".to_string(),
-                    vec!["worker-class:shared".to_string()]
+                    vec!["worker-class:shared".to_string()],
+                    100,
                 ),
                 (
                     "ReindexWorkerTenantPrivate".to_string(),
-                    vec!["worker-class:tenant-private".to_string()]
+                    vec!["worker-class:tenant-private".to_string()],
+                    300,
                 ),
             ]
         );
