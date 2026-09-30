@@ -68,6 +68,7 @@ async fn persisted_row_with_unknown_status_returns_internal_error() {
         proposed: 0,
         skipped: 0,
         error: None,
+        attempt: 0,
         created_at: now,
         updated_at: now,
     };
@@ -80,6 +81,7 @@ async fn persisted_row_with_unknown_status_returns_internal_error() {
         proposed: Set(row.proposed),
         skipped: Set(row.skipped),
         error: Set(row.error.clone()),
+        attempt: Set(row.attempt),
         created_at: Set(row.created_at),
         updated_at: Set(row.updated_at),
     }

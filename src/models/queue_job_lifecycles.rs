@@ -3,6 +3,7 @@ use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, IntoActiveModel, QuerySelect, TransactionTrait};
+use tokio::task::JoinHandle;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -99,6 +100,45 @@ impl Entity {
         Ok(())
     }
 
+    pub(crate) async fn renew(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        attempt: i32,
+        now: DateTimeWithTimeZone,
+    ) -> Result<bool, DbErr> {
+        Self::renew_at(db, id, attempt, now).await
+    }
+
+    pub(crate) async fn renew_at(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        attempt: i32,
+        now: DateTimeWithTimeZone,
+    ) -> Result<bool, DbErr> {
+        let result = Entity::update_many()
+            .col_expr(Column::LeaseUntil, Expr::value(now + lease_duration()))
+            .filter(Column::Id.eq(id))
+            .filter(Column::Attempt.eq(attempt))
+            .filter(Column::Status.eq("running"))
+            .exec(db)
+            .await?;
+        Ok(result.rows_affected == 1)
+    }
+
+    pub(crate) fn heartbeat(db: DatabaseConnection, id: Uuid, attempt: i32) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            ticker.tick().await;
+            loop {
+                match Self::renew(&db, id, attempt, Utc::now().fixed_offset()).await {
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => break,
+                }
+                ticker.tick().await;
+            }
+        })
+    }
+
     pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
         Self::start_at(db, id, Utc::now().fixed_offset()).await
     }
@@ -143,7 +183,7 @@ impl Entity {
             }
         }
         let recovered = initial.status == "running";
-        let lease_until = now + chrono::Duration::minutes(5);
+        let lease_until = now + lease_duration();
         let result = Entity::update_many()
             .col_expr(Column::Status, Expr::value("running"))
             .col_expr(Column::ClaimAt, Expr::value(now))
@@ -207,7 +247,9 @@ impl Entity {
             .col_expr(Column::Error, Expr::value(error.map(str::to_owned)))
             .filter(Column::Id.eq(id));
         if let Some(attempt) = attempt {
-            update = update.filter(Column::Attempt.eq(attempt));
+            update = update
+                .filter(Column::Attempt.eq(attempt))
+                .filter(Column::Status.eq("running"));
         }
         match status {
             "completed" => update = update.col_expr(Column::CompletedAt, Expr::value(now)),
@@ -249,6 +291,10 @@ fn running_lease_is_live(
     lease_until.is_none_or(|lease| lease > now)
 }
 
+fn lease_duration() -> chrono::Duration {
+    chrono::Duration::minutes(5)
+}
+
 pub(crate) struct Enqueue<'a> {
     pub(crate) id: Uuid,
     pub(crate) job_name: &'a str,
@@ -271,6 +317,37 @@ impl Entity {}
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{Database, EntityTrait};
+    use tempfile::tempdir;
+
+    use super::{Admission, Enqueue, Entity, lease_duration};
+
+    async fn database() -> sea_orm::DatabaseConnection {
+        let path = tempdir().unwrap().keep().join("queue.sqlite3");
+        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
+            .await
+            .unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        db
+    }
+
+    async fn enqueue(db: &sea_orm::DatabaseConnection, id: uuid::Uuid, limit: Option<i32>) {
+        Entity::record_enqueue(
+            db,
+            Enqueue {
+                id,
+                job_name: "test",
+                worker_class: "shared",
+                workspace_id: None,
+                plan: None,
+                concurrency_key: Some("shared"),
+                concurrency_limit: limit,
+            },
+        )
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn queue_start_latency_uses_recorded_timestamps() {
@@ -319,5 +396,76 @@ mod tests {
             now
         ));
         assert!(super::running_lease_is_live(None, now));
+    }
+
+    #[tokio::test]
+    async fn admission_is_attempt_fenced_and_heartbeat_is_deterministic() {
+        let db = database().await;
+        let id = uuid::Uuid::now_v7();
+        enqueue(&db, id, None).await;
+        let now = Utc.timestamp_opt(3_000, 0).single().unwrap().fixed_offset();
+        assert_eq!(
+            Entity::start_at(&db, id, now).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        assert_eq!(
+            Entity::start_at(&db, id, now).await.unwrap(),
+            Admission::Duplicate
+        );
+        assert!(Entity::renew_at(&db, id, 1, now).await.unwrap());
+        let row = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.lease_until, Some(now + lease_duration()));
+        assert!(!Entity::renew_at(&db, id, 2, now).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn expired_attempt_recovers_and_stale_completion_is_rejected() {
+        let db = database().await;
+        let id = uuid::Uuid::now_v7();
+        enqueue(&db, id, None).await;
+        let first = Utc.timestamp_opt(4_000, 0).single().unwrap().fixed_offset();
+        assert_eq!(
+            Entity::start_at(&db, id, first).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        let second = first + lease_duration() + chrono::Duration::seconds(1);
+        assert_eq!(
+            Entity::start_at(&db, id, second).await.unwrap(),
+            Admission::Recovered { attempt: 2 }
+        );
+        assert!(
+            Entity::finish(&db, id, Some(1), "completed", None)
+                .await
+                .is_err()
+        );
+        assert!(
+            Entity::finish(&db, id, Some(2), "completed", None)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_admission_allows_one_attempt() {
+        let directory = tempdir().unwrap();
+        let uri = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("queue.sqlite3").display()
+        );
+        let first = Database::connect(&uri).await.unwrap();
+        let second = Database::connect(&uri).await.unwrap();
+        Migrator::up(&first, None).await.unwrap();
+        let id = uuid::Uuid::now_v7();
+        enqueue(&first, id, None).await;
+        let now = Utc.timestamp_opt(5_000, 0).single().unwrap().fixed_offset();
+        let (left, right) = tokio::join!(
+            Entity::start_at(&first, id, now),
+            Entity::start_at(&second, id, now)
+        );
+        let admissions = [left.unwrap(), right.unwrap()];
+        assert_eq!(
+            admissions.iter().filter(|a| a.attempt().is_some()).count(),
+            1
+        );
     }
 }

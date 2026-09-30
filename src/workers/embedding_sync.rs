@@ -256,7 +256,15 @@ macro_rules! embedding_sync_worker_for_class {
                 };
                 let admitted = admission.attempt().is_some();
                 let attempt = admission.attempt();
+                let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
+                    crate::models::queue_job_lifecycles::Entity::heartbeat(
+                        self.ctx.db.clone(), id, attempt,
+                    )
+                });
                 let result = perform_embedding_sync(&self.ctx, &args).await;
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
+                }
                 if admitted {
                     if let Some(id) = args.lifecycle_id {
                         if result.is_ok() {

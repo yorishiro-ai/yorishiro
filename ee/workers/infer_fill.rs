@@ -71,6 +71,7 @@ async fn perform_infer_fill(
     ctx: &AppContext,
     args: &InferFillArgs,
     job_id: Uuid,
+    attempt: Option<i32>,
 ) -> loco_rs::Result<(i64, i64)> {
     let config = llm_keys::get(&ctx.db, args.workspace_id)
         .await
@@ -141,10 +142,11 @@ async fn perform_infer_fill(
             continue;
         }
 
-        let written = inference_proposals::record_batch(
+        let written = inference_proposals::record_batch_attempt(
             &schema_txn,
             args.workspace_id,
             job_id,
+            attempt,
             active.id,
             active.version,
             answers
@@ -218,9 +220,18 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         let attempt = admission.attempt();
         let job_id = args.job_id;
         let claimed = if recovered {
-            inference_jobs::reclaim_running(&self.ctx.db, job_id).await
+            inference_jobs::reclaim_running(
+                &self.ctx.db,
+                job_id,
+                attempt.expect("recovered admission has an attempt") - 1,
+            )
+            .await
         } else {
-            inference_jobs::claim(&self.ctx.db, job_id).await
+            if let Some(attempt) = attempt {
+                inference_jobs::claim_attempt(&self.ctx.db, job_id, Some(attempt - 1)).await
+            } else {
+                inference_jobs::claim(&self.ctx.db, job_id).await
+            }
         }
         .internal()?;
         if !claimed {
@@ -230,12 +241,28 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
             return Ok(());
         }
 
-        match perform_infer_fill(&self.ctx, &args, job_id).await {
+        let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
+            crate::models::queue_job_lifecycles::Entity::heartbeat(self.ctx.db.clone(), id, attempt)
+        });
+
+        match perform_infer_fill(&self.ctx, &args, job_id, attempt).await {
             Ok((proposed, skipped)) => {
-                inference_jobs::complete_proposals(&self.ctx.db, job_id, proposed, skipped)
-                    .await
-                    .internal()?;
-                if admitted && let Some(id) = args.lifecycle_id {
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
+                }
+                let owned = inference_jobs::complete_proposals_attempt(
+                    &self.ctx.db,
+                    job_id,
+                    attempt.unwrap_or(1),
+                    proposed,
+                    skipped,
+                )
+                .await
+                .internal()?;
+                if owned
+                    && admitted
+                    && let Some(id) = args.lifecycle_id
+                {
                     let _ = crate::models::queue_job_lifecycles::Entity::finish(
                         &self.ctx.db,
                         id,
@@ -248,15 +275,35 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                 Ok(())
             }
             Err(e) => {
-                if let Err(update_error) =
-                    inference_jobs::fail(&self.ctx.db, job_id, &e.to_string()).await
-                {
-                    tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
+                if let Some(heartbeat) = heartbeat {
+                    heartbeat.abort();
                 }
-                if admitted && let Some(id) = args.lifecycle_id {
-                    inference_jobs::retry(&self.ctx.db, job_id, &e.to_string())
-                        .await
-                        .internal()?;
+                let owned = match inference_jobs::fail_attempt(
+                    &self.ctx.db,
+                    job_id,
+                    attempt.unwrap_or(1),
+                    &e.to_string(),
+                )
+                .await
+                {
+                    Ok(owned) => owned,
+                    Err(update_error) => {
+                        tracing::error!(%job_id, error = %update_error, "failed to persist infer-fill error");
+                        false
+                    }
+                };
+                if owned
+                    && admitted
+                    && let Some(id) = args.lifecycle_id
+                {
+                    inference_jobs::retry(
+                        &self.ctx.db,
+                        job_id,
+                        &e.to_string(),
+                        attempt.unwrap_or(1),
+                    )
+                    .await
+                    .internal()?;
                     crate::models::queue_job_lifecycles::Entity::defer(
                         &self.ctx.db,
                         id,
