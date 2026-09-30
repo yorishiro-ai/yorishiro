@@ -75,9 +75,6 @@ impl Entity {
         error: &str,
     ) -> Result<(), DbErr> {
         let now = Utc::now().fixed_offset();
-        if let Some(attempt) = attempt {
-            return Self::defer_at(db, id, attempt, error, now).await;
-        }
         let result = Entity::update_many()
             .col_expr(Column::Status, Expr::value("retrying"))
             .col_expr(Column::RetryAt, Expr::value(now))
@@ -620,5 +617,33 @@ mod tests {
             Entity::start_at(&db, expired, renewed).await.unwrap(),
             Admission::Duplicate { attempt: 1 }
         ));
+    }
+
+    #[tokio::test]
+    async fn live_attempt_failure_defers_without_changing_attempt() {
+        let db = database().await;
+        let id = uuid::Uuid::now_v7();
+        enqueue(&db, id, None).await;
+        let now = Utc.timestamp_opt(9_000, 0).single().unwrap().fixed_offset();
+        assert_eq!(
+            Entity::start_at(&db, id, now).await.unwrap(),
+            Admission::Started { attempt: 1 }
+        );
+        Entity::defer(&db, id, Some(1), "worker failed")
+            .await
+            .unwrap();
+        let row = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "retrying");
+        assert_eq!(row.attempt, 1);
+        assert!(Entity::defer(&db, id, Some(0), "stale").await.is_err());
+        assert_eq!(
+            Entity::find_by_id(id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "retrying"
+        );
     }
 }
