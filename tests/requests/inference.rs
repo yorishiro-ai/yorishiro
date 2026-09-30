@@ -359,7 +359,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             )
             .await
             .expect("record proposal");
-            inference_jobs::complete(&ctx.db, job_id, 0, 0)
+            inference_jobs::complete(&txn, job_id, 0, 0)
                 .await
                 .expect("complete proposal job");
             txn.commit().await.expect("commit apply");
@@ -457,7 +457,7 @@ async fn invalid_proposals_do_not_leave_a_snapshot() {
         )
         .await
         .expect("record invalid proposal");
-        inference_jobs::complete(&ctx.db, job_id, 0, 0)
+        inference_jobs::complete(&txn, job_id, 0, 0)
             .await
             .expect("complete proposal job");
         let report = yorishiro::ee::models::inference_proposals::confirm(
@@ -520,7 +520,7 @@ async fn create_completed_proposal(
     )
     .await
     .expect("record proposal");
-    inference_jobs::complete(&ctx.db, job_id, 0, 0)
+    inference_jobs::complete(&txn, job_id, 0, 0)
         .await
         .expect("complete proposal job");
     txn.commit().await.expect("commit proposal");
