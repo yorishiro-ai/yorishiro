@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
 
-.PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities
+.PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities check-all
 
 check:
 	cargo check --locked --workspace
@@ -34,17 +34,20 @@ coverage:
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build
-	docker compose up -d --wait testdb
+	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
+		docker compose up -d --wait testdb; \
+	fi
 	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres scripts/test-backend.sh postgres
 
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite scripts/test-backend.sh sqlite
 
-# Redis is opt-in because normal CI does not provision it. Unlike the normal
-# suite's deliberate skip, this target fails when the selected endpoint is
-# unavailable or the provider test is not executed.
+# The default endpoint is provisioned locally by Compose. An explicit endpoint
+# uses the caller's service instead and does not start a local container.
 test-redis:
-	docker compose up -d --wait redis
+	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379" ]; then \
+		docker compose up -d --wait redis; \
+	fi
 	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' scripts/test-redis.sh
 
 build:
@@ -65,8 +68,7 @@ endif
 # Starts a disposable pgvector/pgvector:pg18 container on port 15432,
 # runs migrations, generates entities, tears everything down.
 entities: build
-	docker compose up -d testdb
-	@sleep 10
+	docker compose up -d --wait testdb
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
 	@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL (DATABASE_URL must start with postgres://)" >&2; exit 1; fi
