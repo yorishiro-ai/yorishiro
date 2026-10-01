@@ -350,8 +350,8 @@ pub(crate) async fn enqueue_for_class_with_dispatcher(
 }
 
 /// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
-/// `perform_later` in `BackgroundQueue` mode only enqueues the job and returns; the embedding provider round trip happens later, inside whichever `WorkerClass` worker type's `perform` dequeues the job (see [`enqueue_for_class`]), on a worker process, not on this request's task.
-/// Runs on Loco's configured `BackgroundQueue`, so a process restart, a forced kill, or a provider outage that exhausts its own retries does not silently lose the sync: the job remains in the configured provider for the next worker run.
+/// The application accepts only Loco's `BackgroundQueue` mode, so `perform_later_with_priority` persists the job and returns before the embedding provider round trip begins.
+/// A process restart or forced kill leaves the job in the configured provider for the next worker run.
 /// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
 ///
 /// This lives here rather than beside one transport's handlers because both of them need it: every entity write that does not call this leaves `entity_entities.embedding` NULL forever, and such an entity is reachable only through the `pg_trgm` fuzzy fallback, so the symptom is search quietly returning worse results rather than any error.

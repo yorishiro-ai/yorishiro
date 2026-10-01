@@ -28,14 +28,16 @@ pub(super) fn load_canonical(path: &Path) -> Result<Config> {
 }
 
 pub(crate) fn validate_queue_policy(config: &Config) -> Result<()> {
+    if config.workers.mode != WorkerMode::BackgroundQueue {
+        return Err(Error::Message(
+            "only BackgroundQueue is supported; ForegroundBlocking and BackgroundAsync are disabled"
+                .into(),
+        ));
+    }
     let Some(queue) = config.queue.as_ref() else {
-        return if config.workers.mode == WorkerMode::BackgroundQueue {
-            Err(Error::Message(
-                "BackgroundQueue requires a configured queue provider".into(),
-            ))
-        } else {
-            Ok(())
-        };
+        return Err(Error::Message(
+            "BackgroundQueue requires a configured queue provider".into(),
+        ));
     };
     let workers = match queue {
         QueueConfig::Postgres(queue) => queue.num_workers,

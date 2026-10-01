@@ -54,10 +54,7 @@ scheduler:
 
 # Worker Configuration
 workers:
-  # specifies the worker mode. Options:
-  #   - BackgroundQueue - Workers operate asynchronously in the background, processing queued.
-  #   - ForegroundBlocking - Workers operate in the foreground and block until tasks are completed.
-  #   - BackgroundAsync - Workers operate asynchronously in the background, processing tasks with async capabilities.
+  # Only BackgroundQueue is supported. ForegroundBlocking and BackgroundAsync are rejected.
   mode: BackgroundQueue
 
 # Yorishiro's registered jobs use tags. Run HTTP and worker processes separately, and start
