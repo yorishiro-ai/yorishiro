@@ -19,9 +19,10 @@ async fn explicit_path_loads_and_environment_overrides_it() {
     )
     .unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH", "DATABASE_URL"]);
+    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH", "DATABASE_URL", "QUEUE_URL"]);
     _guard.set("YORISHIRO_CONFIG_PATH", &path);
     _guard.set("DATABASE_URL", "sqlite:///from-env.sqlite3?mode=rwc");
+    _guard.remove("QUEUE_URL");
     let config = load(&Environment::Development).await.unwrap();
     assert_eq!(config.database.uri, "sqlite:///from-env.sqlite3?mode=rwc");
 }

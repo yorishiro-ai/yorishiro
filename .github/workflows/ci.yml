@@ -194,7 +194,7 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
   test:
-    name: Test (${{ matrix.db }}, ${{ matrix.queue }})
+    name: Test (DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})
     needs: prepare-embedding
     runs-on: ubuntu-latest
     strategy:
@@ -203,13 +203,13 @@ jobs:
         include:
           - db: PG
             backend: postgres
-            queue: SQL
+            queue: Postgres
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           - db: SQLite
             backend: sqlite
-            queue: SQL
+            queue: SQLite
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
@@ -300,6 +300,7 @@ jobs:
         if: matrix.backend == 'postgres'
         env:
           DATABASE_URL: ${{ matrix.database_url }}
+          QUEUE_URL: ${{ matrix.queue_url }}
           LOCO_ENV: ${{ matrix.loco_env }}
           DB_CONNECT_TIMEOUT: "5000"
         run: ./target/debug/yorishiro db migrate
@@ -308,6 +309,7 @@ jobs:
         if: matrix.backend == 'sqlite'
         env:
           DATABASE_URL: ${{ matrix.database_url }}
+          QUEUE_URL: ${{ matrix.queue_url }}
           LOCO_ENV: ${{ matrix.loco_env }}
         run: ./target/debug/yorishiro db migrate
 
