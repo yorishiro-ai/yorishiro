@@ -76,7 +76,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check generated entity hardener
-        run: uv run scripts/test_harden_generated_entities.py
+        run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
 
       - name: Check test harness usage
         run: |
