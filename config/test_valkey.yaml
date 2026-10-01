@@ -38,8 +38,7 @@ scheduler:
 
 
 # Queue Configuration
-# This environment deliberately keeps the application database on PostgreSQL while
-# exercising the external Valkey provider.
+# This environment keeps the application database independent from the external Valkey provider.
 queue:
   kind: Redis
   uri: <%= get_env(name="QUEUE_URL") %>

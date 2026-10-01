@@ -5,6 +5,7 @@ src/models/tenancy.rs	fn	test_support::create_invite_at	Test-only timestamp seam
 src/models/tenancy.rs	fn	test_support::redeem_invite_at	Test-only timestamp seam enabled only with the disabled-by-default test-support feature.
 src/workers/mod.rs	mod	dispatch	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 src/workers/dispatch.rs	trait	TestReindexDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
+src/workers/dispatch.rs	trait	ReindexDispatcher	Test-support dispatcher seam is public so integration tests can install a typed dispatcher.
 src/workers/dispatch.rs	fn	install_test_reindex_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 ee/workers/infer_fill.rs	trait	TestInferFillDispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.
 ee/workers/infer_fill.rs	fn	install_test_infer_fill_dispatcher	Test-only dispatcher substitution seam enabled only with the disabled-by-default test-support feature.

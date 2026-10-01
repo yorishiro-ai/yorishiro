@@ -47,6 +47,11 @@ pub(super) async fn load_from(base_dir: &Path, environment: &Environment) -> Res
 fn test_environment(environment: &Environment) -> Environment {
     match environment {
         Environment::Test => {
+            if env::var("QUEUE_URL")
+                .is_ok_and(|url| url.starts_with("redis://") || url.starts_with("rediss://"))
+            {
+                return Environment::Any("test_valkey".into());
+            }
             let url = env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
             if url.starts_with("sqlite://") || url.starts_with("sqlite::") {

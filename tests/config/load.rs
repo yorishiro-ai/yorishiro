@@ -179,6 +179,22 @@ async fn valkey_test_config_keeps_queue_external_to_postgres() {
     }
 }
 
+#[tokio::test]
+#[serial(process_environment)]
+async fn test_environment_selects_valkey_for_sqlite_database() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
+    _guard.set("QUEUE_URL", "redis://localhost:6379");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
+
+    let config = load(&Environment::Test).await.unwrap();
+    assert!(config.database.uri.starts_with("sqlite://"));
+    match config.queue {
+        Some(QueueConfig::Redis(queue)) => assert_eq!(queue.uri, "redis://localhost:6379"),
+        other => panic!("SQLite test with Valkey must configure a Redis queue, got {other:?}"),
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 #[serial(process_environment)]

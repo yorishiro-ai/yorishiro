@@ -51,6 +51,7 @@ env:
 
 jobs:
   check:
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -153,6 +154,7 @@ jobs:
       - run: cargo +1.94.0 check --locked --workspace
 
   prepare-embedding:
+    name: Models
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -192,18 +194,37 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
   test:
+    name: Test (${{ matrix.db }}, ${{ matrix.queue }})
     needs: prepare-embedding
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - backend: postgres
+          - db: PG
+            backend: postgres
+            queue: SQL
             loco_env: test_postgres
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
-          - backend: sqlite
+            queue_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+          - db: SQLite
+            backend: sqlite
+            queue: SQL
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+          - db: PG
+            backend: postgres
+            queue: Valkey
+            loco_env: test_valkey
+            database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
+            queue_url: redis://localhost:6379
+          - db: SQLite
+            backend: sqlite
+            queue: Valkey
+            loco_env: test_valkey
+            database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: redis://localhost:6379
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -215,6 +236,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U yorishiro"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      valkey:
+        image: valkey/valkey:9.1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
@@ -230,8 +260,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # Separate caches for each matrix entry so postgres and sqlite build artifacts don't
-          # collide (they compile different feature combinations).
-          key: ${{ github.job }}-${{ matrix.backend }}
+          # collide across database and queue providers.
+          key: ${{ github.job }}-${{ matrix.backend }}-${{ matrix.queue }}
 
       - name: Restore multilingual-e5-base cache
         uses: actions/cache/restore@v4
@@ -313,6 +343,8 @@ jobs:
         env:
           LOCO_ENV: ${{ matrix.loco_env }}
           DATABASE_URL: ${{ matrix.database_url }}
+          QUEUE_URL: ${{ matrix.queue_url }}
+          YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
@@ -340,40 +372,3 @@ jobs:
           MODEL_URL: unused
           TOKENIZER_URL: unused
         run: uv run --script scripts/embedding_cache.py verify
-
-  test-valkey:
-    needs: prepare-embedding
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - backend: valkey
-            valkey_version: 9.1
-    services:
-      valkey:
-        image: valkey/valkey:${{ matrix.valkey_version }}
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "valkey-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v6
-
-      - uses: ./.github/actions/rust-setup
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ github.job }}-${{ matrix.backend }}-${{ matrix.valkey_version }}
-
-      - name: Run Valkey queue and configuration tests
-        env:
-          LOCO_ENV: test_valkey
-          DATABASE_URL: postgres://test:test@localhost:5432/test
-          YORISHIRO_REDIS_TEST_URL: redis://localhost:6379
-        run: uv run --script scripts/test_redis.py
