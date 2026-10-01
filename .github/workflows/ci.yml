@@ -57,6 +57,8 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: astral-sh/setup-uv@v6
+
       - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
@@ -70,7 +72,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check generated entity hardener
-        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_harden_generated_entities.py
+        run: uv run --script scripts/test_harden_generated_entities.py
 
       - name: Check test harness usage
         run: |
@@ -155,6 +157,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: astral-sh/setup-uv@v6
+
       - name: Restore multilingual-e5-base cache
         uses: actions/cache/restore@v4
         id: embedding-cache
@@ -176,7 +180,7 @@ jobs:
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
           TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
-        run: bash scripts/embedding-cache.sh prepare
+        run: uv run --script scripts/embedding_cache.py prepare
 
       - name: Save verified multilingual-e5-base cache
         if: steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -217,6 +221,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: astral-sh/setup-uv@v6
+
       - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
@@ -242,7 +248,7 @@ jobs:
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: unused
           TOKENIZER_URL: unused
-        run: bash scripts/embedding-cache.sh verify
+        run: uv run --script scripts/embedding_cache.py verify
 
       - name: Build workspace
         run: cargo build --locked --workspace
@@ -289,7 +295,7 @@ jobs:
           count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
-          python3 scripts/harden_generated_entities.py
+          uv run --script scripts/harden_generated_entities.py
           which sea-orm-cli || echo "ERROR: sea-orm-cli not found in PATH"
           count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           if [ "$count" -lt 10 ]; then
@@ -310,7 +316,7 @@ jobs:
           DB_MAX_CONNECTIONS: 100
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
-        run: scripts/test-backend.sh ${{ matrix.backend }}
+        run: uv run --script scripts/test_backend.py ${{ matrix.backend }}
 
       - name: Verify backend gate rejects a mismatch
         env:
@@ -318,7 +324,7 @@ jobs:
           LOCO_ENV: test_sqlite
         run: |
           set +e
-          output=$(scripts/test-backend.sh postgres models::maintenance:: 2>&1)
+          output=$(uv run --script scripts/test_backend.py postgres models::maintenance:: 2>&1)
           status=$?
           set -e
           echo "$output"
@@ -328,21 +334,12 @@ jobs:
           fi
 
       - name: Verify embedding artifacts before cache save
-        run: |
-          set -euo pipefail
-          cache_dir="$HOME/.cache/yorishiro/models/multilingual-e5-base"
-
-          verify() {
-            local path=$1 expected_size=$2 expected_sha=$3
-            [[ -f "$path" && ! -L "$path" ]] || return 1
-            [[ "$(stat -c '%s' "$path")" == "$expected_size" ]] || return 1
-            [[ "$(sha256sum "$path" | cut -d' ' -f1)" == "$expected_sha" ]]
-          }
-
-          verify "$cache_dir/model.safetensors" \
-            "$EMBEDDING_MODEL_SIZE" "$EMBEDDING_MODEL_SHA256"
-          verify "$cache_dir/tokenizer.json" \
-           "$EMBEDDING_TOKENIZER_SIZE" "$EMBEDDING_TOKENIZER_SHA256"
+        env:
+          CACHE_DIR: ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
+          CACHE_HIT: "true"
+          MODEL_URL: unused
+          TOKENIZER_URL: unused
+        run: uv run --script scripts/embedding_cache.py verify
 
   test-valkey:
     needs: prepare-embedding
@@ -366,6 +363,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: astral-sh/setup-uv@v6
+
       - uses: ./.github/actions/rust-setup
 
       - uses: Swatinem/rust-cache@v2
@@ -377,4 +376,4 @@ jobs:
           LOCO_ENV: test_valkey
           DATABASE_URL: postgres://test:test@localhost:5432/test
           YORISHIRO_REDIS_TEST_URL: redis://localhost:6379
-        run: scripts/test-redis.sh
+        run: uv run --script scripts/test_redis.py

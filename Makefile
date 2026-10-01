@@ -23,24 +23,24 @@ fmt-check:
 	cargo fmt --all -- --check
 
 public-api-check:
-	PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_public_api.py
-	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_public_api.py
+	uv run --script scripts/test_public_api.py
+	uv run --script scripts/check_public_api.py
 	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
 
 # Nightly is required because LLVM branch coverage is not available on stable.
 # Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
 coverage:
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres python3 scripts/coverage_report.py
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run --script scripts/coverage_report.py
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		docker compose up -d --wait testdb; \
 	fi
-	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres scripts/test-backend.sh postgres
+	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run --script scripts/test_backend.py postgres
 
 test-sqlite: build
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite scripts/test-backend.sh sqlite
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run --script scripts/test_backend.py sqlite
 
 # The default endpoint is provisioned locally by Compose. An explicit endpoint
 # uses the caller's service instead and does not start a local container.
@@ -48,7 +48,7 @@ test-redis:
 	@if [ "$(YORISHIRO_REDIS_TEST_URL)" = "redis://localhost:6379" ]; then \
 		docker compose up -d --wait redis; \
 	fi
-	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' scripts/test-redis.sh
+	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' uv run --script scripts/test_redis.py
 
 build:
 	cargo build --locked --workspace
@@ -73,7 +73,7 @@ entities: build
 	rm -f src/models/_entities/*.rs
 	@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL (DATABASE_URL must start with postgres://)" >&2; exit 1; fi
 	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db entities
-	python3 scripts/harden_generated_entities.py
+	uv run --script scripts/harden_generated_entities.py
 	docker compose down -v testdb
 
 # Convenience alias: check + fmt + clippy (CI check job).

@@ -84,7 +84,7 @@ Dedicated SQLite files use this gate:
 - `tests/requests/workspaces_sqlite.rs` — workspace CRUD
 - `tests/migration/sqlite.rs` — migration verification
 
-`scripts/test-backend.sh` runs the suite, reports selected, executed, and skipped gate counts with skip reasons, and fails when the expected backend has zero gate selections or when the other backend has any selections.
+`uv run --script scripts/test_backend.py` runs the suite, reports selected, executed, and skipped gate counts with skip reasons, and fails when the expected backend has zero gate selections or when the other backend has any selections.
 
 `request_with_create_db` is not wired for SQLite (`CREATE DATABASE` has no SQLite equivalent).
 
