@@ -40,7 +40,7 @@ class HardenGeneratedEntitiesTest(unittest.TestCase):
             "oauth_access_token",
         ):
             self.assertIn(f"#[serde(skip_serializing)]\n    pub {field}:", hardened)
-        self.assertNotIn(f"#[serde(skip_serializing)]\n    pub public_key:", hardened)
+        self.assertNotIn("#[serde(skip_serializing)]\n    pub public_key:", hardened)
 
     def test_hardening_is_idempotent(self):
         hardened = harden_model(UNSAFE_ENTITY)

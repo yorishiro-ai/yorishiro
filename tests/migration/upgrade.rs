@@ -210,6 +210,7 @@ async fn assert_rejected(db: &DatabaseConnection, sql: &str) {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000001_preserves_embeddings_and_creates_width_tables() {
     with_database("upgrade_000001", |db| Box::pin(async move {
         Migrator::up(db, Some(1)).await.expect("initial migration");
@@ -289,6 +290,7 @@ async fn upgrade_000001_preserves_embeddings_and_creates_width_tables() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000002_preserves_memberships_and_adds_user_index() {
     with_database("upgrade_000002", |db| Box::pin(async move {
         Migrator::up(db, Some(2)).await.expect("initial and embedding migrations");
@@ -319,6 +321,7 @@ async fn upgrade_000002_preserves_memberships_and_adds_user_index() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000003_preserves_schemas_and_adds_nullable_origin_timestamp() {
     with_database("upgrade_000003", |db| Box::pin(async move {
         Migrator::up(db, Some(3)).await.expect("first two migrations");
@@ -363,6 +366,7 @@ async fn upgrade_000003_preserves_schemas_and_adds_nullable_origin_timestamp() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000004_creates_credit_ledger_with_constraints_and_grant() {
     with_database("upgrade_000004", |db| Box::pin(async move {
         Migrator::up(db, Some(4)).await.expect("first three migrations");
@@ -426,6 +430,7 @@ async fn upgrade_000004_creates_credit_ledger_with_constraints_and_grant() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000005_preserves_audit_rows_and_expands_action_check() {
     with_database("upgrade_000005", |db| Box::pin(async move {
         Migrator::up(db, Some(5)).await.expect("first four migrations");
@@ -471,6 +476,7 @@ async fn upgrade_000005_preserves_audit_rows_and_expands_action_check() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000006_creates_inference_jobs_with_defaults_and_status_check() {
     with_database("upgrade_000006", |db| Box::pin(async move {
         Migrator::up(db, Some(6)).await.expect("first five migrations");
@@ -516,6 +522,7 @@ async fn upgrade_000006_creates_inference_jobs_with_defaults_and_status_check() 
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn upgrade_000007_creates_fork_history_and_integrity_objects() {
     with_database("upgrade_000007", |db| Box::pin(async move {
         Migrator::up(db, Some(7)).await.expect("first six migrations");
@@ -645,6 +652,7 @@ async fn upgrade_000007_creates_fork_history_and_integrity_objects() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
     with_database("upgrade_rollbacks", |db| Box::pin(async move {
         Migrator::up(db, None).await.expect("all migrations");
@@ -665,6 +673,61 @@ async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
             backend => panic!("unsupported migration test backend: {backend:?}"),
         };
         assert_eq!(tenant_table_count, 0, "rollback should remove the initial schema");
+    }))
+    .await;
+}
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+#[serial(process_environment)]
+async fn queue_starvation_index_matches_admission_predicate() {
+    with_database("queue_starvation_index", |db| Box::pin(async move {
+        Migrator::up(db, None).await.expect("all migrations");
+        assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
+        let definition: String = match db.get_database_backend() {
+            DbBackend::Sqlite => {
+                value(
+                    db,
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'queue_job_lifecycles_starvation_idx'",
+                )
+                .await
+            }
+            DbBackend::Postgres => {
+                value(
+                    db,
+                    "SELECT indexdef FROM pg_indexes WHERE indexname = 'queue_job_lifecycles_starvation_idx'",
+                )
+                .await
+            }
+            backend => panic!("unsupported migration test backend: {backend:?}"),
+        };
+        for column in ["status", "worker_class", "enqueue_at"] {
+            assert!(
+                definition.contains(column),
+                "index definition missing {column}: {definition}"
+            );
+        }
+        Migrator::down(db, Some(1))
+            .await
+            .expect("roll back starvation index migration");
+        let absent: i64 = match db.get_database_backend() {
+            DbBackend::Sqlite => value(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'queue_job_lifecycles_starvation_idx'",
+            )
+            .await,
+            DbBackend::Postgres => value(
+                db,
+                "SELECT COUNT(*) FROM pg_indexes WHERE indexname = 'queue_job_lifecycles_starvation_idx'",
+            )
+            .await,
+            backend => panic!("unsupported migration test backend: {backend:?}"),
+        };
+        assert_eq!(absent, 0, "rollback must remove starvation index");
+        Migrator::up(db, None)
+            .await
+            .expect("reapply starvation index migration");
+        assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
     }))
     .await;
 }

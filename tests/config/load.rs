@@ -1,5 +1,6 @@
 use std::fs;
 
+use loco_rs::config::QueueConfig;
 use loco_rs::environment::Environment;
 use serial_test::serial;
 use tempfile::tempdir;
@@ -18,9 +19,10 @@ async fn explicit_path_loads_and_environment_overrides_it() {
     )
     .unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH", "DATABASE_URL"]);
+    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH", "DATABASE_URL", "QUEUE_URL"]);
     _guard.set("YORISHIRO_CONFIG_PATH", &path);
     _guard.set("DATABASE_URL", "sqlite:///from-env.sqlite3?mode=rwc");
+    _guard.remove("QUEUE_URL");
     let config = load(&Environment::Development).await.unwrap();
     assert_eq!(config.database.uri, "sqlite:///from-env.sqlite3?mode=rwc");
 }
@@ -160,6 +162,38 @@ async fn legacy_environment_file_is_the_final_fallback() {
         config.database.uri,
         "postgres://test:test@localhost:5432/test"
     );
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn valkey_test_config_keeps_queue_external_to_postgres() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
+    _guard.set("QUEUE_URL", "redis://localhost:6379");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
+
+    let config = load(&Environment::Any("test_valkey".into())).await.unwrap();
+    assert!(config.database.uri.starts_with("postgres://"));
+    match config.queue {
+        Some(QueueConfig::Redis(queue)) => assert_eq!(queue.uri, "redis://localhost:6379"),
+        other => panic!("test_valkey must configure a Redis queue, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn test_environment_selects_valkey_for_sqlite_database() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
+    _guard.set("QUEUE_URL", "redis://localhost:6379");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
+
+    let config = load(&Environment::Test).await.unwrap();
+    assert!(config.database.uri.starts_with("sqlite://"));
+    match config.queue {
+        Some(QueueConfig::Redis(queue)) => assert_eq!(queue.uri, "redis://localhost:6379"),
+        other => panic!("SQLite test with Valkey must configure a Redis queue, got {other:?}"),
+    }
 }
 
 #[cfg(unix)]

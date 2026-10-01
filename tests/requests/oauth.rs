@@ -319,8 +319,9 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             ("test-model", 768),
         )
         .await;
-        // The call is expected to be refused, so there is nothing to commit; dropping rolls back.
-        drop(txn);
+        // The call is expected to be refused; make the rollback explicit so a
+        // future implementation that retains the transaction cannot leak it.
+        txn.rollback().await.expect("rollback refused provisioning");
         match result {
             Err(yorishiro::YorishiroError::ScopeInsufficient { message, .. }) => {
                 assert!(

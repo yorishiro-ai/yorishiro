@@ -22,7 +22,7 @@ fn each_worker_type_carries_exactly_its_own_class_tag() {
     );
 }
 
-/// `serde(rename_all = "snake_case")` is what `EmbeddingSyncArgs` actually persists into `pg_loco_queue`'s `task_data`; asserting the wire form catches an accidental rename breaking a job already sitting in the queue at deploy time.
+/// `serde(rename_all = "snake_case")` is what `EmbeddingSyncArgs` persists in the queue payload; asserting the wire form catches an accidental rename breaking a job already sitting in a queue at deploy time.
 #[test]
 fn worker_class_serializes_to_snake_case() {
     assert_eq!(

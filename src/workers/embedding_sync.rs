@@ -1,10 +1,10 @@
-//! Generates and stores an entity's embedding vector via Loco's own `BackgroundQueue`.
+//! Generates and stores an entity's embedding vector via Loco's persistent background queue.
 //!
 //! A queue provider rather than a bare `tokio::spawn`: a spawned task loses every in-flight sync on a process restart, a forced kill, or a provider outage past its own retry budget, leaving the entity's `embedding` column permanently `NULL` with nothing to retry it (`tasks::resync_embeddings` is the operational recovery command for rows in that state).
-//! `pg_loco_queue` persists the job in Postgres, so a re-deployed or restarted process resumes it instead of losing it.
+//! The configured Loco queue provider persists the job, so a re-deployed or restarted process resumes it instead of losing it.
 //!
 //! **There is no "subscribe to every `WorkerClass`" worker mode.** An empty tag list makes loco's
-//! dequeue query `AND (tags IS NULL)` (confirmed against `loco-rs` 1.1.0's `bgworker/pg.rs`, and the
+//! dequeue query `AND (tags IS NULL)` (confirmed against the pinned `loco-rs` 1.2.0 `bgworker/pg.rs`, and the
 //! matching logic in `sqlt.rs`/`redis.rs`), so a bare `--worker` process dequeues only *untagged*
 //! jobs. Every job this module enqueues carries exactly one tag, so such a process takes none of
 //! them, rather than taking "the leftover ones nothing else claimed".
@@ -36,7 +36,7 @@ use crate::workers::dispatch::EmbeddingSyncDispatcher;
 /// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
 /// named-queue split would mean switching to Redis first.
 ///
-/// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.1.0's
+/// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
 /// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
 /// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
 /// process would then dequeue every class's work rather than its own.
@@ -239,6 +239,14 @@ macro_rules! embedding_sync_worker_for_class {
                             | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
                         Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
+                            let scheduling = crate::services::queue::decide($class);
+                            tracing::warn!(
+                                lifecycle_id = %id,
+                                worker_class = $class.as_db_str(),
+                                scheduling_priority = scheduling.priority,
+                                fallback = scheduling.fallback,
+                                "worker capacity saturated; preserving class reservation"
+                            );
                             match attempt {
                                 Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
                                     &self.ctx.db,
@@ -257,7 +265,12 @@ macro_rules! embedding_sync_worker_for_class {
                                 .await,
                             }
                             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            $worker_ty::perform_later_with_priority(
+                                &self.ctx,
+                                args.clone(),
+                                Some(scheduling.priority),
+                            )
+                            .await?;
                             return Ok(());
                         }
                         Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
@@ -296,7 +309,13 @@ macro_rules! embedding_sync_worker_for_class {
                             )
                             .await
                             .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later(&self.ctx, args.clone()).await?;
+                            let scheduling = crate::services::queue::decide($class);
+                            $worker_ty::perform_later_with_priority(
+                                &self.ctx,
+                                args.clone(),
+                                Some(scheduling.priority),
+                            )
+                            .await?;
                             return Ok(());
                         }
                     }
@@ -331,8 +350,8 @@ pub(crate) async fn enqueue_for_class_with_dispatcher(
 }
 
 /// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
-/// `perform_later` in `BackgroundQueue` mode only inserts a row into `pg_loco_queue` and returns; the embedding provider round trip happens later, inside whichever `WorkerClass` worker type's `perform` dequeues the job (see [`enqueue_for_class`]), on a worker process, not on this request's task.
-/// Runs on Loco's own `BackgroundQueue` (`pg_loco_queue`), so a process restart, a forced kill, or a provider outage that exhausts its own retries does not silently lose the sync: the job survives in the queue table for the next worker run.
+/// The application uses the persistent queue mode, so `perform_later_with_priority` persists the job and returns before the embedding provider round trip begins.
+/// A process restart or forced kill leaves the job in the configured provider for the next worker run.
 /// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
 ///
 /// This lives here rather than beside one transport's handlers because both of them need it: every entity write that does not call this leaves `entity_entities.embedding` NULL forever, and such an entity is reachable only through the `pg_trgm` fuzzy fallback, so the symptom is search quietly returning worse results rather than any error.

@@ -76,4 +76,4 @@ Branch from `develop`. Merge commits preferred. Every PR updates English + Japan
 
 ## Rules
 
-Rules for code style live at `.claude/rules/`.
+Rules for code style live at `.agents/rules/`.

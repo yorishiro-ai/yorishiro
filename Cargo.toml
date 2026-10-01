@@ -61,8 +61,8 @@ regex = { version = "1.13.1" }
 sea-orm.workspace = true
 chrono.workspace = true
 uuid.workspace = true
-# Raw pool for RLS session-state handling: Loco's own ConnectOptions has no after_connect/
-# after_release hook, so this stays a hand-built sqlx pool beside SeaORM's DatabaseConnection.
+# Raw pool for RLS session-state handling: Loco's standard database bootstrap
+# does not expose the session hooks needed to reset tenant state on release.
 # See https://github.com/yorishiro-ai/yorishiro/issues/221.
 sqlx.workspace = true
 thiserror = { version = "2.0.20" }
@@ -83,7 +83,6 @@ candle-core = { version = "0.11.0" }
 candle-nn = { version = "0.11.0" }
 candle-transformers = { version = "0.11.0" }
 tokenizers = { version = "0.23.2", features = ["onig"] }
-pgvector = { version = "0.4.2" }
 sqlite-vec = "=0.1.9"
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
 # re-export libsqlite3_sys from its own sqlx dependency, so we reach it

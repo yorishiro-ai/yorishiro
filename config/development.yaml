@@ -52,14 +52,6 @@ scheduler:
       schedule: "0 * * * * * 2030"
       run_on_start: true
 
-# Worker Configuration
-workers:
-  # specifies the worker mode. Options:
-  #   - BackgroundQueue - Workers operate asynchronously in the background, processing queued.
-  #   - ForegroundBlocking - Workers operate in the foreground and block until tasks are completed.
-  #   - BackgroundAsync - Workers operate asynchronously in the background, processing tasks with async capabilities.
-  mode: BackgroundQueue
-
 # Yorishiro's registered jobs use tags. Run HTTP and worker processes separately, and start
 # workers with the tags they should consume: worker-class:tenant-private, worker-class:official,
 # worker-class:shared, and/or infer-fill. Bare --worker, --server-and-worker, and --all pass an
@@ -151,8 +143,7 @@ mailer:
   # Run a local catcher — mailpit, MailHog or maildev all default to SMTP on
   # 1025 with a web inbox on 8025 — e.g. `docker run -p 1025:1025 -p 8025:8025
   # axllent/mailpit`, then read the mail at http://localhost:8025.
-  # Prefer not to run one? Set `stub: true` here (as `config/test.yaml` does)
-  # to record deliveries in memory instead of sending them.
+  # Test environments omit this provider block rather than sending mail.
   # SMTP mailer configuration.
   smtp:
     # Enable/Disable smtp mailer.

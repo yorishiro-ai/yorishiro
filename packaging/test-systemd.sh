@@ -129,8 +129,6 @@ server:
       enable: true
     logger:
       enable: true
-workers:
-  mode: BackgroundQueue
 queue:
   kind: Postgres
   uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro

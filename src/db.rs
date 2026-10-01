@@ -1,6 +1,11 @@
 //! Raw sqlx connection handling that sits beside Loco's `sea_orm::DatabaseConnection`, not through it.
 //!
-//! Loco's own pool construction (`sea_orm::ConnectOptions`) has no `after_connect`/`after_release` hook, so the RLS session-state lifecycle this deployment depends on is built here as a standalone `sqlx::PgPool` and stored in `AppContext::shared_store` (see `Hooks::after_context` in `src/app.rs`).
+//! Loco's standard database bootstrap does not expose the session-state hooks
+//! this deployment needs, so the RLS lifecycle is built here as a standalone
+//! `sqlx::PgPool` and stored in `AppContext::shared_store` (see
+//! `Hooks::after_context` in `src/app.rs`).  SeaORM itself supports
+//! `ConnectOptions::after_connect`; this application needs a separate pool so
+//! identity and tenant session state cannot be mixed.
 //! That pool is also wrapped as a `sea_orm::DatabaseConnection`, which preserves its `after_connect` hook: the hook belongs to the sqlx pool, not to SeaORM's wrapper.
 //!
 //! Requests reach the database through `TenantDb::begin_for_workspace`, whose returned `DatabaseTransaction` carries both the entity API and raw SQL the entity layer can't express (JSONB containment, pgvector search, advisory locks).
@@ -41,7 +46,7 @@ impl AppContextBackend for loco_rs::app::AppContext {
 /// `App::boot` (covers the test harness, which never runs `main.rs`) — each guarded by
 /// `std::sync::Once::call_once` so the C-level registration is atomic and idempotent.
 ///
-/// The registration must happen **before** any SQLite connection opens: `loco-rs 1.1.0`'s
+/// The registration must happen **before** any SQLite connection opens: `loco-rs 1.2.0`'s
 /// `cli::main` calls `create_context::<H>` unconditionally at line 777, before the
 /// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
 /// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method

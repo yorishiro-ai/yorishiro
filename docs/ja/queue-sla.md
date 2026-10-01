@@ -44,4 +44,36 @@ Redis はプロバイダー側のジョブ状態を提供しますが、Redis �
 ライフサイクル行を `worker_class` と `status` で集計し、記録された開始時刻をプランの目標と比較してください。
 `queued`、`retrying`、または `unavailable` が増え続ける場合、SLA を判断する前に容量またはプロバイダーの健全性を復旧してください。
 
-この Issue では、数値優先度、プリエンプション、バーストクレジット、RabbitMQ、SQS、提供計算、WASM 実行は追加しません。
+この Issue では、プリエンプション、バーストクレジット、RabbitMQ、SQS、提供計算、WASM 実行は追加しません。
+
+## 優先度と容量
+
+Loco 1.2.0が提供する検証済みのスケジューリング機能を使用します。対応providerは整数priorityを受け付けます。
+
+PostgreSQLとSQLiteは`ORDER BY priority DESC, run_at, id`で処理対象のジョブを選ぶため、そのqueryから見える行の順序は決定的です。
+
+Redisはpriority順のZSETの先頭1000件だけをscanし、その後tagの一致を確認してpriority、`run_at`、idで候補を並べます。
+
+workerに一致しない先行エントリがある場合、tag付きRedis jobがこの上限を超えて次のpolling cycleまでskipされることがあります。
+
+Yorishiroは`tenant_private`に300、`official`に200、`shared`に100のpriorityを割り当てます。
+
+ライフサイクルのadmission lockは`worker_class:plan`単位でcapacityを予約するため、capacityが埋まったクラスが別のクラスのcapacityを消費することはありません。
+
+capacityが埋まった場合の決定的なfallbackは、ジョブを優先されたクラスのtagのままretryingに記録し、クラスのpriorityで再enqueueすることです。別のクラスへ暗黙にrerouteしません。
+
+予約capacityとstarvation protectionが必要な場合は、クラスごとにworker processを起動します。使用するtagは`--worker=worker-class:tenant-private`、`--worker=worker-class:official`、`--worker=worker-class:shared`です。
+
+複数クラスをまとめたworkerも利用できますが、その`num_workers`は共有polling poolであり、クラスごとのworker予約にはなりません。
+
+providerの挙動は固定しているLoco 1.2.0のソースで確認し、全providerに同じordering保証があるとは扱わずproviderごとに記載しています。
+
+starvation protectionは、providerのqueued rowを後からreprioritizeするのではなく、durableなadmission boundaryで行います。
+
+低いクラスのライフサイクルが1分間`queued`または`retrying`で待機した場合、そのdurable rowを観測した新しい高いクラスのdispatchには、低いクラスのworkがadmitされるまでpriority 50を割り当てます。
+
+これにより閾値到達後の連続到着から保護しますが、provider内ですでに先行しているジョブはproviderのorderingとbounded scanの挙動に従います。
+
+この抑制は候補worker setを共有する新規dispatchだけに適用され、クラス別worker processは引き続きreserved capacityを分離する強い運用モードです。
+
+scheduling decision、クラス、priority、capacity limit、active capacity、saturation、fallbackは構造化tracing fieldとして出力します。

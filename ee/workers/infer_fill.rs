@@ -227,7 +227,15 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                         }
                     }
                     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                    Self::perform_later(&self.ctx, args.clone()).await?;
+                    let scheduling = crate::services::queue::decide(
+                        crate::workers::embedding_sync::WorkerClass::Shared,
+                    );
+                    Self::perform_later_with_priority(
+                        &self.ctx,
+                        args.clone(),
+                        Some(scheduling.priority),
+                    )
+                    .await?;
                     return Ok(());
                 }
                 Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
@@ -331,7 +339,15 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     )
                     .await
                     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                    Self::perform_later(&self.ctx, args.clone()).await?;
+                    let scheduling = crate::services::queue::decide(
+                        crate::workers::embedding_sync::WorkerClass::Shared,
+                    );
+                    Self::perform_later_with_priority(
+                        &self.ctx,
+                        args.clone(),
+                        Some(scheduling.priority),
+                    )
+                    .await?;
                     return Ok(());
                 }
                 Err(e)

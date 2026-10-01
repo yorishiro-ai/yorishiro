@@ -238,7 +238,6 @@ def _macro_body_indices(items: list[Token]) -> set[int]:
         if delimiter >= len(items) or items[delimiter].value not in {"{", "(", "["}:
             index += 1
             continue
-        opening = items[delimiter].value
         matching = {"{": "}", "(": ")", "[": "]"}
         stack = []
         end = delimiter

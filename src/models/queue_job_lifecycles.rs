@@ -212,6 +212,14 @@ impl Entity {
                     .count(&txn)
                     .await?;
                 if in_flight >= u64::try_from(std::cmp::Ord::max(limit, 0)).unwrap_or(0) {
+                    tracing::warn!(
+                        lifecycle_id = %id,
+                        worker_class = %initial.worker_class,
+                        concurrency_key = %key,
+                        active_capacity = in_flight,
+                        capacity_limit = limit,
+                        "queue capacity saturated"
+                    );
                     txn.rollback().await?;
                     return Ok(Admission::Saturated {
                         attempt: (initial.status == "running").then_some(initial.attempt),
@@ -246,8 +254,23 @@ impl Entity {
             .await?;
         txn.commit().await?;
         if result.rows_affected == 1 {
+            let active_capacity = if let Some(ref key) = key {
+                Some(
+                    Entity::find()
+                        .filter(Column::ConcurrencyKey.eq(key.clone()))
+                        .filter(Column::Status.eq("running"))
+                        .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
+                        .count(db)
+                        .await?,
+                )
+            } else {
+                None
+            };
             tracing::info!(
                 lifecycle_id = %id,
+                worker_class = %initial.worker_class,
+                active_capacity = ?active_capacity,
+                capacity_limit = ?initial.concurrency_limit,
                 queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(initial.enqueue_at).num_seconds(), 0),
                 "queue job admitted"
             );
@@ -357,7 +380,7 @@ impl Entity {}
 mod tests {
     use chrono::{TimeZone, Utc};
     use migration::{Migrator, MigratorTrait};
-    use sea_orm::{Database, EntityTrait};
+    use sea_orm::{ConnectionTrait, Database, DatabaseBackend, EntityTrait, Statement};
     use tempfile::tempdir;
 
     use super::{Admission, Enqueue, Entity, lease_duration};
@@ -494,6 +517,14 @@ mod tests {
         let first = Database::connect(&uri).await.unwrap();
         let second = Database::connect(&uri).await.unwrap();
         Migrator::up(&first, None).await.unwrap();
+        for db in [&first, &second] {
+            db.execute_raw(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
+            ))
+            .await
+            .unwrap();
+        }
         let id = uuid::Uuid::now_v7();
         enqueue(&first, id, None).await;
         let now = Utc.timestamp_opt(5_000, 0).single().unwrap().fixed_offset();

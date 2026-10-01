@@ -46,6 +46,17 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: valkey/valkey:9.1
+    container_name: redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   app:
     build:
       context: .

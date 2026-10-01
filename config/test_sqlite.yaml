@@ -25,10 +25,6 @@ server:
 # Scheduler Configuration (disabled in test)
 scheduler:
 
-# Worker Configuration
-workers:
-  mode: BackgroundQueue
-
 # Queue Configuration
 queue:
   kind: Sqlite

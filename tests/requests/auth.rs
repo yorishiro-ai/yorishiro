@@ -217,7 +217,7 @@ async fn signup_without_invite_respects_the_tenant_cap() {
     .await;
 }
 
-/// Widens `DB_MAX_CONNECTIONS` past `config/test.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
+/// Widens `DB_MAX_CONNECTIONS` past `config/test_postgres.yaml`'s default of 1, which would starve the second connection before it ever reaches the advisory lock.
 async fn with_db_max_connections<T>(value: &str, fut: impl std::future::Future<Output = T>) -> T {
     let guard = crate::EnvGuard::capture(&["DB_MAX_CONNECTIONS"]);
     guard.set("DB_MAX_CONNECTIONS", value);

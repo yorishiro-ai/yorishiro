@@ -51,7 +51,7 @@ use std::net::SocketAddr;
 /// the identity pool (eager) and the tenant pool (lazy).
 /// Leaving either open means a session survives on the throwaway test database,
 /// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
-/// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
+/// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 ///
 /// `spawn_startup_reindex` spawns a background task that holds a connection from `ctx.db` for its entire lifetime.
 /// Without shutdown-and-await, that task would still hold a session when pools are closed,
@@ -85,6 +85,12 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
 /// test that boots through `request_with_create_db`.
 /// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
+    if let Some(handle) = ctx
+        .shared_store
+        .remove::<yorishiro::app::StartupReindexHandle>()
+    {
+        handle.shutdown_and_wait().await;
+    }
     ctx.db.get_sqlite_connection_pool().close().await;
     // Clean up the temp SQLite file and its journaling siblings.
     let _ = std::fs::remove_file(db_path);
