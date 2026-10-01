@@ -1,5 +1,6 @@
 use std::fs;
 
+use loco_rs::config::QueueConfig;
 use loco_rs::environment::Environment;
 use serial_test::serial;
 use tempfile::tempdir;
@@ -160,6 +161,22 @@ async fn legacy_environment_file_is_the_final_fallback() {
         config.database.uri,
         "postgres://test:test@localhost:5432/test"
     );
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn valkey_test_config_keeps_queue_external_to_postgres() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
+    _guard.set("QUEUE_URL", "redis://localhost:6379");
+    _guard.remove("YORISHIRO_QUEUE_KIND");
+
+    let config = load(&Environment::Any("test_valkey".into())).await.unwrap();
+    assert!(config.database.uri.starts_with("postgres://"));
+    match config.queue {
+        Some(QueueConfig::Redis(queue)) => assert_eq!(queue.uri, "redis://localhost:6379"),
+        other => panic!("test_valkey must configure a Redis queue, got {other:?}"),
+    }
 }
 
 #[cfg(unix)]
