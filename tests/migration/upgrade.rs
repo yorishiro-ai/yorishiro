@@ -668,3 +668,36 @@ async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
     }))
     .await;
 }
+
+#[tokio::test]
+#[serial(postgres_cluster)]
+async fn queue_starvation_index_matches_admission_predicate() {
+    with_database("queue_starvation_index", |db| Box::pin(async move {
+        Migrator::up(db, None).await.expect("all migrations");
+        assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
+        let definition: String = match db.get_database_backend() {
+            DbBackend::Sqlite => {
+                value(
+                    db,
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'queue_job_lifecycles_starvation_idx'",
+                )
+                .await
+            }
+            DbBackend::Postgres => {
+                value(
+                    db,
+                    "SELECT indexdef FROM pg_indexes WHERE indexname = 'queue_job_lifecycles_starvation_idx'",
+                )
+                .await
+            }
+            backend => panic!("unsupported migration test backend: {backend:?}"),
+        };
+        for column in ["status", "worker_class", "enqueue_at"] {
+            assert!(
+                definition.contains(column),
+                "index definition missing {column}: {definition}"
+            );
+        }
+    }))
+    .await;
+}

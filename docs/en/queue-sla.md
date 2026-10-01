@@ -72,4 +72,6 @@ When a lower-class lifecycle has remained `queued` or `retrying` for one minute,
 
 This protects continuous arrivals after the threshold, while jobs already ahead in a provider remain subject to that provider's ordering and bounded-scan behavior.
 
+The suppression applies only to new dispatches sharing the candidate worker set; class-specific worker processes remain the stronger reserved-capacity isolation mode.
+
 Scheduling decisions, class, priority, capacity limit, active capacity, saturation, and fallback are emitted as structured tracing fields.

@@ -112,12 +112,43 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             }
         };
         let concurrency_key = format!("{worker_class}:{plan}");
-        let scheduling = crate::services::queue::decide_for_dispatch(&ctx.db, args.worker_class)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(error = %error, "queue starvation lookup failed");
-                crate::services::queue::decide(args.worker_class)
-            });
+        let scheduling =
+            match crate::services::queue::decide_for_dispatch(&ctx.db, args.worker_class).await {
+                Ok(scheduling) => scheduling,
+                Err(error) => {
+                    let diagnostic = format!("starvation policy lookup failed: {error}");
+                    let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
+                        &ctx.db,
+                        crate::models::queue_job_lifecycles::Enqueue {
+                            id: lifecycle_id,
+                            job_name: "embedding_sync",
+                            worker_class,
+                            workspace_id: Some(args.workspace_id),
+                            plan: Some(&plan),
+                            concurrency_key: Some(&concurrency_key),
+                            concurrency_limit: Some(concurrency_limit),
+                        },
+                    )
+                    .await;
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                        &ctx.db,
+                        lifecycle_id,
+                        None,
+                        "unavailable",
+                        Some(&diagnostic),
+                    )
+                    .await;
+                    tracing::error!(
+                        lifecycle_id = %lifecycle_id,
+                        worker_class,
+                        policy = "starvation",
+                        degraded = true,
+                        diagnostic = %diagnostic,
+                        "queue dispatch refused because starvation policy is unavailable"
+                    );
+                    return Err(loco_rs::Error::Message(diagnostic));
+                }
+            };
         tracing::info!(
             lifecycle_id = %lifecycle_id,
             worker_class,

@@ -119,16 +119,23 @@ async fn finish_competing_order(queue: Arc<Queue>, run_id: &str, expected: Vec<&
     let running_queue = queue.clone();
     let handle =
         tokio::spawn(async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await });
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while progress.borrow().get(run_id).copied().unwrap_or_default() < 2 {
-            progress.changed().await.expect("competing worker progress");
-        }
-    })
-    .await
-    .expect("competing jobs completed");
-    queue.shutdown().expect("stop competing worker");
-    handle
+    let result = std::panic::AssertUnwindSafe(async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while progress.borrow().get(run_id).copied().unwrap_or_default() < 2 {
+                progress.changed().await.expect("competing worker progress");
+            }
+        })
         .await
+        .expect("competing jobs completed");
+    })
+    .catch_unwind()
+    .await;
+    let _ = queue.shutdown();
+    let join_result = handle.await;
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+    join_result
         .expect("join competing worker")
         .expect("run competing worker");
     let actual = COMPETING_ORDER
@@ -143,6 +150,20 @@ async fn finish_competing_order(queue: Arc<Queue>, run_id: &str, expected: Vec<&
         actual,
         expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
     );
+}
+
+async fn with_queue_cleanup<F, Fut>(queue: Arc<Queue>, test: F)
+where
+    F: FnOnce(Arc<Queue>) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let result = std::panic::AssertUnwindSafe(test(queue.clone()))
+        .catch_unwind()
+        .await;
+    let _ = queue.shutdown();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 /// Boots the app against a throwaway PostgreSQL database with `BackgroundQueue` and a SQLite queue file, and hands the test both the context and a pool onto that same queue file.
@@ -170,8 +191,11 @@ where
         // pool must be large enough.  Bump the connect timeout so the queue
         // workers don't block the migration phase.
         config.database.connect_timeout = 30_000;
-        let db = loco_rs::testing::db::init_test_db_creation(&config.database.uri)
-            .expect("init test db");
+        test_db = Some(
+            loco_rs::testing::db::init_test_db_creation(&config.database.uri)
+                .expect("init test db"),
+        );
+        let db = test_db.as_ref().expect("test db");
         db.init_db().await;
         config.database.uri = db.get_connection_str().to_string();
         config.workers.mode = WorkerMode::BackgroundQueue;
@@ -191,6 +215,8 @@ where
         let boot_res = App::boot(boot::StartMode::ServerOnly, &Environment::Test, config)
             .await
             .expect("boot with a sqlite queue");
+        boot = Some(boot_res);
+        let boot_res = boot.as_ref().expect("boot result");
 
         let pool = sqlx::SqlitePool::connect(&queue_uri)
             .await
@@ -234,16 +260,15 @@ where
         // so DROP DATABASE does not fail on teardown.
         close_app_pools(&boot_res.app_context).await;
         pool.close().await;
-
-        // Store for post-panic cleanup.
-        test_db = Some(db);
-        boot = Some(boot_res);
     })
     .catch_unwind()
     .await;
 
     // Post-panic cleanup: close app pools and drop the test DB.
     if let Some(b) = &boot {
+        if let Some(ref queue) = b.app_context.queue_provider {
+            let _ = queue.shutdown();
+        }
         // close_app_pools closes identity, tenant, and ctx.db pools so
         // DROP DATABASE does not fail on teardown.
         close_app_pools(&b.app_context).await;
@@ -430,8 +455,11 @@ async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
         .await
         .expect("SQLite queue");
     let queue = Arc::new(provider);
-    queue.setup().await.expect("set up SQLite queue");
-    assert_competing_priority_order(queue).await;
+    with_queue_cleanup(queue, |queue| async move {
+        queue.setup().await.expect("set up SQLite queue");
+        assert_competing_priority_order(queue).await;
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -456,14 +484,20 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
         .await
         .expect("Postgres queue");
     let queue = Arc::new(provider);
-    queue.setup().await.expect("set up Postgres queue");
-    assert_competing_priority_order(queue).await;
+    with_queue_cleanup(queue, |queue| async move {
+        queue.setup().await.expect("set up Postgres queue");
+        assert_competing_priority_order(queue).await;
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
 async fn sqlite_equal_priority_order_uses_controlled_job_ids() {
     let run_id = "equal-sqlite";
+    let run_at = chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
+        .expect("equal-priority timestamp")
+        .with_timezone(&chrono::Utc);
     let directory = tempfile::tempdir().expect("queue tempdir");
     let uri = format!(
         "sqlite://{}?mode=rwc",
@@ -485,44 +519,48 @@ async fn sqlite_equal_priority_order_uses_controlled_job_ids() {
         .await
         .expect("SQLite queue");
     let queue = Arc::new(provider);
-    queue.setup().await.expect("set up SQLite queue");
-    queue
-        .register(CompetingWorker)
-        .await
-        .expect("register competing worker");
-    let pool = sqlx::SqlitePool::connect(&uri)
-        .await
-        .expect("connect SQLite queue");
-    for (id, name) in [("job-b", "id-b"), ("job-a", "id-a")] {
-        let generated_id = queue
-            .enqueue(
-                CompetingWorker::class_name(),
-                None,
-                CompetingArgs {
-                    run_id: run_id.to_owned(),
-                    name: name.to_owned(),
-                },
-                Some(vec![COMPETING_TAG.to_owned()]),
-                Some(200),
-            )
+    with_queue_cleanup(queue, |queue| async move {
+        queue.setup().await.expect("set up SQLite queue");
+        queue
+            .register(CompetingWorker)
             .await
-            .expect("enqueue SQLite equal-priority job");
-        sqlx::query("UPDATE sqlt_loco_queue SET id = ?, run_at = ? WHERE id = ?")
-            .bind(id)
-            .bind("2000-01-01 00:00:00")
-            .bind(generated_id)
-            .execute(&pool)
+            .expect("register competing worker");
+        let pool = sqlx::SqlitePool::connect(&uri)
             .await
-            .expect("control SQLite equal-priority job");
-    }
-    let ordered: Vec<(String,)> = sqlx::query_as(
-        "SELECT id FROM sqlt_loco_queue WHERE status = 'queued' ORDER BY priority DESC, run_at, id",
-    )
-    .fetch_all(&pool)
-    .await
-    .expect("read SQLite equal-priority order");
-    assert_eq!(ordered, vec![("job-a".to_owned(),), ("job-b".to_owned(),)]);
-    pool.close().await;
+            .expect("connect SQLite queue");
+        let result = std::panic::AssertUnwindSafe(async {
+            for (id, name) in [("job-b", "id-b"), ("job-a", "id-a")] {
+                let generated_id = queue
+                    .enqueue(
+                        CompetingWorker::class_name(),
+                        None,
+                        CompetingArgs {
+                            run_id: run_id.to_owned(),
+                            name: name.to_owned(),
+                        },
+                        Some(vec![COMPETING_TAG.to_owned()]),
+                        Some(200),
+                    )
+                    .await
+                    .expect("enqueue SQLite equal-priority job");
+                sqlx::query("UPDATE sqlt_loco_queue SET id = ?, run_at = ? WHERE id = ?")
+                    .bind(id)
+                    .bind(run_at)
+                    .bind(generated_id)
+                    .execute(&pool)
+                    .await
+                    .expect("control SQLite equal-priority job");
+            }
+            finish_competing_order(queue.clone(), run_id, vec!["id-a", "id-b"]).await;
+        })
+        .catch_unwind()
+        .await;
+        pool.close().await;
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -533,6 +571,9 @@ async fn postgres_equal_priority_order_uses_controlled_job_ids() {
     }
     let uri = std::env::var("DATABASE_URL").expect("PostgreSQL DATABASE_URL");
     let run_id = "equal-postgres";
+    let run_at = chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
+        .expect("equal-priority timestamp")
+        .with_timezone(&chrono::Utc);
     let config = PostgresQueueConfig {
         uri: uri.clone(),
         dangerously_flush: true,
@@ -549,49 +590,59 @@ async fn postgres_equal_priority_order_uses_controlled_job_ids() {
         .await
         .expect("Postgres queue");
     let queue = Arc::new(provider);
-    queue.setup().await.expect("set up Postgres queue");
-    let pool = sqlx::PgPool::connect(&uri)
-        .await
-        .expect("connect Postgres queue");
-    for (id, name) in [("job-b", "id-b"), ("job-a", "id-a")] {
-        let generated_id = queue
-            .enqueue(
-                CompetingWorker::class_name(),
-                None,
-                CompetingArgs {
-                    run_id: run_id.to_owned(),
-                    name: name.to_owned(),
-                },
-                Some(vec![COMPETING_TAG.to_owned()]),
-                Some(200),
-            )
+    with_queue_cleanup(queue, |queue| async move {
+        queue.setup().await.expect("set up Postgres queue");
+        queue
+            .register(CompetingWorker)
             .await
-            .expect("enqueue Postgres equal-priority job");
-        sqlx::query("UPDATE pg_loco_queue SET id = $1, run_at = $2 WHERE id = $3")
-            .bind(id)
-            .bind("2000-01-01T00:00:00Z")
-            .bind(generated_id)
-            .execute(&pool)
+            .expect("register competing worker");
+        let pool = sqlx::PgPool::connect(&uri)
             .await
-            .expect("control Postgres equal-priority job");
-    }
-    let ordered: Vec<(String,)> = sqlx::query_as(
-        "SELECT id FROM pg_loco_queue WHERE status = 'queued' ORDER BY priority DESC, run_at, id",
-    )
-    .fetch_all(&pool)
-    .await
-    .expect("read Postgres equal-priority order");
-    assert_eq!(ordered, vec![("job-a".to_owned(),), ("job-b".to_owned(),)]);
-    pool.close().await;
+            .expect("connect Postgres queue");
+        let result = std::panic::AssertUnwindSafe(async {
+            for (id, name) in [("job-b", "id-b"), ("job-a", "id-a")] {
+                let generated_id = queue
+                    .enqueue(
+                        CompetingWorker::class_name(),
+                        None,
+                        CompetingArgs {
+                            run_id: run_id.to_owned(),
+                            name: name.to_owned(),
+                        },
+                        Some(vec![COMPETING_TAG.to_owned()]),
+                        Some(200),
+                    )
+                    .await
+                    .expect("enqueue Postgres equal-priority job");
+                sqlx::query("UPDATE pg_loco_queue SET id = $1, run_at = $2 WHERE id = $3")
+                    .bind(id)
+                    .bind(run_at)
+                    .bind(generated_id)
+                    .execute(&pool)
+                    .await
+                    .expect("control Postgres equal-priority job");
+            }
+            finish_competing_order(queue.clone(), run_id, vec!["id-a", "id-b"]).await;
+        })
+        .catch_unwind()
+        .await;
+        pool.close().await;
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    })
+    .await;
 }
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
 async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
-    let Ok(uri) = std::env::var("QUEUE_URL") else {
+    let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
+        eprintln!("skipping Redis bounded-scan test: YORISHIRO_REDIS_TEST_URL is unset");
         return;
     };
     if !uri.starts_with("redis://") && !uri.starts_with("rediss://") {
+        eprintln!("skipping Redis bounded-scan test: explicit URL is not Redis");
         return;
     }
     let config = RedisQueueConfig {
@@ -606,69 +657,112 @@ async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
             .await
             .expect("Redis queue"),
     );
-    queue.setup().await.expect("set up Redis queue");
-    queue
-        .register(CompetingWorker)
-        .await
-        .expect("register competing worker");
-    let run_id = "bounded-redis";
-    for index in 0..1001 {
-        queue
-            .enqueue(
-                CompetingWorker::class_name(),
-                None,
-                CompetingArgs {
-                    run_id: run_id.to_owned(),
-                    name: format!("mismatch-{index}"),
-                },
-                Some(vec!["queue-test:other".to_owned()]),
-                Some(200),
-            )
-            .await
-            .expect("enqueue Redis mismatch");
-    }
-    queue
-        .enqueue(
-            CompetingWorker::class_name(),
-            None,
-            CompetingArgs {
-                run_id: run_id.to_owned(),
-                name: "matching-beyond-scan".to_owned(),
-            },
-            Some(vec![COMPETING_TAG.to_owned()]),
-            Some(200),
-        )
-        .await
-        .expect("enqueue Redis matching job");
-    let progress = COMPETING_PROGRESS.get_or_init(|| {
-        let (sender, _receiver) = tokio::sync::watch::channel(HashMap::new());
-        sender
-    });
-    let mut counts = progress.borrow().clone();
-    counts.insert(run_id.to_owned(), 0);
-    let _ = progress.send(counts);
-    let mut progress = progress.subscribe();
-    let running_queue = queue.clone();
-    let handle =
-        tokio::spawn(async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await });
-    assert!(
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if progress.borrow().get(run_id).copied().unwrap_or_default() > 0 {
-                    return;
+    with_queue_cleanup(queue, |queue| async move {
+        let result = std::panic::AssertUnwindSafe(async {
+            queue.setup().await.expect("set up Redis queue");
+            queue
+                .register(CompetingWorker)
+                .await
+                .expect("register competing worker");
+            let run_id = format!("bounded-redis-{}", Uuid::now_v7());
+            queue
+                .enqueue(
+                    CompetingWorker::class_name(),
+                    None,
+                    CompetingArgs {
+                        run_id: run_id.clone(),
+                        name: "in-window-control".to_owned(),
+                    },
+                    Some(vec![COMPETING_TAG.to_owned()]),
+                    Some(400),
+                )
+                .await
+                .expect("enqueue Redis in-window control");
+            let progress = COMPETING_PROGRESS.get_or_init(|| {
+                let (sender, _receiver) = tokio::sync::watch::channel(HashMap::new());
+                sender
+            });
+            let mut counts = progress.borrow().clone();
+            counts.insert(run_id.clone(), 0);
+            let _ = progress.send(counts);
+            let mut progress = progress.subscribe();
+            let running_queue = queue.clone();
+            let handle =
+                tokio::spawn(
+                    async move { running_queue.run(vec![COMPETING_TAG.to_owned()]).await },
+                );
+            let run_result = std::panic::AssertUnwindSafe(async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while progress.borrow().get(&run_id).copied().unwrap_or_default() < 1 {
+                        progress.changed().await.expect("Redis control progress");
+                    }
+                })
+                .await
+                .expect("Redis in-window control completed");
+                for index in 0..1000 {
+                    queue
+                        .enqueue(
+                            CompetingWorker::class_name(),
+                            None,
+                            CompetingArgs {
+                                run_id: run_id.clone(),
+                                name: format!("mismatch-{index}"),
+                            },
+                            Some(vec!["queue-test:other".to_owned()]),
+                            Some(300),
+                        )
+                        .await
+                        .expect("enqueue Redis scan filler");
                 }
-                progress.changed().await.expect("Redis worker progress");
-                tokio::task::yield_now().await;
+                queue
+                    .enqueue(
+                        CompetingWorker::class_name(),
+                        None,
+                        CompetingArgs {
+                            run_id: run_id.clone(),
+                            name: "matching-beyond-scan".to_owned(),
+                        },
+                        Some(vec![COMPETING_TAG.to_owned()]),
+                        Some(200),
+                    )
+                    .await
+                    .expect("enqueue Redis beyond-scan job");
+                assert!(
+                    tokio::time::timeout(Duration::from_secs(2), async {
+                        loop {
+                            if progress.borrow().get(&run_id).copied().unwrap_or_default() > 1 {
+                                return;
+                            }
+                            progress
+                                .changed()
+                                .await
+                                .expect("Redis beyond-scan progress");
+                        }
+                    })
+                    .await
+                    .is_err(),
+                    "matching job outside Redis bounded scan was processed"
+                );
+            })
+            .catch_unwind()
+            .await;
+            let _ = queue.shutdown();
+            let join_result = handle.await;
+            let clear_result = queue.clear().await;
+            if let Err(panic) = run_result {
+                std::panic::resume_unwind(panic);
             }
+            join_result
+                .expect("join Redis worker")
+                .expect("run Redis worker");
+            clear_result.expect("clear Redis queue");
         })
-        .await
-        .is_err(),
-        "matching job outside Redis bounded scan was processed"
-    );
-    queue.shutdown().expect("stop Redis worker");
-    handle
-        .await
-        .expect("join Redis worker")
-        .expect("run Redis worker");
-    queue.clear().await.expect("clear Redis queue");
+        .catch_unwind()
+        .await;
+        let _ = queue.shutdown();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    })
+    .await;
 }

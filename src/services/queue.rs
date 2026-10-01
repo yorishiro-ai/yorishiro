@@ -39,6 +39,14 @@ pub(crate) async fn decide_for_dispatch(
     db: &sea_orm::DatabaseConnection,
     class: WorkerClass,
 ) -> Result<Decision, sea_orm::DbErr> {
+    decide_for_dispatch_at(db, class, Utc::now().fixed_offset()).await
+}
+
+async fn decide_for_dispatch_at(
+    db: &sea_orm::DatabaseConnection,
+    class: WorkerClass,
+    now: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<Decision, sea_orm::DbErr> {
     let lower_classes: &[&str] = match class {
         WorkerClass::TenantPrivate => &["official", "shared"],
         WorkerClass::Official => &["shared"],
@@ -47,7 +55,7 @@ pub(crate) async fn decide_for_dispatch(
     if lower_classes.is_empty() {
         return Ok(decide(class));
     }
-    let cutoff = Utc::now() - chrono::Duration::seconds(STARVATION_WAIT_SECONDS);
+    let cutoff = now - chrono::Duration::seconds(STARVATION_WAIT_SECONDS);
     let waiting = crate::models::queue_job_lifecycles::Entity::find()
         .filter(crate::models::queue_job_lifecycles::Column::Status.is_in(["queued", "retrying"]))
         .filter(
@@ -85,7 +93,60 @@ pub(crate) fn decide(class: WorkerClass) -> Decision {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{Duration, TimeZone, Utc};
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{Database, EntityTrait, QueryFilter, sea_query::Expr};
+    use tempfile::tempdir;
+
     use super::*;
+
+    async fn database() -> sea_orm::DatabaseConnection {
+        let directory = tempdir().expect("queue policy tempdir");
+        let path = directory.keep().join("queue-policy.sqlite3");
+        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
+            .await
+            .expect("queue policy database");
+        Migrator::up(&db, None)
+            .await
+            .expect("queue policy migrations");
+        db
+    }
+
+    async fn lifecycle(
+        db: &sea_orm::DatabaseConnection,
+        class: &str,
+        status: &str,
+        enqueue_at: chrono::DateTime<chrono::FixedOffset>,
+    ) {
+        let id = uuid::Uuid::now_v7();
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+            db,
+            crate::models::queue_job_lifecycles::Enqueue {
+                id,
+                job_name: "queue-policy-test",
+                worker_class: class,
+                workspace_id: None,
+                plan: None,
+                concurrency_key: None,
+                concurrency_limit: None,
+            },
+        )
+        .await
+        .expect("record queue policy lifecycle");
+        crate::models::queue_job_lifecycles::Entity::update_many()
+            .col_expr(
+                crate::models::queue_job_lifecycles::Column::Status,
+                Expr::value(status),
+            )
+            .col_expr(
+                crate::models::queue_job_lifecycles::Column::EnqueueAt,
+                Expr::value(enqueue_at),
+            )
+            .filter(crate::models::queue_job_lifecycles::Column::Id.eq(id))
+            .exec(db)
+            .await
+            .expect("update queue policy lifecycle");
+    }
 
     #[test]
     fn class_order_and_equal_input_tie_breaking_are_stable() {
@@ -99,5 +160,90 @@ mod tests {
         let decision = decide(WorkerClass::Official);
         assert_eq!(decision.class, WorkerClass::Official);
         assert!(!decision.fallback);
+    }
+
+    #[tokio::test]
+    async fn starvation_policy_covers_retrying_candidates_and_exact_boundary() {
+        let db = database().await;
+        let now = Utc
+            .timestamp_opt(100_000, 0)
+            .single()
+            .unwrap()
+            .fixed_offset();
+        lifecycle(
+            &db,
+            "shared",
+            "retrying",
+            now - Duration::seconds(STARVATION_WAIT_SECONDS),
+        )
+        .await;
+
+        let decision = decide_for_dispatch_at(&db, WorkerClass::Official, now)
+            .await
+            .unwrap();
+        assert_eq!(decision.priority, STARVATION_PRIORITY);
+        assert!(decision.fallback);
+
+        let fresh = database().await;
+        lifecycle(
+            &fresh,
+            "shared",
+            "queued",
+            now - Duration::seconds(STARVATION_WAIT_SECONDS - 1),
+        )
+        .await;
+        let decision = decide_for_dispatch_at(&fresh, WorkerClass::Official, now)
+            .await
+            .unwrap();
+        assert_eq!(decision.priority, priority(WorkerClass::Official));
+        assert!(!decision.fallback);
+    }
+
+    #[tokio::test]
+    async fn starvation_policy_excludes_running_and_terminal_rows_and_matches_classes() {
+        let db = database().await;
+        let now = Utc
+            .timestamp_opt(101_000, 0)
+            .single()
+            .unwrap()
+            .fixed_offset();
+        for status in ["running", "completed", "failed", "cancelled", "unavailable"] {
+            lifecycle(
+                &db,
+                "shared",
+                status,
+                now - Duration::seconds(STARVATION_WAIT_SECONDS + 1),
+            )
+            .await;
+        }
+        assert_eq!(
+            decide_for_dispatch_at(&db, WorkerClass::Official, now)
+                .await
+                .unwrap()
+                .priority,
+            priority(WorkerClass::Official)
+        );
+
+        lifecycle(
+            &db,
+            "official",
+            "queued",
+            now - Duration::seconds(STARVATION_WAIT_SECONDS + 1),
+        )
+        .await;
+        assert_eq!(
+            decide_for_dispatch_at(&db, WorkerClass::TenantPrivate, now)
+                .await
+                .unwrap()
+                .priority,
+            STARVATION_PRIORITY
+        );
+        assert_eq!(
+            decide_for_dispatch_at(&db, WorkerClass::Shared, now)
+                .await
+                .unwrap()
+                .priority,
+            priority(WorkerClass::Shared)
+        );
     }
 }

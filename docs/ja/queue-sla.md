@@ -74,4 +74,6 @@ starvation protectionは、providerのqueued rowを後からreprioritizeする�
 
 これにより閾値到達後の連続到着から保護しますが、provider内ですでに先行しているジョブはproviderのorderingとbounded scanの挙動に従います。
 
+この抑制は候補worker setを共有する新規dispatchだけに適用され、クラス別worker processは引き続きreserved capacityを分離する強い運用モードです。
+
 scheduling decision、クラス、priority、capacity limit、active capacity、saturation、fallbackは構造化tracing fieldとして出力します。
