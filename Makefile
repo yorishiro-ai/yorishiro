@@ -6,6 +6,7 @@
 # Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
+YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
 
 .PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities
 
@@ -33,6 +34,7 @@ coverage:
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build
+	docker compose up -d --wait testdb
 	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres scripts/test-backend.sh postgres
 
 test-sqlite: build
@@ -42,6 +44,7 @@ test-sqlite: build
 # suite's deliberate skip, this target fails when the selected endpoint is
 # unavailable or the provider test is not executed.
 test-redis:
+	docker compose up -d --wait redis
 	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' scripts/test-redis.sh
 
 build:

@@ -214,6 +214,15 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
+      redis:
+        image: valkey/valkey:9.1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -311,6 +320,14 @@ jobs:
           DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
         run: scripts/test-backend.sh ${{ matrix.backend }}
+
+      - name: Run Redis queue test
+        if: matrix.backend == 'postgres'
+        env:
+          DATABASE_URL: ${{ matrix.database_url }}
+          LOCO_ENV: ${{ matrix.loco_env }}
+          YORISHIRO_REDIS_TEST_URL: redis://localhost:6379
+        run: scripts/test-redis.sh
 
       - name: Verify backend gate rejects a mismatch
         env:
