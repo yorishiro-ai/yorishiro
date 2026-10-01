@@ -10,3 +10,5 @@ esac
 export LOCO_ENV="${LOCO_ENV:-test_sqlite}"
 cargo test --locked --features test-support --test mod \
   requests::queue::redis_bounded_scan_is_observable_at_the_queue_boundary -- --exact --nocapture
+cargo test --locked --features test-support --test mod \
+  config::load::valkey_test_config_keeps_queue_external_to_postgres -- --exact --nocapture

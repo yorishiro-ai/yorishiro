@@ -214,15 +214,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
-      redis:
-        image: valkey/valkey:9.1
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "valkey-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -321,14 +312,6 @@ jobs:
           RUST_BACKTRACE: "1"
         run: scripts/test-backend.sh ${{ matrix.backend }}
 
-      - name: Run Redis queue test
-        if: matrix.backend == 'postgres'
-        env:
-          DATABASE_URL: ${{ matrix.database_url }}
-          LOCO_ENV: ${{ matrix.loco_env }}
-          YORISHIRO_REDIS_TEST_URL: redis://localhost:6379
-        run: scripts/test-redis.sh
-
       - name: Verify backend gate rejects a mismatch
         env:
           DATABASE_URL: sqlite:///tmp/yorishiro-gate-check.sqlite3?mode=rwc
@@ -359,4 +342,39 @@ jobs:
           verify "$cache_dir/model.safetensors" \
             "$EMBEDDING_MODEL_SIZE" "$EMBEDDING_MODEL_SHA256"
           verify "$cache_dir/tokenizer.json" \
-            "$EMBEDDING_TOKENIZER_SIZE" "$EMBEDDING_TOKENIZER_SHA256"
+           "$EMBEDDING_TOKENIZER_SIZE" "$EMBEDDING_TOKENIZER_SHA256"
+
+  test-valkey:
+    needs: prepare-embedding
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: valkey
+            valkey_version: 9.1
+    services:
+      valkey:
+        image: valkey/valkey:${{ matrix.valkey_version }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/rust-setup
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ github.job }}-${{ matrix.backend }}-${{ matrix.valkey_version }}
+
+      - name: Run Valkey queue and configuration tests
+        env:
+          LOCO_ENV: test_valkey
+          DATABASE_URL: postgres://test:test@localhost:5432/test
+          YORISHIRO_REDIS_TEST_URL: redis://localhost:6379
+        run: scripts/test-redis.sh
