@@ -194,7 +194,7 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
 
   test:
-    name: Test (DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})
+    name: "Test (DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
     needs: prepare-embedding
     runs-on: ubuntu-latest
     strategy:
