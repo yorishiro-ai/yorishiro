@@ -176,7 +176,7 @@ jobs:
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
           TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_TOKENIZER_REMOTE_PATH }}
-        run: bash .github/scripts/embedding-cache.sh prepare
+        run: bash scripts/embedding-cache.sh prepare
 
       - name: Save verified multilingual-e5-base cache
         if: steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -242,7 +242,7 @@ jobs:
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
           MODEL_URL: unused
           TOKENIZER_URL: unused
-        run: bash .github/scripts/embedding-cache.sh verify
+        run: bash scripts/embedding-cache.sh verify
 
       - name: Build workspace
         run: cargo build --locked --workspace
