@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run
 """Run the test suite and verify that only the selected backend gates ran."""
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in {"postgres", "sqlite"}:
         print(
-            "usage: uv run --script scripts/test_backend.py <postgres|sqlite> [cargo test arguments...]",
+            "usage: uv run scripts/test_backend.py <postgres|sqlite> [cargo test arguments...]",
             file=sys.stderr,
         )
         return 2

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run
 """Run the Redis/Valkey queue checks."""
 
 from __future__ import annotations

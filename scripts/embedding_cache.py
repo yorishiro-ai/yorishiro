@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run
 """Prepare and verify the immutable embedding model cache."""
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def validate_source(values: dict[str, str]) -> None:
 
 def main() -> int:
     if len(sys.argv) != 2 or sys.argv[1] not in {"prepare", "verify"}:
-        print("usage: uv run --script scripts/embedding_cache.py <prepare|verify>", file=sys.stderr)
+        print("usage: uv run scripts/embedding_cache.py <prepare|verify>", file=sys.stderr)
         return 2
     values = {name: env(name) for name in REQUIRED}
     validate_source(values)
