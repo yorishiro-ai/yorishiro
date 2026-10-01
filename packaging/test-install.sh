@@ -40,8 +40,9 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-deb() { ls "$PKG_DIR"/yorishiro-*.deb | head -1; }
-rpm() { ls "$PKG_DIR"/yorishiro-*.rpm | head -1; }
+deb() { ls "$PKG_DIR"/yorishiro*.deb | head -1; }
+rpm() { ls "$PKG_DIR"/yorishiro*.rpm | head -1; }
+edition() { basename "$(deb)" | grep -q '^yorishiro-ee-' && echo ee || echo ce; }
 
 # --------------------------------------------------------------------------------------------
 note "deb on ubuntu:24.04 — the supported case"
@@ -57,7 +58,9 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   [ "$(stat -c "%a %U:%G" /etc/yorishiro/yorishiro.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEOWNER"
 ' 2>&1)
-for want in RUNS USER COPYRIGHT EE_LICENCE CONFIG CONFIGPERM STATEOWNER; do
+WANTS="RUNS USER COPYRIGHT CONFIG CONFIGPERM STATEOWNER"
+if [ "$(edition)" = ee ]; then WANTS="$WANTS EE_LICENCE"; fi
+for want in $WANTS; do
   case "$out" in
     *"$want"*) ok "$want" ;;
     *) bad "$want (install output: $(echo "$out" | tr '\n' ' '))" ;;

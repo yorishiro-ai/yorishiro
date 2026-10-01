@@ -8,6 +8,7 @@ name: yorishiro-ee
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
+file_name_template: yorishiro-ee-${VERSION}-${ARCH}
 # nfpm defaults to `version_schema: semver`, which parses the version and rewrites it. A
 # prerelease tag is not a SemVer version, and the default mangles it rather than refusing:
 # `20260830-1` becomes `20260830.0.0~1`, reading the `-1` as a SemVer prerelease suffix and
@@ -82,13 +83,10 @@ overrides:
       - ca-certificates
       - libc.so.6(GLIBC_2.39)(64bit)
 
-# The retired community package installed the same unit name and state directory, so having
-# both would leave two services fighting over one database.
 conflicts:
   - yorishiro-ce
 replaces:
   - yorishiro-ce
-  - yorishiro-ee
 
 contents:
   - src: ./target/release/yorishiro

@@ -6,12 +6,14 @@ Ubuntu 24.04 と AlmaLinux 10（glibc 2.39以降）に対応しています。
 
 リリースでは `yorishiro-ce` と `yorishiro-ee` のパッケージを分けて公開します。
 CE は `enterprise` Cargo feature なしで、EE は feature 付きでビルドします。
+両パッケージは相互に conflict するため、同時にはインストールできません。
+もう一方をインストールすると現在のパッケージを置き換え、共有の設定と状態パスは維持されます。
 
 ## インストール
 
 ```console
-$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro_<VERSION>_amd64.deb
-$ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
+$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro-ce-<VERSION>-amd64.deb
+$ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 ```
 
 ## インストール内容

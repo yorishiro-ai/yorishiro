@@ -6,12 +6,14 @@ They support Ubuntu 24.04 and AlmaLinux 10 (glibc 2.39+).
 
 Releases publish separate `yorishiro-ce` and `yorishiro-ee` packages.
 CE is built without the `enterprise` Cargo feature, while EE includes it and requires an EE licence for production use.
+The packages conflict with each other, so both editions cannot be installed at once.
+Installing the other edition replaces the current package and preserves the shared configuration and state paths.
 
 ## Install
 
 ```console
-$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro_<VERSION>_amd64.deb
-$ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
+$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro-ce-<VERSION>-amd64.deb
+$ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 ```
 
 ## Installed files
