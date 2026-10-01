@@ -50,6 +50,7 @@ impl YorishiroMcpServer {
         }
     }
 
+    #[cfg(feature = "enterprise")]
     pub(crate) fn app_context(&self) -> &AppContext {
         &self.ctx
     }
@@ -298,6 +299,7 @@ impl Authorized {
             .map_err(|err| ErrorData::internal_error(err.to_string(), None))
     }
 
+    #[cfg(feature = "enterprise")]
     pub(crate) fn auth_context(&self) -> &AuthContext {
         &self.ctx
     }
@@ -472,6 +474,7 @@ fn render_inventory_section(title: &str, tools: &[Tool]) -> String {
 }
 
 #[cfg(test)]
+#[cfg(feature = "enterprise")]
 pub(crate) fn render_inventory_fragment(community: &[Tool], enterprise: &[Tool]) -> String {
     let mut community = community.to_vec();
     let mut enterprise = enterprise.to_vec();

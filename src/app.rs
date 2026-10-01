@@ -14,6 +14,7 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
+#[cfg(feature = "enterprise")]
 use sea_orm::EntityTrait;
 use std::path::Path;
 use std::sync::Arc;
@@ -32,34 +33,44 @@ async fn queue_concurrency_policy(
     workspace_id: uuid::Uuid,
     class: &str,
 ) -> Result<(String, i32), String> {
-    let workspace =
-        crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
-            .one(&ctx.db)
-            .await
-            .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
-    let Some(workspace) = workspace else {
-        return Err("queue policy unavailable: workspace does not exist".into());
-    };
-    let plan = crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
-        .one(&ctx.db)
-        .await
-        .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?
-        .ok_or_else(|| "queue policy unavailable: billing row is missing".to_owned())?
-        .plan
-        .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())
-        .and_then(|value| {
-            crate::ee::services::plan::Plan::from_db_str(&value).map_err(|error| error.to_string())
-        })?;
-    let limit = match class {
-        "official" => plan.compute_policy().base_official_concurrency as i32,
-        "tenant_private" | "shared" => 1,
-        _ => {
-            return Err(format!(
-                "queue policy unavailable: unknown worker class {class}"
-            ));
-        }
-    };
-    Ok((plan.as_str().to_owned(), limit))
+    #[cfg(not(feature = "enterprise"))]
+    {
+        let _ = (ctx, workspace_id, class);
+        Ok(("community".to_owned(), 1))
+    }
+    #[cfg(feature = "enterprise")]
+    {
+        let workspace =
+            crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
+                .one(&ctx.db)
+                .await
+                .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
+        let Some(workspace) = workspace else {
+            return Err("queue policy unavailable: workspace does not exist".into());
+        };
+        let plan =
+            crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
+                .one(&ctx.db)
+                .await
+                .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?
+                .ok_or_else(|| "queue policy unavailable: billing row is missing".to_owned())?
+                .plan
+                .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())
+                .and_then(|value| {
+                    crate::ee::services::plan::Plan::from_db_str(&value)
+                        .map_err(|error| error.to_string())
+                })?;
+        let limit = match class {
+            "official" => plan.compute_policy().base_official_concurrency as i32,
+            "tenant_private" | "shared" => 1,
+            _ => {
+                return Err(format!(
+                    "queue policy unavailable: unknown worker class {class}"
+                ));
+            }
+        };
+        Ok((plan.as_str().to_owned(), limit))
+    }
 }
 
 #[async_trait]
@@ -368,6 +379,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
 }
 
 #[async_trait]
+#[cfg(feature = "enterprise")]
 impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
     async fn dispatch(
         &self,
@@ -458,6 +470,7 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
 /// Running before the handler is also what keeps an unlicensed deployment un-probeable: every gated
 /// route answers the same 404 to everyone, rather than authenticating first and thereby confirming
 /// to a valid key that the endpoint exists and is merely locked.
+#[cfg(feature = "enterprise")]
 async fn licence_gate(
     axum::extract::State(ctx): axum::extract::State<AppContext>,
     request: axum::extract::Request,
@@ -539,8 +552,10 @@ impl Hooks for App {
             .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);
         ctx.shared_store
             .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
+        #[cfg(feature = "enterprise")]
         ctx.shared_store.insert(Arc::new(LocoJobDispatcher)
             as Arc<dyn crate::ee::workers::infer_fill::InferFillDispatcher>);
+        #[cfg(feature = "enterprise")]
         crate::ee::services::boot::compose_context(&ctx);
         Ok(ctx)
     }
@@ -563,6 +578,7 @@ impl Hooks for App {
     /// only store the credential. A layer applies to a whole `Routes`, so one group would gate all
     /// four.
     fn routes(ctx: &AppContext) -> AppRoutes {
+        #[cfg(feature = "enterprise")]
         let gate = axum::middleware::from_fn_with_state(ctx.clone(), licence_gate);
         let mut inventory = RouteInventory::default();
         inventory.add_allowlisted_exclusions();
@@ -621,80 +637,84 @@ impl Hooks for App {
         inventory.add_docs(controllers::whoami::openapi_docs());
         mount!(controllers::workspaces::routes(), Edition::Community, false);
         inventory.add_docs(controllers::workspaces::openapi_docs());
-        // The enterprise edition's routes are mounted unconditionally; the inventory records the
-        // edition boundary and the licence gate separately from runtime reachability.
-        mount!(
-            crate::ee::controllers::dashboard::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::dashboard::openapi_docs());
-        mount!(
-            crate::ee::controllers::embedding::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::embedding::openapi_docs());
-        mount!(
-            crate::ee::controllers::entity_columns::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::entity_columns::openapi_docs());
-        mount!(
-            crate::ee::controllers::inference::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::inference::openapi_docs());
-        mount!(
-            crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
-            Edition::Enterprise,
-            true
-        );
-        inventory.add_docs(crate::ee::controllers::inference::gated_openapi_docs());
-        mount!(
-            crate::ee::controllers::inference::inference_job_status_routes().layer(gate.clone()),
-            Edition::Enterprise,
-            true
-        );
-        inventory.add_docs(crate::ee::controllers::inference::job_status_openapi_docs());
-        mount!(
-            crate::ee::controllers::marketplace::routes().layer(gate.clone()),
-            Edition::Enterprise,
-            true
-        );
-        inventory.add_docs(crate::ee::controllers::marketplace::openapi_docs());
-        mount!(
-            crate::ee::controllers::oauth::routes().layer(gate.clone()),
-            Edition::Enterprise,
-            true
-        );
-        inventory.add_docs(crate::ee::controllers::oauth::openapi_docs());
-        mount!(
-            crate::ee::controllers::origin::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::origin::openapi_docs());
-        mount!(
-            crate::ee::controllers::schema_forks::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::schema_forks::openapi_docs());
-        mount!(
-            crate::ee::controllers::stripe::routes().layer(gate),
-            Edition::Enterprise,
-            true
-        );
-        inventory.add_docs(crate::ee::controllers::stripe::openapi_docs());
-        mount!(
-            crate::ee::controllers::worker_class::routes(),
-            Edition::Enterprise,
-            false
-        );
-        inventory.add_docs(crate::ee::controllers::worker_class::openapi_docs());
+        #[cfg(feature = "enterprise")]
+        {
+            // The enterprise edition's routes are mounted unconditionally; the inventory records the
+            // edition boundary and the licence gate separately from runtime reachability.
+            mount!(
+                crate::ee::controllers::dashboard::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::dashboard::openapi_docs());
+            mount!(
+                crate::ee::controllers::embedding::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::embedding::openapi_docs());
+            mount!(
+                crate::ee::controllers::entity_columns::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::entity_columns::openapi_docs());
+            mount!(
+                crate::ee::controllers::inference::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::inference::openapi_docs());
+            mount!(
+                crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
+                Edition::Enterprise,
+                true
+            );
+            inventory.add_docs(crate::ee::controllers::inference::gated_openapi_docs());
+            mount!(
+                crate::ee::controllers::inference::inference_job_status_routes()
+                    .layer(gate.clone()),
+                Edition::Enterprise,
+                true
+            );
+            inventory.add_docs(crate::ee::controllers::inference::job_status_openapi_docs());
+            mount!(
+                crate::ee::controllers::marketplace::routes().layer(gate.clone()),
+                Edition::Enterprise,
+                true
+            );
+            inventory.add_docs(crate::ee::controllers::marketplace::openapi_docs());
+            mount!(
+                crate::ee::controllers::oauth::routes().layer(gate.clone()),
+                Edition::Enterprise,
+                true
+            );
+            inventory.add_docs(crate::ee::controllers::oauth::openapi_docs());
+            mount!(
+                crate::ee::controllers::origin::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::origin::openapi_docs());
+            mount!(
+                crate::ee::controllers::schema_forks::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::schema_forks::openapi_docs());
+            mount!(
+                crate::ee::controllers::stripe::routes().layer(gate),
+                Edition::Enterprise,
+                true
+            );
+            inventory.add_docs(crate::ee::controllers::stripe::openapi_docs());
+            mount!(
+                crate::ee::controllers::worker_class::routes(),
+                Edition::Enterprise,
+                false
+            );
+            inventory.add_docs(crate::ee::controllers::worker_class::openapi_docs());
+        }
 
         ctx.shared_store.insert(inventory);
         ctx.shared_store
@@ -723,13 +743,21 @@ impl Hooks for App {
             .ok_or_else(|| loco_rs::Error::Message("route inventory missing".into()))?;
         let router = controllers::swagger::mount(router, &inventory);
         let router = controllers::mcp::mount(router, ctx, |ctx| {
+            #[cfg(feature = "enterprise")]
             let enterprise_tool_router = crate::ee::services::mcp::tool_router();
+            #[cfg(feature = "enterprise")]
             let enterprise_tool_names = enterprise_tool_router
                 .map
                 .keys()
                 .map(ToString::to_string)
                 .collect::<std::collections::HashSet<_>>();
+            #[cfg(feature = "enterprise")]
             let mut tool_routers = vec![crate::services::mcp::community_tool_router()];
+            #[cfg(not(feature = "enterprise"))]
+            let tool_routers = vec![crate::services::mcp::community_tool_router()];
+            #[cfg(not(feature = "enterprise"))]
+            let enterprise_tool_names = std::collections::HashSet::new();
+            #[cfg(feature = "enterprise")]
             if crate::services::edition::is_active(&ctx) {
                 tool_routers.push(enterprise_tool_router);
             }
@@ -777,12 +805,14 @@ impl Hooks for App {
 
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
         workers::connect_workers(ctx, queue).await?;
+        #[cfg(feature = "enterprise")]
         crate::ee::services::boot::connect_workers(ctx, queue).await?;
         Ok(())
     }
 
     fn register_tasks(tasks: &mut Tasks) {
         workers::register_tasks(tasks);
+        #[cfg(feature = "enterprise")]
         crate::ee::services::boot::register_tasks(tasks);
     }
     async fn truncate(_ctx: &AppContext) -> Result<()> {
@@ -795,6 +825,7 @@ impl Hooks for App {
     /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
     /// so seeding it cannot consume a single-tenant deployment's one slot.
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
+        #[cfg(feature = "enterprise")]
         crate::ee::services::boot::seed(ctx).await?;
         // Seed from YAML fixtures (Loco db::seed).
         // Locates fixture files under the `src/fixtures/` directory and feeds

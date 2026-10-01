@@ -13,13 +13,21 @@ use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
 use sqlite_vec::sqlite3_vec_init;
+#[cfg(feature = "enterprise")]
 use sqlx::ConnectOptions;
+#[cfg(not(feature = "enterprise"))]
+use sqlx::Connection;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+#[cfg(feature = "enterprise")]
 use sqlx::sqlite::SqliteConnectOptions;
+#[cfg(feature = "enterprise")]
 use sqlx::{Connection, PgConnection};
+#[cfg(feature = "enterprise")]
 use std::fs::{File, OpenOptions};
+#[cfg(feature = "enterprise")]
 use std::path::{Path, PathBuf};
+#[cfg(feature = "enterprise")]
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -261,6 +269,7 @@ pub async fn lock_for_update(conn: &impl ConnectionTrait, key: &str) -> Result<(
 }
 
 /// Ownership held for the complete scheduler task, including queue dispatch.
+#[cfg(feature = "enterprise")]
 pub(crate) enum SchedulerOwnership {
     Postgres {
         conn: Option<PgConnection>,
@@ -272,6 +281,7 @@ pub(crate) enum SchedulerOwnership {
     },
 }
 
+#[cfg(feature = "enterprise")]
 impl SchedulerOwnership {
     pub(crate) fn sqlite_path(&self) -> Option<&Path> {
         match self {
@@ -311,6 +321,7 @@ impl SchedulerOwnership {
     }
 }
 
+#[cfg(feature = "enterprise")]
 impl Drop for SchedulerOwnership {
     fn drop(&mut self) {
         if let Self::Postgres { conn, .. } = self
@@ -329,6 +340,7 @@ impl Drop for SchedulerOwnership {
 ///
 /// PostgreSQL uses a detached session-scoped advisory lock so it remains held through dispatch.
 /// SQLite uses a non-blocking lock file beside the configured database file.
+#[cfg(feature = "enterprise")]
 pub(crate) async fn acquire_scheduler_ownership(
     ctx: &loco_rs::app::AppContext,
     key: &str,
@@ -346,6 +358,7 @@ pub(crate) async fn acquire_scheduler_ownership(
     Err("scheduler ownership is unsupported for this database backend".into())
 }
 
+#[cfg(feature = "enterprise")]
 async fn acquire_postgres_scheduler_lock(
     pool: PgPool,
     key: &str,
@@ -378,6 +391,7 @@ async fn acquire_postgres_scheduler_lock(
     }))
 }
 
+#[cfg(feature = "enterprise")]
 fn acquire_sqlite_scheduler_lock(
     uri: &str,
     _key: &str,
@@ -392,6 +406,7 @@ fn acquire_sqlite_scheduler_lock(
     }))
 }
 
+#[cfg(feature = "enterprise")]
 fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
     let options = SqliteConnectOptions::from_str(uri)
         .map_err(|err| format!("invalid SQLite database URI for scheduler lock: {err}"))?;
@@ -439,6 +454,7 @@ fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
     )))
 }
 
+#[cfg(feature = "enterprise")]
 fn sqlite_options_are_in_memory(options: &SqliteConnectOptions) -> bool {
     let filename = options.get_filename();
     if filename.as_os_str().is_empty() {
@@ -456,6 +472,7 @@ fn sqlite_options_are_in_memory(options: &SqliteConnectOptions) -> bool {
         .any(|(key, value)| key == "mode" && value == "memory")
 }
 
+#[cfg(feature = "enterprise")]
 fn try_lock_sqlite_scheduler_file(path: &Path) -> Result<Option<File>, String> {
     let file = OpenOptions::new()
         .create(true)
@@ -475,6 +492,7 @@ fn try_lock_sqlite_scheduler_file(path: &Path) -> Result<Option<File>, String> {
 }
 
 #[cfg(unix)]
+#[cfg(feature = "enterprise")]
 fn lock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     unsafe extern "C" {
@@ -491,6 +509,7 @@ fn lock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
+#[cfg(feature = "enterprise")]
 fn unlock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
     unsafe extern "C" {
@@ -506,6 +525,7 @@ fn unlock_sqlite_scheduler_file(file: &File) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[cfg(feature = "enterprise")]
 fn lock_sqlite_scheduler_file(_file: &File) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -514,6 +534,7 @@ fn lock_sqlite_scheduler_file(_file: &File) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[cfg(feature = "enterprise")]
 fn unlock_sqlite_scheduler_file(_file: &File) -> std::io::Result<()> {
     Ok(())
 }
@@ -636,7 +657,7 @@ pub async fn reindex_workspace_with_lock(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "enterprise"))]
 mod tests {
     use sqlx::Connection;
     use sqlx::sqlite::SqliteConnectOptions;
