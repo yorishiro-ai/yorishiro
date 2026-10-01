@@ -137,6 +137,8 @@ queue:
   reaper:
     age_minutes: 30
     interval_seconds: 60
+workers:
+  mode: BackgroundQueue
 database:
   uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro
   enable_logging: false

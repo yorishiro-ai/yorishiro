@@ -17,7 +17,7 @@ Root crate + `migration/` crate + `ee/` module. `src/models/` owns queries and r
 
 ### Not a model
 
-- `migration/src/`, `templates/*.json`, and `src/db.rs` are database concerns, not model concerns. They stay outside `models/`.
+- `migration/src/`, `src/templates/json/`, and `src/db.rs` are database or asset concerns, not model concerns. They stay outside `models/`.
 - `src/db.rs` handles connection pooling, two-pool architecture (identity pool for control plane, tenant pool for RLS-scoped requests), and session primitives (`SET ROLE`, `RESET`, `set_config`).
 
 ### Raw SQL

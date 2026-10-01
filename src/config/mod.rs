@@ -59,6 +59,9 @@ queue:
     age_minutes: 30
     interval_seconds: 60
 
+workers:
+  mode: BackgroundQueue
+
 # Add scheduled tasks here when this process runs `yorishiro scheduler`.
 # SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
 # PostgreSQL permits multiple replicas through a detached session advisory lock.

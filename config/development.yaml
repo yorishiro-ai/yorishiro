@@ -98,6 +98,7 @@ queue:
 <% else %>
   uri: <%= get_env(name="QUEUE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc") %>
 <% endif %>
+
   dangerously_flush: false
   num_workers: 2
   reaper:
@@ -135,6 +136,9 @@ queue:
     age_minutes: 10
     interval_seconds: 60
 <% endif %>
+
+workers:
+  mode: BackgroundQueue
 
 
 # Mailer Configuration.

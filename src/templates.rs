@@ -11,19 +11,19 @@ struct BuiltinTemplate {
 const TEMPLATES: &[BuiltinTemplate] = &[
     BuiltinTemplate {
         id: "general-notes",
-        source: include_str!("../templates/general-notes.json"),
+        source: include_str!("templates/json/general-notes.json"),
     },
     BuiltinTemplate {
         id: "task-management",
-        source: include_str!("../templates/task-management.json"),
+        source: include_str!("templates/json/task-management.json"),
     },
     BuiltinTemplate {
         id: "worldbuilding",
-        source: include_str!("../templates/worldbuilding.json"),
+        source: include_str!("templates/json/worldbuilding.json"),
     },
     BuiltinTemplate {
         id: "software-adr",
-        source: include_str!("../templates/software-adr.json"),
+        source: include_str!("templates/json/software-adr.json"),
     },
 ];
 
@@ -60,4 +60,17 @@ pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
         .find(|template| template.id == id)
         .map(parse)
         .ok_or_else(|| YorishiroError::not_found(format!("no template named '{id}'")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TEMPLATES, parse};
+
+    #[test]
+    fn every_builtin_asset_is_a_schema_definition() {
+        for template in TEMPLATES {
+            let definition = parse(template);
+            assert!(!definition.entity_types.is_empty(), "{}", template.id);
+        }
+    }
 }

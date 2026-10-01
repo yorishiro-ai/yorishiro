@@ -12,8 +12,10 @@
 | `migration/src/` | Schema migrations |
 | `src/tasks/` | Admin and one-off commands |
 | `ee/` | Enterprise edition (mirrors `models/`, `controllers/`, `services/`) |
+| `src/templates/json/` | Built-in JSON template assets |
 
 - `src/models/_entities/` is auto-generated. Never edit by hand.
+- Root files under `src/models/` are Loco generator compatibility markers. Keep them when moving model implementations into feature directories.
 - Business logic goes in `src/models/<table>.rs` next to the generated entity.
 - Raw SQL is only where SeaORM cannot express it (JSONB containment, pgvector, advisory locks).
 - `src/db.rs` handles connections, not tables.
@@ -61,6 +63,9 @@ Request tests must call `close_app_pools` before returning. See `tests/requests/
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 
 ## Before you push
+
+Linux builds use the repository `.cargo/config.toml`, which requires `mold` and `sccache`.
+Install both tools before running Cargo locally.
 
 ```console
 $ cargo check --locked --workspace

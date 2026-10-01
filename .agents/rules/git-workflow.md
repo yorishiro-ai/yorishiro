@@ -50,8 +50,8 @@ Every PR that changes source code must update docs (English + Japanese). The `do
 - `version = "0.60.0"` in the root `[package]` is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
 - Tag format: `YYYYMMDD-N` (e.g. `20260830-1`), always a prerelease.
-- The `Release` workflow takes only a `dry_run` boolean (manual dispatch from Actions tab, or `gh workflow run release.yml -f dry_run=false`).
-- It tags `YYYYMMDD-N` from UTC date and run counter, builds packages and images, and publishes a GitHub Release marked `prerelease: true`.
-- Nothing in this workflow edits `Cargo.toml` or commits to `develop`: a prerelease tag is not a SemVer version, and cargo rejects `20260830-1` outright.
-- `develop` stays at its SemVer position in the manifest; `yorishiro version` answers with both: `0.60.0 (20260830-1)`.
+- The `Release (prerelease)` workflow takes only a `dry_run` boolean and publishes date-based `YYYYMMDD-N` tags as prereleases.
+- The separate `Release` workflow creates SemVer `vX.Y.Z` releases and uses the version bump prepared by its release branch.
+- Nothing in the prerelease workflow edits `Cargo.toml` or commits to `develop`: a date tag is not a SemVer version, and cargo rejects `20260830-1` outright.
+- `develop` stays at its SemVer position in the manifest for prereleases; `yorishiro version` answers with both versions.
 - Do not hand-edit the version or create the tag locally.

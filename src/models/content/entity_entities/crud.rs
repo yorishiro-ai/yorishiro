@@ -1,16 +1,19 @@
+#[cfg(feature = "enterprise")]
 use chrono::Utc;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
+#[cfg(feature = "enterprise")]
 use serde_json::Value;
 use uuid::Uuid;
 
 use super::validation::{resolve_entity_type, validate_data};
 use super::{
-    ActiveModel, Column, CreateEntityInput, Entity, EntityRecord, ListEntitiesQuery,
-    UpdateEntityInput,
+    ActiveModel, CreateEntityInput, Entity, EntityRecord, ListEntitiesQuery, UpdateEntityInput,
 };
 use crate::error::{ResultExt, YorishiroError};
+#[cfg(feature = "enterprise")]
+use crate::models::_entities::entity_entities::Column;
 
 /// Checks the workspace's `max_entities` cap before an insert.
 /// `NULL` means unlimited, the default for the enterprise edition.
@@ -176,6 +179,7 @@ pub async fn update(
 /// Updates an entity only when it still has the timestamp read by the caller.
 /// PostgreSQL callers also lock the row before reading it, while SQLite's transaction-level
 /// single-writer rule protects this transaction-scoped confirmation path.
+#[cfg(feature = "enterprise")]
 pub(crate) async fn update_if_unchanged(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

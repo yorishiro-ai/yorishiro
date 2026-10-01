@@ -12,7 +12,7 @@
 # Needs docker. Runs the same matrix locally as in CI, so a failure can be reproduced without
 # pushing.
 #
-# There is one package: both editions ship in a single artifact.
+# CE and EE packages are built separately; this script checks the CE package path.
 
 set -uo pipefail
 
@@ -23,10 +23,10 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The floor the package declares. Read rather than hardcoded: this file must not be the place
 # the two disagree.
 # Scoped to the rpm depends line specifically (`libc.so.6(GLIBC_X.Y)(64bit)`), not the whole
-# file: nfpm-yorishiro.yaml's own comments discuss other glibc versions by number (a locally
+# file: the nfpm package config's own comments discuss other glibc versions by number (a locally
 # measured floor that was rejected, historical figures), and a bare whole-file grep picks up
 # whichever of those sorts highest, which is not necessarily the one actually declared below.
-GLIBC_FLOOR="$(grep -oE 'libc\.so\.6\(GLIBC_[0-9]+\.[0-9]+\)' "$REPO/packaging/nfpm-yorishiro.yaml" \
+GLIBC_FLOOR="$(grep -oE 'libc\.so\.6\(GLIBC_[0-9]+\.[0-9]+\)' "$REPO/packaging/nfpm-yorishiro-ce.yaml" \
   | grep -oE 'GLIBC_[0-9]+\.[0-9]+')"
 
 # Checked up front rather than at the call site: a missing tool otherwise surfaces as the
@@ -256,6 +256,8 @@ queue:
   reaper:
     age_minutes: 30
     interval_seconds: 60
+workers:
+  mode: BackgroundQueue
 database:
   uri: postgres://yorishiro:secret@pg-$$:5432/yorishiro
   enable_logging: false

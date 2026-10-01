@@ -129,6 +129,9 @@ queue:
     interval_seconds: 60
 <% endif %>
 
+workers:
+  mode: BackgroundQueue
+
 
 # Mailer Configuration.
 #

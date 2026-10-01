@@ -47,6 +47,9 @@ queue:
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper: null
 
+workers:
+  mode: BackgroundQueue
+
 # Initializers Configuration
 # initializers:
 #  oauth2:

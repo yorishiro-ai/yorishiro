@@ -15,6 +15,9 @@ CI は PostgreSQL の `DB_MAX_CONNECTIONS` を `100` に上書きし、SQLite �
 
 ## テスト
 
+Linux のビルドはリポジトリの `.cargo/config.toml` を使うため、`mold` と `sccache` が必要です。
+ローカルで Cargo を実行する前に両方をインストールしてください。
+
 テストスイートは Rust の既定の並列実行で起動してください。
 `make test-postgres` または `make test-sqlite` を使うと、共通テストを含むスイートを実行し、選択したバックエンド専用テストが 1 件以上実行されたことも検証できます。
 最後に、バックエンド専用ゲートの選択数、実行数、スキップ数とスキップ理由が表示されます。
