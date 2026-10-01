@@ -40,8 +40,8 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-deb() { ls "$PKG_DIR"/yorishiro_*.deb | head -1; }
-rpm() { ls "$PKG_DIR"/yorishiro-[0-9]*.rpm | head -1; }
+deb() { ls "$PKG_DIR"/yorishiro-*.deb | head -1; }
+rpm() { ls "$PKG_DIR"/yorishiro-*.rpm | head -1; }
 
 # --------------------------------------------------------------------------------------------
 note "deb on ubuntu:24.04 — the supported case"
