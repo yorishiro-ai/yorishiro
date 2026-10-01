@@ -171,7 +171,7 @@ jobs:
         run: uv sync --locked
 
       - name: Restore multilingual-e5-base cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         id: embedding-cache
         with:
           path: |
@@ -195,7 +195,7 @@ jobs:
 
       - name: Save verified multilingual-e5-base cache
         if: steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/.cache/yorishiro/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
@@ -276,7 +276,7 @@ jobs:
           key: ${{ github.job }}-${{ matrix.backend }}-${{ matrix.queue }}
 
       - name: Restore multilingual-e5-base cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         id: embedding-cache
         with:
           path: |
