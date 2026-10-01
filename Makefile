@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
 
-.PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities check-all
+.PHONY: check clippy fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities check-all
 
 check:
 	cargo check --locked --workspace
@@ -21,6 +21,9 @@ fmt:
 
 fmt-check:
 	cargo fmt --all -- --check
+
+python-lint:
+	uv run ruff check scripts
 
 public-api-check:
 	PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_public_api.py
@@ -77,4 +80,4 @@ entities: build
 	docker compose down -v testdb
 
 # Convenience alias: check + fmt + clippy (CI check job).
-check-all: fmt-check public-api-check check clippy
+check-all: fmt-check python-lint public-api-check check clippy

@@ -78,6 +78,9 @@ jobs:
       - name: Check generated entity hardener
         run: PYTHONDONTWRITEBYTECODE=1 uv run scripts/test_harden_generated_entities.py
 
+      - name: Python lint
+        run: uv run ruff check scripts
+
       - name: Check test harness usage
         run: |
           # Only tests/requests/mod.rs may call the raw loco helpers directly.

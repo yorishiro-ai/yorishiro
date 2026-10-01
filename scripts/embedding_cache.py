@@ -119,9 +119,14 @@ def main() -> int:
     cache_dir = Path(values["CACHE_DIR"]).expanduser()
     model_path = cache_dir / values["EMBEDDING_MODEL_LOCAL_NAME"]
     tokenizer_path = cache_dir / values["EMBEDDING_TOKENIZER_LOCAL_NAME"]
-    valid = lambda: verify(model_path, values["EMBEDDING_MODEL_SIZE"], values["EMBEDDING_MODEL_SHA256"]) and verify(
-        tokenizer_path, values["EMBEDDING_TOKENIZER_SIZE"], values["EMBEDDING_TOKENIZER_SHA256"]
-    )
+    def valid() -> bool:
+        return verify(
+            model_path, values["EMBEDDING_MODEL_SIZE"], values["EMBEDDING_MODEL_SHA256"]
+        ) and verify(
+            tokenizer_path,
+            values["EMBEDDING_TOKENIZER_SIZE"],
+            values["EMBEDDING_TOKENIZER_SHA256"],
+        )
 
     if sys.argv[1] == "verify":
         if values.get("CACHE_HIT", os.environ.get("CACHE_HIT", "")) != "true" or not valid():
