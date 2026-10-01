@@ -7822,7 +7822,6 @@ dependencies = [
  "libsqlite3-sys",
  "loco-rs",
  "migration",
- "pgvector",
  "proptest",
  "rand 0.10.3",
  "regex",

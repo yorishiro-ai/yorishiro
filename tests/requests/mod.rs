@@ -51,7 +51,7 @@ use std::net::SocketAddr;
 /// the identity pool (eager) and the tenant pool (lazy).
 /// Leaving either open means a session survives on the throwaway test database,
 /// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
-/// `ctx.db` also needs closing: `config/test.yaml`'s `min_connections: 1` keeps one connection open from boot.
+/// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
 ///
 /// `spawn_startup_reindex` spawns a background task that holds a connection from `ctx.db` for its entire lifetime.
 /// Without shutdown-and-await, that task would still hold a session when pools are closed,

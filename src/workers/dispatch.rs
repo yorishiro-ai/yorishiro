@@ -13,35 +13,14 @@ pub(crate) trait EmbeddingSyncDispatcher: Send + Sync {
 }
 
 #[async_trait]
-pub(crate) trait ReindexDispatcher: Send + Sync {
+pub trait ReindexDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String>;
-}
-
-#[cfg(feature = "test-support")]
-#[async_trait]
-pub trait TestReindexDispatcher: Send + Sync {
-    async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String>;
-}
-
-#[cfg(feature = "test-support")]
-struct TestReindexDispatcherAdapter(Arc<dyn TestReindexDispatcher>);
-
-#[cfg(feature = "test-support")]
-#[async_trait]
-impl ReindexDispatcher for TestReindexDispatcherAdapter {
-    async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
-        self.0.dispatch(ctx, args).await
-    }
 }
 
 #[cfg(feature = "test-support")]
 /// Installs a fake reindex dispatcher for request-level tests.
-pub fn install_test_reindex_dispatcher(
-    ctx: &AppContext,
-    dispatcher: Arc<dyn TestReindexDispatcher>,
-) {
-    ctx.shared_store
-        .insert(Arc::new(TestReindexDispatcherAdapter(dispatcher)) as Arc<dyn ReindexDispatcher>);
+pub fn install_test_reindex_dispatcher(ctx: &AppContext, dispatcher: Arc<dyn ReindexDispatcher>) {
+    ctx.shared_store.insert(dispatcher);
 }
 
 #[cfg(test)]

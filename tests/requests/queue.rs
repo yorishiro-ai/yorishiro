@@ -1,14 +1,13 @@
-//! Covers the enqueue side of the background queue: that `enqueue_for_class` puts a row in the queue at all, and that each `WorkerClass` carries its own tag.
+//! Covers queue enqueue, priority ordering, worker tags, and provider boundaries.
 //!
-//! Nothing else in this suite exercises a queue backend.
-//! `config/test.yaml` sets `workers.mode: ForegroundBlocking`, under which `perform_later` calls `perform` inline and never touches a queue, so every job body is covered on every run and the enqueue path would otherwise be covered by nothing: a change breaking it ships through a green suite.
+//! The isolated SQL-provider cases deliberately use a temporary SQLite queue while
+//! the application database remains PostgreSQL.  Loco constructs the queue
+//! provider from its own URI and does not couple that pool to `ctx.db`, so this
+//! setup tests the provider boundary without changing the request harness.
 //!
-//! `tests/workers/queue_routing.rs` covers the dequeue-side tag filter through `Queue::run(tags)`.
-//! It uses a probe worker and both SQL providers rather than copying Loco's filter SQL into this crate.
-//!
-//! The application database is PostgreSQL (`request_with_create_db`) while the queue is a SQLite file in a `TempDir`, which is a pairing no deployment runs.
-//! It is inert with respect to what is asserted rather than merely tolerated: the queue provider opens its own `sqlx::SqlitePool` against its own URI (`bgworker/mod.rs`) and has no view of `ctx.db` at all, which is the same independence that lets the database and queue share one file in `config/development.yaml`.
-//! Booting the whole application on SQLite instead would be more faithful and would bring the entire `tests/`-is-PostgreSQL-only question with it, which is a much larger surface than two assertions justify.
+//! `tests/workers/queue_routing.rs` covers tag filtering through the public
+//! `Queue::run(tags)` API for both SQL providers.  The Valkey provider is covered
+//! by `scripts/test-redis.sh` against a real Valkey service.
 
 use futures::FutureExt;
 use std::collections::HashMap;
@@ -73,6 +72,7 @@ impl BackgroundWorker<CompetingArgs> for CompetingWorker {
 }
 
 async fn assert_competing_priority_order(queue: Arc<Queue>) {
+    let run_id = Uuid::now_v7().to_string();
     queue
         .register(CompetingWorker)
         .await
@@ -82,7 +82,7 @@ async fn assert_competing_priority_order(queue: Arc<Queue>) {
             CompetingWorker::class_name(),
             None,
             CompetingArgs {
-                run_id: "priority".to_owned(),
+                run_id: run_id.clone(),
                 name: "low".to_owned(),
             },
             Some(vec![COMPETING_TAG.to_owned()]),
@@ -95,7 +95,7 @@ async fn assert_competing_priority_order(queue: Arc<Queue>) {
             CompetingWorker::class_name(),
             None,
             CompetingArgs {
-                run_id: "priority".to_owned(),
+                run_id: run_id.clone(),
                 name: "high".to_owned(),
             },
             Some(vec![COMPETING_TAG.to_owned()]),
@@ -104,7 +104,7 @@ async fn assert_competing_priority_order(queue: Arc<Queue>) {
         .await
         .expect("enqueue high priority job");
 
-    finish_competing_order(queue, "priority", vec!["high", "low"]).await;
+    finish_competing_order(queue, &run_id, vec!["high", "low"]).await;
 }
 
 async fn finish_competing_order(queue: Arc<Queue>, run_id: &str, expected: Vec<&str>) {
@@ -168,8 +168,10 @@ where
 
 /// Boots the app against a throwaway PostgreSQL database with `BackgroundQueue` and a SQLite queue file, and hands the test both the context and a pool onto that same queue file.
 ///
-/// `config/test.yaml` carries no `queue:` block, so `BackgroundQueue` there fails outright with `QueueProviderMissing`.
-/// The config is therefore supplied here rather than by flipping a mode: `H::load_config` returns an owned `Config`, and `boot_test_with_create_db` already mutates `database.uri` on it before calling `H::boot`, so setting `workers` and `queue` the same way touches nothing process-wide and leaves every `ForegroundBlocking` test in this binary unaffected.
+/// The request harness loads the PostgreSQL test configuration, then this helper
+/// replaces only the queue configuration on the owned `Config` value.  This
+/// keeps the provider test isolated without changing process-wide configuration
+/// for the other request tests.
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
     F: FnOnce(AppContext, sqlx::SqlitePool, Uuid) -> Fut,
@@ -249,23 +251,13 @@ where
         .await
         .expect("insert queue test billing");
 
-        // Run the test with a real workspace and billing policy.
         test(boot_res.app_context.clone(), pool.clone(), workspace.id).await;
-
-        // Shut down the queue provider first so its worker threads release their
-        // PostgreSQL connections, then close pools — all inside the catch_unwind
-        // block so this runs even when the test panics.
-        if let Some(ref qp) = boot_res.app_context.queue_provider {
-            let _ = qp.shutdown();
-        }
-        // Use close_app_pools which closes identity, tenant, and ctx.db pools
-        // so DROP DATABASE does not fail on teardown.
-        close_app_pools(&boot_res.app_context).await;
     })
     .catch_unwind()
     .await;
 
-    // Post-panic cleanup: close app pools and drop the test DB.
+    // Close the queue before the application pools so its worker connections
+    // are gone before the throwaway database is dropped.
     if let Some(b) = &boot {
         if let Some(ref queue) = b.app_context.queue_provider {
             let _ = queue.shutdown();
@@ -294,9 +286,7 @@ fn args_for(class: WorkerClass, workspace_id: Uuid) -> EmbeddingSyncArgs {
     }
 }
 
-/// A job enqueued through `enqueue_for_class` reaches the queue at all.
-///
-/// In `ForegroundBlocking` this assertion is vacuous, since `perform_later` runs the body inline and writes no row, which is why nothing else here catches an enqueue-side break.
+/// A job enqueued through `enqueue_for_class` reaches the configured queue.
 #[tokio::test]
 #[serial_test::serial(process_environment)]
 async fn enqueue_for_class_puts_a_row_in_the_queue() {

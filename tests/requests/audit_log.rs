@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::services::auth::ApiKeyScope;
-use yorishiro::workers::dispatch::TestReindexDispatcher;
+use yorishiro::workers::dispatch::ReindexDispatcher;
 use yorishiro::workers::reindex::ReindexArgs;
 
 use super::fixtures::{self, TenantArgs, issue_api_key};
@@ -180,7 +180,7 @@ struct AuditBeforeDispatch {
 }
 
 #[async_trait]
-impl TestReindexDispatcher for AuditBeforeDispatch {
+impl ReindexDispatcher for AuditBeforeDispatch {
     async fn dispatch(
         &self,
         ctx: &loco_rs::app::AppContext,
