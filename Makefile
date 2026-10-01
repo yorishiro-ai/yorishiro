@@ -7,7 +7,7 @@
 # Targets like `doctor` do not use this default and require an explicit value.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 
-.PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite build task doctor entities
+.PHONY: check clippy fmt fmt-check public-api-check coverage test-postgres test-sqlite test-redis build task doctor entities
 
 check:
 	cargo check --locked --workspace
@@ -37,6 +37,12 @@ test-postgres: build
 
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite scripts/test-backend.sh sqlite
+
+# Redis is opt-in because normal CI does not provision it. Unlike the normal
+# suite's deliberate skip, this target fails when the selected endpoint is
+# unavailable or the provider test is not executed.
+test-redis:
+	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' scripts/test-redis.sh
 
 build:
 	cargo build --locked --workspace

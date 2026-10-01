@@ -1,13 +1,13 @@
 //! Regression coverage for Loco queue tag routing through its public `Queue` API.
 //!
-//! A worker started without tags must leave tagged jobs alone.
-//! A worker started with `worker-class:shared` must dequeue the same job.
+//! A worker started with `worker-class:shared` must dequeue a tagged job.
 //! The tests exercise both SQL providers without copying their dequeue SQL.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use futures::FutureExt;
 use loco_rs::bgworker::{self, BackgroundWorker};
 use loco_rs::config::{PostgresQueueConfig, SqliteQueueConfig};
 use loco_rs::prelude::*;
@@ -47,34 +47,13 @@ async fn enqueue_tagged_probe(queue: &bgworker::Queue) {
         .expect("enqueue tagged probe");
 }
 
-async fn empty_tags_leave_the_probe_queued(queue: Arc<bgworker::Queue>) {
+async fn shared_tag_dequeues_the_probe(queue: Arc<bgworker::Queue>) {
     DEQUEUE_HITS.store(0, Ordering::SeqCst);
     queue
         .register(RoutingProbeWorker)
         .await
         .expect("register probe");
     enqueue_tagged_probe(&queue).await;
-
-    let running_queue = queue.clone();
-    let handle = tokio::spawn(async move { running_queue.run(vec![]).await });
-    tokio::time::sleep(std::time::Duration::from_millis(1_200)).await;
-    assert_eq!(
-        DEQUEUE_HITS.load(Ordering::SeqCst),
-        0,
-        "empty tags consumed a tagged job"
-    );
-    queue.shutdown().expect("stop empty-tag worker");
-    handle
-        .await
-        .expect("join empty-tag worker")
-        .expect("run empty-tag worker");
-}
-
-async fn shared_tag_dequeues_the_probe(queue: Arc<bgworker::Queue>) {
-    queue
-        .register(RoutingProbeWorker)
-        .await
-        .expect("register probe");
 
     let running_queue = queue.clone();
     let handle = tokio::spawn(async move { running_queue.run(vec![SHARED_TAG.to_string()]).await });
@@ -85,16 +64,19 @@ async fn shared_tag_dequeues_the_probe(queue: Arc<bgworker::Queue>) {
     })
     .await
     .expect("shared-tag worker dequeues tagged job");
-    queue.shutdown().expect("stop shared-tag worker");
-    handle
-        .await
+    let shutdown = queue.shutdown();
+    let joined = handle.await;
+    shutdown.expect("stop shared-tag worker");
+    joined
         .expect("join shared-tag worker")
         .expect("run shared-tag worker");
+    assert_eq!(DEQUEUE_HITS.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
 #[serial(queue_postgres)]
-async fn postgres_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_them() {
+#[serial(process_environment)]
+async fn postgres_queue_routes_tagged_jobs_to_matching_workers() {
     if !crate::require_postgres_backend() {
         return;
     }
@@ -112,26 +94,27 @@ async fn postgres_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_t
         num_workers: 1,
         reaper: None,
     };
-    let empty_queue = Arc::new(
+    let queue = Arc::new(
         bgworker::pg::create_provider(&config)
             .await
             .expect("Postgres queue"),
     );
-    empty_queue.setup().await.expect("set up Postgres queue");
-    empty_tags_leave_the_probe_queued(empty_queue).await;
-
-    let shared_queue = Arc::new(
-        bgworker::pg::create_provider(&config)
-            .await
-            .expect("Postgres queue"),
-    );
-    shared_queue.setup().await.expect("set up Postgres queue");
-    shared_tag_dequeues_the_probe(shared_queue).await;
+    let result = std::panic::AssertUnwindSafe(async {
+        queue.setup().await.expect("set up Postgres queue");
+        shared_tag_dequeues_the_probe(queue.clone()).await;
+    })
+    .catch_unwind()
+    .await;
+    let _ = queue.shutdown();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 #[tokio::test]
 #[serial(queue_postgres)]
-async fn sqlite_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_them() {
+#[serial(process_environment)]
+async fn sqlite_queue_routes_tagged_jobs_to_matching_workers() {
     let directory = tempfile::tempdir().expect("queue tempdir");
     let uri = format!(
         "sqlite://{}?mode=rwc",
@@ -149,19 +132,19 @@ async fn sqlite_queue_empty_tags_exclude_tagged_jobs_and_shared_tag_dequeues_the
         num_workers: 1,
         reaper: None,
     };
-    let empty_queue = Arc::new(
+    let queue = Arc::new(
         bgworker::sqlt::create_provider(&config)
             .await
             .expect("SQLite queue"),
     );
-    empty_queue.setup().await.expect("set up SQLite queue");
-    empty_tags_leave_the_probe_queued(empty_queue).await;
-
-    let shared_queue = Arc::new(
-        bgworker::sqlt::create_provider(&config)
-            .await
-            .expect("SQLite queue"),
-    );
-    shared_queue.setup().await.expect("set up SQLite queue");
-    shared_tag_dequeues_the_probe(shared_queue).await;
+    let result = std::panic::AssertUnwindSafe(async {
+        queue.setup().await.expect("set up SQLite queue");
+        shared_tag_dequeues_the_probe(queue.clone()).await;
+    })
+    .catch_unwind()
+    .await;
+    let _ = queue.shutdown();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }

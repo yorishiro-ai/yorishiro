@@ -141,7 +141,7 @@ async fn legacy_environment_file_is_the_final_fallback() {
     fs::create_dir(&config_directory).unwrap();
     fs::write(
         config_directory.join("test_postgres.yaml"),
-        minimal_config("<%= get_env(name=\"DATABASE_URL\") %>"),
+        minimal_config("{{ get_env(name=\"DATABASE_URL\") }}"),
     )
     .unwrap();
     let _dir = CurrentDirGuard::enter(directory.path());

@@ -152,7 +152,7 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
             handles.push(tokio::spawn(async move {
                 barrier.wait().await;
                 let txn = db.begin().await.expect("begin racer txn");
-                let created = tenancy::create_workspace(
+                let result = tenancy::create_workspace(
                     &txn,
                     tenant_id,
                     &format!("racer-{i}"),
@@ -160,11 +160,14 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
                     None,
                     None,
                 )
-                .await
-                .is_ok();
-                // Committing only on success keeps a rejected racer from leaving a half-open transaction behind; the cap rejection is an `Err`, so there is nothing to commit.
-                // A losing racer's commit can itself fail, so its outcome is folded into the returned bool rather than unwrapped: an `expect` here runs inside a spawned task, and panicking there aborts the whole test process instead of failing this assertion, which hides which check actually broke.
-                created && txn.commit().await.is_ok()
+                .await;
+                match result {
+                    Ok(_) => txn.commit().await.is_ok(),
+                    Err(_) => {
+                        txn.rollback().await.expect("rollback rejected racer");
+                        false
+                    }
+                }
             }));
         }
 

@@ -182,6 +182,7 @@ where
     // Use Option so we can explicitly clean up even on panic.
     let mut test_db: Option<Box<dyn loco_rs::testing::db::TestSupport>> = None;
     let mut boot: Option<BootResult> = None;
+    let mut queue_pool: Option<sqlx::SqlitePool> = None;
 
     let result = std::panic::AssertUnwindSafe(async {
         let mut config = App::load_config(&Environment::Test)
@@ -221,6 +222,7 @@ where
         let pool = sqlx::SqlitePool::connect(&queue_uri)
             .await
             .expect("connect to the queue file");
+        queue_pool = Some(pool.clone());
 
         let tenant = tenant_tenants::ActiveModel {
             name: sea_orm::ActiveValue::Set("queue-test-tenant".into()),
@@ -259,7 +261,6 @@ where
         // Use close_app_pools which closes identity, tenant, and ctx.db pools
         // so DROP DATABASE does not fail on teardown.
         close_app_pools(&boot_res.app_context).await;
-        pool.close().await;
     })
     .catch_unwind()
     .await;
@@ -272,6 +273,9 @@ where
         // close_app_pools closes identity, tenant, and ctx.db pools so
         // DROP DATABASE does not fail on teardown.
         close_app_pools(&b.app_context).await;
+    }
+    if let Some(pool) = queue_pool {
+        pool.close().await;
     }
     if let Some(d) = test_db.take() {
         d.cleanup_db();
@@ -294,6 +298,7 @@ fn args_for(class: WorkerClass, workspace_id: Uuid) -> EmbeddingSyncArgs {
 ///
 /// In `ForegroundBlocking` this assertion is vacuous, since `perform_later` runs the body inline and writes no row, which is why nothing else here catches an enqueue-side break.
 #[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn enqueue_for_class_puts_a_row_in_the_queue() {
     if !super::super::require_postgres_backend() {
         return;
@@ -315,6 +320,7 @@ async fn enqueue_for_class_puts_a_row_in_the_queue() {
 /// `tags()` is a per-type static, so the class has to select the worker type at `perform_later` time rather than travel in the job's arguments; getting that backwards is the easy mistake here.
 /// A regression that sent every class to one worker, or dropped the tag, shows up here as two rows sharing a name or carrying `None`.
 #[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn each_worker_class_carries_its_own_tag() {
     if !super::super::require_postgres_backend() {
         return;
@@ -370,6 +376,7 @@ async fn each_worker_class_carries_its_own_tag() {
 }
 
 #[tokio::test]
+#[serial_test::serial(process_environment)]
 async fn each_reindex_worker_class_carries_its_own_tag() {
     if !super::super::require_postgres_backend() {
         return;
@@ -433,6 +440,7 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
     let directory = tempfile::tempdir().expect("queue tempdir");
     let uri = format!(
@@ -464,6 +472,7 @@ async fn sqlite_background_queue_orders_competing_jobs_without_sleeping() {
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
     if !super::super::require_postgres_backend() {
         return;
@@ -493,6 +502,7 @@ async fn postgres_background_queue_orders_competing_jobs_without_sleeping() {
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn sqlite_equal_priority_order_uses_controlled_job_ids() {
     let run_id = "equal-sqlite";
     let run_at = chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
@@ -565,6 +575,7 @@ async fn sqlite_equal_priority_order_uses_controlled_job_ids() {
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn postgres_equal_priority_order_uses_controlled_job_ids() {
     if !super::super::require_postgres_backend() {
         return;
@@ -636,6 +647,7 @@ async fn postgres_equal_priority_order_uses_controlled_job_ids() {
 
 #[tokio::test]
 #[serial_test::serial(queue_postgres)]
+#[serial_test::serial(process_environment)]
 async fn redis_bounded_scan_is_observable_at_the_queue_boundary() {
     let Ok(uri) = std::env::var("YORISHIRO_REDIS_TEST_URL") else {
         eprintln!("skipping Redis bounded-scan test: YORISHIRO_REDIS_TEST_URL is unset");

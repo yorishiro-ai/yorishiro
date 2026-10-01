@@ -142,6 +142,7 @@ async fn rls_enabled(db: &sea_orm::DatabaseConnection) -> bool {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn all_migrations_apply_to_a_fresh_postgres_database() {
     if !super::super::require_postgres_backend() {
         return;
@@ -158,6 +159,7 @@ async fn all_migrations_apply_to_a_fresh_postgres_database() {
 /// The gate the rollback bug slipped past: `down()` has to drop the circular foreign key before the tables it ties together, and only PostgreSQL has that constraint as a separate object.
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn all_migrations_roll_back_and_reapply_on_postgres() {
     if !super::super::require_postgres_backend() {
         return;
@@ -179,6 +181,7 @@ async fn all_migrations_roll_back_and_reapply_on_postgres() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn inference_job_attempt_migration_grants_update_to_app_role() {
     if !super::super::require_postgres_backend() {
         return;
@@ -188,9 +191,11 @@ async fn inference_job_attempt_migration_grants_update_to_app_role() {
             Migrator::up(db, None).await.expect("run all migrations");
             assert!(privilege(db, "SELECT").await);
             assert!(privilege(db, "UPDATE").await);
-            Migrator::down(db, Some(1))
+            // 000014 is the newest migration.  Roll back both it and 000013
+            // before asserting the 000013 privilege change is gone.
+            Migrator::down(db, Some(2))
                 .await
-                .expect("roll back the privilege migration");
+                .expect("roll back the privilege and starvation-index migrations");
             assert!(privilege(db, "SELECT").await);
             assert!(!privilege(db, "UPDATE").await);
             assert!(!rls_enabled(db).await);
@@ -208,6 +213,7 @@ async fn inference_job_attempt_migration_grants_update_to_app_role() {
 
 #[tokio::test]
 #[serial(postgres_cluster)]
+#[serial(process_environment)]
 async fn inference_job_rls_isolates_workspace_reads_and_updates() {
     if !super::super::require_postgres_backend() {
         return;

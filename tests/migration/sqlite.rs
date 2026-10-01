@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{ConnectionTrait, Database};
+use serial_test::serial;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -22,6 +23,7 @@ fn cleanup(path: &std::path::Path) {
 }
 
 #[tokio::test]
+#[serial(process_environment)]
 async fn all_migrations_apply_to_a_fresh_sqlite_file() {
     if !super::super::require_sqlite_backend() {
         return;
@@ -38,6 +40,7 @@ async fn all_migrations_apply_to_a_fresh_sqlite_file() {
 }
 
 #[tokio::test]
+#[serial(process_environment)]
 async fn all_migrations_roll_back_and_reapply_on_sqlite() {
     if !super::super::require_sqlite_backend() {
         return;
@@ -65,6 +68,7 @@ async fn all_migrations_roll_back_and_reapply_on_sqlite() {
 // Without the transaction guard in helpers::use_transaction(), DDL statements
 // interleave across pooled connections and the DROP/CREATE TRIGGER pair fails.
 #[tokio::test]
+#[serial(process_environment)]
 async fn migration_sqlite_max_connections_10_five_times() {
     if !super::super::require_sqlite_backend() {
         return;
@@ -86,6 +90,7 @@ async fn migration_sqlite_max_connections_10_five_times() {
 /// A database upgraded from the previous migration must replace the old audit action CHECK,
 /// rather than only accepting `fill_defaults` on a fresh install.
 #[tokio::test]
+#[serial(process_environment)]
 async fn fill_defaults_audit_action_upgrades_an_existing_sqlite_schema() {
     if !super::super::require_sqlite_backend() {
         return;

@@ -85,6 +85,12 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
 /// test that boots through `request_with_create_db`.
 /// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
+    if let Some(handle) = ctx
+        .shared_store
+        .remove::<yorishiro::app::StartupReindexHandle>()
+    {
+        handle.shutdown_and_wait().await;
+    }
     ctx.db.get_sqlite_connection_pool().close().await;
     // Clean up the temp SQLite file and its journaling siblings.
     let _ = std::fs::remove_file(db_path);
