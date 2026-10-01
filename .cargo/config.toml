@@ -2,6 +2,15 @@
 loco = "run --"
 loco-tool = "run --"
 
+[net]
+git-fetch-with-cli = true
+
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[build]
+rustc-wrapper = "sccache"
+
 # https://github.com/rust-lang/rust/issues/141626
 # (can be removed once link.exe is fixed)
 [target.x86_64-pc-windows-msvc]

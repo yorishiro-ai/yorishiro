@@ -14,13 +14,6 @@ inputs:
     description: Rust toolchain to install
     required: false
     default: '1.97.0'
-  # Kept as a no-op input for callers that still pass it (windows-weekly.yml).
-  # Sccache was replaced by Swatinem/rust-cache in ci.yml and release.yml.
-  use-sccache:
-    description: No-op (sccache removed)
-    required: false
-    default: ''
-
 runs:
   using: composite
   steps:
@@ -34,3 +27,19 @@ runs:
       if: inputs.targets != ''
       shell: bash
       run: rustup target add ${{ inputs.targets }}
+
+    - name: Install Linux linker
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes mold
+        mold --version
+
+    - name: Install sccache
+      shell: bash
+      run: |
+        if ! command -v sccache >/dev/null 2>&1; then
+          RUSTC_WRAPPER= RUSTFLAGS= cargo install sccache --locked --version 0.10.0
+        fi
+        sccache --version
