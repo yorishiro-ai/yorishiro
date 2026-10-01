@@ -4,6 +4,9 @@ Prerelease packages are published on the [Releases](https://github.com/yorishiro
 
 They support Ubuntu 24.04 and AlmaLinux 10 (glibc 2.39+).
 
+Releases publish separate `yorishiro-ce` and `yorishiro-ee` packages.
+CE is built without the `enterprise` Cargo feature, while EE includes it and requires an EE licence for production use.
+
 ## Install
 
 ```console

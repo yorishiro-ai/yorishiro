@@ -68,6 +68,10 @@ jobs:
         env:
           DRY_RUN: ${{ inputs.dry_run }}
           VERSION: ${{ inputs.version }}
+          # The release plan runs before the shared Rust setup action.
+          # Override repository-local build optimizations for this metadata check.
+          RUSTC_WRAPPER: ''
+          RUSTFLAGS: ''
         run: |
           TAG="v${VERSION}"
 
@@ -155,9 +159,19 @@ jobs:
           - os: ubuntu-26.04
             arch: amd64
             target: x86_64-unknown-linux-gnu
+            edition: ce
           - os: ubuntu-26.04-arm
             arch: arm64
             target: aarch64-unknown-linux-gnu
+            edition: ce
+          - os: ubuntu-26.04
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            edition: ee
+          - os: ubuntu-26.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            edition: ee
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -177,12 +191,18 @@ jobs:
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: cargo build --locked --release --bin yorishiro
+        run: |
+          if [ "${{ matrix.edition }}" = ce ]; then
+            cargo build --locked --no-default-features --release --bin yorishiro
+          else
+            cargo build --locked --features enterprise --release --bin yorishiro
+          fi
 
       - name: Install nfpm
         env:
           NFPM_VERSION: 2.47.0
           ARCH: ${{ matrix.arch }}
+          EDITION: ${{ matrix.edition }}
         run: |
           case "$ARCH" in
             amd64) asset_arch=x86_64 ;;
@@ -205,10 +225,11 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           ARCH: ${{ matrix.arch }}
+          EDITION: ${{ matrix.edition }}
         run: |
           mkdir -p dist
           for pkg in deb rpm; do
-            nfpm package --config packaging/nfpm-yorishiro.yaml --packager "$pkg" --target dist/
+             nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
           done
           ls -1 dist/
 
@@ -221,7 +242,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ !cancelled() }}
         with:
-          name: binary-linux-${{ matrix.arch }}
+          name: binary-linux-${{ matrix.edition }}-${{ matrix.arch }}
           path: dist/*
 
   docker:
@@ -231,8 +252,16 @@ jobs:
         include:
           - os: ubuntu-26.04
             arch: amd64
+            edition: ce
           - os: ubuntu-26.04-arm
             arch: arm64
+            edition: ce
+          - os: ubuntu-26.04
+            arch: amd64
+            edition: ee
+          - os: ubuntu-26.04-arm
+            arch: arm64
+            edition: ee
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -250,12 +279,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify architecture image tags
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          EXPECTED_TAG: v${{ inputs.version }}
+        run: |
+          test "$TAG" = "$EXPECTED_TAG"
+          test "${IMAGE}:${TAG}-ce-amd64" = "${IMAGE}:v${{ inputs.version }}-ce-amd64"
+          test "${IMAGE}:${TAG}-ce-arm64" = "${IMAGE}:v${{ inputs.version }}-ce-arm64"
+          test "${IMAGE}:${TAG}-ee-amd64" = "${IMAGE}:v${{ inputs.version }}-ee-amd64"
+          test "${IMAGE}:${TAG}-ee-arm64" = "${IMAGE}:v${{ inputs.version }}-ee-arm64"
+
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
+          build-args: EDITION=${{ matrix.edition }}
           push: ${{ !inputs.dry_run }}
           provenance: false
-          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.edition }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
@@ -263,6 +305,9 @@ jobs:
     needs: [docker, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    strategy:
+      matrix:
+        edition: [ce, ee]
 
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
@@ -276,17 +321,21 @@ jobs:
       - name: Create multi-arch manifest
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
-          TAG: ${{ inputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          EDITION: ${{ matrix.edition }}
         run: |
           docker buildx imagetools create \
-            -t "${IMAGE}:${TAG}" \
-            "${IMAGE}:${TAG}-amd64" \
-            "${IMAGE}:${TAG}-arm64"
+             -t "${IMAGE}:${TAG}-${EDITION}" \
+             "${IMAGE}:${TAG}-${EDITION}-amd64" \
+             "${IMAGE}:${TAG}-${EDITION}-arm64"
 
   smoke:
     needs: [docker-manifest, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    strategy:
+      matrix:
+        edition: [ce, ee]
 
     services:
       postgres:
@@ -324,7 +373,7 @@ jobs:
             -e HOST=http://127.0.0.1:5150 \
             -e YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1 \
             -e YORISHIRO_EMBEDDING_MODEL=unused \
-            "${IMAGE}:${TAG}"
+            "${IMAGE}:${TAG}-${{ matrix.edition }}"
 
           for _ in $(seq 1 60); do
             curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
@@ -361,8 +410,8 @@ jobs:
               echo "ok: $1 ($n)"
             fi
           }
-          expect '*.deb' 2
-          expect '*.rpm' 2
+           expect '*.deb' 4
+           expect '*.rpm' 4
           exit "$status"
 
       - name: Checksums
@@ -387,5 +436,4 @@ jobs:
 
             Commit: ${{ github.sha }}
 
-            Packages carry both editions in one binary. The paid features stay inactive until
-            `YORISHIRO_LICENSE_KEY` is set.
+            CE and EE are published as separate compile-time artifacts.

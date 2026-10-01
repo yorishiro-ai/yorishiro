@@ -1,10 +1,10 @@
-# The only package. Both editions ship in one artifact, because they are one binary: `ee/`
+# Enterprise package. The enterprise feature is compiled into this artifact.
 # compiles into this crate as a module (`src/lib.rs`'s `#[path = "../ee/mod.rs"]`), and what a
 # deployment serves is decided at runtime by the licence layer, not by which file was installed.
 #
 # The `conflicts` block below still names the retired `yorishiro-ce`, so a machine carrying
 # the old package can move to this one.
-name: yorishiro
+name: yorishiro-ee
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}

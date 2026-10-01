@@ -4,6 +4,9 @@ prerelease パッケージは、各Dockerイメージと共に[Releases](https:/
 
 Ubuntu 24.04 と AlmaLinux 10（glibc 2.39以降）に対応しています。
 
+リリースでは `yorishiro-ce` と `yorishiro-ee` のパッケージを分けて公開します。
+CE は `enterprise` Cargo feature なしで、EE は feature 付きでビルドします。
+
 ## インストール
 
 ```console

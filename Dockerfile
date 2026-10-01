@@ -13,10 +13,12 @@
 # exist on this branch: the frontend is not part of the rebuild yet. When it returns, its stage
 # comes back with it, in the same change that adds the directory.
 FROM rust:1.97-slim AS builder
+ARG EDITION=ee
 
 RUN apt-get update && apt-get install -y \
     g++ \
     curl \
+    mold \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -26,7 +28,13 @@ COPY . .
 # edition-specific build to select here.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --locked --release --bin yorishiro \
+    RUSTC_WRAPPER= cargo install sccache --locked --version 0.10.0 \
+    && export RUSTC_WRAPPER=/usr/local/cargo/bin/sccache \
+    case "$EDITION" in \
+      ce) cargo build --locked --no-default-features --release --bin yorishiro ;; \
+      ee) cargo build --locked --features enterprise --release --bin yorishiro ;; \
+      *) echo "unknown EDITION=$EDITION" >&2; exit 1 ;; \
+    esac \
     && cp target/release/yorishiro /usr/local/bin/yorishiro
 
 # No libstdc++6 here: `readelf -V` on the built binary shows no GLIBCXX version requirement and
