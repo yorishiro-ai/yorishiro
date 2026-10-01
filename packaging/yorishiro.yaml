@@ -36,8 +36,6 @@ database:
 
 # QUEUE_URL, YORISHIRO_QUEUE_WORKERS, and YORISHIRO_QUEUE_REAPER_AGE_MINUTES override fields.
 # YORISHIRO_QUEUE_KIND can switch between Sqlite, Postgres, and Redis.
-workers:
-  mode: BackgroundQueue
 queue:
   kind: Sqlite
   uri: sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc

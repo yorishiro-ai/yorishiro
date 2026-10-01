@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use loco_rs::app::Hooks;
 use loco_rs::bgworker::{self, BackgroundWorker, Queue, sqlt};
 use loco_rs::boot::{self, BootResult};
-use loco_rs::config::{
-    PostgresQueueConfig, QueueConfig, RedisQueueConfig, SqliteQueueConfig, WorkerMode,
-};
+use loco_rs::config::{PostgresQueueConfig, QueueConfig, RedisQueueConfig, SqliteQueueConfig};
 use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
@@ -201,7 +199,6 @@ where
         let db = test_db.as_ref().expect("test db");
         db.init_db().await;
         config.database.uri = db.get_connection_str().to_string();
-        config.workers.mode = WorkerMode::BackgroundQueue;
         config.queue = Some(QueueConfig::Sqlite(SqliteQueueConfig {
             uri: queue_uri.clone(),
             dangerously_flush: false,
