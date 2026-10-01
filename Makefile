@@ -23,8 +23,8 @@ fmt-check:
 	cargo fmt --all -- --check
 
 public-api-check:
-	uv run --script scripts/test_public_api.py
-	uv run --script scripts/check_public_api.py
+	PYTHONDONTWRITEBYTECODE=1 uv run --script scripts/test_public_api.py
+	PYTHONDONTWRITEBYTECODE=1 uv run --script scripts/check_public_api.py
 	@test -z "$$(find scripts -type f \( -name '*.pyc' -o -path '*/__pycache__/*' \) -print -quit)"
 
 # Nightly is required because LLVM branch coverage is not available on stable.

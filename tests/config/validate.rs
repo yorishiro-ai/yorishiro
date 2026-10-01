@@ -49,6 +49,7 @@ async fn only_background_queue_is_supported() {
             "YORISHIRO_QUEUE_KIND",
         ]);
         _guard.remove("YORISHIRO_CONFIG_PATH");
+        _guard.remove("QUEUE_URL");
         let error = load(&Environment::Development)
             .await
             .unwrap_err()
