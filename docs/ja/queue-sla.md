@@ -2,10 +2,6 @@
 
 Yorishiro は、アプリケーションのワーカーアダプターから投入したジョブごとにライフサイクル行を記録します。
 
-アプリケーションが正式にサポートする Loco のワーカーモードは `BackgroundQueue` のみです。
-
-`ForegroundBlocking` と `BackgroundAsync` は、キューの永続化、provider job ID、priority 順序、タグによるワーカー分離、再起動後の復旧を提供しないため、設定検証で拒否します。
-
 ## 意味
 
 `enqueue_at` は、プロバイダーへ投入する前にアプリケーションが記録する時刻です。

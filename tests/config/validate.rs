@@ -36,8 +36,10 @@ async fn canonical_file_rejects_tera_and_get_env_syntax() {
 async fn only_background_queue_is_supported() {
     for mode in ["ForegroundBlocking", "BackgroundAsync"] {
         let directory = tempdir().unwrap();
-        let config = minimal_config("sqlite://file.sqlite3?mode=rwc")
-            .replace("mode: BackgroundQueue", &format!("mode: {mode}"));
+        let config = format!(
+            "{}\nworkers:\n  mode: {mode}\n",
+            minimal_config("sqlite://file.sqlite3?mode=rwc")
+        );
         fs::write(directory.path().join(CANONICAL_CONFIG_FILE), config).unwrap();
         let _dir = CurrentDirGuard::enter(directory.path());
         let _guard = EnvGuard::capture(&[
@@ -51,6 +53,6 @@ async fn only_background_queue_is_supported() {
             .await
             .unwrap_err()
             .to_string();
-        assert!(error.contains("only BackgroundQueue is supported"));
+        assert!(error.contains("configured worker mode is not supported"));
     }
 }

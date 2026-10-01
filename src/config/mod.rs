@@ -48,10 +48,8 @@ database:
   dangerously_truncate: false
   dangerously_recreate: false
 
-# Background jobs use Loco's BackgroundQueue mode only. QUEUE_URL, YORISHIRO_QUEUE_WORKERS, and YORISHIRO_QUEUE_REAPER_AGE_MINUTES override fields in this block.
+# Background jobs use the built-in queue mode. QUEUE_URL, YORISHIRO_QUEUE_WORKERS, and YORISHIRO_QUEUE_REAPER_AGE_MINUTES override fields in this block.
 # YORISHIRO_QUEUE_KIND can switch between Sqlite, Postgres, and Redis.
-workers:
-  mode: BackgroundQueue
 queue:
   kind: Sqlite
   uri: sqlite://yorishiro.sqlite3?mode=rwc

@@ -1,4 +1,4 @@
-//! Generates and stores an entity's embedding vector via Loco's own `BackgroundQueue`.
+//! Generates and stores an entity's embedding vector via Loco's persistent background queue.
 //!
 //! A queue provider rather than a bare `tokio::spawn`: a spawned task loses every in-flight sync on a process restart, a forced kill, or a provider outage past its own retry budget, leaving the entity's `embedding` column permanently `NULL` with nothing to retry it (`tasks::resync_embeddings` is the operational recovery command for rows in that state).
 //! The configured Loco queue provider persists the job, so a re-deployed or restarted process resumes it instead of losing it.
@@ -350,7 +350,7 @@ pub(crate) async fn enqueue_for_class_with_dispatcher(
 }
 
 /// Enqueues embedding sync after the caller's own transaction has committed: generating a vector is an HTTP round trip to the embedding provider (up to 30s), and this must never add that latency to the entity write it follows, nor hold a DB connection open for it.
-/// The application accepts only Loco's `BackgroundQueue` mode, so `perform_later_with_priority` persists the job and returns before the embedding provider round trip begins.
+/// The application uses the persistent queue mode, so `perform_later_with_priority` persists the job and returns before the embedding provider round trip begins.
 /// A process restart or forced kill leaves the job in the configured provider for the next worker run.
 /// A failure to enqueue at all (queue provider unreachable) is only logged: the entity write already succeeded and embedding is an auxiliary feature, so no failure here should surface to the caller.
 ///

@@ -30,8 +30,7 @@ pub(super) fn load_canonical(path: &Path) -> Result<Config> {
 pub(crate) fn validate_queue_policy(config: &Config) -> Result<()> {
     if config.workers.mode != WorkerMode::BackgroundQueue {
         return Err(Error::Message(
-            "only BackgroundQueue is supported; ForegroundBlocking and BackgroundAsync are disabled"
-                .into(),
+            "the configured worker mode is not supported; use the built-in queue mode".into(),
         ));
     }
     let Some(queue) = config.queue.as_ref() else {

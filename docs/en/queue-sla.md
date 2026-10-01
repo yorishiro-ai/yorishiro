@@ -2,10 +2,6 @@
 
 Yorishiro records one lifecycle row for every job dispatched through the application worker adapters.
 
-The application supports only Loco's `BackgroundQueue` worker mode.
-
-`ForegroundBlocking` and `BackgroundAsync` are rejected during configuration validation because they do not provide queue persistence, provider job IDs, priority ordering, tag-based worker routing, or restart recovery.
-
 ## Semantics
 
 `enqueue_at` is the application timestamp written before the provider enqueue call.
