@@ -41,6 +41,9 @@ queue:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
 
+workers:
+  mode: BackgroundQueue
+
 # Database Configuration
 database:
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'

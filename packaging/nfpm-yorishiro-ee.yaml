@@ -1,0 +1,120 @@
+# Enterprise package. The enterprise feature is compiled into this artifact.
+# compiles into this crate as a module (`src/lib.rs`'s `#[path = "../ee/mod.rs"]`), and what a
+# deployment serves is decided at runtime by the licence layer, not by which file was installed.
+#
+# The `conflicts` block below still names the retired `yorishiro-ce`, so a machine carrying
+# the old package can move to this one.
+name: yorishiro-ee
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+# nfpm defaults to `version_schema: semver`, which parses the version and rewrites it. A
+# prerelease tag is not a SemVer version, and the default mangles it rather than refusing:
+# `20260830-1` becomes `20260830.0.0~1`, reading the `-1` as a SemVer prerelease suffix and
+# padding the rest out to a full version core. Measured, with nfpm 2.47.0, on both packagers.
+# `none` passes the string through, so the package is versioned by the tag it was built from.
+version_schema: none
+section: net
+priority: optional
+maintainer: Yorishiro Contributors
+description: |
+  An MCP-native, multi-tenant knowledge store with user-defined schemas.
+  Includes the enterprise features (billing, SSO, marketplace, LLM-backed fill).
+  Those stay disabled until YORISHIRO_LICENSE_KEY is set; everything else works without one.
+vendor: Yorishiro
+homepage: https://github.com/yorishiro-ai/yorishiro
+license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
+
+depends:
+  - ca-certificates
+
+# This floor is declared so the package manager refuses a system that cannot run the binary,
+# rather than installing happily and failing at first start. Verified: without it, the rpm
+# installs on Rocky 9 (glibc 2.34) and then dies on a missing symbol.
+#
+# The figure is read off a binary CI builds, not chosen. Read it from a CI artifact rather than a
+# local build: the glibc floor tracks the host that compiled it, so a developer's machine gives a
+# different and higher answer. Measured directly on this machine while porting the embedding
+# provider to candle: a local release build here reports a floor of 2.43 in its own verneed
+# section, for exactly this reason, which is why that number was never a candidate to appear here.
+# (`test-install.sh` greps this file for the pattern GLIBC underscore version number to learn the
+# declared floor, so a second such match anywhere in this file, comment included, would be picked
+# up as the floor to test against instead of the one actually declared below. This paragraph
+# avoids writing that exact pattern for that reason.)
+#
+# Re-measured against the candle-based binary from a real CI build on the former Ubuntu 24.04
+# runner (release.yml, dry_run, binary/amd64 job): `readelf -V` on the extracted binary shows
+# GLIBC_2.39 as the highest versioned symbol required, the same figure the ort-based binary
+# needed. Removing `ort` changed the native library set but did not move this floor on that
+# runner.
+#
+# That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
+# produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
+# source, same dependencies. The C library's own headers decide which versioned symbols the
+# compiler selects.
+#
+# `2.39` matches what this project supports: Ubuntu 24.04 and AlmaLinux 10,
+# both of which ship glibc 2.39. Package tests enforce compatibility with both targets even when
+# the GitHub-hosted build runner uses a newer Ubuntu release.
+#
+# Read this from the binary rather than from its symbol table. `objdump -T` shows the two
+# `pidfd` symbols as weak, which reads as "2.39 is optional"; the loader does not consult symbol
+# bindings, it rejects any binary whose version-requirements section names a version the library
+# lacks. `objdump -p` is the one that answers the question the package manager needs.
+#
+# The binary links to the system C++ runtime, so the package declares the C++ runtime and libgcc
+# explicitly rather than relying on an incidental dependency.
+#
+# This floor is why the release build has to happen in CI rather than from a developer's
+# `target/release`: a binary linked against a newer host glibc raises the real requirement above
+# what is declared here, and the package then installs on a system it cannot run on.
+overrides:
+  deb:
+    depends:
+      - ca-certificates
+      - libc6 (>= 2.39)
+      - libgcc-s1
+      - libstdc++6
+  rpm:
+    depends:
+      - ca-certificates
+      - libc.so.6(GLIBC_2.39)(64bit)
+      - libgcc
+      - libstdc++
+
+conflicts:
+  - yorishiro
+  - yorishiro-ce
+replaces:
+  - yorishiro
+  - yorishiro-ce
+
+contents:
+  - src: ./target/release/yorishiro
+    dst: /usr/bin/yorishiro
+  - src: ./packaging/yorishiro.service
+    dst: /lib/systemd/system/yorishiro.service
+  # The systemd unit loads this editable canonical YAML file from /etc/yorishiro.
+  # `config|noreplace` preserves an operator's changes during package upgrades.
+  - src: ./packaging/yorishiro.yaml
+    dst: /etc/yorishiro/yorishiro.yaml
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: yorishiro
+  # `copyright` rather than `LICENSE`: Debian policy names it that, and minimal images
+  # (including the official ubuntu/debian containers) carry a dpkg `path-exclude` for
+  # `/usr/share/doc/*` with a `path-include` for `copyright` alone -- a file called LICENSE is
+  # silently dropped on exactly the systems most likely to be used for a deployment.
+  - src: ./LICENSE
+    dst: /usr/share/doc/yorishiro/copyright
+  # The enterprise licence stays outside /usr/share/doc.
+  # A minimal image's `path-include` covers the name `copyright` exactly, so a file named
+  # `copyright.ee` is deleted at unpack time.
+  - src: ./ee/LICENSE
+    dst: /etc/yorishiro/LICENSE.enterprise
+
+scripts:
+  preinstall: ./packaging/preinstall.sh
+  postinstall: ./packaging/postinstall.sh

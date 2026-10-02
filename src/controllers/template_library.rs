@@ -18,7 +18,7 @@ use crate::models::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
 
-#[utoipa::path(get, path = "/api/template-library", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::TemplateRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/template-library", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::TemplateRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub async fn list_templates(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -29,7 +29,7 @@ pub async fn list_templates(
     Ok(Json(templates))
 }
 
-#[utoipa::path(get, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub async fn get_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -50,7 +50,7 @@ pub struct CreateTemplateRequest {
     pub author: Option<String>,
 }
 
-#[utoipa::path(post, path = "/api/template-library", request_body = super::openapi::CreateTemplateRequest, responses((status = 201, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/template-library", request_body = super::openapi::CreateTemplateRequest, responses((status = 201, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn create_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -84,7 +84,7 @@ pub struct UpdateTemplateRequest {
     pub locale: Option<String>,
 }
 
-#[utoipa::path(put, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), request_body = super::openapi::UpdateTemplateRequest, responses((status = 200, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), request_body = super::openapi::UpdateTemplateRequest, responses((status = 200, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn update_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -117,7 +117,7 @@ pub async fn update_template(
     Ok(Json(template))
 }
 
-#[utoipa::path(delete, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Template deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Template deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn delete_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -133,7 +133,7 @@ pub struct ForkTemplateRequest {
     pub name: String,
 }
 
-#[utoipa::path(post, path = "/api/template-library/{id}/fork", params(("id" = Uuid, Path)), request_body = super::openapi::ForkTemplateRequest, responses((status = 201, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/template-library/{id}/fork", params(("id" = Uuid, Path)), request_body = super::openapi::ForkTemplateRequest, responses((status = 201, body = super::openapi::TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn fork_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -148,6 +148,7 @@ pub async fn fork_template(
     Ok((StatusCode::CREATED, Json(template)))
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_list_templates),

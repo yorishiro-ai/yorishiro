@@ -28,8 +28,6 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/rust-setup
-        with:
-          use-sccache: 'false'
 
       # The library, not the binary: this job exists to catch Windows-only compile breakage, and the
       # lib carries both editions since `ee/` compiles into this crate rather than its own.

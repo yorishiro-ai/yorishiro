@@ -140,6 +140,8 @@ Yorishiro uses the `LOG_LEVEL` environment variable to set logging verbosity (`d
 A worker is an executable process that dequeues and runs background jobs.
 A worker pool is a target group selected by `WorkerClass`: `TenantPrivate`, `Official`, or `Shared`.
 The queue is durable job backlog storage, not a worker pool or a database connection pool.
+Yorishiro requires `workers.mode: BackgroundQueue` in canonical, packaged, and legacy configuration files.
+`ForegroundBlocking` and `BackgroundAsync` are rejected at configuration load and application boot.
 
 Run the HTTP server and workers as separate processes.
 The supported all-job worker command is:

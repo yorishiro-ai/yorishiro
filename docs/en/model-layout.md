@@ -34,6 +34,9 @@ Do not edit `_entities` by hand, and keep the post-generation hardening step in 
 
 ## Feature-Area Map
 
+Built-in template JSON assets live under `src/templates/json/` and are embedded from there.
+They are schema definitions, not generated entities, so they are reviewed and tested as source assets.
+
 Every moved hand-written model module has exactly one area.
 `pagination.rs` remains intentionally rooted because it is shared model infrastructure rather than a table model.
 The root marker files preserve the old `crate::models::<module>` paths for existing callers.

@@ -13,26 +13,33 @@
 # exist on this branch: the frontend is not part of the rebuild yet. When it returns, its stage
 # comes back with it, in the same change that adds the directory.
 FROM rust:1.97-slim AS builder
+ARG EDITION=ee
 
 RUN apt-get update && apt-get install -y \
     g++ \
     curl \
+    mold \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY . .
-# One package, one binary. Both editions are in it: `ee/` compiles into this crate as a module,
-# and which features serve is decided at runtime by the licence layer, so there is no
-# edition-specific build to select here.
+# The edition is selected at build time with EDITION=ce or EDITION=ee. CE does not compile the
+# enterprise module; EE includes it and retains its runtime licence gate.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --locked --release --bin yorishiro \
+    RUSTC_WRAPPER= cargo install sccache --locked --version 0.10.0 \
+    && export RUSTC_WRAPPER=/usr/local/cargo/bin/sccache \
+    && (case "$EDITION" in \
+      ce) cargo build --locked --no-default-features --release --bin yorishiro ;; \
+      ee) cargo build --locked --features enterprise --release --bin yorishiro ;; \
+      *) echo "unknown EDITION=$EDITION" >&2; exit 1 ;; \
+    esac) \
     && cp target/release/yorishiro /usr/local/bin/yorishiro
 
-# No libstdc++6 here: `readelf -V` on the built binary shows no GLIBCXX version requirement and
-# no libstdc++.so in NEEDED at all, unlike when this Dockerfile built the ort-based provider.
-# `onig_sys` (tokenizers' oniguruma dependency) and candle's C++ kernels are both statically
-# linked into the binary rather than dynamically linked at runtime.
+# The binary uses the system C++ runtime for candle/tokenizers support, so the runtime image
+# installs the same libgcc/libstdc++ dependencies declared by the native packages.
 # ca-certificates is for the OpenAI-compatible provider's TLS, curl for the HEALTHCHECK.
 # The base stays on the same glibc as the builder (debian trixie, matching rust:1.97-slim).
 FROM debian:trixie-slim
@@ -40,6 +47,8 @@ FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
+    libgcc-s1 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /home/yorishiro yorishiro
 

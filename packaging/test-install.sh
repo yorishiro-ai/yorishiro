@@ -7,26 +7,31 @@
 # None of that is visible from the package contents: a package passes inspection and still fails
 # the install. The test is the install.
 #
-#   ./packaging/test-install.sh <directory holding the .deb and .rpm files>
+#   ./packaging/test-install.sh <exact package file>
 #
 # Needs docker. Runs the same matrix locally as in CI, so a failure can be reproduced without
 # pushing.
 #
-# There is one package: both editions ship in a single artifact.
+# CE and EE packages are built separately; this script checks the CE package path.
 
 set -uo pipefail
 
-PKG_DIR="${1:?usage: test-install.sh <package directory>}"
-PKG_DIR="$(cd "$PKG_DIR" && pwd)"
+PKG_FILE="${1:?usage: test-install.sh <exact package file>}"
+PKG_FILE="$(cd "$(dirname "$PKG_FILE")" && pwd)/$(basename "$PKG_FILE")"
+PKG_DIR="$(dirname "$PKG_FILE")"
+case "$(basename "$PKG_FILE")" in
+  yorishiro-ce-*-amd64.deb|yorishiro-ee-*-amd64.deb|yorishiro-ce-*-arm64.deb|yorishiro-ee-*-arm64.deb) ;;
+  *) echo "package filename is not edition-first: $(basename "$PKG_FILE")" >&2; exit 2 ;;
+esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The floor the package declares. Read rather than hardcoded: this file must not be the place
 # the two disagree.
 # Scoped to the rpm depends line specifically (`libc.so.6(GLIBC_X.Y)(64bit)`), not the whole
-# file: nfpm-yorishiro.yaml's own comments discuss other glibc versions by number (a locally
+# file: the nfpm package config's own comments discuss other glibc versions by number (a locally
 # measured floor that was rejected, historical figures), and a bare whole-file grep picks up
 # whichever of those sorts highest, which is not necessarily the one actually declared below.
-GLIBC_FLOOR="$(grep -oE 'libc\.so\.6\(GLIBC_[0-9]+\.[0-9]+\)' "$REPO/packaging/nfpm-yorishiro.yaml" \
+GLIBC_FLOOR="$(grep -oE 'libc\.so\.6\(GLIBC_[0-9]+\.[0-9]+\)' "$REPO/packaging/nfpm-yorishiro-ce.yaml" \
   | grep -oE 'GLIBC_[0-9]+\.[0-9]+')"
 
 # Checked up front rather than at the call site: a missing tool otherwise surfaces as the
@@ -40,8 +45,19 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-deb() { ls "$PKG_DIR"/yorishiro_*.deb | head -1; }
-rpm() { ls "$PKG_DIR"/yorishiro-[0-9]*.rpm | head -1; }
+deb() {
+  case "$PKG_FILE" in
+    *.deb) printf '%s\n' "$PKG_FILE" ;;
+    *.rpm) printf '%s/%s.deb\n' "$PKG_DIR" "$(basename "${PKG_FILE%.rpm}")" ;;
+  esac
+}
+rpm() {
+  case "$PKG_FILE" in
+    *.rpm) printf '%s\n' "$PKG_FILE" ;;
+    *.deb) printf '%s/%s.rpm\n' "$PKG_DIR" "$(basename "${PKG_FILE%.deb}")" ;;
+  esac
+}
+edition() { basename "$PKG_FILE" | grep -q '^yorishiro-ee-' && echo ee || echo ce; }
 
 # --------------------------------------------------------------------------------------------
 note "deb on ubuntu:24.04 — the supported case"
@@ -57,7 +73,9 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   [ "$(stat -c "%a %U:%G" /etc/yorishiro/yorishiro.yaml)" = "640 root:yorishiro" ] && echo "CONFIGPERM"
   [ "$(stat -c "%U" /var/lib/yorishiro)" = "yorishiro" ] && echo "STATEOWNER"
 ' 2>&1)
-for want in RUNS USER COPYRIGHT EE_LICENCE CONFIG CONFIGPERM STATEOWNER; do
+WANTS="RUNS USER COPYRIGHT CONFIG CONFIGPERM STATEOWNER"
+if [ "$(edition)" = ee ]; then WANTS="$WANTS EE_LICENCE"; fi
+for want in $WANTS; do
   case "$out" in
     *"$want"*) ok "$want" ;;
     *) bad "$want (install output: $(echo "$out" | tr '\n' ' '))" ;;
@@ -256,6 +274,8 @@ queue:
   reaper:
     age_minutes: 30
     interval_seconds: 60
+workers:
+  mode: BackgroundQueue
 database:
   uri: postgres://yorishiro:secret@pg-$$:5432/yorishiro
   enable_logging: false

@@ -10,10 +10,10 @@ mod migration;
 mod snapshots;
 mod validation;
 
-use super::_entities::entity_entities::Column;
 pub use super::_entities::entity_entities::{ActiveModel, Entity, Model};
 use crate::metaschema;
 
+#[cfg(feature = "enterprise")]
 pub(crate) use crud::update_if_unchanged;
 pub use crud::{count, create, delete, export_all, get, get_batch, list, update};
 pub use migration::{drift, fill_defaults, migration_dry_run};

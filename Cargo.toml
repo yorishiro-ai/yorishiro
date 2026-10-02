@@ -10,6 +10,15 @@ publish = false
 default-run = "yorishiro"
 
 [features]
+default = ["enterprise"]
+enterprise = [
+  "dep:base64",
+  "dep:hmac",
+  "dep:jsonwebtoken",
+  "dep:url",
+  "openapi",
+]
+openapi = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 test-support = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -90,12 +99,12 @@ sqlite-vec = "=0.1.9"
 libsqlite3-sys = "=0.37.0"
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }  # licence key verification (ee/services/licence.rs)
-hmac = { version = "0.13.0" }          # Stripe webhook signature (ee/controllers/stripe.rs)
-base64 = { version = "0.23.1" }        # OAuth/PKCE encoding (ee/services/oauth.rs)
-url = { version = "2.5.8" }            # OIDC discovery (ee/services/oauth.rs)
-utoipa = { version = "5.4.0", features = ["axum_extras", "uuid"] }
-utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"], optional = true }  # licence key verification (ee/services/licence.rs)
+hmac = { version = "0.13.0", optional = true }          # Stripe webhook signature (ee/controllers/stripe.rs)
+base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
+url = { version = "2.5.8", optional = true }            # OIDC discovery (ee/services/oauth.rs)
+utoipa = { version = "5.4.0", features = ["axum_extras", "uuid"], optional = true }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"], optional = true }
 
 [[bin]]
 name = "yorishiro"

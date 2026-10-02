@@ -50,6 +50,22 @@ env:
   EMBEDDING_TOKENIZER_SIZE: "17082660"
 
 jobs:
+  ce:
+    name: Community edition
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/rust-setup
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ce
+      - name: Check CE without enterprise code
+        run: cargo check --locked --no-default-features --workspace
+      - name: Test CE MCP inventory
+        run: cargo test --locked --no-default-features --lib services::mcp::tests
+
   check:
     name: Check
     runs-on: ubuntu-latest

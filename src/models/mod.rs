@@ -30,6 +30,7 @@ pub mod import;
 #[path = "system/inference_jobs.rs"]
 pub mod inference_jobs;
 pub(crate) mod inference_proposals;
+#[path = "system/queue_job_lifecycles.rs"]
 pub(crate) mod queue_job_lifecycles;
 #[path = "content/recall.rs"]
 pub mod recall;

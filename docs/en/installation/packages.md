@@ -4,21 +4,28 @@ Prerelease packages are published on the [Releases](https://github.com/yorishiro
 
 They support Ubuntu 24.04 and AlmaLinux 10 (glibc 2.39+).
 
+Releases publish separate `yorishiro-ce` and `yorishiro-ee` packages.
+CE is built without the `enterprise` Cargo feature, while EE includes it and requires an EE licence for production use.
+The packages conflict with each other, so both editions cannot be installed at once.
+Installing the other edition replaces the current package and preserves the shared configuration and state paths.
+
 ## Install
 
 ```console
-$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro_<VERSION>_amd64.deb
-$ sudo dpkg -i yorishiro_<VERSION>_amd64.deb
+$ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yorishiro-ce-<VERSION>-amd64.deb
+$ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 ```
 
-## Installed files
+## Installed files (CE)
 
 | File | Description |
 |---|---|
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/etc/yorishiro/yorishiro.yaml` | Editable canonical configuration template |
-| `/etc/yorishiro/LICENSE.enterprise` | Enterprise licence |
+
+The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
+CE does not install the enterprise licence file.
 
 ## Configuration
 

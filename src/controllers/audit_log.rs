@@ -11,7 +11,7 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::AuditAuthorized;
 use crate::models::api_key_audit_log::{self, Model as AuditLogRecord};
 
-#[utoipa::path(get, path = "/api/audit-log", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::AuditLogRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-grants" = json!(["audit"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/audit-log", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::AuditLogRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-grants" = json!(["audit"]))), tag = "community"))]
 pub async fn list_audit_log(
     authorized: AuditAuthorized,
     Query(page): Query<crate::controllers::PageParams>,
@@ -22,6 +22,7 @@ pub async fn list_audit_log(
     Ok(Json(records))
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![super::route_inventory::path_doc(__path_list_audit_log)]
 }

@@ -13,6 +13,7 @@ pub mod db;
 ///
 /// The enterprise edition is not a separate compilation unit. What it serves is decided at runtime by
 /// `app::licence_gate`.
+#[cfg(feature = "enterprise")]
 #[path = "../ee/mod.rs"]
 pub mod ee;
 pub mod error;

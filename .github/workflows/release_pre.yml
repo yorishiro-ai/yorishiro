@@ -80,9 +80,19 @@ jobs:
           - os: ubuntu-26.04
             arch: amd64
             target: x86_64-unknown-linux-gnu
+            edition: ce
           - os: ubuntu-26.04-arm
             arch: arm64
             target: aarch64-unknown-linux-gnu
+            edition: ce
+          - os: ubuntu-26.04
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            edition: ee
+          - os: ubuntu-26.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            edition: ee
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -102,12 +112,18 @@ jobs:
       - name: Build
         env:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
-        run: cargo build --locked --release --bin yorishiro
+        run: |
+          if [ "${{ matrix.edition }}" = ce ]; then
+            cargo build --locked --no-default-features --release --bin yorishiro
+          else
+            cargo build --locked --features enterprise --release --bin yorishiro
+          fi
 
       - name: Install nfpm
         env:
           NFPM_VERSION: 2.47.0
           ARCH: ${{ matrix.arch }}
+          EDITION: ${{ matrix.edition }}
         run: |
           case "$ARCH" in
             amd64) asset_arch=x86_64 ;;
@@ -130,34 +146,101 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.tag }}
           ARCH: ${{ matrix.arch }}
+          EDITION: ${{ matrix.edition }}
         run: |
           mkdir -p dist
+          case "$ARCH" in amd64) rpm_arch=x86_64 ;; arm64) rpm_arch=aarch64 ;; esac
           for pkg in deb rpm; do
-            nfpm package --config packaging/nfpm-yorishiro.yaml --packager "$pkg" --target dist/
+             nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
+             if [ "$pkg" = deb ]; then
+               source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
+             else
+               source="dist/yorishiro-${EDITION}-${VERSION}-1.${rpm_arch}.rpm"
+             fi
+             mv "$source" "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.${pkg}"
           done
           ls -1 dist/
-
-      - name: Test the packages
-        run: ./packaging/test-install.sh dist
-
-      - name: Test the packages under systemd
-        run: ./packaging/test-systemd.sh dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ !cancelled() }}
         with:
-          name: binary-linux-${{ matrix.arch }}
+          name: binary-linux-${{ matrix.edition }}-${{ matrix.arch }}
           path: dist/*
 
+  package-tests:
+    needs: [binary, prepare]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+          pattern: binary-*
+          merge-multiple: true
+      - name: Install package tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev rpm
+      - name: Assert exact artifacts and metadata
+        env:
+          VERSION: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for edition in ce ee; do
+            for arch in amd64 arm64; do
+              for ext in deb rpm; do
+                test -f "dist/yorishiro-${edition}-${VERSION}-${arch}.${ext}"
+              done
+            done
+          done
+          test "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
+          for f in dist/*.deb; do
+            dpkg-deb -I "$f" | grep -E 'Conflicts:.*yorishiro|Replaces:.*yorishiro'
+          done
+          for f in dist/*.rpm; do
+            rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
+            rpm -qp --obsoletes "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
+          done
+      - name: Build retired unified packages for migration tests
+        env:
+          VERSION: ${{ needs.prepare.outputs.tag }}
+          ARCH: amd64
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/nfpm.tar.gz https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz
+          tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
+          sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
+          mkdir -p target/release /tmp/unified
+          dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
+          cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
+          nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager deb --target /tmp/unified
+          nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager rpm --target /tmp/unified
+          mv "/tmp/unified/yorishiro_${VERSION}_amd64.deb" "/tmp/unified/yorishiro-${VERSION}-amd64.deb"
+          mv "/tmp/unified/yorishiro-${VERSION}-1.x86_64.rpm" "/tmp/unified/yorishiro-${VERSION}-amd64.rpm"
+      - name: Test package transitions and co-install refusal
+        env:
+          VERSION: ${{ needs.prepare.outputs.tag }}
+        run: ./packaging/test-transitions.sh dist /tmp/unified "$VERSION"
+      - name: Test representative installed packages
+        run: |
+          ./packaging/test-install.sh "dist/yorishiro-ce-${{ needs.prepare.outputs.tag }}-amd64.deb"
+          ./packaging/test-systemd.sh "dist/yorishiro-ee-${{ needs.prepare.outputs.tag }}-amd64.deb"
+
   docker:
-    needs: prepare
+    needs: [prepare, package-tests]
     strategy:
       matrix:
         include:
           - os: ubuntu-26.04
             arch: amd64
+            edition: ce
           - os: ubuntu-26.04-arm
             arch: arm64
+            edition: ce
+          - os: ubuntu-26.04
+            arch: amd64
+            edition: ee
+          - os: ubuntu-26.04-arm
+            arch: arm64
+            edition: ee
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -180,7 +263,8 @@ jobs:
           context: .
           push: ${{ !inputs.dry_run }}
           provenance: false
-          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
+          build-args: EDITION=${{ matrix.edition }}
+          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.edition }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
@@ -188,6 +272,9 @@ jobs:
     needs: [docker, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    strategy:
+      matrix:
+        edition: [ce, ee]
 
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
@@ -202,16 +289,20 @@ jobs:
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          EDITION: ${{ matrix.edition }}
         run: |
           docker buildx imagetools create \
-            -t "${IMAGE}:${TAG}" \
-            "${IMAGE}:${TAG}-amd64" \
-            "${IMAGE}:${TAG}-arm64"
+             -t "${IMAGE}:${TAG}-${EDITION}" \
+             "${IMAGE}:${TAG}-${EDITION}-amd64" \
+             "${IMAGE}:${TAG}-${EDITION}-arm64"
 
   smoke:
     needs: [docker-manifest, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    strategy:
+      matrix:
+        edition: [ce, ee]
 
     services:
       postgres:
@@ -249,7 +340,7 @@ jobs:
             -e HOST=http://127.0.0.1:5150 \
             -e YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1 \
             -e YORISHIRO_EMBEDDING_MODEL=unused \
-            "${IMAGE}:${TAG}"
+            "${IMAGE}:${TAG}-${{ matrix.edition }}"
 
           for _ in $(seq 1 60); do
             curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
@@ -286,8 +377,13 @@ jobs:
               echo "ok: $1 ($n)"
             fi
           }
-          expect '*.deb' 2
-          expect '*.rpm' 2
+          for edition in ce ee; do
+            for arch in amd64 arm64; do
+              for ext in deb rpm; do
+                expect "yorishiro-${edition}-${{ needs.prepare.outputs.tag }}-${arch}.${ext}" 1
+              done
+            done
+          done
           exit "$status"
 
       - name: Checksums
@@ -312,5 +408,4 @@ jobs:
 
             Commit: ${{ github.sha }}
 
-            Packages carry both editions in one binary. The paid features stay inactive until
-            `YORISHIRO_LICENSE_KEY` is set.
+            CE and EE are published as separate compile-time artifacts.

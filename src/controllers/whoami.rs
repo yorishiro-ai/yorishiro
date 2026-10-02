@@ -18,7 +18,7 @@ pub struct WhoAmIResponse {
     audit: bool,
 }
 
-#[utoipa::path(get, path = "/api/whoami", responses((status = 200, body = super::openapi::WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = super::openapi::WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
     Json(WhoAmIResponse {
         workspace_id: ctx.workspace_id,
@@ -29,6 +29,7 @@ pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
     })
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![super::route_inventory::path_doc(__path_whoami)]
 }

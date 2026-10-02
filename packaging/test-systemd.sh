@@ -6,13 +6,13 @@
 # must stay runnable without one. What it covers is what `systemd-analyze verify` cannot: that a
 # unit whose syntax is valid actually brings the service up.
 #
-#   ./packaging/test-systemd.sh <directory holding the .deb files>
+#   ./packaging/test-systemd.sh <exact deb package file>
 #
 # Needs docker with --privileged. ubuntu:24.04 and the deb only: the rpm under systemd is
 # checked by hand, because putting an EOL Fedora's package repositories on the critical path of
 # every pull request trades a real dependency for a marginal case.
 #
-# One package, so one run.
+# The caller supplies one exact edition-first package filename.
 #
 # The unconfigured-start section exercises the zero-config default: yorishiro.yaml boots
 # against a local SQLite file with no external dependencies (DATABASE_URL defaults to
@@ -24,8 +24,13 @@
 
 set -uo pipefail
 
-PKG_DIR="${1:?usage: test-systemd.sh <package directory>}"
-PKG_DIR="$(cd "$PKG_DIR" && pwd)"
+PKG_FILE="${1:?usage: test-systemd.sh <exact deb package file>}"
+PKG_FILE="$(cd "$(dirname "$PKG_FILE")" && pwd)/$(basename "$PKG_FILE")"
+case "$(basename "$PKG_FILE")" in
+  yorishiro-ce-*-amd64.deb|yorishiro-ee-*-amd64.deb|yorishiro-ce-*-arm64.deb|yorishiro-ee-*-arm64.deb) ;;
+  *) echo "package filename is not edition-first: $(basename "$PKG_FILE")" >&2; exit 2 ;;
+esac
+PKG_DIR="$(dirname "$PKG_FILE")"
 
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
@@ -34,7 +39,7 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-DEB="$(basename "$(ls "$PKG_DIR"/yorishiro_*.deb | head -1)")"
+DEB="$(basename "$PKG_FILE")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
 
 cleanup() {
@@ -137,6 +142,8 @@ queue:
   reaper:
     age_minutes: 30
     interval_seconds: 60
+workers:
+  mode: BackgroundQueue
 database:
   uri: postgres://yorishiro:secret@$PGIP:5432/yorishiro
   enable_logging: false
