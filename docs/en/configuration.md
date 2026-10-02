@@ -244,6 +244,7 @@ API keys, webhook secrets, OAuth credentials, OIDC tokens, and licence owner inf
 Provider error responses are also omitted from logs because they may echo credentials or tokens.
 This covers deployment and workspace embedding or LLM API keys, Stripe webhook secrets, OAuth client and state-signing credentials, OIDC ID tokens, and the subject in a licence claim.
 HTTP access logs record only the request path, never its query string, so OAuth callback codes and state values are not logged.
+
 ## API key lifecycle
 
 After setup, tenant owners and admins can create, list, and revoke workspace API keys through `/api/api-keys`.
