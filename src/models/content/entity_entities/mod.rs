@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use sea_orm::QuerySelect;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,8 +11,8 @@ mod migration;
 mod snapshots;
 mod validation;
 
-pub use super::_entities::entity_entities::{ActiveModel, Entity, Model};
 use crate::metaschema;
+pub use crate::models::_entities::entity_entities::{ActiveModel, Entity, Model};
 
 #[cfg(feature = "enterprise")]
 pub(crate) use crud::update_if_unchanged;
@@ -19,6 +20,19 @@ pub use crud::{count, create, delete, export_all, get, get_batch, list, update};
 pub use migration::{drift, fill_defaults, migration_dry_run};
 pub use snapshots::{delete_snapshot, snapshot, undo_job};
 pub use validation::validate_data;
+
+pub async fn ids_for_workspace(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<Uuid>, DbErr> {
+    Entity::find()
+        .select_only()
+        .column(crate::models::_entities::entity_entities::Column::Id)
+        .filter(crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id))
+        .into_tuple()
+        .all(db)
+        .await
+}
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -96,7 +110,7 @@ pub struct ListEntitiesQuery {
     /// Restricts results to entities created against this schema version.
     /// Entities keep the version they were written against, so this selects the entities a given version produced, not the ones that would validate against it today.
     pub schema_version: Option<i32>,
-    pub page: super::pagination::ListParams,
+    pub page: crate::models::pagination::ListParams,
 }
 
 /// How one entity stands relative to the active version of its schema.

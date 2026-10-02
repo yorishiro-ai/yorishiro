@@ -1,4 +1,4 @@
-pub use super::_entities::workspace_schema_forks::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 pub type WorkspaceSchemaForks = Entity;
 
@@ -10,9 +10,7 @@ impl ActiveModelBehavior for ActiveModel {
     {
         let mut this = self;
         this.id = crate::db::sqlite_generated_id(db, this.id);
-        if !insert && this.updated_at.is_unchanged() {
-            this.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-        }
+        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
         Ok(this)
     }
 }

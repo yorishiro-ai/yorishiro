@@ -1,4 +1,4 @@
-pub use super::_entities::entity_embeddings_768::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::entity_embeddings_768::{ActiveModel, Entity, Model};
 pub type EntityEmbeddings768 = Entity;
 
 // implement your read-oriented logic here

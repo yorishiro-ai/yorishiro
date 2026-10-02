@@ -1,3 +1,3 @@
-//! Template model area.
-//!
-//! Sources in this directory are compiled through the compatibility declarations in `super`.
+pub mod template_reviews;
+pub mod template_templates;
+pub mod template_versions;

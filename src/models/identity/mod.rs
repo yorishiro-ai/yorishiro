@@ -1,3 +1,10 @@
-//! Identity model area.
-//!
-//! Sources in this directory are compiled through the compatibility declarations in `super`.
+pub mod api_key_audit_log;
+pub mod api_keys;
+pub mod tenancy;
+pub mod tenant_memberships;
+pub mod tenant_tenants;
+pub mod user_users;
+pub mod workspace_embedding_keys;
+pub mod workspace_invites;
+pub mod workspace_llm_keys;
+pub mod workspace_workspaces;

@@ -1,4 +1,4 @@
-pub use super::_entities::workspace_schema_fork_heads::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::workspace_schema_fork_heads::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 pub type WorkspaceSchemaForkHeads = Entity;
 

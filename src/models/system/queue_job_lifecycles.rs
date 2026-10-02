@@ -1,4 +1,6 @@
-pub(crate) use super::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
+pub(crate) use crate::models::_entities::queue_job_lifecycles::{
+    ActiveModel, Column, Entity, Model,
+};
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
@@ -11,13 +13,9 @@ impl ActiveModelBehavior for ActiveModel {
     where
         C: ConnectionTrait,
     {
-        if !insert && self.updated_at.is_unchanged() {
-            let mut this = self;
-            this.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-            Ok(this)
-        } else {
-            Ok(self)
-        }
+        let mut this = self;
+        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        Ok(this)
     }
 }
 

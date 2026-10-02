@@ -1,4 +1,4 @@
-pub use super::_entities::stripe_events::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::stripe_events::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
 #[async_trait::async_trait]

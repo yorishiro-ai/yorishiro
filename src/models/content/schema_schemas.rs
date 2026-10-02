@@ -7,9 +7,9 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
-pub use super::_entities::schema_schemas::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff, validate_definition};
+pub use crate::models::_entities::schema_schemas::{ActiveModel, Entity, Model};
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -193,7 +193,7 @@ pub async fn get_active_schema(
 ) -> Result<SchemaRecord, YorishiroError> {
     // SQLite serializes UUIDs as binary in SeaORM queries, but the migration stores them as
     // hex strings in TEXT columns. Convert to hex for the filter so the comparison works.
-    use super::_entities::schema_schemas::Column;
+    use crate::models::_entities::schema_schemas::Column;
 
     let row = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -218,7 +218,7 @@ pub async fn count_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<i64, YorishiroError> {
-    use super::_entities::schema_schemas::Column;
+    use crate::models::_entities::schema_schemas::Column;
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -236,7 +236,7 @@ pub async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<SchemaRecord>, YorishiroError> {
-    use super::_entities::schema_schemas::Column;
+    use crate::models::_entities::schema_schemas::Column;
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -258,7 +258,7 @@ pub async fn get_by_id(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
-    use super::_entities::schema_schemas::Column;
+    use crate::models::_entities::schema_schemas::Column;
 
     let row = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -335,9 +335,9 @@ impl From<Model> for SchemaSummary {
 pub async fn list(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    page: super::pagination::ListParams,
+    page: crate::models::pagination::ListParams,
 ) -> Result<Vec<SchemaSummary>, YorishiroError> {
-    use super::_entities::schema_schemas::Column;
+    use crate::models::_entities::schema_schemas::Column;
 
     let rows = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -360,7 +360,7 @@ pub async fn notify_upstream_change(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
 ) -> Result<usize, YorishiroError> {
-    use super::_entities::schema_schemas::{Column, Entity};
+    use crate::models::_entities::schema_schemas::{Column, Entity};
     use sea_orm::EntityTrait;
 
     let result = Entity::update_many()
@@ -382,7 +382,7 @@ pub async fn create_schema(
     origin_template_id: Option<Uuid>,
     origin_snapshot: Option<MetaSchemaDefinition>,
 ) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
-    use super::_entities::schema_schemas::Column;
+    use crate::models::_entities::schema_schemas::Column;
 
     validate_definition(&definition)?;
     let name = definition.name.clone();

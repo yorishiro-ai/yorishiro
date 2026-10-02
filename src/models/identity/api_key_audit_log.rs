@@ -10,8 +10,8 @@ use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
 use serde::Serialize;
 use uuid::Uuid;
 
-pub use super::_entities::api_key_audit_log::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
+pub use crate::models::_entities::api_key_audit_log::{ActiveModel, Entity, Model};
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -107,9 +107,9 @@ pub async fn record(
 pub async fn list_for_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    page: super::pagination::ListParams,
+    page: crate::models::pagination::ListParams,
 ) -> Result<Vec<Model>, YorishiroError> {
-    use super::_entities::api_key_audit_log::Column;
+    use crate::models::_entities::api_key_audit_log::Column;
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))

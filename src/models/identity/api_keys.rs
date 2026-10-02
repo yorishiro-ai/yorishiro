@@ -6,7 +6,7 @@ use crate::services::auth::{
     ApiKeyScope, CreatedApiKey, KEY_PREFIX_BYTES, KEY_SECRET_BYTES, hash_key, random_hex,
 };
 
-pub use super::_entities::api_keys::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::api_keys::{ActiveModel, Entity, Model};
 pub type IdentityApiKeys = Entity;
 
 #[async_trait::async_trait]
@@ -52,7 +52,7 @@ impl Entity {
         audit: bool,
         name: &str,
     ) -> Result<CreatedApiKey, YorishiroError> {
-        use super::_entities::workspace_workspaces;
+        use crate::models::_entities::workspace_workspaces;
 
         let txn = db.begin().await.internal()?;
 
@@ -96,9 +96,9 @@ impl Entity {
     pub async fn list_for_workspace(
         conn: &impl ConnectionTrait,
         workspace_id: uuid::Uuid,
-        page: super::pagination::ListParams,
+        page: crate::models::pagination::ListParams,
     ) -> Result<Vec<Model>, YorishiroError> {
-        use super::_entities::api_keys::Column;
+        use crate::models::_entities::api_keys::Column;
 
         Entity::find()
             .filter(Column::WorkspaceId.eq(workspace_id))
@@ -115,7 +115,7 @@ impl Entity {
         conn: &impl ConnectionTrait,
         tenant_id: uuid::Uuid,
     ) -> Result<Vec<Model>, YorishiroError> {
-        use super::_entities::api_keys::Column;
+        use crate::models::_entities::api_keys::Column;
 
         Entity::find()
             .filter(Column::TenantId.eq(tenant_id))
@@ -131,7 +131,7 @@ impl Entity {
         conn: &impl ConnectionTrait,
         key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
-        use super::_entities::api_keys::Column;
+        use crate::models::_entities::api_keys::Column;
 
         let result = Entity::delete_many()
             .filter(Column::Id.eq(key_id))
@@ -154,7 +154,7 @@ impl Entity {
         tenant_id: uuid::Uuid,
         key_id: uuid::Uuid,
     ) -> Result<(), YorishiroError> {
-        use super::_entities::api_keys::Column;
+        use crate::models::_entities::api_keys::Column;
 
         let result = Entity::delete_many()
             .filter(Column::Id.eq(key_id))

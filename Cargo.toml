@@ -15,7 +15,6 @@ enterprise = [
   "dep:base64",
   "dep:hmac",
   "dep:jsonwebtoken",
-  "dep:url",
   "openapi",
 ]
 openapi = ["dep:utoipa", "dep:utoipa-swagger-ui"]
@@ -102,7 +101,6 @@ libsqlite3-sys = "=0.37.0"
 jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"], optional = true }  # licence key verification (ee/services/licence.rs)
 hmac = { version = "0.13.0", optional = true }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
-url = { version = "2.5.8", optional = true }            # OIDC discovery (ee/services/oauth.rs)
 utoipa = { version = "5.4.0", features = ["axum_extras", "uuid"], optional = true }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"], optional = true }
 
@@ -115,8 +113,6 @@ required-features = []
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 tracing-subscriber = "0.3.23"
-rstest = { version = "0.27.0" }
-insta = { version = "1.48.0", features = ["redactions", "yaml", "filters"] }
 # Used by tests/requests/queue.rs to give the SQLite queue a file that is removed with the test.
 tempfile = { version = "3.27.0" }
 # Used by the ee/ request tests folded into tests/requests/.

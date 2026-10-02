@@ -1,4 +1,4 @@
-pub use super::_entities::inference_jobs::{ActiveModel, Column, Entity, Model};
+pub use crate::models::_entities::inference_jobs::{ActiveModel, Column, Entity, Model};
 
 use sea_orm::entity::prelude::*;
 

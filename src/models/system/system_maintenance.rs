@@ -3,7 +3,7 @@
 //! One row, read on every request that could be refused and written only by an operator.
 //! The request role has SELECT only on this table (`migration/src/m20260829_000000_initial_schema.rs`), so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
 
-pub use super::_entities::system_maintenance::{ActiveModel, Column, Entity, Model};
+pub use crate::models::_entities::system_maintenance::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt;

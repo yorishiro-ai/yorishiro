@@ -143,7 +143,7 @@ async fn handle_callback_with_http(
 /// Builds `base` (the provider's `authorization_endpoint`) with `params` appended as a query string.
 /// Returns an error rather than panicking on a malformed `base`, since it comes from an external, unvalidated network response.
 fn url_with_query(base: &str, params: &[(&str, &str)]) -> Result<String, YorishiroError> {
-    let mut url = url::Url::parse(base).map_err(|err| {
+    let mut url = reqwest::Url::parse(base).map_err(|err| {
         YorishiroError::Internal(anyhow::anyhow!(
             "provider's authorization_endpoint '{base}' is not a valid URL: {err}"
         ))

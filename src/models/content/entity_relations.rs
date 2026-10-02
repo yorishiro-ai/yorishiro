@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use std::str::FromStr;
 use uuid::Uuid;
 
-pub use super::_entities::entity_relations::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
+pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model};
 use crate::models::entity_entities::{self, EntityRecord};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,7 +153,7 @@ pub struct ListRelationsQuery {
     /// Restricts the listing to one state.
     /// `None` lists every state, so a caller that does not pass `status` sees deprecated and archived relations along with every other state.
     pub status: Option<RelationStatus>,
-    pub page: super::pagination::ListParams,
+    pub page: crate::models::pagination::ListParams,
 }
 
 /// Validates that `relation_type` doesn't conflict with the source/target entity_types.
@@ -252,7 +252,7 @@ pub async fn get(
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<RelationRecord, YorishiroError> {
-    use super::_entities::entity_relations::Column;
+    use crate::models::_entities::entity_relations::Column;
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -300,7 +300,7 @@ pub async fn delete(
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use super::_entities::entity_relations::Column;
+    use crate::models::_entities::entity_relations::Column;
 
     let result = Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -324,7 +324,7 @@ pub async fn list(
     workspace_id: Uuid,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
-    use super::_entities::entity_relations::Column;
+    use crate::models::_entities::entity_relations::Column;
 
     let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
     if let Some(source_id) = query.source_id {
@@ -352,7 +352,7 @@ pub async fn list(
 
 /// Counts how many relations a workspace holds, for workspace-detail summaries.
 pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i64, YorishiroError> {
-    use super::_entities::entity_relations::Column;
+    use crate::models::_entities::entity_relations::Column;
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
@@ -369,7 +369,7 @@ pub async fn export_all(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
-    use super::_entities::entity_relations::Column;
+    use crate::models::_entities::entity_relations::Column;
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))

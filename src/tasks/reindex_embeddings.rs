@@ -1,6 +1,5 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
-use sea_orm::{FromQueryResult, Statement};
 use uuid::Uuid;
 
 use crate::db::DbHandle;
@@ -23,11 +22,6 @@ use crate::services::embedding;
 ///
 /// PostgreSQL only, for the same reason as `resync_embeddings`: `entity_entities` has no `embedding` column at all on SQLite.
 pub struct ReindexEmbeddings;
-
-#[derive(FromQueryResult)]
-struct CandidateId {
-    id: Uuid,
-}
 
 #[async_trait]
 impl Task for ReindexEmbeddings {
@@ -91,15 +85,12 @@ impl Task for ReindexEmbeddings {
             }
         }
 
-        let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT id FROM entity_entities WHERE workspace_id = $1",
-            [workspace_id.into()],
-        ))
-        .all(&app_context.db)
+        let candidate_ids = crate::models::content::entity_entities::ids_for_workspace(
+            &app_context.db,
+            workspace_id,
+        )
         .await
         .map_err(|err| YorishiroError::Internal(err.into()))?;
-        let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
 
         // Serialize concurrent reindex runs against the same workspace: two runs with different
         // providers would both bypass the write-time model check by design, and embedding writes

@@ -1,4 +1,4 @@
-pub use super::_entities::template_reviews::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::template_reviews::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
 #[async_trait::async_trait]

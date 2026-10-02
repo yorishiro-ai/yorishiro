@@ -1,4 +1,4 @@
-pub use super::_entities::workspace_llm_keys::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::workspace_llm_keys::{ActiveModel, Entity, Model};
 
 use std::fmt;
 

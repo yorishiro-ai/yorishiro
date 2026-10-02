@@ -3,7 +3,7 @@
 //! Distinct from `crate::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
 //! Runs on `ctx.db` (the migration-role connection): `template_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
 
-pub use super::_entities::template_templates::{ActiveModel, Column, Entity, Model};
+pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -139,7 +139,7 @@ fn visible_to(tenant_id: uuid::Uuid) -> Condition {
 pub async fn list_templates(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
-    page: super::pagination::ListParams,
+    page: crate::models::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
     let rows = Entity::find()
         .filter(visible_to(tenant_id))

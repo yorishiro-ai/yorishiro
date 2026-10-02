@@ -4,8 +4,8 @@ use serde::Serialize;
 use std::fmt;
 use std::str::FromStr;
 
-pub use super::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
+pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
