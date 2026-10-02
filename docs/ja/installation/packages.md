@@ -54,5 +54,4 @@ $ sudo systemctl status yorishiro
 $ sudo systemctl status yorishiro-worker
 ```
 
-Loco 1.2.0では、`--server-and-worker`とタグ付きワーカーを組み合わせられないため、
-ワーカーは別ユニットで起動します。3つのworker-classタグと`infer-fill`を処理します。
+Loco 1.2.0では、`--server-and-worker`とタグ付きワーカーを組み合わせられないため、ワーカーは別ユニットで起動します。3つのworker-classタグと`infer-fill`を処理します。

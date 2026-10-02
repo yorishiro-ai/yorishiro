@@ -144,8 +144,8 @@ fn active_licence_plan_is_safe_and_expires_into_fallback() {
         plan: "pro".into(),
         exp: 1000,
     });
-    assert_eq!(licensed.active_plan_at(999).unwrap(), Some(Plan::Pro));
-    assert_eq!(licensed.active_plan_at(1000).unwrap(), None);
+    assert_eq!(licensed.active_plan_at(999), Some(Plan::Pro));
+    assert_eq!(licensed.active_plan_at(1000), None);
 }
 
 #[test]
@@ -155,5 +155,5 @@ fn active_licence_with_unknown_plan_is_diagnostic() {
         plan: "enterprise".into(),
         exp: 1000,
     });
-    assert!(licensed.active_plan_at(999).is_err());
+    assert_eq!(licensed.active_plan_at(999), None);
 }

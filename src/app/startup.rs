@@ -1,6 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use loco_rs::{Result, app::AppContext, boot::BootResult, environment::Environment};
+use loco_rs::{
+    Result,
+    app::AppContext,
+    boot::{BootResult, StartMode},
+    environment::Environment,
+};
 use tokio::task::{JoinHandle, spawn};
 
 use crate::db::AppContextBackend;
@@ -42,8 +47,19 @@ pub(super) fn register_sqlite_extensions() {
 }
 
 /// Runs post-migration startup work without changing the boot hook order.
-pub(super) fn after_boot(result: &BootResult, environment: &Environment) {
-    if !matches!(environment, Environment::Test) {
+pub(super) fn should_run_startup_reindex(mode: &StartMode) -> bool {
+    !matches!(
+        mode,
+        StartMode::WorkerOnly { .. } | StartMode::WorkerAndScheduler { .. }
+    )
+}
+
+pub(super) fn after_boot(
+    result: &BootResult,
+    environment: &Environment,
+    run_startup_reindex: bool,
+) {
+    if !matches!(environment, Environment::Test) && run_startup_reindex {
         spawn_startup_reindex(result.app_context.clone());
         if let Some(config) = crate::services::db_load_guard::LoadGuardConfig::from_env() {
             let ctx = result.app_context.clone();
@@ -210,4 +226,22 @@ fn spawn_startup_reindex(ctx: AppContext) {
 
     // Store the JoinHandle so shutdown_and_wait() can await task completion.
     task.lock().unwrap().replace(join_handle);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_run_startup_reindex;
+    use loco_rs::boot::StartMode;
+
+    #[test]
+    fn worker_only_modes_skip_startup_reindex() {
+        assert!(!should_run_startup_reindex(&StartMode::WorkerOnly {
+            tags: vec![]
+        }));
+        assert!(!should_run_startup_reindex(
+            &StartMode::WorkerAndScheduler { tags: vec![] }
+        ));
+        assert!(should_run_startup_reindex(&StartMode::ServerOnly));
+        assert!(should_run_startup_reindex(&StartMode::ServerAndWorker));
+    }
 }

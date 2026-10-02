@@ -134,11 +134,15 @@ impl LicenceState {
 
     /// Returns the plan from an active licence, if one is present.
     /// An expired or absent licence deliberately falls through to billing/default policy.
-    pub fn active_plan_at(&self, now: i64) -> Result<Option<Plan>, YorishiroError> {
-        let Some(claims) = self.claims.as_ref().filter(|claims| claims.exp > now) else {
-            return Ok(None);
-        };
-        Plan::from_db_str(&claims.plan).map(Some)
+    pub fn active_plan_at(&self, now: i64) -> Option<Plan> {
+        let claims = self.claims.as_ref().filter(|claims| claims.exp > now)?;
+        match Plan::from_db_str(&claims.plan) {
+            Ok(plan) => Some(plan),
+            Err(error) => {
+                tracing::warn!(error = %error, "active licence has an unknown plan; using billing/default queue policy");
+                None
+            }
+        }
     }
 }
 

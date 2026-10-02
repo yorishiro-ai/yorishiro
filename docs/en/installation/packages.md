@@ -54,5 +54,4 @@ $ sudo systemctl status yorishiro
 $ sudo systemctl status yorishiro-worker
 ```
 
-The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged
-workers. It runs the three worker-class tags and `infer-fill`.
+The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged workers. It runs the three worker-class tags and `infer-fill`.

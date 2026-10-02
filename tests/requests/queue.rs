@@ -23,6 +23,7 @@ use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
 use yorishiro::app::App;
+use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::{
     queue_job_lifecycles, tenant_billing, tenant_tenants, workspace_workspaces,
 };
@@ -450,6 +451,50 @@ async fn missing_billing_uses_free_policy_for_both_dispatchers() {
                 && row.concurrency_key.as_deref() == Some("official:free")
                 && row.concurrency_limit == Some(1)
         }));
+    })
+    .await;
+}
+
+/// A concrete licence inserted after boot must replace the default state used by queue policy.
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn active_licence_plan_takes_precedence_over_billing_for_dispatch() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_sqlite_queue(|ctx, _pool, workspace_id| async move {
+        ctx.shared_store
+            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+                sub: "queue-test".into(),
+                plan: "pro".into(),
+                exp: chrono::Utc::now().timestamp() + 3600,
+            })));
+
+        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .expect("find workspace")
+            .expect("workspace");
+        tenant_billing::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(workspace.tenant_id),
+            plan: sea_orm::ActiveValue::Set(Some("free".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("insert billing");
+
+        embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Official, workspace_id))
+            .await
+            .expect("embedding enqueue with active licence");
+        let row = queue_job_lifecycles::Entity::find()
+            .one(&ctx.db)
+            .await
+            .expect("read queue lifecycle")
+            .expect("queue lifecycle");
+        assert_eq!(row.plan.as_deref(), Some("pro"));
+        assert_eq!(row.concurrency_key.as_deref(), Some("official:pro"));
+        assert_eq!(row.concurrency_limit, Some(4));
     })
     .await;
 }

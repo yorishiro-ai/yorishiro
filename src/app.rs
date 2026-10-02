@@ -52,8 +52,7 @@ async fn queue_concurrency_policy(
             .shared_store
             .get::<std::sync::Arc<crate::ee::services::licence::LicenceState>>()
             .ok_or_else(|| "queue policy unavailable: licence state is missing".to_owned())?
-            .active_plan_at(chrono::Utc::now().timestamp())
-            .map_err(|error| format!("queue policy unavailable: invalid licence plan: {error}"))?;
+            .active_plan_at(chrono::Utc::now().timestamp());
         let plan = if let Some(plan) = licence_plan {
             plan
         } else {
@@ -540,6 +539,7 @@ impl Hooks for App {
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         startup::register_sqlite_extensions();
+        let run_startup_reindex = startup::should_run_startup_reindex(&mode);
 
         let result = create_app::<Self, Migrator>(mode, environment, config).await?;
 
@@ -550,7 +550,7 @@ impl Hooks for App {
         // Skip in test environments — the background task holds a `ctx.db`
         // connection that survives the test callback and races with loco's
         // `BootResultWrapper::drop` which tries `DROP DATABASE`.
-        startup::after_boot(&result, environment);
+        startup::after_boot(&result, environment, run_startup_reindex);
 
         Ok(result)
     }

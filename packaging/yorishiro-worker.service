@@ -3,6 +3,8 @@
 [Unit]
 Description=Yorishiro background worker
 After=network.target yorishiro.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

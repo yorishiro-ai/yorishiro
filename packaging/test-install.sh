@@ -186,9 +186,9 @@ note "the systemd unit is valid"
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-   systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service 2>&1' 2>&1)
+  systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service 2>&1' 2>&1)
 if [ -z "$(echo "$out" | grep -v '^$')" ]; then
-   ok "systemd-analyze verify is silent on server and worker units"
+  ok "systemd-analyze verify is silent on server and worker units"
 else
   bad "systemd-analyze verify complained: $(echo "$out" | head -3 | tr '\n' ' ')"
 fi
@@ -219,17 +219,17 @@ out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:24.04 bash -c '
   set -euo pipefail
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-   units="/lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service"
-   for unit in $units; do
-     [ -f "$unit" ] || { echo "NO_UNIT:$unit"; exit 1; }
-   done
-   grep -oE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
+  units="/lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service"
+  for unit in $units; do
+    [ -f "$unit" ] || { echo "NO_UNIT:$unit"; exit 1; }
+  done
+  grep -oE "(^|[[:space:]=\"])/[A-Za-z0-9._/-]+" $units \
     | sed -e "s/^[[:space:]=\"]//" -e "s/[.,]$//" \
     | grep -vE "^/(proc|sys)(/|$)" \
     | sort -u | while read -r p; do
       [ -e "$p" ] || echo "MISSING:$p"
-   done
-   echo CHECKED' 2>&1)
+  done
+  echo CHECKED' 2>&1)
 if ! grep -q CHECKED <<<"$out"; then
   bad "could not check the paths the unit names: $(echo "$out" | tr '\n' ' ')"
 elif grep -q MISSING: <<<"$out"; then
