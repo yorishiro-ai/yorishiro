@@ -33,14 +33,14 @@ public-api-check:
 # Nightly is required because LLVM branch coverage is not available on stable.
 # Artifacts are written to coverage/ (override with COVERAGE_OUTPUT_DIR=...).
 coverage:
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/coverage_report.py
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 LOCO_ENV=test_postgres uv run scripts/coverage_report.py
 
 # Run the full suite against the selected backend (postgres by default).
 test-postgres: build
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		docker compose up -d --wait testdb; \
 	fi
-	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres uv run scripts/test_backend.py postgres
+	DATABASE_URL='$(DATABASE_URL)' RUST_BACKTRACE=1 DB_MAX_CONNECTIONS=100 LOCO_ENV=test_postgres uv run scripts/test_backend.py postgres
 
 test-sqlite: build
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' RUST_BACKTRACE=1 LOCO_ENV=test_sqlite uv run scripts/test_backend.py sqlite
@@ -72,10 +72,10 @@ endif
 # runs migrations, generates entities, tears everything down.
 entities: build
 	docker compose up -d --wait testdb
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 LOCO_ENV=test_postgres ./target/debug/yorishiro db migrate
 	rm -f src/models/_entities/*.rs
 	@if echo '$(DATABASE_URL)' | grep -q '^sqlite://'; then echo "ERROR: entities requires PostgreSQL (DATABASE_URL must start with postgres://)" >&2; exit 1; fi
-	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 LOCO_ENV=test_postgres ./target/debug/yorishiro db entities
+	DATABASE_URL='$(DATABASE_URL)' DB_MAX_CONNECTIONS=100 LOCO_ENV=test_postgres ./target/debug/yorishiro db entities
 	uv run scripts/harden_generated_entities.py
 	docker compose down -v testdb
 
