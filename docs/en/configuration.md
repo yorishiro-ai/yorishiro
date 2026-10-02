@@ -126,6 +126,12 @@ An unconfigured skeleton starts with SQLite locally. No external services are ne
 | `YORISHIRO_EMBEDDING_MODEL` | Unset | Embeddings model name |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding provider (`none`, `local`, or unset for local) |
 
+When both the application and queue use SQLite, the queue URI must name a separate file.
+The packaged default is `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`, while the local skeleton uses `sqlite://yorishiro_queue.sqlite3?mode=rwc`.
+Boot rejects equivalent shared-file URIs after normalizing SQLite paths and ignoring connection query parameters.
+Set `QUEUE_URL` explicitly when moving an existing installation or choosing a custom location.
+PostgreSQL and Redis queue behavior is unaffected.
+
 ### Mailer
 
 Email is not used by Yorishiro by default.

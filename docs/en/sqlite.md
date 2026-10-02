@@ -29,11 +29,18 @@ export DATABASE_URL='sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc'
 cargo run
 ```
 
+SQLite background jobs use a separate file, `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`, by default.
+The application database and queue must not share a file because their independent connection pools can hold SQLite locks against each other while a worker dequeues a job.
+If an existing installation points `QUEUE_URL` at the application file, move the queue database to the separate path before starting the updated version.
+The queue tables are recreated there as needed, so jobs still pending in the old shared file should be drained or migrated by the operator first.
+PostgreSQL and Redis queue configurations are unchanged.
+
 At least 2 connections are required. The server refuses to start if `max_connections` is less than 2.
 
 ## Configuration files
 
 There is no separate SQLite production config file; use `yorishiro.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
+Set `QUEUE_URL` to another SQLite file when using a custom application path.
 
 ## Authentication
 

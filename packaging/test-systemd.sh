@@ -17,7 +17,7 @@
 # The unconfigured-start section exercises the zero-config default: yorishiro.yaml boots
 # against a local SQLite file with no external dependencies (DATABASE_URL defaults to
 # sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
-# queue derives from DATABASE_URL's scheme), so an unconfigured install starts successfully
+# and the queue uses its separate packaged SQLite file), so an unconfigured install starts successfully
 # and serves a single-tenant trial instance. Embeddings are disabled to avoid fetching the
 # ~1 GiB model in CI. The later phase writes PostgreSQL settings to the installed YAML template
 # to verify that path as well.

@@ -9,8 +9,8 @@
 # external dependencies — no Postgres, no Redis, no embedding backend — and serves a
 # single-tenant trial instance.
 # The default database is `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` (an
-# absolute path, independent of the process's CWD), and the queue derives its kind from
-# `DATABASE_URL`'s scheme, so SQLite-to-SQLite is automatic when both are unset.
+# absolute path, independent of the process's CWD), while SQLite jobs use the separate
+# `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc` file.
 # `HOST` defaults to `http://localhost`, which is enough for a trial instance that nobody
 # needs to reach externally.
 #
@@ -86,8 +86,8 @@ server:
 #
 # YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
 # Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
-# With DATABASE_URL unset (defaults to `sqlite://`) or naming PostgreSQL, the queue
-# defaults to the same backend and QUEUE_URL falls back to DATABASE_URL.
+# With DATABASE_URL unset, SQLite uses a separate queue file.
+# PostgreSQL continues to use DATABASE_URL unless QUEUE_URL is set.
 # QUEUE_URL takes no default when an external backend is required (Redis, or explicit
 # non-SQLite queue), matching this file's own no-silent-fallback convention.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
@@ -102,7 +102,7 @@ queue:
 <% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
 queue:
   kind: Sqlite
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc")) %>
+  uri: <%= get_env(name="QUEUE_URL", default="sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc") %>
   dangerously_flush: false
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
   reaper:

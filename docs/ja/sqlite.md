@@ -29,11 +29,18 @@ export DATABASE_URL='sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc'
 cargo run
 ```
 
+SQLite のバックグラウンドジョブは、既定で別ファイル `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc` を使います。
+アプリケーション用とキュー用の接続プールが同じ SQLite ファイルのロックを取り合い、ワーカーのジョブ取り出しが停止するため、ファイルを共有してはいけません。
+既存の設定で `QUEUE_URL` がアプリケーション用ファイルを指している場合は、更新版の起動前に別ファイルへ移行してください。
+旧ファイルに残る未処理ジョブは、運用担当者が先に処理または移行してください。
+PostgreSQL と Redis のキュー設定は変更ありません。
+
 少なくとも2つの接続が必要です。`max_connections` が2未満の場合、サーバーは起動を拒否します。
 
 ## 設定ファイル
 
 本番用の SQLite 専用設定ファイルはありません。`yorishiro.yaml` に `sqlite://` URL を設定してください。
+アプリケーションのパスを変更する場合は、`QUEUE_URL` に別の SQLite ファイルを指定してください。
 
 ## 認証
 

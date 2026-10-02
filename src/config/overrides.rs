@@ -84,17 +84,16 @@ fn apply_queue_overrides(value: &mut Value, database_url: Option<&str>) -> Resul
             "QUEUE_URL is not compatible with queue kind {kind}"
         )));
     }
-    let uri = queue_url
-        .or_else(|| {
-            database_url
-                .filter(|uri| queue_kind_for_uri(uri) == Some(kind.as_str()))
-                .map(str::to_owned)
-        })
-        .or_else(|| {
-            configured_uri
-                .filter(|uri| queue_kind_for_uri(uri) == Some(kind.as_str()))
-                .map(str::to_owned)
-        });
+    let uri = queue_url.or_else(|| {
+        configured_uri
+            .filter(|uri| queue_kind_for_uri(uri) == Some(kind.as_str()))
+            .map(str::to_owned)
+    });
+    let uri = uri.or_else(|| {
+        database_url
+            .filter(|uri| queue_kind_for_uri(uri) == Some(kind.as_str()))
+            .map(str::to_owned)
+    });
     if uri.is_none() {
         return Err(Error::Message(format!(
             "no queue URI is compatible with queue kind {kind}; set QUEUE_URL"
