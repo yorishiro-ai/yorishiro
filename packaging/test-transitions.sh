@@ -29,7 +29,7 @@ run_deb_transition() {
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
-     systemctl --root=/ enable yorishiro.service
+    systemctl --root=/ enable yorishiro.service
     systemctl --root=/ enable yorishiro-worker.service
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${to})\" = 'install ok installed'
@@ -37,7 +37,7 @@ run_deb_transition() {
     grep -qx edited-by-transition /etc/yorishiro/yorishiro.yaml
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = yorishiro:yorishiro
-     test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
+    test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro-worker.service
     test -x /usr/bin/yorishiro
   "
@@ -64,7 +64,7 @@ run_rpm_transition() {
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
-     systemctl --root=/ enable yorishiro.service
+    systemctl --root=/ enable yorishiro.service
     systemctl --root=/ enable yorishiro-worker.service
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     rpm -q yorishiro-${to}
@@ -72,7 +72,7 @@ run_rpm_transition() {
     grep -qx edited-by-transition /etc/yorishiro/yorishiro.yaml
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = yorishiro:yorishiro
-     test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
+    test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro-worker.service
     test -x /usr/bin/yorishiro
   "
