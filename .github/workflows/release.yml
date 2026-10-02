@@ -228,16 +228,17 @@ jobs:
           EDITION: ${{ matrix.edition }}
         run: |
           mkdir -p dist
+          case "$ARCH" in amd64) rpm_arch=x86_64 ;; arm64) rpm_arch=aarch64 ;; esac
           for pkg in deb rpm; do
              nfpm package --config "packaging/nfpm-yorishiro-${EDITION}.yaml" --packager "$pkg" --target dist/
+             if [ "$pkg" = deb ]; then
+               source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
+             else
+               source="dist/yorishiro-${EDITION}-${VERSION}-1.${rpm_arch}.rpm"
+             fi
+             mv "$source" "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.${pkg}"
           done
           ls -1 dist/
-
-      - name: Test the packages
-        run: ./packaging/test-install.sh dist
-
-      - name: Test the packages under systemd
-        run: ./packaging/test-systemd.sh dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ !cancelled() }}
@@ -245,8 +246,65 @@ jobs:
           name: binary-linux-${{ matrix.edition }}-${{ matrix.arch }}
           path: dist/*
 
+  package-tests:
+    needs: [binary, prepare]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+          pattern: binary-*
+          merge-multiple: true
+      - name: Install package tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev rpm
+      - name: Assert exact artifacts and metadata
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          for edition in ce ee; do
+            for arch in amd64 arm64; do
+              for ext in deb rpm; do
+                test -f "dist/yorishiro-${edition}-${VERSION}-${arch}.${ext}"
+              done
+            done
+          done
+          test "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
+          for f in dist/*.deb; do
+            dpkg-deb -I "$f" | grep -E 'Conflicts:.*yorishiro|Replaces:.*yorishiro'
+          done
+          for f in dist/*.rpm; do
+            rpm -qp --conflicts "$f" | grep -qx 'yorishiro\|yorishiro-ce\|yorishiro-ee'
+            rpm -qp --obsoletes "$f" | grep -qx 'yorishiro\|yorishiro-ce\|yorishiro-ee'
+          done
+      - name: Build retired unified packages for migration tests
+        env:
+          VERSION: ${{ inputs.version }}
+          ARCH: amd64
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/nfpm.tar.gz https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz
+          tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
+          sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
+          mkdir -p target/release /tmp/unified
+          dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
+          cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
+          nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager deb --target /tmp/unified
+          nfpm package --config packaging/nfpm-yorishiro-unified.yaml --packager rpm --target /tmp/unified
+          mv "/tmp/unified/yorishiro_${VERSION}_amd64.deb" "/tmp/unified/yorishiro-${VERSION}-amd64.deb"
+          mv "/tmp/unified/yorishiro-${VERSION}-1.x86_64.rpm" "/tmp/unified/yorishiro-${VERSION}-amd64.rpm"
+      - name: Test package transitions and co-install refusal
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./packaging/test-transitions.sh dist /tmp/unified "$VERSION"
+      - name: Test representative installed packages
+        run: |
+          ./packaging/test-install.sh "dist/yorishiro-ce-${{ inputs.version }}-amd64.deb"
+          ./packaging/test-systemd.sh "dist/yorishiro-ee-${{ inputs.version }}-amd64.deb"
+
   docker:
-    needs: prepare
+    needs: [prepare, package-tests]
     strategy:
       matrix:
         include:
@@ -410,8 +468,13 @@ jobs:
               echo "ok: $1 ($n)"
             fi
           }
-           expect '*.deb' 4
-           expect '*.rpm' 4
+          for edition in ce ee; do
+            for arch in amd64 arm64; do
+              for ext in deb rpm; do
+                expect "yorishiro-${edition}-${{ inputs.version }}-${arch}.${ext}" 1
+              done
+            done
+          done
           exit "$status"
 
       - name: Checksums

@@ -9,7 +9,7 @@ use crate::error::ResultExt;
 use crate::models::export;
 
 /// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
-#[utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn export_jsonl(
     authorized: Authorized<ReadScope>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -25,6 +25,7 @@ pub async fn export_jsonl(
     Ok(([(header::CONTENT_TYPE, "application/x-ndjson")], body))
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![super::route_inventory::path_doc(__path_export_jsonl)]
 }

@@ -16,14 +16,16 @@ $ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yor
 $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 ```
 
-## Installed files
+## Installed files (CE)
 
 | File | Description |
 |---|---|
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/etc/yorishiro/yorishiro.yaml` | Editable canonical configuration template |
-| `/etc/yorishiro/LICENSE.enterprise` | Enterprise licence |
+
+The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
+CE does not install the enterprise licence file.
 
 ## Configuration
 

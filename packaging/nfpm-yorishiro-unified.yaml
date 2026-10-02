@@ -1,10 +1,6 @@
-# Enterprise package. The enterprise feature is compiled into this artifact.
-# compiles into this crate as a module (`src/lib.rs`'s `#[path = "../ee/mod.rs"]`), and what a
-# deployment serves is decided at runtime by the licence layer, not by which file was installed.
-#
-# The `conflicts` block below still names the retired `yorishiro-ce`, so a machine carrying
-# the old package can move to this one.
-name: yorishiro-ee
+# Community package. It is built without the `enterprise` Cargo feature.
+# This package contains only the community build.
+name: yorishiro
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
@@ -19,11 +15,10 @@ priority: optional
 maintainer: Yorishiro Contributors
 description: |
   An MCP-native, multi-tenant knowledge store with user-defined schemas.
-  Includes the enterprise features (billing, SSO, marketplace, LLM-backed fill).
-  Those stay disabled until YORISHIRO_LICENSE_KEY is set; everything else works without one.
+  Includes the community server features.
 vendor: Yorishiro
 homepage: https://github.com/yorishiro-ai/yorishiro
-license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
+license: BUSL-1.1
 
 depends:
   - ca-certificates
@@ -62,8 +57,9 @@ depends:
 # bindings, it rejects any binary whose version-requirements section names a version the library
 # lacks. `objdump -p` is the one that answers the question the package manager needs.
 #
-# The binary links to the system C++ runtime, so the package declares the C++ runtime and libgcc
-# explicitly rather than relying on an incidental dependency.
+# There is no GLIBCXX floor as of the candle-based embedding provider: `readelf -V` on the real
+# The binary links to the system C++ runtime, so the retired package declares the native runtime
+# dependencies explicitly rather than relying on an incidental dependency.
 #
 # This floor is why the release build has to happen in CI rather than from a developer's
 # `target/release`: a binary linked against a newer host glibc raises the real requirement above
@@ -81,13 +77,6 @@ overrides:
       - libc.so.6(GLIBC_2.39)(64bit)
       - libgcc
       - libstdc++
-
-conflicts:
-  - yorishiro
-  - yorishiro-ce
-replaces:
-  - yorishiro
-  - yorishiro-ce
 
 contents:
   - src: ./target/release/yorishiro
@@ -109,11 +98,6 @@ contents:
   # silently dropped on exactly the systems most likely to be used for a deployment.
   - src: ./LICENSE
     dst: /usr/share/doc/yorishiro/copyright
-  # The enterprise licence stays outside /usr/share/doc.
-  # A minimal image's `path-include` covers the name `copyright` exactly, so a file named
-  # `copyright.ee` is deleted at unpack time.
-  - src: ./ee/LICENSE
-    dst: /etc/yorishiro/LICENSE.enterprise
 
 scripts:
   preinstall: ./packaging/preinstall.sh

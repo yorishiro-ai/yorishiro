@@ -63,7 +63,7 @@ where
     value.parse().map_err(serde::de::Error::custom)
 }
 
-#[utoipa::path(get, path = "/api/system/maintenance", responses((status = 200, body = super::openapi::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/system/maintenance", responses((status = 200, body = super::openapi::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn get_maintenance(
     State(ctx): State<AppContext>,
     _authorized: Authorized<MigrationScope>,
@@ -72,7 +72,7 @@ pub async fn get_maintenance(
     Ok(Json(current.into()))
 }
 
-#[utoipa::path(put, path = "/api/system/maintenance", request_body = super::openapi::SetMaintenanceRequest, responses((status = 200, body = super::openapi::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community")]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/system/maintenance", request_body = super::openapi::SetMaintenanceRequest, responses((status = 200, body = super::openapi::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn set_maintenance(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
@@ -111,6 +111,7 @@ pub async fn set_maintenance(
     Ok(Json(updated.into()))
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_get_maintenance),

@@ -7,7 +7,7 @@
 # None of that is visible from the package contents: a package passes inspection and still fails
 # the install. The test is the install.
 #
-#   ./packaging/test-install.sh <directory holding the .deb and .rpm files>
+#   ./packaging/test-install.sh <exact package file>
 #
 # Needs docker. Runs the same matrix locally as in CI, so a failure can be reproduced without
 # pushing.
@@ -16,8 +16,13 @@
 
 set -uo pipefail
 
-PKG_DIR="${1:?usage: test-install.sh <package directory>}"
-PKG_DIR="$(cd "$PKG_DIR" && pwd)"
+PKG_FILE="${1:?usage: test-install.sh <exact package file>}"
+PKG_FILE="$(cd "$(dirname "$PKG_FILE")" && pwd)/$(basename "$PKG_FILE")"
+PKG_DIR="$(dirname "$PKG_FILE")"
+case "$(basename "$PKG_FILE")" in
+  yorishiro-ce-*-amd64.deb|yorishiro-ee-*-amd64.deb|yorishiro-ce-*-arm64.deb|yorishiro-ee-*-arm64.deb) ;;
+  *) echo "package filename is not edition-first: $(basename "$PKG_FILE")" >&2; exit 2 ;;
+esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The floor the package declares. Read rather than hardcoded: this file must not be the place
@@ -40,9 +45,19 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
 note() { printf '\n== %s ==\n' "$1"; }
 
-deb() { ls "$PKG_DIR"/yorishiro*.deb | head -1; }
-rpm() { ls "$PKG_DIR"/yorishiro*.rpm | head -1; }
-edition() { basename "$(deb)" | grep -q '^yorishiro-ee-' && echo ee || echo ce; }
+deb() {
+  case "$PKG_FILE" in
+    *.deb) printf '%s\n' "$PKG_FILE" ;;
+    *.rpm) printf '%s/%s.deb\n' "$PKG_DIR" "$(basename "${PKG_FILE%.rpm}")" ;;
+  esac
+}
+rpm() {
+  case "$PKG_FILE" in
+    *.rpm) printf '%s\n' "$PKG_FILE" ;;
+    *.deb) printf '%s/%s.rpm\n' "$PKG_DIR" "$(basename "${PKG_FILE%.deb}")" ;;
+  esac
+}
+edition() { basename "$PKG_FILE" | grep -q '^yorishiro-ee-' && echo ee || echo ce; }
 
 # --------------------------------------------------------------------------------------------
 note "deb on ubuntu:24.04 — the supported case"

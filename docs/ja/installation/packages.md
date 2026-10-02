@@ -16,14 +16,16 @@ $ wget https://github.com/yorishiro-ai/yorishiro/releases/download/<VERSION>/yor
 $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 ```
 
-## インストール内容
+## インストール内容（CE）
 
 | ファイル | 説明 |
 |---|---|
 | `/usr/bin/yorishiro` | バイナリ |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
 | `/etc/yorishiro/yorishiro.yaml` | 編集可能な正規設定テンプレート |
-| `/etc/yorishiro/LICENSE.enterprise` | エンタープライズライセンス |
+
+EE パッケージは同じ共有パスに加えて `/etc/yorishiro/LICENSE.enterprise` をインストールします。
+CE は EE ライセンスファイルをインストールしません。
 
 ## 設定
 

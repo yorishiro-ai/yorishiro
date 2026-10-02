@@ -34,7 +34,7 @@ pub struct InferFillRequest {
     pub status: InferenceJobStatus,
 }
 
-#[utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -94,7 +94,7 @@ pub struct InferJobStatus {
     pub error: Option<String>,
 }
 
-#[utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn infer_job_status(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -196,7 +196,7 @@ async fn authorized_job(
 }
 
 /// `GET /api/inference-jobs/{job_id}/proposals`
-#[utoipa::path(get, path = "/api/inference-jobs/{job_id}/proposals", params(("job_id" = String, Path)), responses((status = 200, body = [crate::controllers::openapi::InferenceProposalResponse]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}/proposals", params(("job_id" = String, Path)), responses((status = 200, body = [crate::controllers::openapi::InferenceProposalResponse]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn list_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -209,7 +209,7 @@ async fn list_proposals(
     Ok(Json(proposals))
 }
 
-#[utoipa::path(post, path = "/api/inference-jobs/{job_id}/reject", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/reject", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn reject_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -222,7 +222,7 @@ async fn reject_proposals(
     Ok(Json(report))
 }
 
-#[utoipa::path(post, path = "/api/inference-jobs/{job_id}/discard", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/discard", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn discard_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -253,7 +253,7 @@ async fn proposal_transaction(
         .internal()?)
 }
 
-#[utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn confirm_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -268,7 +268,7 @@ async fn confirm_proposals(
 }
 
 /// `PUT /api/workspace/llm-key`
-#[utoipa::path(put, path = "/api/workspace/llm-key", request_body = crate::controllers::openapi::LlmKeyRequest, responses((status = 204, description = "LLM credentials saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/llm-key", request_body = crate::controllers::openapi::LlmKeyRequest, responses((status = 204, description = "LLM credentials saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn set_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -288,7 +288,7 @@ async fn set_llm_key(
 }
 
 /// `GET /api/workspace/llm-key`
-#[utoipa::path(get, path = "/api/workspace/llm-key", responses((status = 200, body = crate::controllers::openapi::LlmKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/llm-key", responses((status = 200, body = crate::controllers::openapi::LlmKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn get_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -302,7 +302,7 @@ async fn get_llm_key(
 }
 
 /// `DELETE /api/workspace/llm-key`
-#[utoipa::path(delete, path = "/api/workspace/llm-key", responses((status = 204, description = "LLM credentials removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/llm-key", responses((status = 204, description = "LLM credentials removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn delete_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -323,6 +323,7 @@ pub struct SetLlmKeyRequest {
     pub api_key: String,
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
     vec![
         crate::controllers::route_inventory::path_doc(__path_set_llm_key),
@@ -331,12 +332,14 @@ pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDo
     ]
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
     vec![crate::controllers::route_inventory::path_doc(
         __path_infer_fill,
     )]
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn job_status_openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
     vec![
         crate::controllers::route_inventory::path_doc(__path_infer_job_status),

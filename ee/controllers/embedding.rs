@@ -33,7 +33,7 @@ pub struct SetEmbeddingKeyRequest {
 }
 
 /// `PUT /api/workspace/embedding-key`
-#[utoipa::path(put, path = "/api/workspace/embedding-key", request_body = crate::controllers::openapi::EmbeddingKeyRequest, responses((status = 204, description = "Embedding provider saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/embedding-key", request_body = crate::controllers::openapi::EmbeddingKeyRequest, responses((status = 204, description = "Embedding provider saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -89,7 +89,7 @@ async fn set_embedding_key(
 }
 
 /// `GET /api/workspace/embedding-key`
-#[utoipa::path(get, path = "/api/workspace/embedding-key", responses((status = 200, body = crate::controllers::openapi::EmbeddingKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/embedding-key", responses((status = 200, body = crate::controllers::openapi::EmbeddingKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn get_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -105,7 +105,7 @@ async fn get_embedding_key(
 }
 
 /// `DELETE /api/workspace/embedding-key`
-#[utoipa::path(delete, path = "/api/workspace/embedding-key", responses((status = 204, description = "Embedding provider removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise")]
+#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/embedding-key", responses((status = 204, description = "Embedding provider removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn delete_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -125,6 +125,7 @@ pub fn routes() -> Routes {
     )
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<crate::controllers::route_inventory::RouteDoc> {
     vec![
         crate::controllers::route_inventory::path_doc(__path_set_embedding_key),

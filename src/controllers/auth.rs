@@ -40,14 +40,14 @@ pub struct SignupResponse {
     pub workspaces: Vec<WorkspaceSummary>,
 }
 
-#[utoipa::path(
+#[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/signup",
     request_body = super::openapi::SignupRequest,
     responses((status = 201, body = super::openapi::SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
-)]
+))]
 pub async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
@@ -169,14 +169,14 @@ pub struct LoginResponse {
     pub user_id: Uuid,
 }
 
-#[utoipa::path(
+#[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/login",
     request_body = super::openapi::LoginRequest,
     responses((status = 200, body = super::openapi::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
-)]
+))]
 pub async fn login(
     State(ctx): State<AppContext>,
     Json(body): Json<LoginRequest>,
@@ -257,6 +257,7 @@ pub fn routes() -> Routes {
         .add("/login", post(login))
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::route_inventory::RouteDoc> {
     vec![
         super::route_inventory::path_doc(__path_signup),

@@ -4,7 +4,6 @@ name: yorishiro-ce
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
-file_name_template: yorishiro-ce-${VERSION}-${ARCH}
 # nfpm defaults to `version_schema: semver`, which parses the version and rewrites it. A
 # prerelease tag is not a SemVer version, and the default mangles it rather than refusing:
 # `20260830-1` becomes `20260830.0.0~1`, reading the `-1` as a SemVer prerelease suffix and
@@ -41,8 +40,8 @@ depends:
 # Re-measured against the candle-based binary from a real CI build on the former Ubuntu 24.04
 # runner (release.yml, dry_run, binary/amd64 job): `readelf -V` on the extracted binary shows
 # GLIBC_2.39 as the highest versioned symbol required, the same figure the ort-based binary
-# needed. Removing `ort` changed what the binary links (no more libstdc++, no more openssl) but
-# did not move this floor on that runner.
+# needed. Removing `ort` changed the native library set but did not move this floor on that
+# runner.
 #
 # That the floor comes from the build host is measured, across five builds: a host at glibc 2.31
 # produces a binary needing 2.30, 2.35 needs 2.34, 2.39 needs 2.39, 2.44 needs 2.43. Same
@@ -58,12 +57,8 @@ depends:
 # bindings, it rejects any binary whose version-requirements section names a version the library
 # lacks. `objdump -p` is the one that answers the question the package manager needs.
 #
-# There is no GLIBCXX floor as of the candle-based embedding provider: `readelf -V` on the real
-# CI-built amd64 binary shows no GLIBCXX version requirement at all, and no libstdc++.so in
-# NEEDED. `onig_sys` (tokenizers' oniguruma dependency) and candle's C++ kernels are both
-# statically linked, unlike onnxruntime, which is what put GLIBCXX_3.4.30 here before.
-# `libstdc++6`/`libstdc++ >= 12` are dropped outright rather than carried forward: their absence
-# is a structural fact (no such link exists at all), not a number needing re-measurement.
+# The binary links to the system C++ runtime, so the package declares the C++ runtime and libgcc
+# explicitly rather than relying on an incidental dependency.
 #
 # This floor is why the release build has to happen in CI rather than from a developer's
 # `target/release`: a binary linked against a newer host glibc raises the real requirement above
@@ -73,14 +68,20 @@ overrides:
     depends:
       - ca-certificates
       - libc6 (>= 2.39)
+      - libgcc-s1
+      - libstdc++6
   rpm:
     depends:
       - ca-certificates
       - libc.so.6(GLIBC_2.39)(64bit)
+      - libgcc
+      - libstdc++
 
 conflicts:
+  - yorishiro
   - yorishiro-ee
 replaces:
+  - yorishiro
   - yorishiro-ee
 
 contents:

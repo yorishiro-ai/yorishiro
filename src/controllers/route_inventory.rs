@@ -1,12 +1,15 @@
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
+#[cfg(feature = "openapi")]
 use utoipa::openapi::path::{HttpMethod, Operation};
+#[cfg(feature = "openapi")]
 use utoipa::openapi::{RefOr, Schema};
 
 /// The edition that owns a REST route.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Edition {
     Community,
+    #[cfg(feature = "openapi")]
     Enterprise,
 }
 
@@ -14,6 +17,7 @@ pub(crate) enum Edition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RouteClass {
     Public,
+    #[cfg(feature = "openapi")]
     Infrastructure,
 }
 
@@ -22,9 +26,12 @@ pub(crate) enum RouteClass {
 pub(crate) struct RouteEntry {
     pub(crate) path: String,
     pub(crate) method: Method,
+    #[cfg(feature = "openapi")]
     pub(crate) edition: Edition,
+    #[cfg(feature = "openapi")]
     pub(crate) gated: bool,
     pub(crate) operation_id: String,
+    #[cfg(feature = "openapi")]
     pub(crate) class: RouteClass,
 }
 
@@ -33,10 +40,12 @@ pub(crate) struct RouteEntry {
 pub(crate) struct RouteInventory {
     pub(crate) entries: Vec<RouteEntry>,
     pub(crate) exclusions: Vec<InfrastructureExclusion>,
+    #[cfg(feature = "openapi")]
     pub(crate) docs: Vec<RouteDoc>,
 }
 
 /// OpenAPI metadata emitted next to the handler that serves an operation.
+#[cfg(feature = "openapi")]
 #[derive(Clone)]
 pub(crate) struct RouteDoc {
     pub(crate) path: String,
@@ -45,6 +54,7 @@ pub(crate) struct RouteDoc {
     pub(crate) schemas: Vec<(String, RefOr<Schema>)>,
 }
 
+#[cfg(feature = "openapi")]
 fn openapi_method(method: &Method) -> HttpMethod {
     match *method {
         Method::GET => HttpMethod::Get,
@@ -59,6 +69,7 @@ fn openapi_method(method: &Method) -> HttpMethod {
     }
 }
 
+#[cfg(feature = "openapi")]
 pub(crate) fn path_doc<P>(_: P) -> RouteDoc
 where
     P: utoipa::Path + utoipa::__dev::SchemaReferences,
@@ -87,21 +98,27 @@ impl RouteInventory {
         gated: bool,
         class: RouteClass,
     ) {
+        #[cfg(not(feature = "openapi"))]
+        let _ = (edition, gated, class);
         for route in routes.collect() {
             for method in route.actions {
                 let operation_id = operation_id(&method, &route.uri);
                 self.entries.push(RouteEntry {
                     path: route.uri.clone(),
                     method,
+                    #[cfg(feature = "openapi")]
                     edition,
+                    #[cfg(feature = "openapi")]
                     gated,
                     operation_id,
+                    #[cfg(feature = "openapi")]
                     class,
                 });
             }
         }
     }
 
+    #[cfg(feature = "openapi")]
     pub(crate) fn add_docs(&mut self, docs: impl IntoIterator<Item = RouteDoc>) {
         self.docs.extend(docs);
     }
@@ -114,15 +131,19 @@ impl RouteInventory {
                 self.entries.push(RouteEntry {
                     path: route.uri.clone(),
                     method: method.clone(),
+                    #[cfg(feature = "openapi")]
                     edition: Edition::Community,
+                    #[cfg(feature = "openapi")]
                     gated: false,
                     operation_id: operation_id(&method, &route.uri),
+                    #[cfg(feature = "openapi")]
                     class: RouteClass::Infrastructure,
                 });
             }
         }
     }
 
+    #[cfg(feature = "openapi")]
     pub(crate) fn public(&self, edition: Edition) -> impl Iterator<Item = &RouteEntry> {
         self.entries.iter().filter(move |entry| {
             entry.class == RouteClass::Public
@@ -155,34 +176,39 @@ impl RouteInventory {
             );
         }
 
-        let mut docs = std::collections::HashSet::new();
-        for doc in &self.docs {
-            for method in &doc.methods {
+        #[cfg(feature = "openapi")]
+        {
+            let mut docs = std::collections::HashSet::new();
+            for doc in &self.docs {
+                for method in &doc.methods {
+                    assert!(
+                        docs.insert((doc.path.clone(), method.clone())),
+                        "duplicate OpenAPI metadata: {}",
+                        doc.path,
+                    );
+                }
+            }
+            for entry in self.public(Edition::Enterprise) {
                 assert!(
-                    docs.insert((doc.path.clone(), method.clone())),
-                    "duplicate OpenAPI metadata: {}",
-                    doc.path,
+                    self.docs.iter().any(|doc| {
+                        doc.path == entry.path
+                            && doc.methods.contains(&openapi_method(&entry.method))
+                    }),
+                    "missing OpenAPI metadata for {} {}",
+                    entry.method,
+                    entry.path
                 );
             }
-        }
-        for entry in self.public(Edition::Enterprise) {
-            assert!(
-                self.docs.iter().any(|doc| {
-                    doc.path == entry.path && doc.methods.contains(&openapi_method(&entry.method))
-                }),
-                "missing OpenAPI metadata for {} {}",
-                entry.method,
-                entry.path
-            );
-        }
-        for doc in &self.docs {
-            assert!(
-                self.public(Edition::Enterprise).any(|entry| {
-                    doc.path == entry.path && doc.methods.contains(&openapi_method(&entry.method))
-                }),
-                "OpenAPI metadata has no composed route: {}",
-                doc.path
-            );
+            for doc in &self.docs {
+                assert!(
+                    self.public(Edition::Enterprise).any(|entry| {
+                        doc.path == entry.path
+                            && doc.methods.contains(&openapi_method(&entry.method))
+                    }),
+                    "OpenAPI metadata has no composed route: {}",
+                    doc.path
+                );
+            }
         }
     }
 
