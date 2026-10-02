@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::error::YorishiroError;
 use crate::metaschema::MetaSchemaDefinition;
-use crate::models::content::schema_schemas;
+use crate::models::schema_schemas;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -172,7 +172,7 @@ impl YorishiroMcpServer {
             },
             (None, Some(template_id)) => {
                 let (definition, origin) =
-                    match crate::models::templates::template_templates::resolve_template_definition(
+                    match crate::models::template_templates::resolve_template_definition(
                         &self.ctx.db,
                         authorized.ctx.tenant_id,
                         &template_id,

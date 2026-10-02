@@ -24,11 +24,11 @@ Project-specific code remains only where the framework APIs cannot preserve requ
 - [ ] Correct stale testing, edition, module, and Git workflow rules.
 - [ ] Keep `gh-wait` optional and retain the repository-specific CI workflow table.
 
-### P0: finish the grouped model layout
+### P0: restore the Loco model layout
 
-- [ ] Declare every grouped model through its area's `mod.rs`.
+- [x] Place every application model at `src/models/<table>.rs` and declare it through `src/models/mod.rs`.
 - [ ] Keep `entity_entities` and `tenancy` private implementation directories inside their owning areas.
-- [ ] Remove marker-only area modules, zero-byte sentinels, and `#[path]` compatibility declarations.
+- [x] Remove area modules, zero-byte sentinels, and `#[path]` compatibility declarations.
 - [ ] Move production imports to canonical area paths, then rewrite test imports last.
 - [ ] Run entity regeneration and prove generated extensions are not overwritten.
 - [ ] Preserve `_entities`, `pagination`, and justified multi-table/query modules.

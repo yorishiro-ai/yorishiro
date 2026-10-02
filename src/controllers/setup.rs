@@ -20,8 +20,8 @@ use uuid::Uuid;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::embedding_provider;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::identity::api_keys::IdentityApiKeys;
-use crate::models::identity::tenancy::{self, MembershipRole};
+use crate::models::api_keys::IdentityApiKeys;
+use crate::models::tenancy::{self, MembershipRole};
 
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     let settings = ctx

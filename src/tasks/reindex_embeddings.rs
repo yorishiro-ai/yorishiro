@@ -92,12 +92,10 @@ impl Task for ReindexEmbeddings {
             }
         }
 
-        let candidate_ids = crate::models::content::entity_entities::ids_for_workspace(
-            &app_context.db,
-            workspace_id,
-        )
-        .await
-        .map_err(|err| YorishiroError::Internal(err.into()))?;
+        let candidate_ids =
+            crate::models::entity_entities::ids_for_workspace(&app_context.db, workspace_id)
+                .await
+                .map_err(|err| YorishiroError::Internal(err.into()))?;
 
         // Serialize concurrent reindex runs against the same workspace: two runs with different
         // providers would both bypass the write-time model check by design, and embedding writes

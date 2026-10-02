@@ -2,7 +2,7 @@ use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::content::entity_entities::EntityRecord;
+use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
@@ -22,8 +22,7 @@ async fn reindex_embedding_for_record(
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexStep, YorishiroError> {
     let schema =
-        crate::models::content::schema_schemas::get_by_id(conn, workspace_id, record.schema_id)
-            .await?;
+        crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
     let entity_type_def = schema
         .definition
         .entity_types
@@ -63,10 +62,9 @@ pub(super) async fn run(
     candidate_ids: &[Uuid],
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
-    let records =
-        crate::models::content::entity_entities::get_batch(conn, workspace_id, candidate_ids)
-            .await
-            .map_err(|err| YorishiroError::Internal(err.into()))?;
+    let records = crate::models::entity_entities::get_batch(conn, workspace_id, candidate_ids)
+        .await
+        .map_err(|err| YorishiroError::Internal(err.into()))?;
 
     let mut reindexed = 0;
     let mut failures = Vec::new();

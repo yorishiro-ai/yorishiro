@@ -11,7 +11,7 @@ pub(super) async fn resolve_embedding_chain(
     licenced: bool,
     deployment_dimensions: usize,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
-    let row = crate::models::identity::workspace_workspaces::embedding_chain(conn, workspace_id)
+    let row = crate::models::workspace_workspaces::embedding_chain(conn, workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
 

@@ -11,7 +11,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::models::content::entity_entities;
+use crate::models::entity_entities;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -304,15 +304,15 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        if let Err(err) = crate::models::identity::api_key_audit_log::record(
+        if let Err(err) = crate::models::api_key_audit_log::record(
             authorized.txn(),
-            crate::models::identity::api_key_audit_log::AuditActor {
+            crate::models::api_key_audit_log::AuditActor {
                 workspace_id,
                 tenant_id: authorized.ctx.tenant_id,
                 api_key_id: authorized.ctx.api_key_id,
                 user_id: authorized.ctx.user_id,
             },
-            crate::models::identity::api_key_audit_log::AuditAction::FillDefaults,
+            crate::models::api_key_audit_log::AuditAction::FillDefaults,
             serde_json::json!({
                 "schema_name": schema_name,
                 "job_id": job_id,

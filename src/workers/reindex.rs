@@ -55,7 +55,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
 
     // Fetch all entity IDs for this workspace.
     let candidate_ids =
-        crate::models::content::entity_entities::ids_for_workspace(&ctx.db, args.workspace_id)
+        crate::models::entity_entities::ids_for_workspace(&ctx.db, args.workspace_id)
             .await
             .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
@@ -108,14 +108,14 @@ macro_rules! reindex_worker_for_class {
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
                 let admission = if let Some(id) = args.lifecycle_id {
-                    match crate::models::system::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
+                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
                     {
-                        Ok(admission @ (crate::models::system::queue_job_lifecycles::Admission::Started { .. } | crate::models::system::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
+                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
                         Ok(
-                            crate::models::system::queue_job_lifecycles::Admission::Duplicate { .. }
-                            | crate::models::system::queue_job_lifecycles::Admission::Terminal,
+                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+                            | crate::models::queue_job_lifecycles::Admission::Terminal,
                         ) => return Ok(()),
-                        Ok(crate::models::system::queue_job_lifecycles::Admission::Saturated { attempt }) => {
+                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
                             let scheduling = crate::services::queue::decide($class);
                             tracing::warn!(
                                 lifecycle_id = %id,
@@ -125,7 +125,7 @@ macro_rules! reindex_worker_for_class {
                                 "worker capacity saturated; preserving class reservation"
                             );
                             match attempt {
-                                Some(attempt) => crate::models::system::queue_job_lifecycles::Entity::defer_at(
+                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
                                     &self.ctx.db,
                                     id,
                                     attempt,
@@ -133,7 +133,7 @@ macro_rules! reindex_worker_for_class {
                                     chrono::Utc::now().fixed_offset(),
                                 )
                                 .await,
-                                None => crate::models::system::queue_job_lifecycles::Entity::defer(
+                                None => crate::models::queue_job_lifecycles::Entity::defer(
                                     &self.ctx.db,
                                     id,
                                     None,
@@ -153,12 +153,12 @@ macro_rules! reindex_worker_for_class {
                         Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
                     }
                 } else {
-                    crate::models::system::queue_job_lifecycles::Admission::Started { attempt: 0 }
+                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
                 };
                 let admitted = admission.attempt().is_some();
                 let attempt = admission.attempt();
                 let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
-                    crate::models::system::queue_job_lifecycles::Entity::heartbeat(
+                    crate::models::queue_job_lifecycles::Entity::heartbeat(
                         self.ctx.db.clone(), id, attempt,
                     )
                 });
@@ -169,7 +169,7 @@ macro_rules! reindex_worker_for_class {
                 if admitted {
                     if let Some(id) = args.lifecycle_id {
                         if result.is_ok() {
-                            let _ = crate::models::system::queue_job_lifecycles::Entity::finish(
+                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
                                 &self.ctx.db,
                                 id,
                                 attempt,
@@ -178,7 +178,7 @@ macro_rules! reindex_worker_for_class {
                             )
                             .await;
                         } else if let Some(error) = result.as_ref().err() {
-                            crate::models::system::queue_job_lifecycles::Entity::defer(
+                            crate::models::queue_job_lifecycles::Entity::defer(
                                 &self.ctx.db,
                                 id,
                                 attempt,

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::models::templates::template_templates;
+use crate::models::template_templates;
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]

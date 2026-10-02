@@ -1,25 +1,39 @@
 pub mod _entities;
-pub mod content;
-pub mod identity;
-pub mod pagination;
-pub mod system;
-pub mod templates;
-
-pub use content::{
-    entity_column_preferences, entity_embeddings, entity_embeddings_768, entity_embeddings_1024,
-    entity_embeddings_1536, entity_entities, entity_relations, entity_snapshots, export, import,
-    recall, schema_schemas, search, workspace_schema_fork_heads, workspace_schema_forks,
-};
-pub use identity::{
-    api_key_audit_log, api_keys, tenancy, tenant_memberships, tenant_tenants, user_users,
-    workspace_embedding_keys, workspace_invites, workspace_llm_keys, workspace_workspaces,
-};
-#[cfg(feature = "enterprise")]
-pub(crate) use system::queue_job_lifecycles;
-pub use system::{
-    compute_credit_ledger, inference_jobs, stripe_events, system_maintenance, tenant_billing,
-    tenant_reindex_schedules, workspace_worker_classes,
-};
-pub use templates::{template_reviews, template_templates, template_versions};
-
+pub mod api_key_audit_log;
+pub mod api_keys;
+pub mod compute_credit_ledger;
+pub mod entity_column_preferences;
+pub mod entity_embeddings;
+pub mod entity_embeddings_1024;
+pub mod entity_embeddings_1536;
+pub mod entity_embeddings_768;
+pub mod entity_entities;
+pub mod entity_relations;
+pub mod entity_snapshots;
+pub mod export;
+pub mod import;
+pub mod inference_jobs;
 pub(crate) mod inference_proposals;
+pub mod pagination;
+pub(crate) mod queue_job_lifecycles;
+pub mod recall;
+pub mod schema_schemas;
+pub mod search;
+pub mod stripe_events;
+pub mod system_maintenance;
+pub mod template_reviews;
+pub mod template_templates;
+pub mod template_versions;
+pub mod tenancy;
+pub mod tenant_billing;
+pub mod tenant_memberships;
+pub mod tenant_reindex_schedules;
+pub mod tenant_tenants;
+pub mod user_users;
+pub mod workspace_embedding_keys;
+pub mod workspace_invites;
+pub mod workspace_llm_keys;
+pub mod workspace_schema_fork_heads;
+pub mod workspace_schema_forks;
+pub mod workspace_worker_classes;
+pub mod workspace_workspaces;

@@ -11,7 +11,7 @@ use crate::controllers::extractors::{
 };
 use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
-use crate::models::content::search::{self, SearchHit};
+use crate::models::search::{self, SearchHit};
 use crate::services::rate_limit::charge_search_tokens;
 
 #[derive(Deserialize)]

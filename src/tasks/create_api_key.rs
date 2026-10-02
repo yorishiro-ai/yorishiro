@@ -3,7 +3,7 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::identity::api_keys::Entity as ApiKeys;
+use crate::models::api_keys::Entity as ApiKeys;
 use crate::services::auth::ApiKeyScope;
 
 /// `cargo loco task create_api_key workspace_id:<uuid> scope:write`

@@ -164,9 +164,7 @@ fn spawn_startup_reindex(ctx: AppContext) {
             // We compare each workspace's stamped model against the provider's model name.
             // If they differ, enqueue a reindex.
             let workspaces =
-                match crate::models::identity::workspace_workspaces::stamped_for_reindex(&ctx.db)
-                    .await
-                {
+                match crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db).await {
                     Ok(ws) => ws,
                     Err(err) => {
                         tracing::error!("startup reindex: failed to list workspaces: {err}");

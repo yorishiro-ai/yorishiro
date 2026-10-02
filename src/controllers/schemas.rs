@@ -12,8 +12,8 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
 use crate::error::YorishiroError;
 use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
-use crate::models::content::schema_schemas::{self, SchemaRecord, SchemaSummary};
-use crate::models::templates::template_templates;
+use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
+use crate::models::template_templates;
 use crate::templates::{self, TemplateSummary};
 
 #[derive(Serialize)]

@@ -6,7 +6,7 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope};
 use crate::error::ResultExt;
-use crate::models::content::export;
+use crate::models::export;
 
 /// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]

@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope};
 use crate::error::YorishiroError;
-use crate::models::identity::api_key_audit_log;
-use crate::models::system::system_maintenance::{
+use crate::models::api_key_audit_log;
+use crate::models::system_maintenance::{
     self, DEFAULT_RETRY_AFTER_SECONDS, MaintenanceMode, MaintenanceState,
 };
 

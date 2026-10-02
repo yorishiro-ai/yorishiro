@@ -14,7 +14,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::content::entity_entities::EntityRecord;
+use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 const DEFAULT_SEARCH_LIMIT: i64 = 10;

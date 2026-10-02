@@ -67,7 +67,7 @@ pub(crate) async fn create_workspace(
     _embedding: Option<(&str, i32)>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     use crate::models::_entities::tenant_tenants;
-    use crate::models::identity::workspace_workspaces::WorkspaceStatus;
+    use crate::models::workspace_workspaces::WorkspaceStatus;
 
     let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
         .one(conn)

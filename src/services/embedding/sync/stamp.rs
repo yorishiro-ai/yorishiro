@@ -10,7 +10,7 @@ pub(super) async fn stamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    crate::models::identity::workspace_workspaces::stamp_embedding_if_missing(
+    crate::models::workspace_workspaces::stamp_embedding_if_missing(
         conn,
         workspace_id,
         model,
@@ -26,7 +26,7 @@ pub(super) async fn restamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    let mut active = crate::models::identity::workspace_workspaces::ActiveModel {
+    let mut active = crate::models::workspace_workspaces::ActiveModel {
         id: ActiveValue::Unchanged(workspace_id),
         ..Default::default()
     };

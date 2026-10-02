@@ -21,15 +21,14 @@ async fn check_entity_quota(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    let max_entities =
-        crate::models::identity::workspace_workspaces::Entity::find_by_id(workspace_id)
-            .select_only()
-            .column(crate::models::_entities::workspace_workspaces::Column::MaxEntities)
-            .into_tuple::<Option<i32>>()
-            .one(conn)
-            .await
-            .internal()?
-            .flatten();
+    let max_entities = crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
+        .select_only()
+        .column(crate::models::_entities::workspace_workspaces::Column::MaxEntities)
+        .into_tuple::<Option<i32>>()
+        .one(conn)
+        .await
+        .internal()?
+        .flatten();
 
     let Some(max) = max_entities else {
         return Ok(());
@@ -78,7 +77,7 @@ pub async fn create(
     check_entity_quota(conn, workspace_id).await?;
 
     // Before resolving the schema, so an empty workspace is told it is empty rather than reporting the schema name as not found.
-    if crate::models::identity::workspace_workspaces::is_schema_pending(conn, workspace_id).await? {
+    if crate::models::workspace_workspaces::is_schema_pending(conn, workspace_id).await? {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "workspace '{workspace_id}' has no schema yet, so there is nothing to \
@@ -91,12 +90,9 @@ pub async fn create(
         });
     }
 
-    let schema = crate::models::content::schema_schemas::get_active_schema(
-        conn,
-        workspace_id,
-        &input.schema_name,
-    )
-    .await?;
+    let schema =
+        crate::models::schema_schemas::get_active_schema(conn, workspace_id, &input.schema_name)
+            .await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &input.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 
@@ -167,8 +163,7 @@ pub async fn update(
 ) -> Result<EntityRecord, YorishiroError> {
     let existing = get(conn, workspace_id, input.id).await?;
     let schema =
-        crate::models::content::schema_schemas::get_by_id(conn, workspace_id, existing.schema_id)
-            .await?;
+        crate::models::schema_schemas::get_by_id(conn, workspace_id, existing.schema_id).await?;
     let entity_type_def = resolve_entity_type(&schema.definition, &existing.entity_type)?;
     validate_data(entity_type_def, &input.data)?;
 

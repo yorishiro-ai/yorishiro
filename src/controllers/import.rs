@@ -4,7 +4,7 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, SchemaScope};
-use crate::models::content::import::{self, ImportResult};
+use crate::models::import::{self, ImportResult};
 
 /// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 /// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.

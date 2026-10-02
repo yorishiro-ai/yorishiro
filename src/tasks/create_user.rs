@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
 use crate::error::ResultExt;
-use crate::models::identity::tenancy;
+use crate::models::tenancy;
 
 /// `cargo loco task create_user email:owner@example.com password:hunter2-hunter2 [display_name:Alice]`
 ///

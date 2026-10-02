@@ -14,7 +14,7 @@ impl Task for ListTenants {
     }
 
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
-        let tenants = crate::models::identity::tenant_tenants::list_all(&app_context.db).await?;
+        let tenants = crate::models::tenant_tenants::list_all(&app_context.db).await?;
 
         if tenants.is_empty() {
             println!("no tenants (create one with `cargo loco task create_tenant name:acme`)");

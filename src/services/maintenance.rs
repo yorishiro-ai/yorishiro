@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::models::system::system_maintenance;
+use crate::models::system_maintenance;
 
 /// Paths that answer even under full lock.
 ///

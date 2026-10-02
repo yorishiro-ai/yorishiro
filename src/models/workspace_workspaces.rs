@@ -46,7 +46,7 @@ pub(crate) async fn embedding_chain(
         .column(Column::EmbeddingDimensions)
         .column_as(TenantColumn::EmbeddingModel, "tenant_model")
         .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
-        .left_join(crate::models::identity::tenant_tenants::Entity)
+        .left_join(crate::models::tenant_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
         .into_model::<EmbeddingChainRow>()
         .one(conn)

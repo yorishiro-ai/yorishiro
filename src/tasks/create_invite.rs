@@ -4,7 +4,7 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::identity::tenancy::{self, MembershipRole};
+use crate::models::tenancy::{self, MembershipRole};
 
 /// `cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner`
 ///

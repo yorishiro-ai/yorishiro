@@ -55,7 +55,7 @@ pub async fn authenticate_sqlite(
     let key_hash = hash_key(presented_key);
 
     let (key, tenant_id) =
-        crate::models::identity::api_keys::Entity::find_sqlite_auth_context(conn, key_hash)
+        crate::models::api_keys::Entity::find_sqlite_auth_context(conn, key_hash)
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
 
@@ -82,7 +82,7 @@ pub async fn authenticate_sqlite(
 
 /// SQLite equivalent of [`touch_last_used`]: same best-effort, non-failing update, on the SeaORM entity API instead of a raw `sqlx::PgConnection`.
 pub async fn touch_last_used_sqlite(conn: &impl ConnectionTrait, api_key_id: Uuid) {
-    crate::models::identity::api_keys::Entity::touch_last_used(conn, api_key_id).await;
+    crate::models::api_keys::Entity::touch_last_used(conn, api_key_id).await;
 }
 
 /// Records the API key's last-used timestamp, on a raw `sqlx` connection.

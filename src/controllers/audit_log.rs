@@ -9,7 +9,7 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuditAuthorized;
-use crate::models::identity::api_key_audit_log::{self, Model as AuditLogRecord};
+use crate::models::api_key_audit_log::{self, Model as AuditLogRecord};
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/audit-log", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::AuditLogRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-grants" = json!(["audit"]))), tag = "community"))]
 pub async fn list_audit_log(

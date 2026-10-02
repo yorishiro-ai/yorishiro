@@ -3,7 +3,7 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::identity::tenancy::{self, MembershipRole};
+use crate::models::tenancy::{self, MembershipRole};
 
 /// `cargo loco task add_member tenant_id:<uuid> user_id:<uuid> role:owner`
 ///

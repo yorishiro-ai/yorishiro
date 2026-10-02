@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
-use crate::models::identity::api_keys::IdentityApiKeys;
-use crate::models::identity::tenancy::{self, MembershipRole, WorkspaceSummary};
+use crate::models::api_keys::IdentityApiKeys;
+use crate::models::tenancy::{self, MembershipRole, WorkspaceSummary};
 use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize)]

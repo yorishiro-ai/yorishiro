@@ -5,7 +5,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::content::entity_entities;
+use crate::models::entity_entities;
 use crate::services::embedding;
 
 /// `cargo loco task resync_embeddings workspace_id:<uuid>`

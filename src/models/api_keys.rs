@@ -46,12 +46,11 @@ impl Entity {
         let Some(workspace_id) = key.workspace_id else {
             return Ok(None);
         };
-        let tenant_id =
-            crate::models::identity::workspace_workspaces::Entity::find_by_id(workspace_id)
-                .one(conn)
-                .await
-                .internal()?
-                .map(|workspace| workspace.tenant_id);
+        let tenant_id = crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(conn)
+            .await
+            .internal()?
+            .map(|workspace| workspace.tenant_id);
         Ok(tenant_id.map(|tenant_id| (key, tenant_id)))
     }
 

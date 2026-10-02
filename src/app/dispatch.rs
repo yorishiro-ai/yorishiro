@@ -32,9 +32,9 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         {
             Ok(policy) => policy,
             Err(error) => {
-                let _ = crate::models::system::queue_job_lifecycles::Entity::record_enqueue(
+                let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
                     &ctx.db,
-                    crate::models::system::queue_job_lifecycles::Enqueue {
+                    crate::models::queue_job_lifecycles::Enqueue {
                         id: lifecycle_id,
                         job_name: "embedding_sync",
                         worker_class,
@@ -45,7 +45,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                     },
                 )
                 .await;
-                let _ = crate::models::system::queue_job_lifecycles::Entity::finish(
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
                     None,
@@ -63,9 +63,9 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                 Ok(scheduling) => scheduling,
                 Err(error) => {
                     let diagnostic = format!("starvation policy lookup failed: {error}");
-                    let _ = crate::models::system::queue_job_lifecycles::Entity::record_enqueue(
+                    let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
                         &ctx.db,
-                        crate::models::system::queue_job_lifecycles::Enqueue {
+                        crate::models::queue_job_lifecycles::Enqueue {
                             id: lifecycle_id,
                             job_name: "embedding_sync",
                             worker_class,
@@ -76,7 +76,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                         },
                     )
                     .await;
-                    let _ = crate::models::system::queue_job_lifecycles::Entity::finish(
+                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
                         &ctx.db,
                         lifecycle_id,
                         None,
@@ -102,9 +102,9 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             fallback = scheduling.fallback,
             "queue scheduling decision"
         );
-        crate::models::system::queue_job_lifecycles::Entity::record_enqueue(
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
-            crate::models::system::queue_job_lifecycles::Enqueue {
+            crate::models::queue_job_lifecycles::Enqueue {
                 id: lifecycle_id,
                 job_name: "embedding_sync",
                 worker_class,
@@ -145,13 +145,12 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         };
         match result {
             Ok(job_id) => {
-                if let Err(error) =
-                    crate::models::system::queue_job_lifecycles::Entity::mark_dispatched(
-                        &ctx.db,
-                        lifecycle_id,
-                        &job_id,
-                    )
-                    .await
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
                 {
                     tracing::error!(
                         lifecycle_id = %lifecycle_id,
@@ -163,7 +162,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                 Ok(job_id)
             }
             Err(error) => {
-                let _ = crate::models::system::queue_job_lifecycles::Entity::finish(
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
                     None,
@@ -201,9 +200,9 @@ impl ReindexDispatcher for LocoJobDispatcher {
         {
             Ok(policy) => policy,
             Err(error) => {
-                let _ = crate::models::system::queue_job_lifecycles::Entity::record_enqueue(
+                let _ = crate::models::queue_job_lifecycles::Entity::record_enqueue(
                     &ctx.db,
-                    crate::models::system::queue_job_lifecycles::Enqueue {
+                    crate::models::queue_job_lifecycles::Enqueue {
                         id: lifecycle_id,
                         job_name: "reindex",
                         worker_class,
@@ -214,7 +213,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                     },
                 )
                 .await;
-                let _ = crate::models::system::queue_job_lifecycles::Entity::finish(
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
                     None,
@@ -240,9 +239,9 @@ impl ReindexDispatcher for LocoJobDispatcher {
             fallback = scheduling.fallback,
             "queue scheduling decision"
         );
-        crate::models::system::queue_job_lifecycles::Entity::record_enqueue(
+        crate::models::queue_job_lifecycles::Entity::record_enqueue(
             &ctx.db,
-            crate::models::system::queue_job_lifecycles::Enqueue {
+            crate::models::queue_job_lifecycles::Enqueue {
                 id: lifecycle_id,
                 job_name: "reindex",
                 worker_class,
@@ -283,13 +282,12 @@ impl ReindexDispatcher for LocoJobDispatcher {
         };
         match result {
             Ok(job_id) => {
-                if let Err(error) =
-                    crate::models::system::queue_job_lifecycles::Entity::mark_dispatched(
-                        &ctx.db,
-                        lifecycle_id,
-                        &job_id,
-                    )
-                    .await
+                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
+                    &ctx.db,
+                    lifecycle_id,
+                    &job_id,
+                )
+                .await
                 {
                     tracing::error!(
                         lifecycle_id = %lifecycle_id,
@@ -301,7 +299,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                 Ok(job_id)
             }
             Err(error) => {
-                let _ = crate::models::system::queue_job_lifecycles::Entity::finish(
+                let _ = crate::models::queue_job_lifecycles::Entity::finish(
                     &ctx.db,
                     lifecycle_id,
                     None,

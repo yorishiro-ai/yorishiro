@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::MetaSchemaDefinition;
-use crate::models::content::schema_schemas;
+use crate::models::schema_schemas;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

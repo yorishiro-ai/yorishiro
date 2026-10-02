@@ -28,11 +28,9 @@ impl Task for ListWorkspaces {
                         .into(),
                 })?;
 
-        let workspaces = crate::models::identity::workspace_workspaces::models_for_tenant(
-            &app_context.db,
-            tenant_id,
-        )
-        .await?;
+        let workspaces =
+            crate::models::workspace_workspaces::models_for_tenant(&app_context.db, tenant_id)
+                .await?;
 
         if workspaces.is_empty() {
             println!("no workspaces for tenant {tenant_id}");
