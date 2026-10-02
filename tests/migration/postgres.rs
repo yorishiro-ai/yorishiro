@@ -17,6 +17,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// Returns the 1-indexed position of the named migration in `Migrator::migrations()`.
+/// Panics with a clear message if the migration is missing or renamed.
+fn migrations_through(name: &str) -> u32 {
+    Migrator::migrations()
+        .iter()
+        .position(|m| m.name() == name)
+        .unwrap_or_else(|| panic!("no migration named {name} in Migrator::migrations()")) as u32
+        + 1
+}
+
 /// A throwaway database, dropped and recreated so each run starts from nothing.
 ///
 /// A `DATABASE_URL` that is present but unusable panics rather than skipping.
@@ -191,9 +201,12 @@ async fn inference_job_attempt_migration_grants_update_to_app_role() {
             Migrator::up(db, None).await.expect("run all migrations");
             assert!(privilege(db, "SELECT").await);
             assert!(privilege(db, "UPDATE").await);
-            // Migration #16 (file 000015) is the newest migration.  Roll back 000016, 000015, and 000014
-            // before asserting the 000013 privilege change is gone.
-            Migrator::down(db, Some(3))
+            // Roll back through the privilege migration (file 000013) from the full applied list.
+            // The rollback steps back = total migrations minus the privilege migration's position.
+            let total = Migrator::migrations().len() as u32;
+            let priv_pos = migrations_through("m20260930_000013_inference_job_attempt_privileges");
+            let steps_back = total - priv_pos + 1;
+            Migrator::down(db, Some(steps_back))
                 .await
                 .expect("roll back the api_key_name, starvation-index, and privilege migrations");
             assert!(privilege(db, "SELECT").await);
