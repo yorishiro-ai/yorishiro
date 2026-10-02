@@ -29,6 +29,48 @@ impl ActiveModel {}
 
 // implement your custom finders, selectors oriented logic here
 impl Entity {
+    pub(crate) async fn find_sqlite_auth_context(
+        conn: &impl ConnectionTrait,
+        key_hash: Vec<u8>,
+    ) -> Result<Option<(Model, uuid::Uuid)>, YorishiroError> {
+        use crate::models::_entities::api_keys::Column;
+
+        let Some(key) = Entity::find()
+            .filter(Column::KeyHash.eq(key_hash))
+            .one(conn)
+            .await
+            .internal()?
+        else {
+            return Ok(None);
+        };
+        let Some(workspace_id) = key.workspace_id else {
+            return Ok(None);
+        };
+        let tenant_id =
+            crate::models::identity::workspace_workspaces::Entity::find_by_id(workspace_id)
+                .one(conn)
+                .await
+                .internal()?
+                .map(|workspace| workspace.tenant_id);
+        Ok(tenant_id.map(|tenant_id| (key, tenant_id)))
+    }
+
+    pub(crate) async fn touch_last_used(conn: &impl ConnectionTrait, api_key_id: uuid::Uuid) {
+        use crate::models::_entities::api_keys::Column;
+
+        if let Err(err) = Entity::update_many()
+            .col_expr(
+                Column::LastUsedAt,
+                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+            )
+            .filter(Column::Id.eq(api_key_id))
+            .exec(conn)
+            .await
+        {
+            tracing::warn!(error = %err, "failed to update api key last_used_at");
+        }
+    }
+
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, where only the `secret` part (192 bits) is the actual credential.
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
     /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `services::auth::AuthContext::audit`'s doc comment describes.

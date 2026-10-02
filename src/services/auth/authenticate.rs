@@ -1,9 +1,8 @@
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{api_keys, workspace_workspaces};
 
 use super::{ApiKeyScope, AuthContext, hash_key};
 
@@ -55,22 +54,14 @@ pub async fn authenticate_sqlite(
 ) -> Result<AuthContext, YorishiroError> {
     let key_hash = hash_key(presented_key);
 
-    let key = api_keys::Entity::find()
-        .filter(api_keys::Column::KeyHash.eq(key_hash))
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
+    let (key, tenant_id) =
+        crate::models::identity::api_keys::Entity::find_sqlite_auth_context(conn, key_hash)
+            .await?
+            .ok_or(YorishiroError::Unauthenticated)?;
 
     let Some(workspace_id) = key.workspace_id else {
         return Err(YorishiroError::Unauthenticated);
     };
-
-    let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
 
     let scope = ApiKeyScope::from_db_str(&key.scope).ok_or_else(|| {
         YorishiroError::Internal(anyhow::anyhow!(
@@ -82,7 +73,7 @@ pub async fn authenticate_sqlite(
     Ok(AuthContext {
         api_key_id: key.id,
         workspace_id,
-        tenant_id: workspace.tenant_id,
+        tenant_id,
         scope,
         user_id: key.user_id,
         audit: key.audit,
@@ -91,17 +82,7 @@ pub async fn authenticate_sqlite(
 
 /// SQLite equivalent of [`touch_last_used`]: same best-effort, non-failing update, on the SeaORM entity API instead of a raw `sqlx::PgConnection`.
 pub async fn touch_last_used_sqlite(conn: &impl ConnectionTrait, api_key_id: Uuid) {
-    let result = api_keys::Entity::update_many()
-        .col_expr(
-            api_keys::Column::LastUsedAt,
-            sea_orm::sea_query::Expr::value(chrono::Utc::now()),
-        )
-        .filter(api_keys::Column::Id.eq(api_key_id))
-        .exec(conn)
-        .await;
-    if let Err(err) = result {
-        tracing::warn!(error = %err, "failed to update api key last_used_at");
-    }
+    crate::models::identity::api_keys::Entity::touch_last_used(conn, api_key_id).await;
 }
 
 /// Records the API key's last-used timestamp, on a raw `sqlx` connection.

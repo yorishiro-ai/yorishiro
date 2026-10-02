@@ -21,3 +21,11 @@ impl ActiveModel {}
 
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
+
+pub(crate) async fn list_all(
+    conn: &impl ConnectionTrait,
+) -> Result<Vec<Model>, crate::error::YorishiroError> {
+    use crate::error::ResultExt;
+
+    Entity::find().all(conn).await.internal()
+}

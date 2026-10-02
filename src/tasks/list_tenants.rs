@@ -1,9 +1,6 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::error::ResultExt;
-use crate::models::_entities::tenant_tenants;
-
 /// `cargo loco task list_tenants`
 pub struct ListTenants;
 
@@ -17,10 +14,7 @@ impl Task for ListTenants {
     }
 
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
-        let tenants = tenant_tenants::Entity::find()
-            .all(&app_context.db)
-            .await
-            .internal()?;
+        let tenants = crate::models::identity::tenant_tenants::list_all(&app_context.db).await?;
 
         if tenants.is_empty() {
             println!("no tenants (create one with `cargo loco task create_tenant name:acme`)");
