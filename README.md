@@ -102,6 +102,9 @@ The default configuration uses SQLite — no external database required.
 1. Open `http://localhost/` and create an account through the setup wizard.
 2. Generate an API key and start creating entities.
 
+For a source checkout using a background queue, run the server and tagged worker separately:
+`cargo loco start` and `cargo loco start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill`.
+
 For installation instructions, see [docs/en/installation.md](docs/en/installation.md).
 
 ## Configuration

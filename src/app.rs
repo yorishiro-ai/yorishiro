@@ -48,18 +48,30 @@ async fn queue_concurrency_policy(
         let Some(workspace) = workspace else {
             return Err("queue policy unavailable: workspace does not exist".into());
         };
-        let plan =
-            crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
-                .one(&ctx.db)
-                .await
-                .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?
-                .ok_or_else(|| "queue policy unavailable: billing row is missing".to_owned())?
-                .plan
-                .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())
-                .and_then(|value| {
+        let licence_plan = ctx
+            .shared_store
+            .get::<std::sync::Arc<crate::ee::services::licence::LicenceState>>()
+            .ok_or_else(|| "queue policy unavailable: licence state is missing".to_owned())?
+            .active_plan_at(chrono::Utc::now().timestamp());
+        let plan = if let Some(plan) = licence_plan {
+            plan
+        } else {
+            let billing =
+                crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
+                    .one(&ctx.db)
+                    .await
+                    .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
+            match billing {
+                None => crate::ee::services::plan::Plan::Free,
+                Some(billing) => {
+                    let value = billing.plan.ok_or_else(|| {
+                        "queue policy unavailable: billing plan is missing".to_owned()
+                    })?;
                     crate::ee::services::plan::Plan::from_db_str(&value)
-                        .map_err(|error| error.to_string())
-                })?;
+                        .map_err(|error| error.to_string())?
+                }
+            }
+        };
         let limit = match class {
             "official" => plan.compute_policy().base_official_concurrency as i32,
             "tenant_private" | "shared" => 1,
@@ -527,6 +539,7 @@ impl Hooks for App {
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         startup::register_sqlite_extensions();
+        let run_startup_reindex = startup::should_run_startup_reindex(&mode);
 
         let result = create_app::<Self, Migrator>(mode, environment, config).await?;
 
@@ -537,7 +550,7 @@ impl Hooks for App {
         // Skip in test environments — the background task holds a `ctx.db`
         // connection that survives the test callback and races with loco's
         // `BootResultWrapper::drop` which tries `DROP DATABASE`.
-        startup::after_boot(&result, environment);
+        startup::after_boot(&result, environment, run_startup_reindex);
 
         Ok(result)
     }

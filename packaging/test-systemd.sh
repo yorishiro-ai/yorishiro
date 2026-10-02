@@ -159,7 +159,7 @@ EOF"
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
-  systemctl enable --now yorishiro' >/dev/null 2>&1
+  systemctl enable --now yorishiro yorishiro-worker' >/dev/null 2>&1
 
 for _ in $(seq 1 60); do
   docker exec "$APP" curl -fsS http://127.0.0.1:5150/_ping >/dev/null 2>&1 && break
@@ -168,15 +168,23 @@ done
 
 state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
+  echo "worker-active=$(systemctl is-active yorishiro-worker)"
   echo "enabled=$(systemctl is-enabled yorishiro)"
+  echo "worker-enabled=$(systemctl is-enabled yorishiro-worker)"
   echo "ping=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:5150/_ping)"' 2>&1)
 
 grep -q 'active=active' <<<"$state" \
   && ok "the service is active" \
   || bad "expected active, got: $(grep -o 'active=[a-z-]*' <<<"$state")"
+grep -q 'worker-active=active' <<<"$state" \
+  && ok "the worker is active" \
+  || bad "expected worker active, got: $(grep -o 'worker-active=[a-z-]*' <<<"$state")"
 grep -q 'enabled=enabled' <<<"$state" \
   && ok "the service is enabled" \
   || bad "expected enabled, got: $(grep -o 'enabled=[a-z-]*' <<<"$state")"
+grep -q 'worker-enabled=enabled' <<<"$state" \
+  && ok "the worker is enabled" \
+  || bad "expected worker enabled, got: $(grep -o 'worker-enabled=[a-z-]*' <<<"$state")"
 grep -q 'ping=200' <<<"$state" \
   && ok "it answers /_ping" \
   || bad "expected 200 from /_ping, got: $(grep -o 'ping=[0-9]*' <<<"$state")"

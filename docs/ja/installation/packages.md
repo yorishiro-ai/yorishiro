@@ -22,6 +22,7 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 |---|---|
 | `/usr/bin/yorishiro` | バイナリ |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
+| `/lib/systemd/system/yorishiro-worker.service` | タグ付きバックグラウンドワーカーユニット |
 | `/etc/yorishiro/yorishiro.yaml` | 編集可能な正規設定テンプレート |
 
 EE パッケージは同じ共有パスに加えて `/etc/yorishiro/LICENSE.enterprise` をインストールします。
@@ -48,5 +49,10 @@ server:
 
 ```console
 $ sudo systemctl enable --now yorishiro
+$ sudo systemctl enable --now yorishiro-worker
 $ sudo systemctl status yorishiro
+$ sudo systemctl status yorishiro-worker
 ```
+
+Loco 1.2.0では、`--server-and-worker`とタグ付きワーカーを組み合わせられないため、ワーカーは別ユニットで起動します。
+3つのworker-classタグと`infer-fill`を処理します。
