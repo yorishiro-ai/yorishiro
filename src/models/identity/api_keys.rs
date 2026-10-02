@@ -40,6 +40,18 @@ impl Entity {
         user_id: Option<uuid::Uuid>,
         audit: bool,
     ) -> Result<CreatedApiKey, YorishiroError> {
+        Self::create_named_api_key(db, workspace_id, scope, user_id, audit, "unnamed").await
+    }
+
+    /// Issues a key with a caller-visible name.
+    pub(crate) async fn create_named_api_key(
+        db: &sea_orm::DatabaseConnection,
+        workspace_id: uuid::Uuid,
+        scope: ApiKeyScope,
+        user_id: Option<uuid::Uuid>,
+        audit: bool,
+        name: &str,
+    ) -> Result<CreatedApiKey, YorishiroError> {
         use super::_entities::workspace_workspaces;
 
         let txn = db.begin().await.internal()?;
@@ -61,6 +73,7 @@ impl Entity {
             user_id: ActiveValue::Set(user_id),
             key_hash: ActiveValue::Set(key_hash),
             key_prefix: ActiveValue::Set(prefix),
+            name: ActiveValue::Set(name.to_owned()),
             scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(audit),
             ..Default::default()
@@ -97,6 +110,22 @@ impl Entity {
             .internal()
     }
 
+    /// Every key in a tenant, oldest first.
+    pub(crate) async fn list_for_tenant(
+        conn: &impl ConnectionTrait,
+        tenant_id: uuid::Uuid,
+    ) -> Result<Vec<Model>, YorishiroError> {
+        use super::_entities::api_keys::Column;
+
+        Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
+            .all(conn)
+            .await
+            .internal()
+    }
+
     /// Deletes an API key by id, revoking it immediately: authentication looks up the key on every request, so there is no cached credential to also invalidate.
     pub async fn revoke(
         conn: &impl ConnectionTrait,
@@ -106,6 +135,30 @@ impl Entity {
 
         let result = Entity::delete_many()
             .filter(Column::Id.eq(key_id))
+            .exec(conn)
+            .await
+            .internal()?;
+
+        if result.rows_affected == 0 {
+            Err(YorishiroError::not_found(format!(
+                "api key '{key_id}' was not found"
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Revokes one of a tenant's keys without allowing an id from another tenant to match.
+    pub(crate) async fn revoke_for_tenant(
+        conn: &impl ConnectionTrait,
+        tenant_id: uuid::Uuid,
+        key_id: uuid::Uuid,
+    ) -> Result<(), YorishiroError> {
+        use super::_entities::api_keys::Column;
+
+        let result = Entity::delete_many()
+            .filter(Column::Id.eq(key_id))
+            .filter(Column::TenantId.eq(tenant_id))
             .exec(conn)
             .await
             .internal()?;

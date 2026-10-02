@@ -6,6 +6,16 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement, TryGetable};
 use serial_test::serial;
 
+/// Returns the 1-indexed position of the named migration in `Migrator::migrations()`.
+/// Panics with a clear message if the migration is missing or renamed.
+fn migrations_through(name: &str) -> u32 {
+    Migrator::migrations()
+        .iter()
+        .position(|m| m.name() == name)
+        .unwrap_or_else(|| panic!("no migration named {name} in Migrator::migrations()")) as u32
+        + 1
+}
+
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const TENANT: &str = "11111111-1111-4111-8111-111111111111";
@@ -682,7 +692,11 @@ async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
 #[serial(process_environment)]
 async fn queue_starvation_index_matches_admission_predicate() {
     with_database("queue_starvation_index", |db| Box::pin(async move {
-        Migrator::up(db, None).await.expect("all migrations");
+        let through_starvation =
+            migrations_through("m20261001_000014_queue_lifecycle_starvation_index");
+        Migrator::up(db, Some(through_starvation))
+            .await
+            .expect("migrations through starvation index");
         assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
         let definition: String = match db.get_database_backend() {
             DbBackend::Sqlite => {
@@ -724,7 +738,7 @@ async fn queue_starvation_index_matches_admission_predicate() {
             backend => panic!("unsupported migration test backend: {backend:?}"),
         };
         assert_eq!(absent, 0, "rollback must remove starvation index");
-        Migrator::up(db, None)
+        Migrator::up(db, Some(through_starvation))
             .await
             .expect("reapply starvation index migration");
         assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;

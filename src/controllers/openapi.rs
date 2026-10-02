@@ -341,6 +341,35 @@ pub struct AddMemberRequest {
 }
 
 #[derive(ToSchema)]
+pub struct CreateApiKeyRequest {
+    pub name: String,
+}
+
+#[derive(ToSchema)]
+pub struct CreateApiKeyResponse {
+    pub id: Uuid,
+    pub prefix: String,
+    pub full_key: String,
+    pub name: String,
+    #[schema(format = DateTime)]
+    pub created_at: String,
+}
+
+#[derive(ToSchema)]
+pub struct ApiKeyRecord {
+    pub id: Uuid,
+    pub prefix: String,
+    pub name: String,
+    #[schema(format = DateTime)]
+    pub created_at: String,
+}
+
+#[derive(ToSchema)]
+pub struct ListApiKeysResponse {
+    pub keys: Vec<ApiKeyRecord>,
+}
+
+#[derive(ToSchema)]
 pub struct CreateWorkspaceRequest {
     pub name: String,
     #[schema(nullable = true)]

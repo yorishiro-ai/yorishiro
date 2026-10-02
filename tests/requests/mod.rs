@@ -1,3 +1,4 @@
+mod api_keys;
 mod audit_log;
 mod auth;
 mod dashboard;
