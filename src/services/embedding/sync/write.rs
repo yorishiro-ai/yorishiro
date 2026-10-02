@@ -43,7 +43,13 @@ pub(super) async fn sync_embedding(
     };
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    let chain = super::resolution::resolve_embedding_chain(conn, workspace_id, licenced).await?;
+    let chain = super::resolution::resolve_embedding_chain(
+        conn,
+        workspace_id,
+        licenced,
+        provider.dimensions(),
+    )
+    .await?;
     let effective_dimensions = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)

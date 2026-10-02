@@ -44,9 +44,10 @@ pub struct ReindexArgs {
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     // Build and verify the provider: a reindex fails fast if the provider is
     // unconfigured, same as the task.
-    let provider = embedding::build_embedding_provider()
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("build provider: {e}")))?;
+    let provider = ctx
+        .shared_store
+        .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
+        .ok_or_else(|| loco_rs::Error::Message("embedding provider missing".into()))?;
     provider
         .embed_batch(&[])
         .await

@@ -148,14 +148,12 @@ fn spawn_startup_reindex(ctx: AppContext) {
             }
 
             // Resolve the deployment's current provider to compare against workspace stamps.
-            let provider = match crate::services::embedding::build_embedding_provider().await {
-                Ok(p) => p,
-                Err(err) => {
-                    tracing::warn!(
-                        "startup reindex: failed to build embedding provider, skipping detection: {err}"
-                    );
-                    return;
-                }
+            let Some(provider) = ctx
+                .shared_store
+                .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
+            else {
+                tracing::warn!("startup reindex: embedding provider missing");
+                return;
             };
             if provider.embed_batch(&[]).await.is_err() {
                 tracing::warn!("startup reindex: embedding provider must be configured");

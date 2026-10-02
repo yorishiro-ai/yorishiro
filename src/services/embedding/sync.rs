@@ -110,6 +110,7 @@ pub(crate) async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     licenced: bool,
+    deployment_dimensions: usize,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
-    resolution::resolve_embedding_chain(conn, workspace_id, licenced).await
+    resolution::resolve_embedding_chain(conn, workspace_id, licenced, deployment_dimensions).await
 }

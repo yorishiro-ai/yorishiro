@@ -45,9 +45,12 @@ impl Task for ReindexEmbeddings {
         // Mirrors resync_embeddings's own up-front probe: an unconfigured provider satisfies the
         // dimension count but errors on every actual call, so this turns that into one clear
         // failure instead of N per-entity ones that would read as an ordinary "N failed" outcome.
-        let provider = embedding::build_embedding_provider().await.map_err(|err| {
-            YorishiroError::Internal(anyhow::anyhow!("failed to build embedding provider: {err}"))
-        })?;
+        let provider = app_context
+            .shared_store
+            .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
+            .ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
+            })?;
         provider
             .embed_batch(&[])
             .await
@@ -70,10 +73,14 @@ impl Task for ReindexEmbeddings {
             .unwrap_or(false);
         if !force {
             let licenced = crate::services::edition::is_active(app_context);
-            let chain =
-                embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id, licenced)
-                    .await
-                    .map_err(|err| YorishiroError::Internal(err.into()))?;
+            let chain = embedding::sync::resolve_embedding_chain(
+                &app_context.db,
+                workspace_id,
+                licenced,
+                provider.dimensions(),
+            )
+            .await
+            .map_err(|err| YorishiroError::Internal(err.into()))?;
             if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {
                 println!(
                     "workspace {} already stamped with model {:?}; nothing to reindex \

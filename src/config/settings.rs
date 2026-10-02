@@ -4,8 +4,37 @@ use serde::Deserialize;
 #[serde(default)]
 pub(crate) struct Settings {
     pub(crate) max_tenants: i32,
+    pub(crate) embedding: Embedding,
     pub(crate) rate_limit: RateLimit,
     pub(crate) db_load_guard: DbLoadGuard,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct Embedding {
+    pub(crate) provider: String,
+    pub(crate) dimensions: usize,
+    pub(crate) base_url: Option<String>,
+    pub(crate) api_key: String,
+    pub(crate) model: Option<String>,
+    pub(crate) send_dimensions_param: bool,
+    pub(crate) local_model: String,
+    pub(crate) local_max_sequence_length: usize,
+}
+
+impl Default for Embedding {
+    fn default() -> Self {
+        Self {
+            provider: "local".into(),
+            dimensions: crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
+            base_url: None,
+            api_key: String::new(),
+            model: None,
+            send_dimensions_param: false,
+            local_model: crate::services::embedding::default_local_model().into(),
+            local_max_sequence_length: 512,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

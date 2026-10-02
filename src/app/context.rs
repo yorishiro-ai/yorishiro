@@ -37,7 +37,7 @@ pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
 
     // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the
     // error to the first search.
-    let embedding_provider = crate::services::embedding::build_embedding_provider()
+    let embedding_provider = crate::services::embedding::build_embedding_provider(&settings)
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
     ctx.shared_store.insert(embedding_provider);

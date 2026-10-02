@@ -31,9 +31,12 @@ impl Task for CreateWorkspace {
                 })?;
         let name = vars.cli_arg("name")?;
 
-        let provider = crate::services::embedding::build_embedding_provider()
-            .await
-            .internal()?;
+        let provider = app_context
+            .shared_store
+            .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>()
+            .ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
+            })?;
         let embedding_model = provider.model_name();
         let dimensions = provider.dimensions() as i32;
 

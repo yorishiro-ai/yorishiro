@@ -215,9 +215,25 @@ pub async fn resolve_search_table(
     workspace_id: Uuid,
     licenced: bool,
 ) -> Result<(usize, String), YorishiroError> {
+    resolve_search_table_with_dimensions(
+        conn,
+        workspace_id,
+        licenced,
+        crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
+    )
+    .await
+}
+
+async fn resolve_search_table_with_dimensions(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    licenced: bool,
+    deployment_dimensions: usize,
+) -> Result<(usize, String), YorishiroError> {
     use crate::services::embedding::sync::resolve_embedding_chain;
 
-    let chain = resolve_embedding_chain(conn, workspace_id, licenced).await?;
+    let chain =
+        resolve_embedding_chain(conn, workspace_id, licenced, deployment_dimensions).await?;
     let dimension = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
@@ -247,7 +263,8 @@ pub async fn search_by_vector(
         });
     }
 
-    let (_dimension, embed_table) = resolve_search_table(conn, workspace_id, licenced).await?;
+    let (_dimension, embed_table) =
+        resolve_search_table_with_dimensions(conn, workspace_id, licenced, vector.len()).await?;
 
     let knn = match conn.get_database_backend() {
         sea_orm::DatabaseBackend::Postgres => {

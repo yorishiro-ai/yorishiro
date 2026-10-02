@@ -49,6 +49,46 @@ pub(super) fn apply_environment_overrides(value: &mut Value) -> Result<()> {
     apply_queue_overrides(value, database_url.as_deref())?;
     apply_mailer_overrides(value)?;
     set_i64(value, &["settings", "max_tenants"], "YORISHIRO_MAX_TENANTS")?;
+    set_string(
+        value,
+        &["settings", "embedding", "provider"],
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    );
+    set_u64(
+        value,
+        &["settings", "embedding", "dimensions"],
+        "YORISHIRO_EMBEDDING_DIMENSIONS",
+    )?;
+    set_string(
+        value,
+        &["settings", "embedding", "base_url"],
+        "YORISHIRO_EMBEDDING_BASE_URL",
+    );
+    set_string(
+        value,
+        &["settings", "embedding", "api_key"],
+        "YORISHIRO_EMBEDDING_API_KEY",
+    );
+    set_string(
+        value,
+        &["settings", "embedding", "model"],
+        "YORISHIRO_EMBEDDING_MODEL",
+    );
+    set_bool(
+        value,
+        &["settings", "embedding", "send_dimensions_param"],
+        "YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM",
+    )?;
+    set_string(
+        value,
+        &["settings", "embedding", "local_model"],
+        "YORISHIRO_LOCAL_MODEL",
+    );
+    set_u64(
+        value,
+        &["settings", "embedding", "local_max_sequence_length"],
+        "YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH",
+    )?;
     set_u64(
         value,
         &["settings", "rate_limit", "auth_max_requests"],

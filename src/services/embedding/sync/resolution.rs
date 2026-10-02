@@ -9,6 +9,7 @@ pub(super) async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     licenced: bool,
+    deployment_dimensions: usize,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
     use crate::models::_entities::tenant_tenants::Column as TenantColumn;
     use crate::models::_entities::workspace_workspaces::Column;
@@ -26,11 +27,6 @@ pub(super) async fn resolve_embedding_chain(
         .await
         .internal()?
         .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
-
-    let deployment_dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
-        .unwrap_or_else(|_| crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS.to_string())
-        .parse()
-        .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS);
 
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,

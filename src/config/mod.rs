@@ -6,7 +6,7 @@ mod validate;
 
 pub use init::init;
 pub use load::load;
-pub(crate) use settings::Settings;
+pub(crate) use settings::{Embedding, Settings};
 pub(crate) use validate::validate_queue_policy;
 
 pub const CANONICAL_CONFIG_FILE: &str = "yorishiro.yaml";

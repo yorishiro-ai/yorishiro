@@ -7,6 +7,10 @@ pub mod sync;
 
 pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 
+pub(crate) fn default_local_model() -> &'static str {
+    model_fetch::DEFAULT_MODEL.short_id
+}
+
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
 use std::sync::Arc;
@@ -153,33 +157,32 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 ///    The model files (~1 GiB) are fetched into `$HOME/.cache/yorishiro/` on first use.
 ///
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
-pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
-    let dimensions: usize = std::env::var("YORISHIRO_EMBEDDING_DIMENSIONS")
-        .unwrap_or_else(|_| DEFAULT_EMBEDDING_DIMENSIONS.to_string())
-        .parse()?;
+pub(crate) async fn build_embedding_provider(
+    config: &crate::config::Settings,
+) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
+    let config = &config.embedding;
+    let dimensions = config.dimensions;
 
     // Check base_url/model presence before PROVIDER so that the documented
     // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible
     // path rather than flowing into the local provider.
-    let base_url = std::env::var("YORISHIRO_EMBEDDING_BASE_URL").ok();
-    let model = std::env::var("YORISHIRO_EMBEDDING_MODEL").ok();
+    let base_url = config.base_url.clone();
+    let model = config.model.clone();
 
     if let (Some(base_url), Some(model)) = (base_url, model) {
         let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
             base_url: base_url.clone(),
-            api_key: std::env::var("YORISHIRO_EMBEDDING_API_KEY").unwrap_or_default(),
+            api_key: config.api_key.clone(),
             model: model.clone(),
             dimensions,
-            send_dimensions_param: std::env::var("YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM")
-                .map(|v| v == "true")
-                .unwrap_or(false),
+            send_dimensions_param: config.send_dimensions_param,
         });
         tracing::info!(provider = "openai", %base_url, %model, dimensions, "embedding provider configured");
         return Ok(std::sync::Arc::new(provider));
     }
 
-    match std::env::var("YORISHIRO_EMBEDDING_PROVIDER").as_deref() {
-        Ok("none") => {
+    match config.provider.as_str() {
+        "none" => {
             tracing::info!(
                 "embedding provider explicitly disabled (YORISHIRO_EMBEDDING_PROVIDER=none)"
             );
@@ -188,12 +191,15 @@ pub async fn build_embedding_provider() -> anyhow::Result<std::sync::Arc<dyn Emb
                 remedy: "YORISHIRO_EMBEDDING_PROVIDER is set to \"none\"; unset it or set YORISHIRO_EMBEDDING_PROVIDER=local or YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL to enable embeddings",
             }))
         }
-        Ok("local") => build_local_provider(dimensions).await,
-        _ => {
+        "local" => build_local_provider(config).await,
+        other => {
+            if other != "openai" {
+                anyhow::bail!("unknown embedding provider {other:?}");
+            }
             tracing::info!(
                 "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
             );
-            build_local_provider(dimensions).await
+            anyhow::bail!("embedding provider openai requires base_url and model")
         }
     }
 }
@@ -306,13 +312,7 @@ fn reject_renamed_onnx_vars() -> anyhow::Result<()> {
 
 /// Picks a [`model_fetch::LocalModelDef`] by `YORISHIRO_LOCAL_MODEL`'s value, or [`model_fetch::DEFAULT_MODEL`] when unset.
 /// An unrecognized value fails startup rather than silently falling back to the default: a typo in this variable is exactly the kind of "this deployment thinks it configured one model but got another" mistake the whole write-time model check exists to catch, and catching the typo at boot is strictly better than catching the resulting stamp mismatch on the first write.
-fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> {
-    let Some(requested) = std::env::var_os("YORISHIRO_LOCAL_MODEL") else {
-        return Ok(model_fetch::DEFAULT_MODEL);
-    };
-    let requested = requested
-        .into_string()
-        .map_err(|_| anyhow::anyhow!("YORISHIRO_LOCAL_MODEL is not valid UTF-8"))?;
+fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::LocalModelDef> {
     if requested == model_fetch::DEFAULT_MODEL.short_id {
         Ok(model_fetch::DEFAULT_MODEL)
     } else if requested == "nomic-embed-text-v1.5" {
@@ -338,10 +338,11 @@ fn resolve_local_model() -> anyhow::Result<&'static model_fetch::LocalModelDef> 
 ///
 /// The model files are fetched on first use when, and only when, neither the default path nor the cache path holds both files.
 async fn build_local_provider(
-    dimensions: usize,
+    config: &crate::config::Embedding,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     reject_renamed_onnx_vars()?;
-    let def = resolve_local_model()?;
+    let dimensions = config.dimensions;
+    let def = resolve_local_model(&config.local_model)?;
     if dimensions != def.dimensions {
         anyhow::bail!(
             "YORISHIRO_EMBEDDING_DIMENSIONS={dimensions} does not match {}'s own output width \
@@ -351,9 +352,7 @@ async fn build_local_provider(
             def.dimensions
         );
     }
-    let max_sequence_length: usize = std::env::var("YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH")
-        .unwrap_or_else(|_| "512".into())
-        .parse()?;
+    let max_sequence_length = config.local_max_sequence_length;
     let Some((model_path, tokenizer_path)) = resolve_model_paths(def).await? else {
         return Ok(std::sync::Arc::new(UnconfiguredEmbeddingProvider {
             dimensions,

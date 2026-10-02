@@ -73,7 +73,12 @@ impl Task for ResyncEmbeddings {
 
         // An unconfigured embedding provider satisfies the dimension count but errors on every actual call.
         // Probe it once up front so a misconfiguration is one clear failure, not N per-candidate ones that read as an ordinary "N failed" outcome.
-        let provider = embedding::build_embedding_provider().await.internal()?;
+        let provider = app_context
+            .shared_store
+            .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
+            .ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
+            })?;
         provider
             .embed_batch(&[])
             .await
