@@ -138,30 +138,33 @@ fn spawn_startup_reindex(ctx: AppContext) {
             // If they differ, enqueue a reindex.
             use sea_orm::{EntityTrait, QuerySelect};
 
-            let workspaces: Vec<_> = match crate::models::workspace_workspaces::Entity::find()
-                .select_only()
-                .column(crate::models::_entities::workspace_workspaces::Column::Id)
-                .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingModel)
-                .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingDimensions)
-                .column_as(
-                    crate::models::_entities::tenant_tenants::Column::EmbeddingModel,
-                    "tenant_model",
-                )
-                .column_as(
-                    crate::models::_entities::tenant_tenants::Column::EmbeddingDimensions,
-                    "tenant_dimensions",
-                )
-                .left_join(crate::models::tenant_tenants::Entity)
-                .into_model::<crate::services::embedding::sync::StartupReindexRow>()
-                .all(&ctx.db)
-                .await
-            {
-                Ok(ws) => ws,
-                Err(err) => {
-                    tracing::error!("startup reindex: failed to list workspaces: {err}");
-                    return;
-                }
-            };
+            let workspaces: Vec<_> =
+                match crate::models::identity::workspace_workspaces::Entity::find()
+                    .select_only()
+                    .column(crate::models::_entities::workspace_workspaces::Column::Id)
+                    .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingModel)
+                    .column(
+                        crate::models::_entities::workspace_workspaces::Column::EmbeddingDimensions,
+                    )
+                    .column_as(
+                        crate::models::_entities::tenant_tenants::Column::EmbeddingModel,
+                        "tenant_model",
+                    )
+                    .column_as(
+                        crate::models::_entities::tenant_tenants::Column::EmbeddingDimensions,
+                        "tenant_dimensions",
+                    )
+                    .left_join(crate::models::identity::tenant_tenants::Entity)
+                    .into_model::<crate::services::embedding::sync::StartupReindexRow>()
+                    .all(&ctx.db)
+                    .await
+                {
+                    Ok(ws) => ws,
+                    Err(err) => {
+                        tracing::error!("startup reindex: failed to list workspaces: {err}");
+                        return;
+                    }
+                };
 
             for ws in &workspaces {
                 // Check for shutdown before processing each workspace.

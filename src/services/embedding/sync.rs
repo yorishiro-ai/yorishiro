@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::error::YorishiroError;
 use crate::metaschema::EntityTypeDef;
-use crate::models::entity_entities::EntityRecord;
+use crate::models::content::entity_entities::EntityRecord;
 use crate::services::embedding::EmbeddingProvider;
 
 /// Concatenates the values of `x-embed` fields as `"field: value"` to build the text to embed.

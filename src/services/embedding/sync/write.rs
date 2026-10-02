@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::error::YorishiroError;
 use crate::metaschema::EntityTypeDef;
-use crate::models::entity_entities::EntityRecord;
+use crate::models::content::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
@@ -130,7 +130,8 @@ pub(super) async fn sync_embedding_for_record(
     licenced: bool,
 ) -> Result<(), YorishiroError> {
     let schema =
-        crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
+        crate::models::content::schema_schemas::get_by_id(conn, workspace_id, record.schema_id)
+            .await?;
     let entity_type_def = schema
         .definition
         .entity_types

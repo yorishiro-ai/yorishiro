@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::entity_entities::{self, EntityRecord};
-use crate::models::entity_relations::{self, RelationRecord};
-use crate::models::schema_schemas::{self, SchemaRecord};
+use crate::models::content::entity_entities::{self, EntityRecord};
+use crate::models::content::entity_relations::{self, RelationRecord};
+use crate::models::content::schema_schemas::{self, SchemaRecord};
 
 /// One line of a JSONL export: a tagged union so schema/entity/relation records can be told apart on read-back without a separate line-position convention.
 /// `Deserialize` is derived so `models::import::import_jsonl` can read the same shape back in.

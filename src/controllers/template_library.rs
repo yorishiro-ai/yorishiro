@@ -14,7 +14,7 @@ use crate::controllers::extractors::AuthContext;
 use crate::controllers::members::require_tenant_admin;
 use crate::error::YorishiroError;
 use crate::metaschema::MetaSchemaDefinition;
-use crate::models::template_templates::{
+use crate::models::templates::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
 

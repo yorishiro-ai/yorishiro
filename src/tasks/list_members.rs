@@ -3,7 +3,7 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::tenancy;
+use crate::models::identity::tenancy;
 
 /// `cargo loco task list_members tenant_id:<uuid>`
 pub struct ListMembers;

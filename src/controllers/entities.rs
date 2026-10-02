@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
-use crate::models::api_key_audit_log;
-use crate::models::entity_entities::{self, EntityRecord, UndoReport};
+use crate::models::content::entity_entities::{self, EntityRecord, UndoReport};
+use crate::models::identity::api_key_audit_log;
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 

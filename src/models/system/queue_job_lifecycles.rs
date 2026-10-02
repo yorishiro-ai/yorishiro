@@ -413,7 +413,7 @@ mod tests {
     fn queue_start_latency_uses_recorded_timestamps() {
         let enqueue_at = Utc.timestamp_opt(1_000, 0).single().unwrap().fixed_offset();
         let start_at = Utc.timestamp_opt(1_075, 0).single().unwrap().fixed_offset();
-        let row = crate::models::queue_job_lifecycles::Model {
+        let row = crate::models::system::queue_job_lifecycles::Model {
             id: uuid::Uuid::nil(),
             provider_job_id: None,
             job_name: "job".into(),

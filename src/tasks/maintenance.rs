@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::system_maintenance::{self, MaintenanceMode};
+use crate::models::system::system_maintenance::{self, MaintenanceMode};
 
 /// `cargo loco task maintenance mode:full_lock [retry_after:300] [reason:"upgrading"]`
 ///

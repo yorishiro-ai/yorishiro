@@ -14,6 +14,7 @@ pub use identity::{
     api_key_audit_log, api_keys, tenancy, tenant_memberships, tenant_tenants, user_users,
     workspace_embedding_keys, workspace_invites, workspace_llm_keys, workspace_workspaces,
 };
+#[cfg(feature = "enterprise")]
 pub(crate) use system::queue_job_lifecycles;
 pub use system::{
     compute_credit_ledger, inference_jobs, stripe_events, system_maintenance, tenant_billing,

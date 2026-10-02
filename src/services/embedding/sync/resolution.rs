@@ -13,13 +13,13 @@ pub(super) async fn resolve_embedding_chain(
     use crate::models::_entities::tenant_tenants::Column as TenantColumn;
     use crate::models::_entities::workspace_workspaces::Column;
 
-    let row = crate::models::workspace_workspaces::Entity::find()
+    let row = crate::models::identity::workspace_workspaces::Entity::find()
         .select_only()
         .column(Column::EmbeddingModel)
         .column(Column::EmbeddingDimensions)
         .column_as(TenantColumn::EmbeddingModel, "tenant_model")
         .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
-        .left_join(crate::models::tenant_tenants::Entity)
+        .left_join(crate::models::identity::tenant_tenants::Entity)
         .filter(Column::Id.eq(workspace_id))
         .into_model::<EmbeddingChainRow>()
         .one(conn)

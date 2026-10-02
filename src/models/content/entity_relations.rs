@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model};
-use crate::models::entity_entities::{self, EntityRecord};
+use crate::models::content::entity_entities::{self, EntityRecord};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -166,7 +166,8 @@ async fn validate_relation_type(
     relation_type: &str,
 ) -> Result<(), YorishiroError> {
     let schema =
-        crate::models::schema_schemas::get_by_id(conn, workspace_id, source.schema_id).await?;
+        crate::models::content::schema_schemas::get_by_id(conn, workspace_id, source.schema_id)
+            .await?;
 
     let relation_def = schema
         .definition

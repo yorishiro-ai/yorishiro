@@ -15,7 +15,7 @@ pub(super) async fn stamp_workspace_embedding(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::workspace_workspaces::Column;
 
-    crate::models::workspace_workspaces::Entity::update_many()
+    crate::models::identity::workspace_workspaces::Entity::update_many()
         .col_expr(Column::EmbeddingModel, Expr::value(model))
         .col_expr(Column::EmbeddingDimensions, Expr::value(dimensions))
         .filter(Column::Id.eq(workspace_id))
@@ -33,7 +33,7 @@ pub(super) async fn restamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    let mut active = crate::models::workspace_workspaces::ActiveModel {
+    let mut active = crate::models::identity::workspace_workspaces::ActiveModel {
         id: ActiveValue::Unchanged(workspace_id),
         ..Default::default()
     };

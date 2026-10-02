@@ -20,8 +20,8 @@ use uuid::Uuid;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::embedding_provider;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenancy::{self, MembershipRole};
+use crate::models::identity::api_keys::IdentityApiKeys;
+use crate::models::identity::tenancy::{self, MembershipRole};
 
 fn wizard_enabled() -> bool {
     matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))

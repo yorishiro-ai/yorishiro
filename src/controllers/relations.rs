@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, WriteScope};
-use crate::models::entity_relations::{self, RelationRecord, RelationStatus};
+use crate::models::content::entity_relations::{self, RelationRecord, RelationStatus};
 
 #[derive(Deserialize)]
 pub struct CreateRelationRequest {

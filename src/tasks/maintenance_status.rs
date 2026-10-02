@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
 use crate::error::ResultExt;
-use crate::models::system_maintenance;
+use crate::models::system::system_maintenance;
 
 /// `cargo loco task maintenance_status`
 pub struct MaintenanceStatus;

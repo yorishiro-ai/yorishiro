@@ -1,7 +1,7 @@
 //! Control-plane tenancy operations for signup, login, invites, memberships, and workspaces.
 //!
 //! These operations use Loco's control-plane connection rather than the RLS-scoped tenant pool because a new tenant has no workspace context yet.
-//! This module keeps the historical `crate::models::tenancy` API stable while its implementations live in private modules.
+//! This module keeps the historical `crate::models::identity::tenancy` API stable while its implementations live in private modules.
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, DatabaseTransaction};

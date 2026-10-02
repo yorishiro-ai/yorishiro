@@ -16,8 +16,8 @@ use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces;
-use crate::models::tenancy;
-use crate::models::workspace_workspaces::WorkspaceRecord;
+use crate::models::identity::tenancy;
+use crate::models::identity::workspace_workspaces::WorkspaceRecord;
 use crate::models::{entity_entities, entity_relations, schema_schemas};
 
 /// Fetches a workspace and confirms it belongs to `tenant_id`, so a caller can never probe or act on another tenant's workspace by guessing its id.

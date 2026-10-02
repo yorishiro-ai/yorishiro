@@ -8,9 +8,9 @@ use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::models::entity_entities::{self, EntityRecord};
-use crate::models::entity_relations::{self, DEFAULT_NEIGHBORS_LIMIT};
-use crate::models::schema_schemas::{self, SchemaRecord};
+use crate::models::content::entity_entities::{self, EntityRecord};
+use crate::models::content::entity_relations::{self, DEFAULT_NEIGHBORS_LIMIT};
+use crate::models::content::schema_schemas::{self, SchemaRecord};
 
 pub const DEFAULT_RECALL_LIMIT: i64 = DEFAULT_NEIGHBORS_LIMIT;
 

@@ -11,7 +11,7 @@ use tokio::time::interval;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
-use crate::models::system_maintenance::{self, MaintenanceMode, MaintenanceState};
+use crate::models::system::system_maintenance::{self, MaintenanceMode, MaintenanceState};
 
 /// Reason string written when this guard enables maintenance mode.
 pub const AUTO_REASON: &str = "database load (automatic)";

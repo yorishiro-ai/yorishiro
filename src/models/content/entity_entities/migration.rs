@@ -18,9 +18,11 @@ pub async fn drift(
 ) -> Result<EntityDrift, YorishiroError> {
     let entity = super::crud::get(conn, workspace_id, entity_id).await?;
     let own =
-        crate::models::schema_schemas::get_by_id(conn, workspace_id, entity.schema_id).await?;
+        crate::models::content::schema_schemas::get_by_id(conn, workspace_id, entity.schema_id)
+            .await?;
     let active =
-        crate::models::schema_schemas::get_active_schema(conn, workspace_id, &own.name).await?;
+        crate::models::content::schema_schemas::get_active_schema(conn, workspace_id, &own.name)
+            .await?;
 
     // The entity's own type definition may be absent from the active version: the type was dropped.
     // Nothing is "missing" in that case; the whole type is, which the version numbers already say.
@@ -69,7 +71,8 @@ pub async fn migration_dry_run(
     use crate::models::_entities::entity_entities::Column;
 
     let active =
-        crate::models::schema_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
+        crate::models::content::schema_schemas::get_active_schema(conn, workspace_id, schema_name)
+            .await?;
 
     // (entity_type, schema_id, count) for everything under this schema name, whatever version.
     #[derive(sea_orm::FromQueryResult)]
@@ -119,9 +122,12 @@ pub async fn migration_dry_run(
         let old = match definitions.get(&row.schema_id) {
             Some(def) => def.clone(),
             None => {
-                let record =
-                    crate::models::schema_schemas::get_by_id(conn, workspace_id, row.schema_id)
-                        .await?;
+                let record = crate::models::content::schema_schemas::get_by_id(
+                    conn,
+                    workspace_id,
+                    row.schema_id,
+                )
+                .await?;
                 definitions.insert(row.schema_id, record.definition.clone());
                 record.definition
             }
@@ -195,7 +201,8 @@ pub async fn fill_defaults(
     updated_by: Option<Uuid>,
 ) -> Result<FillDefaultsReport, YorishiroError> {
     let active =
-        crate::models::schema_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
+        crate::models::content::schema_schemas::get_active_schema(conn, workspace_id, schema_name)
+            .await?;
 
     // Fetch all entities behind the active version.
     use crate::models::_entities::entity_entities::Column;

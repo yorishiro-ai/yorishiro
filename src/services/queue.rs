@@ -56,13 +56,16 @@ async fn decide_for_dispatch_at(
         return Ok(decide(class));
     }
     let cutoff = now - chrono::Duration::seconds(STARVATION_WAIT_SECONDS);
-    let waiting = crate::models::queue_job_lifecycles::Entity::find()
-        .filter(crate::models::queue_job_lifecycles::Column::Status.is_in(["queued", "retrying"]))
+    let waiting = crate::models::system::queue_job_lifecycles::Entity::find()
         .filter(
-            crate::models::queue_job_lifecycles::Column::WorkerClass
+            crate::models::system::queue_job_lifecycles::Column::Status
+                .is_in(["queued", "retrying"]),
+        )
+        .filter(
+            crate::models::system::queue_job_lifecycles::Column::WorkerClass
                 .is_in(lower_classes.iter().copied()),
         )
-        .filter(crate::models::queue_job_lifecycles::Column::EnqueueAt.lte(cutoff))
+        .filter(crate::models::system::queue_job_lifecycles::Column::EnqueueAt.lte(cutoff))
         .count(db)
         .await?;
     Ok(if waiting > 0 {
@@ -119,9 +122,9 @@ mod tests {
         enqueue_at: chrono::DateTime<chrono::FixedOffset>,
     ) {
         let id = uuid::Uuid::now_v7();
-        crate::models::queue_job_lifecycles::Entity::record_enqueue(
+        crate::models::system::queue_job_lifecycles::Entity::record_enqueue(
             db,
-            crate::models::queue_job_lifecycles::Enqueue {
+            crate::models::system::queue_job_lifecycles::Enqueue {
                 id,
                 job_name: "queue-policy-test",
                 worker_class: class,
@@ -133,16 +136,16 @@ mod tests {
         )
         .await
         .expect("record queue policy lifecycle");
-        crate::models::queue_job_lifecycles::Entity::update_many()
+        crate::models::system::queue_job_lifecycles::Entity::update_many()
             .col_expr(
-                crate::models::queue_job_lifecycles::Column::Status,
+                crate::models::system::queue_job_lifecycles::Column::Status,
                 Expr::value(status),
             )
             .col_expr(
-                crate::models::queue_job_lifecycles::Column::EnqueueAt,
+                crate::models::system::queue_job_lifecycles::Column::EnqueueAt,
                 Expr::value(enqueue_at),
             )
-            .filter(crate::models::queue_job_lifecycles::Column::Id.eq(id))
+            .filter(crate::models::system::queue_job_lifecycles::Column::Id.eq(id))
             .exec(db)
             .await
             .expect("update queue policy lifecycle");

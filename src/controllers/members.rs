@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::error::YorishiroError;
-use crate::models::tenancy::{self, MembershipRecord, MembershipRole};
+use crate::models::identity::tenancy::{self, MembershipRecord, MembershipRole};
 
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
 pub(crate) async fn require_tenant_admin(
