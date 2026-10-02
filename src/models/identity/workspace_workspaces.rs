@@ -1,5 +1,5 @@
-use sea_orm::Statement;
 use sea_orm::entity::prelude::*;
+use sea_orm::{QuerySelect, Statement};
 use serde::Serialize;
 use std::fmt;
 use std::str::FromStr;
@@ -19,14 +19,56 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
+#[derive(Clone, sea_orm::FromQueryResult)]
+pub(crate) struct EmbeddingChainRow {
+    pub(crate) embedding_model: Option<String>,
+    pub(crate) embedding_dimensions: Option<i32>,
+    pub(crate) tenant_model: Option<String>,
+    pub(crate) tenant_dimensions: Option<i32>,
+}
 
-// implement your write-oriented logic here
-impl ActiveModel {}
+#[derive(Clone, sea_orm::FromQueryResult)]
+pub(crate) struct StartupReindexRow {
+    pub(crate) id: Uuid,
+    pub(crate) embedding_model: Option<String>,
+}
 
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
+pub(crate) async fn embedding_chain(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Option<EmbeddingChainRow>, YorishiroError> {
+    use crate::models::_entities::tenant_tenants::Column as TenantColumn;
+    use crate::models::_entities::workspace_workspaces::Column;
+
+    Entity::find()
+        .select_only()
+        .column(Column::EmbeddingModel)
+        .column(Column::EmbeddingDimensions)
+        .column_as(TenantColumn::EmbeddingModel, "tenant_model")
+        .column_as(TenantColumn::EmbeddingDimensions, "tenant_dimensions")
+        .left_join(crate::models::identity::tenant_tenants::Entity)
+        .filter(Column::Id.eq(workspace_id))
+        .into_model::<EmbeddingChainRow>()
+        .one(conn)
+        .await
+        .internal()
+}
+
+pub(crate) async fn stamped_for_reindex(
+    conn: &impl ConnectionTrait,
+) -> Result<Vec<StartupReindexRow>, YorishiroError> {
+    use crate::models::_entities::workspace_workspaces::Column;
+
+    Entity::find()
+        .select_only()
+        .column(Column::Id)
+        .column(Column::EmbeddingModel)
+        .filter(Column::EmbeddingModel.is_not_null())
+        .into_model::<StartupReindexRow>()
+        .all(conn)
+        .await
+        .internal()
+}
 
 pub async fn list_for_tenant(
     conn: &impl ConnectionTrait,

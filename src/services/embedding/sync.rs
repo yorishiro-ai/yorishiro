@@ -89,22 +89,6 @@ pub(crate) struct ResolvedEmbedding {
     pub(crate) deployment_dimensions: usize,
 }
 
-/// A row returned by the workspace and tenant embedding-chain query.
-#[derive(sea_orm::FromQueryResult)]
-struct EmbeddingChainRow {
-    embedding_model: Option<String>,
-    embedding_dimensions: Option<i32>,
-    tenant_model: Option<String>,
-    tenant_dimensions: Option<i32>,
-}
-
-/// A workspace row used by startup reindex detection.
-#[derive(Clone, sea_orm::FromQueryResult)]
-pub(crate) struct StartupReindexRow {
-    pub(crate) id: Uuid,
-    pub(crate) embedding_model: Option<String>,
-}
-
 /// Resolves the workspace, tenant, and deployment embedding settings.
 pub(crate) async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,

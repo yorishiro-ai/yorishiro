@@ -163,27 +163,8 @@ fn spawn_startup_reindex(ctx: AppContext) {
             // Fetch all workspaces that have an embedding model stamp.
             // We compare each workspace's stamped model against the provider's model name.
             // If they differ, enqueue a reindex.
-            use sea_orm::{EntityTrait, QuerySelect};
-
-            let workspaces: Vec<_> =
-                match crate::models::identity::workspace_workspaces::Entity::find()
-                    .select_only()
-                    .column(crate::models::_entities::workspace_workspaces::Column::Id)
-                    .column(crate::models::_entities::workspace_workspaces::Column::EmbeddingModel)
-                    .column(
-                        crate::models::_entities::workspace_workspaces::Column::EmbeddingDimensions,
-                    )
-                    .column_as(
-                        crate::models::_entities::tenant_tenants::Column::EmbeddingModel,
-                        "tenant_model",
-                    )
-                    .column_as(
-                        crate::models::_entities::tenant_tenants::Column::EmbeddingDimensions,
-                        "tenant_dimensions",
-                    )
-                    .left_join(crate::models::identity::tenant_tenants::Entity)
-                    .into_model::<crate::services::embedding::sync::StartupReindexRow>()
-                    .all(&ctx.db)
+            let workspaces =
+                match crate::models::identity::workspace_workspaces::stamped_for_reindex(&ctx.db)
                     .await
                 {
                     Ok(ws) => ws,
