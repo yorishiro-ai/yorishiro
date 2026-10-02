@@ -64,5 +64,3 @@ src/controllers/openapi.rs	field	ProposalConfirmResponse::stale	OpenAPI confirma
 src/controllers/openapi.rs	field	ProposalConfirmResponse::invalid	OpenAPI confirmation response field.
 src/workers/embedding_sync.rs	field	EmbeddingSyncArgs::lifecycle_id	Optional internal lifecycle correlation carried through the existing serialized worker payload.
 src/workers/reindex.rs	field	ReindexArgs::lifecycle_id	Optional internal lifecycle correlation carried through the existing serialized worker payload.
-# The licence plan query is part of the enterprise state API used by plan gates.
-ee/services/licence.rs	fn	LicenceState::active_plan_at	Public licence state query used by enterprise plan gates and integration tests.

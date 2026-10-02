@@ -22,49 +22,18 @@ Run `make check-all` (`fmt-check + check + clippy`). Confirm all pass before pus
 
 ## CI
 
-Wait for PR/CI events using `gh-wait` (`gh extension install k1LoW/gh-wait`):
+| Workflow | Triggers | Notes |
+|---|---|---|
+| `ci.yml` | PR push/push to `develop` / `loco-rebuild` | Matrix: postgres + sqlite in parallel |
+| `doc-check.yml` | PR push to `develop` / `loco-rebuild` | Warns if source change lacks doc update |
+| `security.yml` | PR push to `develop` / `loco-rebuild` | Path-filtered: `Cargo.toml`/`Cargo.lock`/`.cargo/audit.toml` changes only |
+| `codeql.yml` | Weekly cron (`0 3 * * 1`) + manual dispatch | Does not run on PR push |
+| `dep-audit.yml` | Weekly cron (`0 9 * * 1`) + manual dispatch | Rust dependency audit |
+| `windows-weekly.yml` | Weekly cron (`0 18 * * 1`) + manual dispatch | Windows compile check |
+| `cache-cleanup.yml` | Closed PR against `develop` | Cleans caches on merged PR branches |
+| `release.yml` | Manual dispatch only | `dry_run: true/false` |
 
-**Wait for CI completion:**
-
-```bash
-gh wait pr <number> --ci-completed
-```
-
-**Wait for PR approval:**
-
-```bash
-gh wait pr <number> --approved --open
-```
-
-**Wait for merge:**
-
-```bash
-gh wait pr <number> --merged --open
-```
-
-**Wait for CI failure:**
-
-```bash
-gh wait pr <number> --ci-failed --open
-```
-
-**Continuous watch (e.g., notify on every new comment until PR is closed):**
-
-```bash
-gh wait pr <number> --commented --open --until closed
-```
-
-**Manage rules:**
-
-```bash
-gh wait list              # List all watch rules
-gh wait delete <id>       # Delete a specific rule
-gh wait delete --all      # Delete all rules
-```
-
-Polling interval defaults to `1min` for PR/workflow and `30min` for issue/discussion. Custom interval: `--interval 5min`.
-
-For full workflow reference, see `.github/workflows/`.
+Check a workflow's `on:` block before assuming it runs (or doesn't) on a PR.
 
 ## Merge strategy
 

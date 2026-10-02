@@ -330,6 +330,7 @@ jobs:
           DATABASE_URL: ${{ matrix.database_url }}
           QUEUE_URL: ${{ matrix.queue_url }}
           LOCO_ENV: ${{ matrix.loco_env }}
+          DB_CONNECT_TIMEOUT: "5000"
         run: ./target/debug/yorishiro db migrate
 
       - name: Run migrations (sqlite)
@@ -345,6 +346,7 @@ jobs:
         env:
           DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
           LOCO_ENV: test_postgres
+          DB_CONNECT_TIMEOUT: "5000"
         run: |
           # Diagnose: confirm the migration-created tables actually exist.
           # This is the branching point if db entities ever produces 0 files again.
@@ -374,6 +376,7 @@ jobs:
           QUEUE_URL: ${{ matrix.queue_url }}
           YORISHIRO_REDIS_TEST_URL: ${{ matrix.queue_url }}
           DB_MAX_CONNECTIONS: 100
+          DB_CONNECT_TIMEOUT: 5000
           RUST_BACKTRACE: "1"
         run: uv run scripts/test_backend.py ${{ matrix.backend }}
 
