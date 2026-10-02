@@ -64,3 +64,18 @@ src/controllers/openapi.rs	field	ProposalConfirmResponse::stale	OpenAPI confirma
 src/controllers/openapi.rs	field	ProposalConfirmResponse::invalid	OpenAPI confirmation response field.
 src/workers/embedding_sync.rs	field	EmbeddingSyncArgs::lifecycle_id	Optional internal lifecycle correlation carried through the existing serialized worker payload.
 src/workers/reindex.rs	field	ReindexArgs::lifecycle_id	Optional internal lifecycle correlation carried through the existing serialized worker payload.
+src/controllers/openapi.rs	struct	CreateApiKeyRequest	OpenAPI request body schema for API key creation.
+src/controllers/openapi.rs	field	CreateApiKeyRequest::name	OpenAPI request body field.
+src/controllers/openapi.rs	struct	CreateApiKeyResponse	OpenAPI response schema returned on successful API key creation.
+src/controllers/openapi.rs	field	CreateApiKeyResponse::id	OpenAPI response field.
+src/controllers/openapi.rs	field	CreateApiKeyResponse::prefix	OpenAPI response field.
+src/controllers/openapi.rs	field	CreateApiKeyResponse::full_key	OpenAPI response field (one-time secret).
+src/controllers/openapi.rs	field	CreateApiKeyResponse::name	OpenAPI response field.
+src/controllers/openapi.rs	field	CreateApiKeyResponse::created_at	OpenAPI response field.
+src/controllers/openapi.rs	struct	ApiKeyRecord	OpenAPI record shape in the key listing response.
+src/controllers/openapi.rs	field	ApiKeyRecord::id	OpenAPI record field.
+src/controllers/openapi.rs	field	ApiKeyRecord::prefix	OpenAPI record field.
+src/controllers/openapi.rs	field	ApiKeyRecord::name	OpenAPI record field.
+src/controllers/openapi.rs	field	ApiKeyRecord::created_at	OpenAPI record field.
+src/controllers/openapi.rs	struct	ListApiKeysResponse	OpenAPI list response wrapper.
+src/controllers/openapi.rs	field	ListApiKeysResponse::keys	OpenAPI list field.

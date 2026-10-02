@@ -341,36 +341,32 @@ pub struct AddMemberRequest {
 }
 
 #[derive(ToSchema)]
-#[allow(dead_code)]
-pub(crate) struct CreateApiKeyRequest {
-    pub(crate) name: String,
+pub struct CreateApiKeyRequest {
+    pub name: String,
 }
 
 #[derive(ToSchema)]
-#[allow(dead_code)]
-pub(crate) struct CreateApiKeyResponse {
-    pub(crate) id: Uuid,
-    pub(crate) prefix: String,
-    pub(crate) full_key: String,
-    pub(crate) name: String,
+pub struct CreateApiKeyResponse {
+    pub id: Uuid,
+    pub prefix: String,
+    pub full_key: String,
+    pub name: String,
     #[schema(format = DateTime)]
-    pub(crate) created_at: String,
+    pub created_at: String,
 }
 
 #[derive(ToSchema)]
-#[allow(dead_code)]
-pub(crate) struct ApiKeyRecord {
-    pub(crate) id: Uuid,
-    pub(crate) prefix: String,
-    pub(crate) name: String,
+pub struct ApiKeyRecord {
+    pub id: Uuid,
+    pub prefix: String,
+    pub name: String,
     #[schema(format = DateTime)]
-    pub(crate) created_at: String,
+    pub created_at: String,
 }
 
 #[derive(ToSchema)]
-#[allow(dead_code)]
-pub(crate) struct ListApiKeysResponse {
-    pub(crate) keys: Vec<ApiKeyRecord>,
+pub struct ListApiKeysResponse {
+    pub keys: Vec<ApiKeyRecord>,
 }
 
 #[derive(ToSchema)]

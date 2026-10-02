@@ -191,11 +191,11 @@ async fn inference_job_attempt_migration_grants_update_to_app_role() {
             Migrator::up(db, None).await.expect("run all migrations");
             assert!(privilege(db, "SELECT").await);
             assert!(privilege(db, "UPDATE").await);
-            // 000014 is the newest migration.  Roll back both it and 000013
+            // Migration #16 (file 000015) is the newest migration.  Roll back 000016, 000015, and 000014
             // before asserting the 000013 privilege change is gone.
-            Migrator::down(db, Some(2))
+            Migrator::down(db, Some(3))
                 .await
-                .expect("roll back the privilege and starvation-index migrations");
+                .expect("roll back the api_key_name, starvation-index, and privilege migrations");
             assert!(privilege(db, "SELECT").await);
             assert!(!privilege(db, "UPDATE").await);
             assert!(!rls_enabled(db).await);

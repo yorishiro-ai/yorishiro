@@ -682,7 +682,9 @@ async fn incremental_migration_rollbacks_are_separate_from_fresh_upgrades() {
 #[serial(process_environment)]
 async fn queue_starvation_index_matches_admission_predicate() {
     with_database("queue_starvation_index", |db| Box::pin(async move {
-        Migrator::up(db, None).await.expect("all migrations");
+        Migrator::up(db, Some(15))
+            .await
+            .expect("migrations through starvation index");
         assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
         let definition: String = match db.get_database_backend() {
             DbBackend::Sqlite => {
@@ -724,7 +726,7 @@ async fn queue_starvation_index_matches_admission_predicate() {
             backend => panic!("unsupported migration test backend: {backend:?}"),
         };
         assert_eq!(absent, 0, "rollback must remove starvation index");
-        Migrator::up(db, None)
+        Migrator::up(db, Some(15))
             .await
             .expect("reapply starvation index migration");
         assert_index_exists(db, "queue_job_lifecycles_starvation_idx").await;
