@@ -48,6 +48,36 @@ pub(super) fn apply_environment_overrides(value: &mut Value) -> Result<()> {
     )?;
     apply_queue_overrides(value, database_url.as_deref())?;
     apply_mailer_overrides(value)?;
+    set_u64(
+        value,
+        &["settings", "rate_limit", "auth_max_requests"],
+        "YORISHIRO_AUTH_RATE_LIMIT_MAX",
+    )?;
+    set_u64(
+        value,
+        &["settings", "rate_limit", "auth_window_seconds"],
+        "YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS",
+    )?;
+    set_u64(
+        value,
+        &["settings", "rate_limit", "search_tokens_per_minute"],
+        "YORISHIRO_SEARCH_TOKENS_PER_MINUTE",
+    )?;
+    set_i64(
+        value,
+        &["settings", "db_load_guard", "threshold"],
+        "YORISHIRO_DB_LOAD_THRESHOLD",
+    )?;
+    set_u64(
+        value,
+        &["settings", "db_load_guard", "sustain_seconds"],
+        "YORISHIRO_DB_LOAD_SUSTAIN_SECS",
+    )?;
+    set_u64(
+        value,
+        &["settings", "db_load_guard", "poll_seconds"],
+        "YORISHIRO_DB_LOAD_POLL_SECS",
+    )?;
     Ok(())
 }
 

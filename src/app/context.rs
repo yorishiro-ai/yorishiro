@@ -9,6 +9,7 @@ use super::startup;
 /// Builds the base application's shared services without moving work past Loco's migration boundary.
 pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
     startup::validate_backend(&ctx)?;
+    let settings = ctx.config.settings::<crate::config::Settings>()?;
 
     if ctx.is_postgres() {
         let database_url = ctx.config.database.uri.clone();
@@ -47,9 +48,11 @@ pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
     ctx.shared_store
         .insert(crate::workers::embedding_sync::default_worker_class_resolver());
     // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
-    ctx.shared_store.insert(Arc::new(
-        crate::services::rate_limit::RateLimiter::search_tokens_from_env(),
-    ));
+    ctx.shared_store
+        .insert(Arc::new(crate::services::rate_limit::RateLimiter::search(
+            &settings,
+        )));
+    ctx.shared_store.insert(settings);
 
     Ok(ctx)
 }

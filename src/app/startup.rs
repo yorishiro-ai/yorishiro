@@ -70,7 +70,14 @@ pub(super) fn after_boot(
 ) {
     if !matches!(environment, Environment::Test) && run_startup_reindex {
         spawn_startup_reindex(result.app_context.clone());
-        if let Some(config) = crate::services::db_load_guard::LoadGuardConfig::from_env() {
+        let settings = result
+            .app_context
+            .shared_store
+            .get::<crate::config::Settings>()
+            .expect("application settings were installed in after_context");
+        if let Some(config) =
+            crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings)
+        {
             let ctx = result.app_context.clone();
             let task = spawn(async move { crate::services::db_load_guard::run(ctx, config).await });
             result

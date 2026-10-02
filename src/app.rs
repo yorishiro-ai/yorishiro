@@ -458,8 +458,12 @@ impl Hooks for App {
             let tool_router = crate::services::mcp::compose_tool_routers(tool_routers);
             crate::services::mcp::YorishiroMcpServer::new(ctx, tool_router, enterprise_tool_names)
         });
+        let settings = ctx
+            .shared_store
+            .get::<crate::config::Settings>()
+            .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
         let rate_limiter =
-            std::sync::Arc::new(crate::services::rate_limit::RateLimiter::from_env());
+            std::sync::Arc::new(crate::services::rate_limit::RateLimiter::auth(&settings));
         let router = router.layer(axum::middleware::from_fn_with_state(
             rate_limiter,
             crate::services::rate_limit::enforce,

@@ -40,28 +40,22 @@ impl RateLimiter {
 
     /// `YORISHIRO_AUTH_RATE_LIMIT_MAX` (default 10) requests per
     /// `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` (default 60) seconds, per client IP.
-    pub fn from_env() -> Self {
-        let max_requests = std::env::var("YORISHIRO_AUTH_RATE_LIMIT_MAX")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10);
-        let window_secs = std::env::var("YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(60);
-        Self::new(max_requests, Duration::from_secs(window_secs))
+    pub(crate) fn auth(config: &crate::config::Settings) -> Self {
+        Self::new(
+            config.rate_limit.auth_max_requests,
+            Duration::from_secs(config.rate_limit.auth_window_seconds),
+        )
     }
 
     /// `YORISHIRO_SEARCH_TOKENS_PER_MINUTE` (default 100000) tokens per minute, per workspace.
     ///
     /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is known and is the thing whose consumption matters.
     /// The default is high enough that ordinary use never reaches it: it is there to bound a runaway agent, not to ration.
-    pub fn search_tokens_from_env() -> Self {
-        let max_tokens = std::env::var("YORISHIRO_SEARCH_TOKENS_PER_MINUTE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(100_000);
-        Self::new(max_tokens, Duration::from_secs(60))
+    pub(crate) fn search(config: &crate::config::Settings) -> Self {
+        Self::new(
+            config.rate_limit.search_tokens_per_minute,
+            Duration::from_secs(60),
+        )
     }
 
     /// Returns `true` if this call is within the limit, `false` if `key` has exhausted its quota for the current window.

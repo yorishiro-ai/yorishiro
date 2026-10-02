@@ -91,7 +91,7 @@ pub(crate) fn decide(class: WorkerClass) -> Decision {
 mod tests {
     use chrono::{Duration, TimeZone, Utc};
     use migration::{Migrator, MigratorTrait};
-    use sea_orm::{Database, EntityTrait, QueryFilter, sea_query::Expr};
+    use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter, sea_query::Expr};
     use tempfile::tempdir;
 
     use super::*;
