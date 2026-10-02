@@ -611,6 +611,9 @@ impl Hooks for App {
         #[cfg(feature = "openapi")]
         #[cfg(feature = "openapi")]
         inventory.add_docs(controllers::audit_log::openapi_docs());
+        mount!(controllers::api_keys::routes(), Edition::Community, false);
+        #[cfg(feature = "openapi")]
+        inventory.add_docs(controllers::api_keys::openapi_docs());
         mount!(controllers::auth::routes(), Edition::Community, false);
         #[cfg(feature = "openapi")]
         #[cfg(feature = "openapi")]

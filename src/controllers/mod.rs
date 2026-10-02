@@ -1,3 +1,4 @@
+pub(crate) mod api_keys;
 pub mod audit_log;
 pub mod auth;
 pub mod entities;

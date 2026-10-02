@@ -15,6 +15,7 @@ pub struct Model {
     pub key_hash: Vec<u8>,
     #[sea_orm(column_type = "Text")]
     pub key_prefix: String,
+    pub name: String,
     #[sea_orm(column_type = "Text")]
     pub scope: String,
     pub created_at: DateTimeWithTimeZone,

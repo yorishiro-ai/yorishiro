@@ -248,3 +248,10 @@ API キー、webhook secret、OAuth 認証情報、OIDC token、ライセンス�
 外部 provider のエラー本文も、認証情報や token が含まれる可能性があるためログに出力しません。
 対象には、デプロイメントとワークスペースの embedding または LLM API キー、Stripe webhook secret、OAuth client と state signing の認証情報、OIDC ID token、ライセンス claim の subject が含まれます。
 HTTP access log にはリクエスト path だけを記録し、query string は記録しません。そのため OAuth callback の code と state はログに出力されません。
+## API キーのライフサイクル
+
+セットアップ後は、テナントの Owner と Admin が `/api/api-keys` でワークスペース API キーを作成、一覧表示、失効できます。
+`POST /api/api-keys` は前後の空白を除いた 1 文字以上 100 文字以下の `name` を受け付け、完全なキーをそのレスポンスでのみ返します。
+`GET /api/api-keys` は名前、プレフィックス、識別子、作成日時を返しますが、ハッシュや平文の秘密情報は返しません。
+`DELETE /api/api-keys/{id}` はキーを直ちに失効させ、識別子が存在しない場合や別テナントのキーの場合は `404` を返します。
+リクエストに使用したキー自身の失効は意図的に許可しているため、管理者は別の認証情報なしで古いキーを失効できます。

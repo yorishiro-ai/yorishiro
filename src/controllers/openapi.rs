@@ -341,6 +341,39 @@ pub struct AddMemberRequest {
 }
 
 #[derive(ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct CreateApiKeyRequest {
+    pub(crate) name: String,
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct CreateApiKeyResponse {
+    pub(crate) id: Uuid,
+    pub(crate) prefix: String,
+    pub(crate) full_key: String,
+    pub(crate) name: String,
+    #[schema(format = DateTime)]
+    pub(crate) created_at: String,
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct ApiKeyRecord {
+    pub(crate) id: Uuid,
+    pub(crate) prefix: String,
+    pub(crate) name: String,
+    #[schema(format = DateTime)]
+    pub(crate) created_at: String,
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct ListApiKeysResponse {
+    pub(crate) keys: Vec<ApiKeyRecord>,
+}
+
+#[derive(ToSchema)]
 pub struct CreateWorkspaceRequest {
     pub name: String,
     #[schema(nullable = true)]

@@ -18,6 +18,7 @@ mod m20260930_000011_queue_job_lease;
 mod m20260930_000012_inference_job_attempt;
 mod m20260930_000013_inference_job_attempt_privileges;
 mod m20261001_000014_queue_lifecycle_starvation_index;
+mod m20261002_000015_api_key_name;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -39,6 +40,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260930_000012_inference_job_attempt::Migration),
             Box::new(m20260930_000013_inference_job_attempt_privileges::Migration),
             Box::new(m20261001_000014_queue_lifecycle_starvation_index::Migration),
+            Box::new(m20261002_000015_api_key_name::Migration),
             // inject-above (do not remove this comment)
         ]
     }
