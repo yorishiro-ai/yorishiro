@@ -133,14 +133,30 @@ pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yorishiro
 pub async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,
+    configured_max: Option<i32>,
 ) -> Result<tenant_tenants::Model, YorishiroError> {
-    tenant::create_tenant(conn, name).await
+    tenant::create_tenant(conn, name, configured_max).await
 }
 
-/// Reads and parses `YORISHIRO_MAX_TENANTS`.
-/// An unset or zero value means unlimited, while a negative or non-integer value is a configuration error.
-pub fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
-    tenant::max_tenants_from_env()
+#[cfg(feature = "enterprise")]
+pub(crate) fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
+    match std::env::var("YORISHIRO_MAX_TENANTS") {
+        Ok(raw) => {
+            let parsed = raw.parse::<i32>().map_err(|_| {
+                YorishiroError::Internal(anyhow::anyhow!(
+                    "YORISHIRO_MAX_TENANTS must be an integer, got '{raw}'"
+                ))
+            })?;
+            match parsed {
+                0 => Ok(None),
+                n if n < 0 => Err(YorishiroError::Internal(anyhow::anyhow!(
+                    "YORISHIRO_MAX_TENANTS must not be negative, got '{raw}'"
+                ))),
+                n => Ok(Some(n)),
+            }
+        }
+        Err(_) => Ok(None),
+    }
 }
 
 /// Creates a human user account.

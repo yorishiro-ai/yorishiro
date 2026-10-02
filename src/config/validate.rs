@@ -27,6 +27,12 @@ pub(super) fn load_canonical(path: &Path) -> Result<Config> {
     overrides::apply_environment_overrides(&mut value)?;
     let config: Config = serde_yaml::from_value(value)
         .map_err(|err| Error::YAMLFile(err, path.display().to_string()))?;
+    let settings = config.settings::<crate::config::Settings>()?;
+    if settings.max_tenants < 0 {
+        return Err(Error::Message(
+            "settings.max_tenants must not be negative".into(),
+        ));
+    }
     validate_queue_policy(&config)?;
     Ok(config)
 }

@@ -130,7 +130,12 @@ async fn signup_without_invite(
     // tenant + user + membership run in one transaction, same reasoning as signup_with_invite's create_user + add_member: a request that dies part-way must not leave rows nothing can finish or undo.
     let tenant_name = body.display_name.as_deref().unwrap_or(email);
     let txn = ctx.db.begin().await.internal()?;
-    let tenant = tenancy::create_tenant(&txn, tenant_name).await?;
+    let settings = ctx
+        .shared_store
+        .get::<crate::config::Settings>()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
+    let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
+    let tenant = tenancy::create_tenant(&txn, tenant_name, max_tenants).await?;
     let user =
         tenancy::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
     tenancy::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;

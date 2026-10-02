@@ -24,13 +24,14 @@ pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yo
 pub(crate) async fn create_tenant(
     conn: &impl ConnectionTrait,
     name: &str,
+    configured_max: Option<i32>,
 ) -> Result<tenant_tenants::Model, YorishiroError> {
     // SQLite has no database-enforced tenant isolation (no RLS, no roles), so a second tenant on that backend would be a silent isolation break rather than merely an unwanted one.
     // The cap is hardcoded rather than read from YORISHIRO_MAX_TENANTS: an operator raising that variable must not be able to loosen a constraint that exists because the isolation mechanism itself is absent, not because of a configurable policy choice.
     let effective_max = if conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
         Some(1)
     } else {
-        max_tenants_from_env()?
+        configured_max
     };
 
     if let Some(max) = effective_max {
@@ -61,27 +62,6 @@ pub(crate) async fn create_tenant(
     active.insert(conn).await.internal()
 }
 
-/// Reads and parses `YORISHIRO_MAX_TENANTS`.
-/// Unset or `0` means unlimited; a negative or non-integer value is a misconfiguration and fails loudly rather than silently falling back to unlimited.
-pub(crate) fn max_tenants_from_env() -> Result<Option<i32>, YorishiroError> {
-    match std::env::var("YORISHIRO_MAX_TENANTS") {
-        Ok(raw) => {
-            let parsed = raw.parse::<i32>().map_err(|_| {
-                YorishiroError::Internal(anyhow::anyhow!(
-                    "YORISHIRO_MAX_TENANTS must be an integer, got '{raw}'"
-                ))
-            })?;
-            match parsed {
-                0 => Ok(None),
-                n if n < 0 => Err(YorishiroError::Internal(anyhow::anyhow!(
-                    "YORISHIRO_MAX_TENANTS must not be negative, got '{raw}'"
-                ))),
-                n => Ok(Some(n)),
-            }
-        }
-        Err(_) => Ok(None),
-    }
-}
 /// Sets a tenant's `max_workspaces` cap.
 ///
 /// An enterprise-edition deployment never calls this (its tenants keep whatever cap they were created with, `None` by default): the only caller is `ee/`'s Stripe integration, applying the cap that comes with a plan change.

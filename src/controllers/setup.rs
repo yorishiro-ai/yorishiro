@@ -23,8 +23,12 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::identity::api_keys::IdentityApiKeys;
 use crate::models::identity::tenancy::{self, MembershipRole};
 
-fn wizard_enabled() -> bool {
-    matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
+fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
+    let settings = ctx
+        .shared_store
+        .get::<crate::config::Settings>()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
+    Ok((settings.max_tenants > 0).then_some(settings.max_tenants))
 }
 
 #[derive(Serialize)]
@@ -35,7 +39,7 @@ pub struct SetupStatusResponse {
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = super::openapi::SetupStatusResponse)), security(()), tag = "community"))]
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
-    let setup_required = if wizard_enabled() {
+    let setup_required = if max_tenants(&ctx)?.is_some() {
         tenancy::count_tenants(&ctx.db).await? == 0
     } else {
         false
@@ -65,7 +69,8 @@ pub async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if !wizard_enabled() {
+    let max_tenants = max_tenants(&ctx)?;
+    if max_tenants.is_none() {
         return Err(YorishiroError::not_found(
             "the setup wizard is not enabled on this deployment",
         )
@@ -96,7 +101,7 @@ pub async fn setup(
         .into());
     }
 
-    let tenant = tenancy::create_tenant(&txn, "default").await?;
+    let tenant = tenancy::create_tenant(&txn, "default", max_tenants).await?;
 
     let workspace = tenancy::create_workspace(
         &txn,

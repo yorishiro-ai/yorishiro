@@ -48,6 +48,7 @@ pub(super) fn apply_environment_overrides(value: &mut Value) -> Result<()> {
     )?;
     apply_queue_overrides(value, database_url.as_deref())?;
     apply_mailer_overrides(value)?;
+    set_i64(value, &["settings", "max_tenants"], "YORISHIRO_MAX_TENANTS")?;
     set_u64(
         value,
         &["settings", "rate_limit", "auth_max_requests"],
