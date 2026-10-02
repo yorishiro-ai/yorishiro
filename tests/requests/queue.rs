@@ -23,7 +23,9 @@ use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::models::_entities::{tenant_billing, tenant_tenants, workspace_workspaces};
+use yorishiro::models::_entities::{
+    queue_job_lifecycles, tenant_billing, tenant_tenants, workspace_workspaces,
+};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::workers::embedding_sync::{self, EmbeddingSyncArgs, WorkerClass};
 use yorishiro::workers::reindex::{self, ReindexArgs};
@@ -239,15 +241,6 @@ where
         .insert(&boot_res.app_context.db)
         .await
         .expect("insert queue test workspace");
-        tenant_billing::ActiveModel {
-            tenant_id: sea_orm::ActiveValue::Set(tenant.id),
-            plan: sea_orm::ActiveValue::Set(Some("free".into())),
-            ..Default::default()
-        }
-        .insert(&boot_res.app_context.db)
-        .await
-        .expect("insert queue test billing");
-
         test(boot_res.app_context.clone(), pool.clone(), workspace.id).await;
     })
     .catch_unwind()
@@ -421,6 +414,72 @@ async fn each_reindex_worker_class_carries_its_own_tag() {
                 ),
             ]
         );
+    })
+    .await;
+}
+
+/// Community/self-hosted tenants have no billing row, but both dispatchers still use Free policy.
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn missing_billing_uses_free_policy_for_both_dispatchers() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_sqlite_queue(|ctx, _pool, workspace_id| async move {
+        embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Official, workspace_id))
+            .await
+            .expect("embedding enqueue without billing");
+        reindex::enqueue_for_class(
+            &ctx,
+            ReindexArgs {
+                lifecycle_id: None,
+                workspace_id,
+                worker_class: WorkerClass::Official,
+            },
+        )
+        .await
+        .expect("reindex enqueue without billing");
+
+        let rows = queue_job_lifecycles::Entity::find()
+            .all(&ctx.db)
+            .await
+            .expect("read queue lifecycles");
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| {
+            row.plan.as_deref() == Some("free")
+                && row.concurrency_key.as_deref() == Some("official:free")
+                && row.concurrency_limit == Some(1)
+        }));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial(process_environment)]
+async fn present_invalid_billing_plan_remains_diagnostic() {
+    if !super::super::require_postgres_backend() {
+        return;
+    }
+    with_sqlite_queue(|ctx, _pool, workspace_id| async move {
+        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
+            .one(&ctx.db)
+            .await
+            .expect("find workspace")
+            .expect("workspace");
+        tenant_billing::ActiveModel {
+            tenant_id: sea_orm::ActiveValue::Set(workspace.tenant_id),
+            plan: sea_orm::ActiveValue::Set(Some("invalid".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("insert invalid billing");
+
+        let error =
+            embedding_sync::enqueue_for_class(&ctx, args_for(WorkerClass::Official, workspace_id))
+                .await
+                .expect_err("invalid billing must not silently become free");
+        assert!(error.to_string().contains("unknown plan value"));
     })
     .await;
 }

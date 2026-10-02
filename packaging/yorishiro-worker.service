@@ -1,0 +1,23 @@
+# Enable with `systemctl enable --now yorishiro-worker` alongside yorishiro.service.
+# Explicit tags are required: Loco 1.2.0 cannot combine --server-and-worker with tagged workers.
+[Unit]
+Description=Yorishiro background worker
+After=network.target yorishiro.service
+
+[Service]
+Type=simple
+User=yorishiro
+Group=yorishiro
+WorkingDirectory=/var/lib/yorishiro
+Environment=YORISHIRO_CONFIG_PATH=/etc/yorishiro/yorishiro.yaml
+ExecStart=/usr/bin/yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yorishiro
+
+[Install]
+WantedBy=multi-user.target

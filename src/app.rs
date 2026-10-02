@@ -48,18 +48,31 @@ async fn queue_concurrency_policy(
         let Some(workspace) = workspace else {
             return Err("queue policy unavailable: workspace does not exist".into());
         };
-        let plan =
-            crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
-                .one(&ctx.db)
-                .await
-                .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?
-                .ok_or_else(|| "queue policy unavailable: billing row is missing".to_owned())?
-                .plan
-                .ok_or_else(|| "queue policy unavailable: billing plan is missing".to_owned())
-                .and_then(|value| {
+        let licence_plan = ctx
+            .shared_store
+            .get::<std::sync::Arc<crate::ee::services::licence::LicenceState>>()
+            .ok_or_else(|| "queue policy unavailable: licence state is missing".to_owned())?
+            .active_plan_at(chrono::Utc::now().timestamp())
+            .map_err(|error| format!("queue policy unavailable: invalid licence plan: {error}"))?;
+        let plan = if let Some(plan) = licence_plan {
+            plan
+        } else {
+            let billing =
+                crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
+                    .one(&ctx.db)
+                    .await
+                    .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
+            match billing {
+                None => crate::ee::services::plan::Plan::Free,
+                Some(billing) => {
+                    let value = billing.plan.ok_or_else(|| {
+                        "queue policy unavailable: billing plan is missing".to_owned()
+                    })?;
                     crate::ee::services::plan::Plan::from_db_str(&value)
-                        .map_err(|error| error.to_string())
-                })?;
+                        .map_err(|error| error.to_string())?
+                }
+            }
+        };
         let limit = match class {
             "official" => plan.compute_policy().base_official_concurrency as i32,
             "tenant_private" | "shared" => 1,

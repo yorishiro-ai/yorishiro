@@ -9,6 +9,7 @@
 //!
 //! No key means the enterprise features are disabled, never that the process refuses to start: a deployment that only wants the free half must keep working with no licence configured at all.
 
+use super::plan::Plan;
 use crate::YorishiroError;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
@@ -129,6 +130,15 @@ impl LicenceState {
     /// The pure fold [`Self::is_active`] wraps, so expiry is testable without waiting for a clock or mocking one.
     pub fn is_active_at(&self, now: i64) -> bool {
         self.claims.as_ref().is_some_and(|c| c.exp > now)
+    }
+
+    /// Returns the plan from an active licence, if one is present.
+    /// An expired or absent licence deliberately falls through to billing/default policy.
+    pub fn active_plan_at(&self, now: i64) -> Result<Option<Plan>, YorishiroError> {
+        let Some(claims) = self.claims.as_ref().filter(|claims| claims.exp > now) else {
+            return Ok(None);
+        };
+        Plan::from_db_str(&claims.plan).map(Some)
     }
 }
 

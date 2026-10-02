@@ -22,6 +22,7 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 |---|---|
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
+| `/lib/systemd/system/yorishiro-worker.service` | Tagged background worker unit |
 | `/etc/yorishiro/yorishiro.yaml` | Editable canonical configuration template |
 
 The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
@@ -48,5 +49,10 @@ See [docs/configuration.md](../configuration.md) for all settings.
 
 ```console
 $ sudo systemctl enable --now yorishiro
+$ sudo systemctl enable --now yorishiro-worker
 $ sudo systemctl status yorishiro
+$ sudo systemctl status yorishiro-worker
 ```
+
+The worker is a separate unit because Loco 1.2.0 cannot combine `--server-and-worker` with tagged
+workers. It runs the three worker-class tags and `infer-fill`.

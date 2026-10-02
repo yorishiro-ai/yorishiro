@@ -13,10 +13,10 @@ use crate::workers::embedding_sync::WorkerClassResolver;
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) {
     // An absent or invalid licence key warns and continues rather than failing boot.
-    ctx.shared_store.insert(
-        Arc::new(crate::ee::services::licence::LicenceState::from_env())
-            as Arc<dyn crate::services::edition::EnterpriseEdition>,
-    );
+    let licence = Arc::new(crate::ee::services::licence::LicenceState::from_env());
+    ctx.shared_store.insert(licence.clone());
+    ctx.shared_store
+        .insert(licence as Arc<dyn crate::services::edition::EnterpriseEdition>);
 
     if ctx.is_sqlite() {
         // These features use PostgreSQL-only SQL and report their limitation at boot.
