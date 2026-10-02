@@ -1,5 +1,6 @@
 mod context;
 mod dispatch;
+mod routes;
 mod startup;
 mod workers;
 
@@ -23,7 +24,9 @@ use std::sync::Arc;
 pub use startup::StartupReindexHandle;
 
 use crate::controllers;
-use crate::controllers::route_inventory::{Edition, RouteClass, RouteInventory};
+use crate::controllers::route_inventory::RouteInventory;
+#[cfg(feature = "enterprise")]
+use crate::controllers::route_inventory::{Edition, RouteClass};
 use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
 use dispatch::LocoJobDispatcher;
 
@@ -288,11 +291,12 @@ impl Hooks for App {
     fn routes(ctx: &AppContext) -> AppRoutes {
         #[cfg(feature = "enterprise")]
         let gate = axum::middleware::from_fn_with_state(ctx.clone(), licence_gate);
-        let mut inventory = RouteInventory::default();
-        inventory.add_allowlisted_exclusions();
-        let mut app_routes = AppRoutes::with_default_routes();
-        inventory.add_infrastructure(&app_routes);
+        #[cfg(feature = "enterprise")]
+        let (mut app_routes, mut inventory) = routes::community();
+        #[cfg(not(feature = "enterprise"))]
+        let (app_routes, inventory) = routes::community();
 
+        #[cfg(feature = "enterprise")]
         macro_rules! mount {
             ($route:expr, $edition:expr, $gated:expr) => {{
                 let route = $route;
@@ -302,82 +306,6 @@ impl Hooks for App {
             }};
         }
 
-        mount!(controllers::audit_log::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::audit_log::openapi_docs());
-        mount!(controllers::api_keys::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::api_keys::openapi_docs());
-        mount!(controllers::auth::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::auth::openapi_docs());
-        mount!(controllers::entities::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::entities::openapi_docs());
-        mount!(
-            controllers::entities::migration_routes(),
-            Edition::Community,
-            false
-        );
-        mount!(controllers::export::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::export::openapi_docs());
-        mount!(controllers::import::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::import::openapi_docs());
-        mount!(controllers::members::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::members::openapi_docs());
-        mount!(controllers::relations::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::relations::openapi_docs());
-        mount!(controllers::schemas::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::schemas::openapi_docs());
-        mount!(
-            controllers::schemas::template_routes(),
-            Edition::Community,
-            false
-        );
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::schemas::template_openapi_docs());
-        mount!(controllers::search::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::search::openapi_docs());
-        mount!(controllers::setup::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::setup::openapi_docs());
-        mount!(controllers::system::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::system::openapi_docs());
-        mount!(
-            controllers::template_library::routes(),
-            Edition::Community,
-            false
-        );
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::template_library::openapi_docs());
-        mount!(controllers::whoami::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::whoami::openapi_docs());
-        mount!(controllers::workspaces::routes(), Edition::Community, false);
-        #[cfg(feature = "openapi")]
-        #[cfg(feature = "openapi")]
-        inventory.add_docs(controllers::workspaces::openapi_docs());
         #[cfg(feature = "enterprise")]
         {
             // The enterprise edition's routes are mounted unconditionally; the inventory records the
