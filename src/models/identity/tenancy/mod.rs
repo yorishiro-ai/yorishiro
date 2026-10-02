@@ -14,17 +14,11 @@ use crate::models::_entities::{
 };
 use crate::services::auth::ApiKeyScope;
 
-#[path = "tenancy/invite.rs"]
 mod invite;
-#[path = "tenancy/membership.rs"]
 mod membership;
-#[path = "tenancy/orchestration.rs"]
 mod orchestration;
-#[path = "tenancy/tenant.rs"]
 mod tenant;
-#[path = "tenancy/users.rs"]
 mod users;
-#[path = "tenancy/workspace.rs"]
 mod workspace;
 
 /// The nil UUID reserved for infrastructure tenants that own no members and no data of their own.
@@ -131,6 +125,13 @@ pub async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yorishiro
 /// On SQLite, the cap is hardcoded to one because the backend has no database-enforced tenant isolation, regardless of `YORISHIRO_MAX_TENANTS`.
 /// On SQLite, the generated tenant ID is supplied by the ActiveModel hook rather than by this function.
 pub async fn create_tenant(
+    conn: &impl ConnectionTrait,
+    name: &str,
+) -> Result<tenant_tenants::Model, YorishiroError> {
+    create_tenant_with_limit(conn, name, None).await
+}
+
+pub async fn create_tenant_with_limit(
     conn: &impl ConnectionTrait,
     name: &str,
     configured_max: Option<i32>,

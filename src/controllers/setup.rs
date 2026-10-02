@@ -101,7 +101,7 @@ pub async fn setup(
         .into());
     }
 
-    let tenant = tenancy::create_tenant(&txn, "default", max_tenants).await?;
+    let tenant = tenancy::create_tenant_with_limit(&txn, "default", max_tenants).await?;
 
     let workspace = tenancy::create_workspace(
         &txn,

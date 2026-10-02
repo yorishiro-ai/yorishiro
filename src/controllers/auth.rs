@@ -135,7 +135,7 @@ async fn signup_without_invite(
         .get::<crate::config::Settings>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
     let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
-    let tenant = tenancy::create_tenant(&txn, tenant_name, max_tenants).await?;
+    let tenant = tenancy::create_tenant_with_limit(&txn, tenant_name, max_tenants).await?;
     let user =
         tenancy::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
     tenancy::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;

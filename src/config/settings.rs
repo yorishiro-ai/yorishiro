@@ -1,21 +1,11 @@
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct Settings {
     pub(crate) max_tenants: i32,
     pub(crate) rate_limit: RateLimit,
     pub(crate) db_load_guard: DbLoadGuard,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            max_tenants: 0,
-            rate_limit: RateLimit::default(),
-            db_load_guard: DbLoadGuard::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
