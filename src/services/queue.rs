@@ -1,7 +1,6 @@
 //! Queue scheduling policy shared by every Loco queue provider.
 
 use chrono::Utc;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
 use crate::workers::embedding_sync::WorkerClass;
 
@@ -56,18 +55,12 @@ async fn decide_for_dispatch_at(
         return Ok(decide(class));
     }
     let cutoff = now - chrono::Duration::seconds(STARVATION_WAIT_SECONDS);
-    let waiting = crate::models::system::queue_job_lifecycles::Entity::find()
-        .filter(
-            crate::models::system::queue_job_lifecycles::Column::Status
-                .is_in(["queued", "retrying"]),
-        )
-        .filter(
-            crate::models::system::queue_job_lifecycles::Column::WorkerClass
-                .is_in(lower_classes.iter().copied()),
-        )
-        .filter(crate::models::system::queue_job_lifecycles::Column::EnqueueAt.lte(cutoff))
-        .count(db)
-        .await?;
+    let waiting = crate::models::system::queue_job_lifecycles::Entity::count_waiting_lower_classes(
+        db,
+        lower_classes,
+        cutoff,
+    )
+    .await?;
     Ok(if waiting > 0 {
         Decision {
             class,

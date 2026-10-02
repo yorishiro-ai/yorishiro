@@ -4,7 +4,7 @@ pub(crate) use crate::models::_entities::queue_job_lifecycles::{
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ExprTrait, IntoActiveModel, QuerySelect, TransactionTrait};
+use sea_orm::{ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect, TransactionTrait};
 use tokio::task::JoinHandle;
 
 #[async_trait::async_trait]
@@ -20,6 +20,19 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Entity {
+    pub(crate) async fn count_waiting_lower_classes(
+        db: &impl ConnectionTrait,
+        lower_classes: &[&str],
+        cutoff: DateTimeWithTimeZone,
+    ) -> Result<u64, DbErr> {
+        Entity::find()
+            .filter(Column::Status.is_in(["queued", "retrying"]))
+            .filter(Column::WorkerClass.is_in(lower_classes.iter().copied()))
+            .filter(Column::EnqueueAt.lte(cutoff))
+            .count(db)
+            .await
+    }
+
     pub(crate) async fn record_enqueue(
         db: &impl ConnectionTrait,
         enqueue: Enqueue<'_>,

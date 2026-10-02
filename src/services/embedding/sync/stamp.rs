@@ -1,7 +1,4 @@
-use sea_orm::sea_query::Expr;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -13,17 +10,13 @@ pub(super) async fn stamp_workspace_embedding(
     model: String,
     dimensions: i32,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::workspace_workspaces::Column;
-
-    crate::models::identity::workspace_workspaces::Entity::update_many()
-        .col_expr(Column::EmbeddingModel, Expr::value(model))
-        .col_expr(Column::EmbeddingDimensions, Expr::value(dimensions))
-        .filter(Column::Id.eq(workspace_id))
-        .filter(Column::EmbeddingModel.is_null())
-        .exec(conn)
-        .await
-        .internal()?;
-    Ok(())
+    crate::models::identity::workspace_workspaces::stamp_embedding_if_missing(
+        conn,
+        workspace_id,
+        model,
+        dimensions,
+    )
+    .await
 }
 
 /// Restamps the workspace after every candidate has been reindexed successfully.

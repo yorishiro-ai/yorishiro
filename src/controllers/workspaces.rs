@@ -6,7 +6,7 @@ use axum::routing::{delete, get, post};
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -41,16 +41,9 @@ pub async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    let workspaces = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(auth.tenant_id))
-        .all(&ctx.db)
-        .await
-        .map_err(|err| ApiError::from(YorishiroError::Internal(err.into())))?;
     Ok(Json(
-        workspaces
-            .into_iter()
-            .map(WorkspaceRecord::try_from)
-            .collect::<Result<_, _>>()?,
+        crate::models::identity::workspace_workspaces::list_for_tenant(&ctx.db, auth.tenant_id)
+            .await?,
     ))
 }
 

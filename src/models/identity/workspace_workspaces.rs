@@ -28,6 +28,45 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
+pub async fn list_for_tenant(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
+    Entity::find()
+        .filter(crate::models::_entities::workspace_workspaces::Column::TenantId.eq(tenant_id))
+        .all(conn)
+        .await
+        .internal()?
+        .into_iter()
+        .map(WorkspaceRecord::try_from)
+        .collect()
+}
+
+pub async fn stamp_embedding_if_missing(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    model: String,
+    dimensions: i32,
+) -> Result<(), YorishiroError> {
+    use sea_orm::sea_query::Expr;
+
+    Entity::update_many()
+        .col_expr(
+            crate::models::_entities::workspace_workspaces::Column::EmbeddingModel,
+            Expr::value(model),
+        )
+        .col_expr(
+            crate::models::_entities::workspace_workspaces::Column::EmbeddingDimensions,
+            Expr::value(dimensions),
+        )
+        .filter(crate::models::_entities::workspace_workspaces::Column::Id.eq(workspace_id))
+        .filter(crate::models::_entities::workspace_workspaces::Column::EmbeddingModel.is_null())
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
 /// API-facing workspace record with a typed status.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkspaceRecord {
