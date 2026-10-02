@@ -479,15 +479,15 @@ async fn lock_entity_for_confirmation(
     workspace_id: Uuid,
     entity_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    if conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres {
-        conn.execute_raw(sea_orm::Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT id FROM entity_entities WHERE workspace_id = $1 AND id = $2 FOR UPDATE",
-            [workspace_id.into(), entity_id.into()],
-        ))
+    entity_entities::Entity::find()
+        .select_only()
+        .column(crate::models::_entities::entity_entities::Column::Id)
+        .filter(crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id))
+        .filter(crate::models::_entities::entity_entities::Column::Id.eq(entity_id))
+        .lock_exclusive()
+        .one(conn)
         .await
         .internal()?;
-    }
     Ok(())
 }
 
