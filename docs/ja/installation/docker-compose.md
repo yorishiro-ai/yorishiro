@@ -15,6 +15,7 @@ services:
       - data:/home/yorishiro/.cache/yorishiro
     environment:
       - DATABASE_URL=sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc
+      - QUEUE_URL=sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc
 
 volumes:
   data:

@@ -140,6 +140,12 @@ PostgreSQL の負荷ガードは、デプロイメント全体のメンテナン
 | `YORISHIRO_EMBEDDING_MODEL` | 未設定 | 埋め込みモデル名 |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みプロバイダ（`none` で無効、`local` でローカル、未設定でローカル） |
 
+アプリケーションとキューの両方に SQLite を使う場合、キュー URI は別ファイルを指定する必要があります。
+パッケージ版の既定値は `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`、ローカル雛形の既定値は `sqlite://yorishiro_queue.sqlite3?mode=rwc` です。
+起動時に SQLite のパスを正規化し、接続クエリを除いて同じファイルになる設定を拒否します。
+既存インストールの移行や保存場所の変更には `QUEUE_URL` を明示してください。
+PostgreSQL と Redis のキュー動作には影響しません。
+
 ### メール
 
 Yorishiro は既定ではメールを送信しません。

@@ -52,7 +52,7 @@ database:
 # YORISHIRO_QUEUE_KIND can switch between Sqlite, Postgres, and Redis.
 queue:
   kind: Sqlite
-  uri: sqlite://yorishiro.sqlite3?mode=rwc
+  uri: sqlite://yorishiro_queue.sqlite3?mode=rwc
   dangerously_flush: false
   num_workers: 2
   reaper:

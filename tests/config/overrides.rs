@@ -37,7 +37,7 @@ async fn postgres_database_derives_postgres_queue_and_uri() {
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn sqlite_database_derives_sqlite_queue_and_uri() {
+async fn sqlite_database_keeps_the_configured_separate_queue_uri() {
     let directory = tempdir().unwrap();
     fs::write(
         directory.path().join(CANONICAL_CONFIG_FILE),
@@ -59,7 +59,7 @@ async fn sqlite_database_derives_sqlite_queue_and_uri() {
     assert!(matches!(
         config.queue,
         Some(loco_rs::config::QueueConfig::Sqlite(queue))
-            if queue.uri == "sqlite://derived.sqlite3?mode=rwc"
+            if queue.uri == "sqlite://queue.sqlite3?mode=rwc"
     ));
 }
 
@@ -89,6 +89,33 @@ async fn explicit_queue_kind_and_queue_url_take_precedence() {
         Some(loco_rs::config::QueueConfig::Sqlite(queue))
             if queue.uri == "sqlite://queue.sqlite3?mode=rwc"
     ));
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn environment_queue_url_is_validated_against_environment_database_url() {
+    let directory = tempdir().unwrap();
+    fs::write(
+        directory.path().join(CANONICAL_CONFIG_FILE),
+        minimal_config("sqlite://file.sqlite3?mode=rwc"),
+    )
+    .unwrap();
+    let _dir = CurrentDirGuard::enter(directory.path());
+    let _guard = EnvGuard::capture(&[
+        "YORISHIRO_CONFIG_PATH",
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+    ]);
+    _guard.remove("YORISHIRO_CONFIG_PATH");
+    _guard.set("DATABASE_URL", "sqlite://env.sqlite3?mode=rwc");
+    _guard.set("QUEUE_URL", "sqlite://./env.sqlite3?mode=ro");
+    _guard.set("YORISHIRO_QUEUE_KIND", "Sqlite");
+    let error = load(&Environment::Development)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("same file"), "{error}");
 }
 
 #[tokio::test]

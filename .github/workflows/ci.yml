@@ -237,7 +237,7 @@ jobs:
             queue: SQLite
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
-            queue_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
+            queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
           - db: PG
             backend: postgres
             queue: Valkey
