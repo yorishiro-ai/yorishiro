@@ -134,7 +134,7 @@ impl LicenceState {
 
     /// Returns the plan from an active licence, if one is present.
     /// An expired or absent licence deliberately falls through to billing/default policy.
-    pub fn active_plan_at(&self, now: i64) -> Option<Plan> {
+    pub(crate) fn active_plan_at(&self, now: i64) -> Option<Plan> {
         let claims = self.claims.as_ref().filter(|claims| claims.exp > now)?;
         match Plan::from_db_str(&claims.plan) {
             Ok(plan) => Some(plan),
@@ -149,5 +149,32 @@ impl LicenceState {
 impl crate::services::edition::EnterpriseEdition for LicenceState {
     fn is_active(&self) -> bool {
         Self::is_active(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LicenceClaims, LicenceState};
+    use crate::ee::services::plan::Plan;
+
+    #[test]
+    fn active_licence_plan_is_safe_and_expires_into_fallback() {
+        let licensed = LicenceState::licensed(LicenceClaims {
+            sub: "test-customer".into(),
+            plan: "pro".into(),
+            exp: 1000,
+        });
+        assert_eq!(licensed.active_plan_at(999), Some(Plan::Pro));
+        assert_eq!(licensed.active_plan_at(1000), None);
+    }
+
+    #[test]
+    fn active_licence_with_unknown_plan_falls_back() {
+        let licensed = LicenceState::licensed(LicenceClaims {
+            sub: "test-customer".into(),
+            plan: "enterprise".into(),
+            exp: 1000,
+        });
+        assert_eq!(licensed.active_plan_at(999), None);
     }
 }
