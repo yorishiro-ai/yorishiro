@@ -509,6 +509,11 @@ impl Hooks for App {
         #[cfg(feature = "enterprise")]
         crate::ee::services::boot::register_tasks(tasks);
     }
+
+    async fn on_shutdown(ctx: &AppContext) {
+        startup::shutdown(ctx).await;
+    }
+
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())
     }

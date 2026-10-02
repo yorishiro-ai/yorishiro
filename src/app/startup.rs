@@ -23,6 +23,15 @@ pub struct StartupReindexHandle {
     task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
+pub(super) struct LoadGuardHandle(JoinHandle<()>);
+
+impl LoadGuardHandle {
+    async fn shutdown(self) {
+        self.0.abort();
+        let _ = self.0.await;
+    }
+}
+
 impl StartupReindexHandle {
     /// Signal shutdown and await the task's completion.
     ///
@@ -63,8 +72,21 @@ pub(super) fn after_boot(
         spawn_startup_reindex(result.app_context.clone());
         if let Some(config) = crate::services::db_load_guard::LoadGuardConfig::from_env() {
             let ctx = result.app_context.clone();
-            spawn(async move { crate::services::db_load_guard::run(ctx, config).await });
+            let task = spawn(async move { crate::services::db_load_guard::run(ctx, config).await });
+            result
+                .app_context
+                .shared_store
+                .insert(LoadGuardHandle(task));
         }
+    }
+}
+
+pub(super) async fn shutdown(ctx: &AppContext) {
+    if let Some(handle) = ctx.shared_store.remove::<StartupReindexHandle>() {
+        handle.shutdown_and_wait().await;
+    }
+    if let Some(handle) = ctx.shared_store.remove::<LoadGuardHandle>() {
+        handle.shutdown().await;
     }
 }
 
