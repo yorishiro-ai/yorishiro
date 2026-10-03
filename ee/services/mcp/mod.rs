@@ -2,8 +2,8 @@ mod origin;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 
-use crate::services::mcp::YorishiroMcpServer;
-use crate::services::mcp::compose_tool_routers;
+use crate::controllers::mcp::YorishiroMcpServer;
+use crate::controllers::mcp::compose_tool_routers;
 
 /// The complete enterprise-only MCP tool set.
 pub(crate) fn tool_router() -> ToolRouter<YorishiroMcpServer> {
@@ -15,14 +15,14 @@ mod tests {
     use std::collections::HashSet;
 
     use super::tool_router;
-    use crate::services::mcp::{community_tool_router, render_inventory_fragment};
+    use crate::controllers::mcp::{community_tool_router, render_inventory_fragment};
 
     #[test]
     fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
         let community = community_tool_router().list_all();
         let enterprise = tool_router().list_all();
         let full =
-            crate::services::mcp::compose_tool_routers([community_tool_router(), tool_router()])
+            crate::controllers::mcp::compose_tool_routers([community_tool_router(), tool_router()])
                 .list_all();
         let community_names: HashSet<_> = community.iter().map(|tool| &tool.name).collect();
         let enterprise_names: HashSet<_> = enterprise.iter().map(|tool| &tool.name).collect();

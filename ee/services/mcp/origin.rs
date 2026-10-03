@@ -14,10 +14,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::services::auth::ApiKeyScope;
-use crate::services::mcp::{
+use crate::controllers::mcp::{
     AuthzOutcome, YorishiroMcpServer, authorize, err_to_tool_result, ok_json,
 };
+use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ListUpstreamChangesArgs {

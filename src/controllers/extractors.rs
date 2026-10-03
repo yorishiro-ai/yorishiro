@@ -36,7 +36,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
     })
 }
 
-/// Also used by the MCP adapter (`services::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
+/// Also used by the MCP adapter (`controllers::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
 pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
     ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
         ApiError(YorishiroError::Internal(anyhow::anyhow!(
@@ -45,7 +45,7 @@ pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
     })
 }
 
-/// See `db_handle`'s doc comment: also used by `services::mcp`.
+/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 pub(crate) fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiError> {
     ctx.shared_store
         .get::<Arc<dyn Authenticator>>()
@@ -56,7 +56,7 @@ pub(crate) fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, 
         })
 }
 
-/// See `db_handle`'s doc comment: also used by `services::mcp`.
+/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 /// Returns the deployment-wide provider, ignoring any workspace-level assignment: the caller has no `workspace_id` yet (setup, a fresh workspace's dimension stamp) or explicitly wants the deployment default regardless of what a workspace is assigned.
 /// A caller resolving a provider *for* a workspace's own work (search, embedding sync) wants `resolve_embedding_provider` instead.
 pub(crate) fn embedding_provider(
@@ -72,7 +72,7 @@ pub(crate) fn embedding_provider(
 }
 
 /// The embedding provider `workspace_id` should actually use: its own assignment through the `WorkspaceEmbeddingResolver` trait object if it has one, the deployment default otherwise.
-/// Also used by `services::mcp`.
+/// Also used by `controllers::mcp`.
 pub(crate) async fn resolve_embedding_provider(
     ctx: &AppContext,
     workspace_id: Uuid,
@@ -117,7 +117,7 @@ pub(crate) async fn resolve_worker_class(
         .unwrap_or(crate::workers::embedding_sync::WorkerClass::Shared))
 }
 
-/// See `db_handle`'s doc comment: also used by `services::mcp`.
+/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 pub(crate) fn search_token_limiter(
     ctx: &AppContext,
 ) -> Result<Arc<crate::services::rate_limit::RateLimiter>, ApiError> {

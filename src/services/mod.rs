@@ -4,6 +4,5 @@ pub mod db_load_guard;
 pub mod edition;
 pub mod embedding;
 pub mod maintenance;
-pub mod mcp;
 pub(crate) mod queue;
 pub mod rate_limit;

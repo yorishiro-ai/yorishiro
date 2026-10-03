@@ -409,7 +409,7 @@ impl Hooks for App {
         let router = controllers::swagger::mount(router, &inventory);
         let router = controllers::mcp::mount(router, ctx, |ctx| {
             #[cfg(feature = "enterprise")]
-            let enterprise_tool_router = crate::ee::services::mcp::tool_router();
+            let enterprise_tool_router = crate::ee::controllers::mcp::tool_router();
             #[cfg(feature = "enterprise")]
             let enterprise_tool_names = enterprise_tool_router
                 .map
@@ -417,17 +417,21 @@ impl Hooks for App {
                 .map(ToString::to_string)
                 .collect::<std::collections::HashSet<_>>();
             #[cfg(feature = "enterprise")]
-            let mut tool_routers = vec![crate::services::mcp::community_tool_router()];
+            let mut tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(not(feature = "enterprise"))]
-            let tool_routers = vec![crate::services::mcp::community_tool_router()];
+            let tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(not(feature = "enterprise"))]
             let enterprise_tool_names = std::collections::HashSet::new();
             #[cfg(feature = "enterprise")]
             if crate::services::edition::is_active(&ctx) {
                 tool_routers.push(enterprise_tool_router);
             }
-            let tool_router = crate::services::mcp::compose_tool_routers(tool_routers);
-            crate::services::mcp::YorishiroMcpServer::new(ctx, tool_router, enterprise_tool_names)
+            let tool_router = crate::controllers::mcp::compose_tool_routers(tool_routers);
+            crate::controllers::mcp::YorishiroMcpServer::new(
+                ctx,
+                tool_router,
+                enterprise_tool_names,
+            )
         });
         let settings = ctx
             .shared_store
