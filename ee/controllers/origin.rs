@@ -36,7 +36,7 @@ pub struct MergeResponse {
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;

@@ -94,7 +94,7 @@ pub(crate) fn compose_tool_routers(
 #[cfg(test)]
 mod input_parity_tests {
     use super::*;
-    use crate::controllers::{entities as rest_entities, relations as rest_relations};
+    use crate::dtos::{entities as rest_entities, relations as rest_relations};
     use crate::models::{entity_entities, entity_relations};
     use serde_json::json;
     use uuid::Uuid;
@@ -122,7 +122,7 @@ mod input_parity_tests {
             entity_type: Some("note".into()),
             filter: Some(r#"{"title":"hello"}"#.into()),
             schema_version: Some(2),
-            page: crate::controllers::PageParams(loco_rs::model::query::PaginationQuery {
+            page: crate::dtos::common::PageParams(loco_rs::model::query::PaginationQuery {
                 page: 3,
                 page_size: 7,
             }),
@@ -176,7 +176,7 @@ mod input_parity_tests {
                 target_id: Some(target_id),
                 relation_type: Some("knows".into()),
                 status: Some(entity_relations::RelationStatus::Deprecated),
-                page: crate::controllers::PageParams(loco_rs::model::query::PaginationQuery {
+                page: crate::dtos::common::PageParams(loco_rs::model::query::PaginationQuery {
                     page: 2,
                     page_size: 5,
                 }),

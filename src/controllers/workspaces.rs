@@ -3,17 +3,16 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
-use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
+use crate::dtos::workspaces::{CreateWorkspaceRequest, WorkspaceDetail};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces;
 use crate::models::tenancy;
@@ -46,18 +45,6 @@ pub async fn list_workspaces(
     ))
 }
 
-#[derive(Deserialize)]
-pub struct CreateWorkspaceRequest {
-    pub name: String,
-    /// Cap on the number of entities this workspace may hold.
-    /// Omit for unlimited.
-    pub max_entities: Option<i32>,
-    /// Schema to associate with this workspace.
-    /// Omit to leave it unset.
-    #[serde(default)]
-    pub schema_id: Option<Uuid>,
-}
-
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = super::openapi::CreateWorkspaceRequest, responses((status = 201, body = super::openapi::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn create_workspace(
     State(ctx): State<AppContext>,
@@ -83,20 +70,6 @@ pub async fn create_workspace(
     .await?;
     txn.commit().await.internal()?;
     Ok((StatusCode::CREATED, Json(workspace)))
-}
-
-#[derive(Serialize)]
-pub struct WorkspaceDetail {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub name: String,
-    pub max_entities: Option<i32>,
-    pub schema_id: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
-    pub entity_count: i64,
-    pub relation_count: i64,
-    /// Currently *active* schemas only (one per distinct schema name), not a raw row count, which would also include archived versions.
-    pub schema_count: i64,
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]

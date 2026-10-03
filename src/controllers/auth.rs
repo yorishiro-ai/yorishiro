@@ -9,36 +9,12 @@ use axum::routing::post;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::controllers::ApiError;
+use crate::dtos::auth::{LoginRequest, LoginResponse, SignupRequest, SignupResponse};
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenancy::{self, MembershipRole, WorkspaceSummary};
-
-#[derive(Deserialize)]
-pub struct SignupRequest {
-    /// The plaintext token from an `admin create-invite`-issued invitation.
-    /// Omit it to create a fresh tenant and join it as `Owner` instead.
-    pub invite_token: Option<String>,
-    /// Required when `invite_token` is omitted, rejected when it is present.
-    pub email: Option<String>,
-    pub password: String,
-    pub display_name: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct SignupResponse {
-    pub user_id: Uuid,
-    pub email: String,
-    pub tenant_id: Uuid,
-    pub role: MembershipRole,
-    /// The workspaces the new member can now log into.
-    /// The client picks one and passes its id to `/auth/login`.
-    pub workspaces: Vec<WorkspaceSummary>,
-}
+use crate::models::tenancy::{self, MembershipRole};
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -151,27 +127,6 @@ async fn signup_without_invite(
             workspaces: vec![],
         }),
     ))
-}
-
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
-    /// Which of the account's workspaces to issue an API key for.
-    /// Omit this when the account can only reach one workspace; it resolves automatically.
-    /// An account reaching more than one must specify explicitly (422 otherwise), and the refusal lists the candidates.
-    pub workspace_id: Option<Uuid>,
-}
-
-#[derive(Serialize)]
-pub struct LoginResponse {
-    /// The freshly issued API key's plaintext.
-    /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
-    pub api_key: String,
-    pub api_key_id: Uuid,
-    pub workspace_id: Uuid,
-    pub scope: ApiKeyScope,
-    pub user_id: Uuid,
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(

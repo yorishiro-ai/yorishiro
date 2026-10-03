@@ -131,3 +131,4 @@ src/models/entity_embeddings/reindex.rs	fn	reindex_workspace	seaorm-facade: embe
 src/models/entity_embeddings/reindex.rs	struct	ReindexFailure	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
 src/models/entity_embeddings/reindex.rs	struct	ReindexOutcome	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
 src/models/entity_embeddings/write.rs	fn	sync_embedding_for_record	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
+src/lib.rs	mod	dtos	openapi-transport: Loco `dtos/` layout holding REST request and response types; the integration-test crate and `ee/` reuse them.

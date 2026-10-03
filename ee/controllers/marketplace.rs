@@ -39,7 +39,7 @@ async fn licensed_tenant(
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MarketplaceListing>>, ApiError> {
     // The listing spans every tenant, so the identity is not read, but a valid key is still required, which is what authenticating here enforces.
     let _ = licensed_tenant(&ctx, &headers).await?;
@@ -53,7 +53,7 @@ async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
     let versions =
@@ -98,7 +98,7 @@ async fn list_reviews(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(template_id): Path<Uuid>,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, ApiError> {
     let (tenant_id, _) = licensed_tenant(&ctx, &headers).await?;
     let reviews =

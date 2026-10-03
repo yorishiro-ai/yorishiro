@@ -5,12 +5,12 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::Deserialize;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
+use crate::dtos::members::AddMemberRequest;
 use crate::error::YorishiroError;
-use crate::models::tenancy::{self, MembershipRecord, MembershipRole};
+use crate::models::tenancy::{self, MembershipRecord};
 
 /// Shared by `members` and `workspaces`: both are tenant-wide concerns, independent of (and stricter than) the presented API key's own scope.
 pub(crate) async fn require_tenant_admin(
@@ -33,19 +33,11 @@ pub(crate) async fn require_tenant_admin(
 pub async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MembershipRecord>>, ApiError> {
     require_tenant_admin(&ctx, auth.tenant_id, auth.user_id).await?;
     let members = tenancy::list_members(&ctx.db, auth.tenant_id, page.into()).await?;
     Ok(Json(members))
-}
-
-#[derive(Deserialize)]
-pub struct AddMemberRequest {
-    /// Must already have an account (created via `/auth/signup`): this endpoint attaches an *existing* user to the caller's tenant, it never creates one.
-    /// To bring in someone with no account yet, issue them an invite instead.
-    pub email: String,
-    pub role: MembershipRole,
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/members", request_body = super::openapi::AddMemberRequest, responses((status = 201, body = super::openapi::MembershipRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]

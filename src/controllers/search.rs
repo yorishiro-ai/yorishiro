@@ -3,7 +3,6 @@ use axum::extract::{Query, State};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::Deserialize;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{
@@ -11,17 +10,9 @@ use crate::controllers::extractors::{
 };
 use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::db::AppContextBackend;
+use crate::dtos::search::SearchEntitiesParams;
 use crate::error::YorishiroError;
 use crate::models::search::{self, SearchHit};
-
-#[derive(Deserialize)]
-pub struct SearchEntitiesParams {
-    pub query_text: String,
-    pub entity_type: Option<String>,
-    /// JSON-encoded containment filter, e.g. `{"status":"active"}`.
-    pub filter: Option<String>,
-    pub limit: Option<i64>,
-}
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [super::openapi::SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn search_entities(
@@ -33,7 +24,7 @@ pub async fn search_entities(
     let default = search::SearchQuery::default();
     let query = search::SearchQuery {
         entity_type: params.entity_type,
-        filter: super::parse_filter_param(params.filter)?,
+        filter: crate::dtos::common::parse_filter_param(params.filter)?,
         limit: params.limit.unwrap_or(default.limit),
     };
 

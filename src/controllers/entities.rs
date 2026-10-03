@@ -5,75 +5,18 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
+use crate::dtos::entities::{
+    CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
+    ReindexResponse, UpdateEntityRequest,
+};
 use crate::models::api_key_audit_log;
 use crate::models::entity_entities::{self, EntityRecord, UndoReport};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
-
-#[derive(Deserialize)]
-pub struct CreateEntityRequest {
-    pub schema_name: String,
-    pub entity_type: String,
-    pub data: Value,
-}
-
-#[derive(Deserialize)]
-pub struct FillDefaultsRequest {
-    pub schema_name: String,
-}
-
-#[derive(Serialize)]
-pub struct FillDefaultsResponse {
-    pub schema_name: String,
-    pub job_id: Uuid,
-    pub entities_updated: i64,
-    pub fields_filled: i64,
-}
-
-#[derive(Deserialize)]
-pub struct UpdateEntityRequest {
-    pub data: Value,
-}
-
-#[derive(Deserialize)]
-pub struct ListEntitiesParams {
-    pub entity_type: Option<String>,
-    /// JSON-encoded containment filter, e.g. `{"status":"active"}`.
-    pub filter: Option<String>,
-    /// Restricts results to entities created against this schema version.
-    pub schema_version: Option<i32>,
-    #[serde(flatten)]
-    pub page: crate::controllers::PageParams,
-}
-
-impl From<CreateEntityRequest> for entity_entities::CreateEntityInput {
-    fn from(request: CreateEntityRequest) -> Self {
-        Self {
-            schema_name: request.schema_name,
-            entity_type: request.entity_type,
-            data: request.data,
-        }
-    }
-}
-
-impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
-    type Error = crate::YorishiroError;
-
-    fn try_from(params: ListEntitiesParams) -> Result<Self, Self::Error> {
-        Ok(Self {
-            entity_type: params.entity_type,
-            filter: crate::controllers::parse_filter_param(params.filter)?,
-            schema_version: params.schema_version,
-            page: params.page.into(),
-        })
-    }
-}
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/entities", request_body = super::openapi::CreateEntityRequest, responses((status = 201, body = super::openapi::EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
 pub async fn create_entity(
@@ -233,12 +176,6 @@ pub async fn reindex_workspace(
         })?;
 
     Ok(Json(ReindexResponse { job_id }))
-}
-
-#[derive(Serialize)]
-pub struct ReindexResponse {
-    /// The job ID assigned by the queue provider.
-    pub job_id: String,
 }
 
 /// Fills absent required fields in entities that fall behind the active schema version.

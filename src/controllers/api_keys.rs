@@ -3,48 +3,22 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
-use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::EntityTrait;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::members::require_tenant_admin;
+use crate::dtos::api_keys::{
+    ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
+};
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
 
 const MAX_NAME_LENGTH: usize = 100;
-
-#[derive(Deserialize)]
-pub(crate) struct CreateApiKeyRequest {
-    pub(crate) name: String,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ApiKeyRecord {
-    pub(crate) id: Uuid,
-    pub(crate) prefix: String,
-    pub(crate) name: String,
-    pub(crate) created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct CreateApiKeyResponse {
-    pub(crate) id: Uuid,
-    pub(crate) prefix: String,
-    pub(crate) full_key: String,
-    pub(crate) name: String,
-    pub(crate) created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ListApiKeysResponse {
-    pub(crate) keys: Vec<ApiKeyRecord>,
-}
 
 fn validate_name(name: &str) -> Result<String, YorishiroError> {
     let name = name.trim();

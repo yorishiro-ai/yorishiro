@@ -12,11 +12,10 @@ use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::embedding_provider;
+use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole};
@@ -29,12 +28,6 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     Ok((settings.max_tenants > 0).then_some(settings.max_tenants))
 }
 
-#[derive(Serialize)]
-pub struct SetupStatusResponse {
-    /// True when the wizard is enabled and no tenant exists yet: the client should show the setup form instead of the login form.
-    pub setup_required: bool,
-}
-
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = super::openapi::SetupStatusResponse)), security(()), tag = "community"))]
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if max_tenants(&ctx)?.is_some() {
@@ -43,23 +36,6 @@ pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRes
         false
     };
     Ok(Json(SetupStatusResponse { setup_required }))
-}
-
-#[derive(Deserialize)]
-pub struct SetupRequest {
-    pub email: String,
-    pub password: String,
-    pub display_name: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct SetupResponse {
-    pub user_id: Uuid,
-    pub email: String,
-    pub tenant_id: Uuid,
-    pub workspace_id: Uuid,
-    /// A freshly issued API key, scoped to the new owner account: shown only here, same as `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
-    pub api_key: String,
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = super::openapi::SetupRequest, responses((status = 201, body = super::openapi::SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]

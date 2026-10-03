@@ -4,44 +4,26 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
 use crate::data::templates::{self, TemplateSummary};
+use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
 use crate::error::YorishiroError;
-use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
+use crate::metaschema::{self, MetaSchemaDefinition};
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::template_templates;
-
-#[derive(Serialize)]
-pub struct CreateSchemaResponse {
-    pub schema: SchemaRecord,
-    pub diff: VersioningDiff,
-}
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn list_schemas(
     authorized: Authorized<ReadScope>,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.into()).await?;
     Ok(Json(summaries))
-}
-
-/// Either an inline schema definition, or a reference to a template.
-///
-/// `template_id` accepts both kinds of template, because a caller holding an id should not have to know which kind it is: a built-in id (`"task-management"`, see `GET /api/templates`) served from the binary, or a UUID from the tenant's template library (`GET /api/template-library`).
-///
-/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum CreateSchemaRequest {
-    Definition(MetaSchemaDefinition),
-    Template { template_id: String },
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, responses((status = 201, body = super::openapi::CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]

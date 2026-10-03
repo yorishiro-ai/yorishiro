@@ -3,6 +3,7 @@ pub mod controllers;
 pub mod data;
 pub mod db;
 mod db_enum;
+pub mod dtos;
 
 /// The enterprise edition.
 ///
