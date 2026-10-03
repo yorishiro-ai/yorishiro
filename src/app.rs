@@ -92,7 +92,7 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
 
         let lifecycle_id = uuid::Uuid::now_v7();
         let scheduling =
-            crate::services::queue::decide(crate::workers::embedding_sync::WorkerClass::Shared);
+            crate::workers::queue::decide(crate::workers::embedding_sync::WorkerClass::Shared);
         tracing::info!(
             lifecycle_id = %lifecycle_id,
             worker_class = "shared",

@@ -148,7 +148,7 @@ where
     };
     let concurrency_key = format!("{class}:{plan}");
 
-    let scheduling = match crate::services::queue::decide_for_dispatch(&ctx.db, spec.class).await {
+    let scheduling = match crate::workers::queue::decide_for_dispatch(&ctx.db, spec.class).await {
         Ok(scheduling) => scheduling,
         Err(error) => {
             let diagnostic = format!("starvation policy lookup failed: {error}");

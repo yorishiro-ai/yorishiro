@@ -39,7 +39,7 @@ where
         Admission::Started { attempt } | Admission::Recovered { attempt } => attempt,
         Admission::Duplicate { .. } | Admission::Terminal => return Ok(()),
         Admission::Saturated { attempt } => {
-            let scheduling = crate::services::queue::decide(class);
+            let scheduling = crate::workers::queue::decide(class);
             tracing::warn!(
                 lifecycle_id = %id,
                 worker_class = class.as_db_str(),
@@ -93,7 +93,7 @@ where
     W: BackgroundWorker<A>,
     A: Clone + Send + Sync + Serialize + 'static,
 {
-    let scheduling = crate::services::queue::decide(class);
+    let scheduling = crate::workers::queue::decide(class);
     W::perform_later_with_priority(ctx, args.clone(), Some(scheduling.priority)).await?;
     Ok(())
 }

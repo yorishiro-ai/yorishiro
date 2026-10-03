@@ -227,7 +227,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                         }
                     }
                     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                    let scheduling = crate::services::queue::decide(
+                    let scheduling = crate::workers::queue::decide(
                         crate::workers::embedding_sync::WorkerClass::Shared,
                     );
                     Self::perform_later_with_priority(
@@ -339,7 +339,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                     )
                     .await
                     .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                    let scheduling = crate::services::queue::decide(
+                    let scheduling = crate::workers::queue::decide(
                         crate::workers::embedding_sync::WorkerClass::Shared,
                     );
                     Self::perform_later_with_priority(
