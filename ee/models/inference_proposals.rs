@@ -421,7 +421,7 @@ pub async fn confirm(
         }
 
         entity_entities::snapshot(conn, workspace_id, entity_id, job_id).await?;
-        if !entity_entities::update_if_unchanged(
+        if !crate::ee::models::entity_entities::update_if_unchanged(
             conn,
             workspace_id,
             &existing,

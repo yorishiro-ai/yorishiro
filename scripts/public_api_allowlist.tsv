@@ -134,3 +134,6 @@ src/models/entity_embeddings/write.rs	fn	sync_embedding_for_record	seaorm-facade
 src/lib.rs	mod	dtos	openapi-transport: Loco `dtos/` layout holding REST request and response types; the integration-test crate and `ee/` reuse them.
 src/models/schema_schemas.rs	mod	metaschema	integration-test: the schema-definition language stored in `schema_schemas.definition`; moved from the top-level `metaschema` module, and `ee/` plus the integration-test crate validate and diff definitions through it.
 ee/mod.rs	mod	db	ce-ee-composition: the enterprise overlay of `src/db.rs`, holding the scheduler-ownership primitives that only `ee/tasks/reindex_scheduler.rs` uses.
+ee/models/mod.rs	mod	entity_entities	ce-ee-composition: enterprise overlay of the community module of the same path, holding behavior only the enterprise edition uses.
+ee/workers/mod.rs	mod	dispatch	ce-ee-composition: enterprise overlay of the community module of the same path, holding behavior only the enterprise edition uses.
+ee/workers/mod.rs	mod	queue	ce-ee-composition: enterprise overlay of the community module of the same path, holding behavior only the enterprise edition uses.

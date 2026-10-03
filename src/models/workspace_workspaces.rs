@@ -79,20 +79,6 @@ pub(crate) async fn stamped_for_reindex(
         .internal()
 }
 
-#[cfg(feature = "enterprise")]
-pub(crate) async fn find_tenant_id(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-) -> Result<Option<Uuid>, YorishiroError> {
-    Entity::find_by_id(workspace_id)
-        .select_only()
-        .column(crate::models::_entities::workspace_workspaces::Column::TenantId)
-        .into_tuple()
-        .one(conn)
-        .await
-        .internal()
-}
-
 pub async fn list_for_tenant(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

@@ -1,8 +1,69 @@
 //! Queue scheduling policy shared by every Loco queue provider.
 
+use std::sync::Arc;
+
+use async_trait::async_trait;
 use chrono::Utc;
+use loco_rs::app::AppContext;
+use uuid::Uuid;
 
 use crate::workers::embedding_sync::WorkerClass;
+
+/// What a job is admitted under: the plan label recorded on its lifecycle row, and how many jobs of its class may run at once.
+pub(crate) struct ConcurrencyPolicy {
+    pub(crate) plan: String,
+    pub(crate) limit: i32,
+}
+
+/// Decides how many jobs of a class one workspace may have running.
+///
+/// A seam: an edition that sells compute replaces this rule without touching the dispatcher that asks.
+/// The error is a diagnostic for the operator, and a job whose policy cannot be determined is refused rather than admitted under a guess.
+#[async_trait]
+pub(crate) trait QueuePolicy: Send + Sync {
+    async fn concurrency(
+        &self,
+        ctx: &AppContext,
+        workspace_id: Uuid,
+        class: WorkerClass,
+    ) -> Result<ConcurrencyPolicy, String>;
+}
+
+/// This crate's own rule: one running job per class, whatever the workspace.
+pub(crate) struct CommunityQueuePolicy;
+
+#[async_trait]
+impl QueuePolicy for CommunityQueuePolicy {
+    async fn concurrency(
+        &self,
+        _ctx: &AppContext,
+        _workspace_id: Uuid,
+        _class: WorkerClass,
+    ) -> Result<ConcurrencyPolicy, String> {
+        Ok(ConcurrencyPolicy {
+            plan: "community".to_owned(),
+            limit: 1,
+        })
+    }
+}
+
+/// The policy a deployment gets when it does not choose one.
+pub(crate) fn default_queue_policy() -> Arc<dyn QueuePolicy> {
+    Arc::new(CommunityQueuePolicy)
+}
+
+/// The concurrency policy `class` is admitted under for `workspace_id`, from whichever [`QueuePolicy`] is installed.
+pub(crate) async fn concurrency_for(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+    class: WorkerClass,
+) -> Result<ConcurrencyPolicy, String> {
+    let policy = ctx
+        .shared_store
+        .get::<Arc<dyn QueuePolicy>>()
+        .ok_or_else(|| "queue policy unavailable: no policy is installed".to_owned())?;
+    policy.concurrency(ctx, workspace_id, class).await
+}
 
 const TENANT_PRIVATE_PRIORITY: i32 = 300;
 const OFFICIAL_PRIORITY: i32 = 200;
@@ -99,6 +160,24 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[tokio::test]
+    async fn the_installed_policy_decides_and_a_missing_one_refuses() {
+        let ctx = crate::workers::dispatch::test_context().await;
+
+        let refused = concurrency_for(&ctx, Uuid::nil(), WorkerClass::Shared).await;
+        assert!(refused.is_err_and(|error| error.contains("no policy is installed")));
+
+        ctx.shared_store.insert(default_queue_policy());
+        for class in [
+            WorkerClass::TenantPrivate,
+            WorkerClass::Official,
+            WorkerClass::Shared,
+        ] {
+            let policy = concurrency_for(&ctx, Uuid::nil(), class).await.unwrap();
+            assert_eq!((policy.plan.as_str(), policy.limit), ("community", 1));
+        }
+    }
 
     async fn database() -> sea_orm::DatabaseConnection {
         let directory = tempdir().expect("queue policy tempdir");

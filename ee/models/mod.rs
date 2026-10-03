@@ -7,6 +7,7 @@ pub mod billing;
 pub mod compute_credit_ledger;
 pub mod embedding_keys;
 pub mod entity_columns;
+pub mod entity_entities;
 pub mod entity_fill;
 pub mod inference_jobs;
 pub mod inference_proposals;

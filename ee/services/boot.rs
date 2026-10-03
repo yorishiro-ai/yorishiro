@@ -8,7 +8,9 @@ use loco_rs::{
 };
 
 use crate::db::AppContextBackend;
+use crate::workers::dispatch::LocoJobDispatcher;
 use crate::workers::embedding_sync::WorkerClassResolver;
+use crate::workers::queue::QueuePolicy;
 
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) {
@@ -40,6 +42,12 @@ pub(crate) fn compose_context(ctx: &AppContext) {
     ctx.shared_store.insert(Arc::new(
         crate::ee::services::worker_class_resolver::WorkerClassAssignmentResolver,
     ) as Arc<dyn WorkerClassResolver>);
+    // Replaces the community queue policy installed by the base context builder.
+    ctx.shared_store
+        .insert(Arc::new(crate::ee::workers::queue::PlanQueuePolicy) as Arc<dyn QueuePolicy>);
+    ctx.shared_store
+        .insert(Arc::new(LocoJobDispatcher)
+            as Arc<dyn crate::ee::workers::infer_fill::InferFillDispatcher>);
 }
 
 /// Registers enterprise workers after the base workers, preserving queue order.

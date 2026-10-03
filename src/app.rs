@@ -28,131 +28,6 @@ use crate::workers::reindex::{
     ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
 };
 
-pub(crate) async fn queue_concurrency_policy(
-    ctx: &AppContext,
-    workspace_id: uuid::Uuid,
-    class: crate::workers::embedding_sync::WorkerClass,
-) -> Result<(String, i32), String> {
-    #[cfg(not(feature = "enterprise"))]
-    {
-        let _ = (ctx, workspace_id, class);
-        Ok(("community".to_owned(), 1))
-    }
-    #[cfg(feature = "enterprise")]
-    {
-        let tenant_id = crate::models::workspace_workspaces::find_tenant_id(&ctx.db, workspace_id)
-            .await
-            .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
-        let Some(tenant_id) = tenant_id else {
-            return Err("queue policy unavailable: workspace does not exist".into());
-        };
-        let licence_plan = ctx
-            .shared_store
-            .get::<std::sync::Arc<crate::ee::services::licence::LicenceState>>()
-            .ok_or_else(|| "queue policy unavailable: licence state is missing".to_owned())?
-            .active_plan_at(chrono::Utc::now().timestamp());
-        let plan = if let Some(plan) = licence_plan {
-            plan
-        } else {
-            let billing = crate::models::tenant_billing::find_plan(&ctx.db, tenant_id)
-                .await
-                .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
-            match billing {
-                None => crate::ee::services::plan::Plan::Free,
-                Some(plan) => {
-                    let value = plan.ok_or_else(|| {
-                        "queue policy unavailable: billing plan is missing".to_owned()
-                    })?;
-                    crate::ee::services::plan::Plan::from_db_str(&value)
-                        .map_err(|error| error.to_string())?
-                }
-            }
-        };
-        let limit = match class {
-            crate::workers::embedding_sync::WorkerClass::Official => {
-                plan.compute_policy().base_official_concurrency as i32
-            }
-            crate::workers::embedding_sync::WorkerClass::TenantPrivate
-            | crate::workers::embedding_sync::WorkerClass::Shared => 1,
-        };
-        Ok((plan.as_str().to_owned(), limit))
-    }
-}
-
-#[async_trait]
-#[cfg(feature = "enterprise")]
-impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
-    async fn dispatch(
-        &self,
-        ctx: &AppContext,
-        mut args: crate::ee::workers::infer_fill::InferFillArgs,
-    ) -> loco_rs::Result<String> {
-        use loco_rs::bgworker::BackgroundWorker;
-
-        let lifecycle_id = uuid::Uuid::now_v7();
-        let scheduling =
-            crate::workers::queue::decide(crate::workers::embedding_sync::WorkerClass::Shared);
-        tracing::info!(
-            lifecycle_id = %lifecycle_id,
-            worker_class = "shared",
-            scheduling_priority = scheduling.priority,
-            fallback = scheduling.fallback,
-            "queue scheduling decision"
-        );
-        crate::models::queue_job_lifecycles::Entity::record_enqueue(
-            &ctx.db,
-            crate::models::queue_job_lifecycles::Enqueue {
-                id: lifecycle_id,
-                job_name: "infer_fill",
-                worker_class: "shared",
-                workspace_id: Some(args.workspace_id),
-                plan: None,
-                concurrency_key: Some("shared"),
-                concurrency_limit: Some(1),
-            },
-        )
-        .await
-        .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
-        args.lifecycle_id = Some(lifecycle_id);
-        let result = crate::ee::workers::infer_fill::InferFillWorker::perform_later_with_priority(
-            ctx,
-            args,
-            Some(scheduling.priority),
-        )
-        .await;
-        match result {
-            Ok(job_id) => {
-                if let Err(error) = crate::models::queue_job_lifecycles::Entity::mark_dispatched(
-                    &ctx.db,
-                    lifecycle_id,
-                    &job_id,
-                )
-                .await
-                {
-                    tracing::error!(
-                        lifecycle_id = %lifecycle_id,
-                        provider_job_id = %job_id,
-                        diagnostic = %error,
-                        "provider job dispatched but lifecycle correlation write failed"
-                    );
-                }
-                Ok(job_id)
-            }
-            Err(error) => {
-                let _ = crate::models::queue_job_lifecycles::Entity::finish(
-                    &ctx.db,
-                    lifecycle_id,
-                    None,
-                    crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
-                    Some(&error.to_string()),
-                )
-                .await;
-                Err(error)
-            }
-        }
-    }
-}
-
 pub struct App;
 #[async_trait]
 impl Hooks for App {
@@ -200,9 +75,6 @@ impl Hooks for App {
             .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);
         ctx.shared_store
             .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
-        #[cfg(feature = "enterprise")]
-        ctx.shared_store.insert(Arc::new(LocoJobDispatcher)
-            as Arc<dyn crate::ee::workers::infer_fill::InferFillDispatcher>);
         #[cfg(feature = "enterprise")]
         crate::ee::services::boot::compose_context(&ctx);
         Ok(ctx)
@@ -622,6 +494,8 @@ async fn install_services(ctx: AppContext) -> Result<AppContext> {
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
     ctx.shared_store.insert(embedding_provider);
+    ctx.shared_store
+        .insert(crate::workers::queue::default_queue_policy());
     // Both resolvers are installed on every backend, unlike the authenticator above: they read
     // `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
     ctx.shared_store

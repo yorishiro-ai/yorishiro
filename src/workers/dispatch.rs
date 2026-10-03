@@ -141,14 +141,14 @@ where
     let lifecycle_id = Uuid::now_v7();
     let class = spec.class.as_db_str();
 
-    let (plan, concurrency_limit) = match crate::app::queue_concurrency_policy(
+    let (plan, concurrency_limit) = match super::queue::concurrency_for(
         ctx,
         spec.workspace_id,
         spec.class,
     )
     .await
     {
-        Ok(policy) => policy,
+        Ok(policy) => (policy.plan, policy.limit),
         Err(error) => {
             // No plan is known, so the row is closed with no capacity at all.
             refuse(ctx, &spec, lifecycle_id, None, class, 0, &error).await;

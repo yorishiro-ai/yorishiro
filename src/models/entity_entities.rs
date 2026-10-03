@@ -14,8 +14,6 @@ mod validation;
 pub use crate::models::_entities::entity_entities::{ActiveModel, Entity, Model};
 use crate::models::schema_schemas::metaschema;
 
-#[cfg(feature = "enterprise")]
-pub(crate) use crud::update_if_unchanged;
 pub use crud::{count, create, delete, export_all, get, get_batch, list, update};
 pub use migration::{drift, fill_defaults, migration_dry_run};
 pub use snapshots::{delete_snapshot, snapshot, undo_job};
