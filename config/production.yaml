@@ -3,7 +3,8 @@
 # This is the production environment.
 #
 # Yorishiro supports SQLite or PostgreSQL for application data.
-# Its queue can use a separate SQLite file, PostgreSQL, or Valkey through Loco's Redis provider.
+# Queue storage is configured independently through Loco's queue provider.
+# This release supports SQLite, PostgreSQL, and the Redis-compatible provider.
 # An unconfigured start uses local SQLite files and serves a single-tenant trial instance.
 # The default database is `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` (an
 # absolute path, independent of the process's CWD), while SQLite jobs use the separate
@@ -14,7 +15,7 @@
 # To use PostgreSQL for application data, set `DATABASE_URL` to a `postgres://` URI.
 # When you do, `YORISHIRO_QUEUE_KIND` defaults to `Postgres` and the queue uses `DATABASE_URL`
 # as its connection URI (the same instance), so you need only one database running.
-# Set `YORISHIRO_QUEUE_KIND=Redis` and a `redis://` or `rediss://` `QUEUE_URL` to use Valkey independently of the application database.
+# Set `YORISHIRO_QUEUE_KIND=Redis` and a `redis://` or `rediss://` `QUEUE_URL` to use the Redis-compatible provider independently of the application database.
 #
 # The enterprise edition variables below are not rendered by this file (they are read
 # directly via `std::env::var` in `ee/`), but listed here for completeness so this
@@ -83,7 +84,7 @@ server:
 # Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
 # With DATABASE_URL unset, SQLite uses a separate queue file.
 # PostgreSQL continues to use DATABASE_URL unless QUEUE_URL is set.
-# The `Redis` name is Loco's provider variant and supports Valkey's Redis-compatible protocol.
+# `Redis` is Loco's provider variant name for Redis-compatible queue services.
 # QUEUE_URL takes no default when an external backend is required (Redis, or explicit
 # non-SQLite queue), matching this file's own no-silent-fallback convention.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
@@ -129,7 +130,7 @@ workers:
   mode: BackgroundQueue
 
 settings:
-  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>
+  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
   embedding:
     provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="local") %>
     dimensions: <%= get_env(name="YORISHIRO_EMBEDDING_DIMENSIONS", default="768") %>

@@ -121,15 +121,17 @@ Yorishiro は Loco 標準の `config/<environment>.yaml` 構成を使います�
 
 YAML では Loco の Tera `get_env` 式を使い、`DATABASE_URL`、`QUEUE_URL`、埋め込み設定などのデプロイ時の値を読み込みます。
 アプリケーションデータは SQLite と PostgreSQL に対応します。
-キューは独立して選択でき、SQLite、PostgreSQL、または Loco の `Redis` キュープロバイダ経由の Valkey に対応します。
+キューの保存先は Loco のキュープロバイダとして独立して選択します。
+このリリースでは SQLite、PostgreSQL、Redis 互換キュープロバイダを利用できます。
 development と production の未設定時は両方に SQLite を使うため、外部サービスは不要です。
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
 | `HOST` | `http://localhost` | サーバのホスト名またはアドレス |
-| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から導出 | `Sqlite`、`Postgres`、`Redis`。Valkey には `Redis` を指定 |
-| `QUEUE_URL` | バックエンド別の既定値 | キュー接続 URI。Valkey は `redis://` または `rediss://` |
+| `YORISHIRO_MAX_TENANTS` | `1` | テナント上限。`0` は無制限となり、初回セットアップウィザードを無効化 |
+| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から導出 | Loco のキュープロバイダ。このリリースでは `Sqlite`、`Postgres`、`Redis` |
+| `QUEUE_URL` | プロバイダ別の既定値 | キュープロバイダの接続 URI。Redis 互換プロバイダは `redis://` または `rediss://` |
 | `YORISHIRO_EMBEDDING_BASE_URL` | 未設定 | 埋め込みエンドポイントの URL |
 | `YORISHIRO_EMBEDDING_MODEL` | 未設定 | 埋め込みモデル名 |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みプロバイダ（`none` で無効、`local` でローカル、未設定でローカル） |
@@ -138,10 +140,11 @@ development と production の未設定時は両方に SQLite を使うため、
 パッケージ版の既定値は `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`、`config/development.yaml` の既定値は `sqlite://yorishiro_queue.sqlite3?mode=rwc` です。
 起動時に SQLite のパスを正規化し、接続クエリを除いて同じファイルになる設定を拒否します。
 既存インストールの移行や保存場所の変更には `QUEUE_URL` を明示してください。
-PostgreSQL と Valkey のキューには SQLite の同一ファイル制約はありません。
+PostgreSQL と Redis 互換キューには SQLite の同一ファイル制約はありません。
 
-アプリケーションデータベースとキューは同じバックエンドを使う必要はありません。
-たとえば PostgreSQL のアプリケーションデータベースと Valkey を組み合わせる場合は、`YORISHIRO_QUEUE_KIND=Redis` と `QUEUE_URL=redis://valkey:6379` を設定します。
+アプリケーションデータベースとキュープロバイダは同じバックエンドを使う必要はありません。
+たとえば PostgreSQL のアプリケーションデータベースと Redis 互換キューサービスを組み合わせる場合は、`YORISHIRO_QUEUE_KIND=Redis` と適切な `QUEUE_URL` を設定します。
+今後キュープロバイダが増えても、アプリケーションデータベースの設定は変わりません。
 
 ### メール
 

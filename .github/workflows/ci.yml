@@ -226,7 +226,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - db: PG
+          - db: Postgres
             backend: postgres
             queue: Postgres
             loco_env: test_postgres
@@ -238,16 +238,16 @@ jobs:
             loco_env: test_sqlite
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc
-          - db: PG
+          - db: Postgres
             backend: postgres
-            queue: Valkey
-            loco_env: test_valkey
+            queue: Redis-compatible
+            loco_env: test_redis
             database_url: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
             queue_url: redis://localhost:6379
           - db: SQLite
             backend: sqlite
-            queue: Valkey
-            loco_env: test_valkey
+            queue: Redis-compatible
+            loco_env: test_redis
             database_url: sqlite:///tmp/yorishiro.sqlite3?mode=rwc
             queue_url: redis://localhost:6379
     services:

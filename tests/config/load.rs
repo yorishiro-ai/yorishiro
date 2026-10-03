@@ -51,6 +51,25 @@ async fn test_environment_selects_backend_specific_loco_config() {
 
 #[tokio::test]
 #[serial(process_environment)]
+async fn redis_test_config_keeps_queue_independent_from_database() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
+    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
+    _guard.set("QUEUE_URL", "redis://queue.example:6379");
+
+    let config = load(&Environment::Any("test_redis".into())).await.unwrap();
+
+    assert_eq!(
+        config.database.uri,
+        "postgres://test:test@localhost:5432/test"
+    );
+    assert!(matches!(
+        config.queue,
+        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example:6379"
+    ));
+}
+
+#[tokio::test]
+#[serial(process_environment)]
 async fn test_configs_disable_external_embedding_downloads_by_default() {
     let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
     _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
@@ -83,7 +102,7 @@ async fn production_config_is_the_packaged_loco_config() {
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn production_supports_postgres_and_valkey_queues() {
+async fn production_selects_queue_provider_independently_from_database() {
     let _guard = EnvGuard::capture(&[
         "DATABASE_URL",
         "QUEUE_URL",
@@ -104,13 +123,13 @@ async fn production_supports_postgres_and_valkey_queues() {
     ));
 
     _guard.set("YORISHIRO_QUEUE_KIND", "Redis");
-    _guard.set("QUEUE_URL", "redis://valkey:6379");
+    _guard.set("QUEUE_URL", "redis://queue.example:6379");
 
-    let valkey_queue = load(&Environment::Production).await.unwrap();
+    let redis_queue = load(&Environment::Production).await.unwrap();
 
-    assert_eq!(valkey_queue.database.uri, "postgres://db/yorishiro");
+    assert_eq!(redis_queue.database.uri, "postgres://db/yorishiro");
     assert!(matches!(
-        valkey_queue.queue,
-        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://valkey:6379"
+        redis_queue.queue,
+        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://queue.example:6379"
     ));
 }

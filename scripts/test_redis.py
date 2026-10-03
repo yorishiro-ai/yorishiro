@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run
-"""Run the Redis/Valkey queue checks."""
+"""Run the Redis-compatible queue checks."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def main() -> int:
             "test-support",
             "--test",
             "mod",
-            "config::load::valkey_test_config_keeps_queue_external_to_postgres",
+            "config::load::redis_test_config_keeps_queue_independent_from_database",
             "--",
             "--exact",
             "--nocapture",

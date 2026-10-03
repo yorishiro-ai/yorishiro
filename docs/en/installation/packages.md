@@ -32,7 +32,7 @@ CE does not install the enterprise licence file.
 
 Edit `/etc/yorishiro/production.yaml` to configure the packaged service.
 Package upgrades preserve local changes to this file.
-The application database can use SQLite or PostgreSQL, while the queue can independently use SQLite, PostgreSQL, or Valkey.
+The application database can use SQLite or PostgreSQL, while queue storage is independently selected through Loco's queue provider.
 
 ```yaml
 database:
@@ -44,7 +44,7 @@ server:
   host: https://yorishiro.example.com
 ```
 
-For Valkey, set `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL=redis://valkey:6379` in the service environment instead of using the PostgreSQL queue block.
+For a Redis-compatible queue service, set `YORISHIRO_QUEUE_KIND=Redis` and its `QUEUE_URL` in the service environment instead of using the PostgreSQL queue block.
 
 See [docs/configuration.md](../configuration.md) for all settings.
 

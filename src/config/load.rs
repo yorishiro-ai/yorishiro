@@ -17,7 +17,7 @@ fn test_environment(environment: &Environment) -> Environment {
             if env::var("QUEUE_URL")
                 .is_ok_and(|url| url.starts_with("redis://") || url.starts_with("rediss://"))
             {
-                return Environment::Any("test_valkey".into());
+                return Environment::Any("test_redis".into());
             }
             let url = env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());

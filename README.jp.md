@@ -111,7 +111,8 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 `LOCO_ENV` が `config/<environment>.yaml` を選び、`LOCO_CONFIG_FOLDER` で別の設定ディレクトリを指定できます。
 YAML では Loco の Tera `get_env` 式を使ってデプロイ時の値を上書きします。
 ソース開発では `config/development.yaml` を使い、パッケージと Docker では `config/production.yaml` を使います。
-アプリケーションデータは SQLite または PostgreSQL を利用でき、キューは独立して SQLite、PostgreSQL、または Loco の `Redis` キュープロバイダ経由の Valkey を利用できます。
+アプリケーションデータは SQLite または PostgreSQL を利用できます。
+キューの保存先は Loco のキュープロバイダとして独立して選択でき、このリリースでは SQLite、PostgreSQL、Redis 互換プロバイダを利用できます。
 バックエンド変数を設定しない場合のみ、パッケージと Docker は SQLite の既定データを `/var/lib/yorishiro` に保存します。
 
 ## ドキュメント

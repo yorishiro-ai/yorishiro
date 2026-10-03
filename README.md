@@ -113,7 +113,8 @@ Configuration follows Loco's environment layout under `config/`.
 `LOCO_ENV` selects `config/<environment>.yaml`, and `LOCO_CONFIG_FOLDER` can select another configuration directory.
 The YAML files use Loco's Tera `get_env` expressions for deployment overrides.
 Source development defaults to `config/development.yaml`, while package and Docker installations run with `config/production.yaml`.
-Application data can use SQLite or PostgreSQL, and the queue can independently use SQLite, PostgreSQL, or Valkey through Loco's `Redis` queue provider.
+Application data can use SQLite or PostgreSQL.
+Queue storage is selected independently through Loco's queue provider, with SQLite, PostgreSQL, and Redis-compatible providers available in this release.
 With no backend variables set, package and Docker installations store the SQLite defaults under `/var/lib/yorishiro`.
 
 ## Documentation

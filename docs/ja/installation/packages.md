@@ -32,7 +32,7 @@ CE は EE ライセンスファイルをインストールしません。
 
 パッケージ版サービスの設定は `/etc/yorishiro/production.yaml` を編集します。
 パッケージを更新しても、このファイルに加えた変更は保持されます。
-アプリケーションデータベースは SQLite または PostgreSQL を利用でき、キューは独立して SQLite、PostgreSQL、または Valkey を利用できます。
+アプリケーションデータベースは SQLite または PostgreSQL を利用でき、キューの保存先は Loco のキュープロバイダとして独立して選択できます。
 
 ```yaml
 database:
@@ -44,7 +44,7 @@ server:
   host: https://yorishiro.example.com
 ```
 
-Valkey を使う場合は、PostgreSQL のキューブロックの代わりにサービス環境へ `YORISHIRO_QUEUE_KIND=Redis` と `QUEUE_URL=redis://valkey:6379` を設定します。
+Redis 互換キューサービスを使う場合は、PostgreSQL のキューブロックの代わりにサービス環境へ `YORISHIRO_QUEUE_KIND=Redis` と接続先の `QUEUE_URL` を設定します。
 
 全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
 

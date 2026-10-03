@@ -108,15 +108,17 @@ Package and Docker installations set `LOCO_ENV=production` and provide `producti
 
 The YAML files use Loco's Tera `get_env` expressions for deploy-time values such as `DATABASE_URL`, `QUEUE_URL`, and embedding settings.
 Application data supports SQLite and PostgreSQL.
-The queue is selected independently and supports SQLite, PostgreSQL, and Valkey through Loco's `Redis` queue provider.
+Queue storage is selected independently through Loco's queue provider.
+This release provides SQLite, PostgreSQL, and Redis-compatible queue providers.
 An unconfigured development or production environment uses SQLite for both roles, so no external service is required.
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
 | `HOST` | `http://localhost` | Your server's hostname or address |
-| `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | `Sqlite`, `Postgres`, or `Redis`; use `Redis` for Valkey |
-| `QUEUE_URL` | Backend default | Queue URI, including `redis://` or `rediss://` for Valkey |
+| `YORISHIRO_MAX_TENANTS` | `1` | Tenant cap; `0` allows unlimited tenants and disables the first-run setup wizard |
+| `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | Loco queue provider: `Sqlite`, `Postgres`, or `Redis` in this release |
+| `QUEUE_URL` | Provider default | Queue provider URI, including `redis://` or `rediss://` for the Redis-compatible provider |
 | `YORISHIRO_EMBEDDING_BASE_URL` | Unset | Embeddings endpoint URL |
 | `YORISHIRO_EMBEDDING_MODEL` | Unset | Embeddings model name |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding provider (`none`, `local`, or unset for local) |
@@ -125,10 +127,11 @@ When both the application and queue use SQLite, the queue URI must name a separa
 The packaged default is `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`, while `config/development.yaml` uses `sqlite://yorishiro_queue.sqlite3?mode=rwc`.
 Boot rejects equivalent shared-file URIs after normalizing SQLite paths and ignoring connection query parameters.
 Set `QUEUE_URL` explicitly when moving an existing installation or choosing a custom location.
-PostgreSQL and Valkey queues do not share the SQLite file restriction.
+PostgreSQL and Redis-compatible queues do not share the SQLite file restriction.
 
-The application database and queue do not have to use the same backend.
-For example, a PostgreSQL application database can use Valkey by setting `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL=redis://valkey:6379`.
+The application database and queue provider do not have to use the same backend.
+For example, a PostgreSQL application database can use a Redis-compatible queue service by setting `YORISHIRO_QUEUE_KIND=Redis` and an appropriate `QUEUE_URL`.
+Additional queue providers can be added without changing the application database configuration.
 
 ### Mailer
 
