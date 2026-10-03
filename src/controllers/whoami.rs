@@ -5,7 +5,7 @@ use loco_rs::controller::Routes;
 use crate::controllers::extractors::AuthContext;
 use crate::dtos::whoami::WhoAmIResponse;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = super::openapi::WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = crate::dtos::whoami::WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub async fn whoami(AuthContext(ctx): AuthContext) -> Json<WhoAmIResponse> {
     Json(WhoAmIResponse {
         workspace_id: ctx.workspace_id,

@@ -73,19 +73,23 @@ pub async fn lock_version(
         .internal()
 }
 
-/// Represents a row in the `schema_schemas` table.
-/// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
+/// One version of a workspace's schema.
+//
+// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SchemaRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
     pub name: String,
     pub version: i32,
+    #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
     pub definition: MetaSchemaDefinition,
     pub status: SchemaStatus,
     pub origin_template_id: Option<Uuid>,
     pub origin_status: SchemaOriginStatus,
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<serde_json::Value>))]
     pub origin_snapshot: Option<MetaSchemaDefinition>,
     pub origin_updated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -250,9 +254,10 @@ pub struct MergeDiffSummary {
     pub has_conflicts: bool,
 }
 
-/// A row in a schema listing.
-/// A lightweight summary that omits the `definition` body, used as the entry point for MCP clients (LLMs) to discover what schemas exist for a workspace.
+/// A schema in a listing.
+/// A lightweight summary that omits the `definition` body.
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SchemaSummary {
     pub id: Uuid,
     pub name: String,

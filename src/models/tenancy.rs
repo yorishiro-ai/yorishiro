@@ -55,6 +55,7 @@ impl MembershipRole {
 
 /// A tenant member as reported by member-list and member-add operations.
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MembershipRecord {
     pub user_id: Uuid,
     pub email: String,
@@ -71,6 +72,7 @@ pub struct RedeemedInvite {
 
 /// A workspace summary returned by tenancy lookups and signup.
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceSummary {
     pub id: Uuid,
     pub name: String,

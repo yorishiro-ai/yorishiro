@@ -38,7 +38,7 @@ fn validate_name(name: &str) -> Result<String, YorishiroError> {
     Ok(name.to_owned())
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys", request_body = super::openapi::CreateApiKeyRequest, responses((status = 201, body = super::openapi::CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys", request_body = crate::dtos::api_keys::CreateApiKeyRequest, responses((status = 201, body = crate::dtos::api_keys::CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub(crate) async fn create(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -73,7 +73,7 @@ pub(crate) async fn create(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/api-keys", responses((status = 200, body = super::openapi::ListApiKeysResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/api-keys", responses((status = 200, body = crate::dtos::api_keys::ListApiKeysResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub(crate) async fn list(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,

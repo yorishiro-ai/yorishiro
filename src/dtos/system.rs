@@ -1,11 +1,14 @@
 use crate::models::system_maintenance::{MaintenanceMode, MaintenanceState};
 use serde::{Deserialize, Serialize};
 
-/// The state as the API reports it.
-/// `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
+/// The maintenance state as the API reports it.
+//
+// `MaintenanceState` is the repository's own type and is not serialisable as-is (it holds `MaintenanceMode`, not a plain string), so the wire shape is declared here rather than reused directly.
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MaintenanceResponse {
     /// `off`, `read-only` or `full-lock`.
+    #[cfg_attr(feature = "openapi", schema(value_type = MaintenanceMode))]
     pub mode: String,
     /// Seconds a refused caller is told to wait, sent as `Retry-After` on the refusal itself.
     pub retry_after: u32,
@@ -34,6 +37,7 @@ where
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetMaintenanceRequest {
     /// `off`, `read-only` or `full-lock`, spelled as the CLI spells them.
     #[serde(deserialize_with = "deserialize_maintenance_mode")]

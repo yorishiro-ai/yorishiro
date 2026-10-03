@@ -54,10 +54,12 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// The RLS-scoped request path's view of a `entity_entities` row.
-/// Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
-/// `created_by`/`updated_by` are `None` for entities touched by an unattributed API key.
+/// A stored entity.
+/// `created_by`/`updated_by` are absent for entities touched by an unattributed API key.
+//
+// Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
 #[derive(Clone, Debug, Serialize, Deserialize, sea_orm::FromQueryResult)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EntityRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -190,6 +192,7 @@ pub struct EntitySnapshot {
 
 /// What undoing a job put back.
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UndoReport {
     pub job_id: Uuid,
     /// Entities restored to the data they held before.

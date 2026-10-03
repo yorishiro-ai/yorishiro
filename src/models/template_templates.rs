@@ -37,11 +37,13 @@ impl Entity {}
 
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TemplateRecord {
     pub id: uuid::Uuid,
     pub tenant_id: uuid::Uuid,
     pub name: String,
     pub description: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
     pub definition: MetaSchemaDefinition,
     pub tags: Vec<String>,
     pub locale: Option<String>,

@@ -4,6 +4,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateEntityRequest {
     pub schema_name: String,
     pub entity_type: String,
@@ -11,11 +12,13 @@ pub struct CreateEntityRequest {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FillDefaultsRequest {
     pub schema_name: String,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FillDefaultsResponse {
     pub schema_name: String,
     pub job_id: Uuid,
@@ -24,6 +27,7 @@ pub struct FillDefaultsResponse {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateEntityRequest {
     pub data: Value,
 }
@@ -63,6 +67,7 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReindexResponse {
     /// The job ID assigned by the queue provider.
     pub job_id: String,

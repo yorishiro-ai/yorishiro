@@ -17,7 +17,7 @@ use crate::error::YorishiroError;
 use crate::models::api_key_audit_log;
 use crate::models::system_maintenance::{self, DEFAULT_RETRY_AFTER_SECONDS};
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/system/maintenance", responses((status = 200, body = super::openapi::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/system/maintenance", responses((status = 200, body = crate::dtos::system::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn get_maintenance(
     State(ctx): State<AppContext>,
     _authorized: Authorized<MigrationScope>,
@@ -26,7 +26,7 @@ pub async fn get_maintenance(
     Ok(Json(current.into()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/system/maintenance", request_body = super::openapi::SetMaintenanceRequest, responses((status = 200, body = super::openapi::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/system/maintenance", request_body = crate::dtos::system::SetMaintenanceRequest, responses((status = 200, body = crate::dtos::system::MaintenanceResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn set_maintenance(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,

@@ -28,7 +28,7 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     Ok((settings.max_tenants > 0).then_some(settings.max_tenants))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = super::openapi::SetupStatusResponse)), security(()), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = crate::dtos::setup::SetupStatusResponse)), security(()), tag = "community"))]
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if max_tenants(&ctx)?.is_some() {
         tenancy::count_tenants(&ctx.db).await? == 0
@@ -38,7 +38,7 @@ pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRes
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = super::openapi::SetupRequest, responses((status = 201, body = super::openapi::SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = crate::dtos::setup::SetupRequest, responses((status = 201, body = crate::dtos::setup::SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 pub async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,

@@ -3,11 +3,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct CreateApiKeyRequest {
     pub(crate) name: String,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct ApiKeyRecord {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
@@ -16,6 +18,7 @@ pub(crate) struct ApiKeyRecord {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct CreateApiKeyResponse {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
@@ -25,6 +28,7 @@ pub(crate) struct CreateApiKeyResponse {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct ListApiKeysResponse {
     pub(crate) keys: Vec<ApiKeyRecord>,
 }

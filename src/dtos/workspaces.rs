@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateWorkspaceRequest {
     pub name: String,
     /// Cap on the number of entities this workspace may hold.
@@ -15,6 +16,7 @@ pub struct CreateWorkspaceRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceDetail {
     pub id: Uuid,
     pub tenant_id: Uuid,

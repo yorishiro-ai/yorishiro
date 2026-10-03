@@ -131,6 +131,7 @@ pub async fn stamp_embedding_if_missing(
 
 /// API-facing workspace record with a typed status.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkspaceRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,

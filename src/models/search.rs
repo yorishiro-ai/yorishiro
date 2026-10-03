@@ -39,6 +39,7 @@ impl Default for SearchQuery {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SearchHit {
     pub entity: EntityRecord,
     /// Cosine distance (PostgreSQL `<=>` or sqlite-vec cosine distance).

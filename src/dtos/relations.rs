@@ -4,6 +4,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateRelationRequest {
     pub source_id: Uuid,
     pub target_id: Uuid,
@@ -24,6 +25,7 @@ pub struct ListRelationsParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
     pub status: RelationStatus,

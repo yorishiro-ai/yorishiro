@@ -241,6 +241,7 @@ pub enum ValidationErrorCode {
 
 /// A single validation error detail, included in `ValidationFailed.details`.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ValidationDetail {
     /// JSON pointer to the field being validated (e.g. `/entity_types/foo/fields/bar`).
     pub field: String,
@@ -249,6 +250,7 @@ pub struct ValidationDetail {
     pub problem: String,
     /// Machine-readable classification of the error.
     /// Clients should switch on this to render localized messages.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub code: ValidationErrorCode,
     /// The expected value (e.g. "string", "object", "5"), or `None` if not applicable.
     pub expected: Option<String>,

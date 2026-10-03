@@ -35,7 +35,7 @@ async fn get_workspace_in_tenant(
     Ok(workspace)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [super::openapi::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 pub async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -45,7 +45,7 @@ pub async fn list_workspaces(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = super::openapi::CreateWorkspaceRequest, responses((status = 201, body = super::openapi::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = crate::dtos::workspaces::CreateWorkspaceRequest, responses((status = 201, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -72,7 +72,7 @@ pub async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::dtos::workspaces::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn get_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<ReadScope>,

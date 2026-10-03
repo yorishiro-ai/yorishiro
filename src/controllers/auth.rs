@@ -19,8 +19,8 @@ use crate::models::tenancy::{self, MembershipRole};
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/signup",
-    request_body = super::openapi::SignupRequest,
-    responses((status = 201, body = super::openapi::SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
+    request_body = crate::dtos::auth::SignupRequest,
+    responses((status = 201, body = crate::dtos::auth::SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
 ))]
@@ -132,8 +132,8 @@ async fn signup_without_invite(
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/login",
-    request_body = super::openapi::LoginRequest,
-    responses((status = 200, body = super::openapi::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)),
+    request_body = crate::dtos::auth::LoginRequest,
+    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
 ))]

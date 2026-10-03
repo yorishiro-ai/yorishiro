@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetupStatusResponse {
     /// True when the wizard is enabled and no tenant exists yet: the client should show the setup form instead of the login form.
     pub setup_required: bool,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetupRequest {
     pub email: String,
     pub password: String,
@@ -15,6 +17,7 @@ pub struct SetupRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetupResponse {
     pub user_id: Uuid,
     pub email: String,

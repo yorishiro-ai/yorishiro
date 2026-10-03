@@ -18,7 +18,7 @@ use crate::models::entity_entities::{self, EntityRecord, UndoReport};
 use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/entities", request_body = super::openapi::CreateEntityRequest, responses((status = 201, body = super::openapi::EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/entities", request_body = crate::dtos::entities::CreateEntityRequest, responses((status = 201, body = crate::models::entity_entities::EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
 pub async fn create_entity(
     State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
@@ -33,7 +33,7 @@ pub async fn create_entity(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn get_entity(
     authorized: Authorized<ReadScope>,
     Path(id): Path<Uuid>,
@@ -43,7 +43,7 @@ pub async fn get_entity(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = super::openapi::UpdateEntityRequest, responses((status = 200, body = super::openapi::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::entities::UpdateEntityRequest, responses((status = 200, body = crate::models::entity_entities::EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "community"))]
 pub async fn update_entity(
     State(ctx): State<AppContext>,
     authorized: Authorized<WriteScope>,
@@ -78,7 +78,7 @@ pub async fn delete_entity(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities", params(("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query), ("schema_version" = Option<i32>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::EntityRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/entities", params(("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query), ("schema_version" = Option<i32>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::entity_entities::EntityRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn list_entities(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListEntitiesParams>,
@@ -93,7 +93,7 @@ pub async fn list_entities(
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
 /// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. `ee/`'s fill-proposal confirmation), not an ordinary entity write.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 200, body = super::openapi::UndoReport), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 200, body = crate::models::entity_entities::UndoReport), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn undo_migration_job(
     authorized: Authorized<MigrationScope>,
     Path(job_id): Path<Uuid>,
@@ -133,7 +133,7 @@ pub async fn undo_migration_job(
 ///
 /// Returns 503 when no queue provider is configured: `perform_later` would silently return
 /// a job ID while discarding the job, which is worse than no endpoint at all.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/reindex", responses((status = 200, body = super::openapi::ReindexResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/reindex", responses((status = 200, body = crate::dtos::entities::ReindexResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn reindex_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<MigrationScope>,
@@ -187,7 +187,7 @@ pub async fn reindex_workspace(
 /// updated data.
 ///
 /// Returns 409 when the workspace has no entities behind the active version.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = super::openapi::FillDefaultsRequest, responses((status = 200, body = super::openapi::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = crate::dtos::entities::FillDefaultsRequest, responses((status = 200, body = crate::dtos::entities::FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"]))), tag = "community"))]
 pub async fn fill_defaults(
     authorized: Authorized<MigrationScope>,
     Json(body): Json<FillDefaultsRequest>,

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignupRequest {
     /// The plaintext token from an `admin create-invite`-issued invitation.
     /// Omit it to create a fresh tenant and join it as `Owner` instead.
@@ -15,6 +16,7 @@ pub struct SignupRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignupResponse {
     pub user_id: Uuid,
     pub email: String,
@@ -26,6 +28,7 @@ pub struct SignupResponse {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
@@ -36,6 +39,7 @@ pub struct LoginRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LoginResponse {
     /// The freshly issued API key's plaintext.
     /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
