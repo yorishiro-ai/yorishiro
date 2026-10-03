@@ -82,3 +82,4 @@ src/controllers/openapi.rs	field	ListApiKeysResponse::keys	OpenAPI list field.
 src/lib.rs	mod	data	integration-test: Loco `data/` layout holding typed settings and configuration loading, which the integration-test crate calls.
 src/data/mod.rs	mod	config	integration-test: `data::config::load` is the Loco configuration entry the integration-test crate exercises.
 src/data/config.rs	fn	load	integration-test: loads an environment exactly as `Hooks::load_config` does, so request tests and config tests share one path.
+src/data/mod.rs	mod	templates	integration-test: built-in template data that the integration-test crate counts and inspects.

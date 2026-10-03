@@ -14,7 +14,7 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let built_in_count = yorishiro::templates::list_templates().len();
+        let built_in_count = yorishiro::data::templates::list_templates().len();
 
         let first = official_templates::seed_official_templates(&ctx)
             .await

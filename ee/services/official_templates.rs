@@ -41,8 +41,8 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
 
     let mut outcome = SeedOutcome::default();
 
-    for summary in crate::templates::list_templates() {
-        let definition = crate::templates::get_template(&summary.id)?;
+    for summary in crate::data::templates::list_templates() {
+        let definition = crate::data::templates::get_template(&summary.id)?;
         let definition_json = serde_json::to_value(&definition).internal()?;
 
         let template_id = upsert_template(

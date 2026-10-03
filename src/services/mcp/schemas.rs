@@ -224,7 +224,7 @@ impl YorishiroMcpServer {
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 
-        ok_json(crate::templates::list_templates())
+        ok_json(crate::data::templates::list_templates())
     }
 
     #[tool(

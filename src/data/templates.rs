@@ -11,19 +11,19 @@ struct BuiltinTemplate {
 const TEMPLATES: &[BuiltinTemplate] = &[
     BuiltinTemplate {
         id: "general-notes",
-        source: include_str!("templates/json/general-notes.json"),
+        source: include_str!("../../data/templates/general-notes.json"),
     },
     BuiltinTemplate {
         id: "task-management",
-        source: include_str!("templates/json/task-management.json"),
+        source: include_str!("../../data/templates/task-management.json"),
     },
     BuiltinTemplate {
         id: "worldbuilding",
-        source: include_str!("templates/json/worldbuilding.json"),
+        source: include_str!("../../data/templates/worldbuilding.json"),
     },
     BuiltinTemplate {
         id: "software-adr",
-        source: include_str!("templates/json/software-adr.json"),
+        source: include_str!("../../data/templates/software-adr.json"),
     },
 ];
 

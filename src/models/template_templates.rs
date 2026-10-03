@@ -1,6 +1,6 @@
 //! CRUD for `template_templates`, the user-contributed schema template library.
 //!
-//! Distinct from `crate::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
+//! Distinct from `crate::data::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
 //! Runs on `ctx.db` (the migration-role connection): `template_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
 
 pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
@@ -161,7 +161,7 @@ pub async fn resolve_template_definition(
             let template = get_template(conn, tenant_id, id).await?;
             Ok((template.definition, Some(template.id)))
         }
-        Err(_) => Ok((crate::templates::get_template(template_id)?, None)),
+        Err(_) => Ok((crate::data::templates::get_template(template_id)?, None)),
     }
 }
 

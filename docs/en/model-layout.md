@@ -34,7 +34,7 @@ Do not edit `_entities` by hand, and keep the post-generation hardening step in 
 
 ## Feature-Area Map
 
-Built-in template JSON assets live under `src/templates/json/` and are embedded from there.
+Built-in template JSON assets live under `data/templates/` and are embedded by `src/data/templates.rs`.
 They are schema definitions, not generated entities, so they are reviewed and tested as source assets.
 
 Every moved hand-written model module has exactly one area.

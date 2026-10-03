@@ -2,11 +2,29 @@
 
 ## Repository overview
 
-This repository is mid-port from a hand-rolled `sqlx` + `sea-query` + `Engine`-generic data layer to [Loco](https://loco.rs).
+This repository is a [Loco](https://loco.rs) 1.2.0 application with a Laravel-like design: thin entry points, fat models, transport DTOs, jobs, and providers.
 
 ## Repository layout
 
-Root crate + `migration/` crate + `ee/` module. `src/models/` owns queries and record shapes; `src/controllers/` maps HTTP requests to actions; `services/mcp/` owns MCP tools (`YorishiroMcpServer` and `#[tool_router]` implementations). `ee/` mirrors `models/`, `controllers/`, and `services/` for enterprise features.
+Root crate + `migration/` crate + `ee/` module.
+`ee/` is an overlay on `src/`: it mirrors CE's folder hierarchy and file names, so a CE path tells you where its enterprise counterpart lives.
+CE therefore follows Loco's generator layout exactly; a directory Loco does not generate needs a written reason below.
+
+| Directory | Role | Laravel counterpart |
+|---|---|---|
+| `src/controllers/` | Entry points: REST handlers, MCP tools (`controllers/mcp/`), request middleware (`controllers/middleware/`), extractors | Controllers, Middleware |
+| `src/tasks/` | Entry point: the CLI | Console commands |
+| `src/dtos/` | Request and response transport types (`dtos/<plural>.rs`) | Resources, Form requests |
+| `src/models/` | Tables (`<table>.rs`), `_entities/` (generated), cross-table facades | Eloquent models |
+| `src/workers/` | Background jobs | Jobs |
+| `src/initializers/` | Process-lifetime wiring | Service providers |
+| `src/data/` | Typed settings and static data | Config |
+| `src/fixtures/` | Seed data | Seeders |
+| `src/services/` | **External clients only** (embedding providers). Loco has no equivalent, and nothing else may live here | Services |
+| `src/db.rs`, `src/error.rs` | Cross-cutting infrastructure Loco leaves to the application | Exception handler, DB config |
+
+Every entry point (REST, MCP, CLI) authenticates, parses input, calls model operations, and renders.
+None of them owns domain logic or builds ordinary queries.
 
 ### Model ownership
 
@@ -20,7 +38,8 @@ Root crate + `migration/` crate + `ee/` module. `src/models/` owns queries and r
 
 ### Not a model
 
-- `migration/src/`, `src/templates/json/`, and `src/db.rs` are database or asset concerns, not model concerns. They stay outside `models/`.
+- `migration/src/` and `src/db.rs` are database concerns, not model concerns. They stay outside `models/`.
+- Built-in template JSON is static data: `src/data/templates.rs` embeds `data/templates/*.json`.
 - `src/db.rs` handles connection pooling, two-pool architecture (identity pool for control plane, tenant pool for RLS-scoped requests), and session primitives (`SET ROLE`, `RESET`, `set_config`).
 
 ### Raw SQL
@@ -41,7 +60,8 @@ Examples:
 
 ### MCP placement
 
-MCP is a service, not a controller. Route mounting (`src/controllers/mcp.rs::mount()`) is the one exception — it is a one-liner called from `Hooks::after_routes`.
+MCP is an entry point, so it is a controller: `src/controllers/mcp/` holds `YorishiroMcpServer`, the `#[tool_router]` implementations, and the transport mount.
+Each tool authenticates, parses its arguments, calls a model operation, and renders a tool result, exactly like a REST handler.
 
 ## Architecture
 

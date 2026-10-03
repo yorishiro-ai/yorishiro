@@ -117,7 +117,7 @@ pub async fn find_or_create(
     .await?;
 
     // A schema requires an existing `workspace_id`, so it is created after the workspace and the workspace is then updated to point at it, moving its `status` to `active`.
-    let definition = crate::templates::get_template("general-notes")?;
+    let definition = crate::data::templates::get_template("general-notes")?;
     let (schema, _diff) =
         schema_schemas::create_schema(conn, tenant.id, workspace.id, definition, None, None)
             .await?;
