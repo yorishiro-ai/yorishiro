@@ -113,7 +113,8 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
 /// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
 pub(super) const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 static NEXT_STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -157,7 +158,8 @@ async fn ensure_file(
     artifact: &Artifact,
 ) -> anyhow::Result<PathBuf> {
     let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
         .build()
         .expect("reqwest client configuration is static and always valid");
     ensure_file_with_http(dir, def, artifact, &client, &ReqwestArtifactHttp).await
@@ -501,7 +503,8 @@ mod tests {
 
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(READ_TIMEOUT)
             .build()
             .unwrap()
     }

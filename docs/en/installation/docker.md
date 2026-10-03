@@ -49,5 +49,5 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 ## Configuration
 
 See [docs/en/configuration.md](../configuration.md) for all settings.
-The canonical configuration file is at `/app/yorishiro.yaml` inside the image.
-Mount a replacement there or set `YORISHIRO_CONFIG_PATH` to a readable file.
+The production configuration is at `/app/config/production.yaml` inside the image.
+Mount a replacement there or point `LOCO_CONFIG_FOLDER` at another configuration directory.

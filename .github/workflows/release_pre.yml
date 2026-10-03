@@ -338,8 +338,7 @@ jobs:
             -e DATABASE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
             -e QUEUE_URL=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro \
             -e HOST=http://127.0.0.1:5150 \
-            -e YORISHIRO_EMBEDDING_BASE_URL=http://localhost:1 \
-            -e YORISHIRO_EMBEDDING_MODEL=unused \
+            -e YORISHIRO_EMBEDDING_PROVIDER=none \
             "${IMAGE}:${TAG}-${{ matrix.edition }}"
 
           for _ in $(seq 1 60); do

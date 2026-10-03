@@ -1,225 +1,116 @@
-use std::fs;
-
 use loco_rs::config::QueueConfig;
 use loco_rs::environment::Environment;
 use serial_test::serial;
-use tempfile::tempdir;
-use yorishiro::config::{CANONICAL_CONFIG_FILE, load};
 
-use super::{CurrentDirGuard, EnvGuard, minimal_config};
+use yorishiro::config::load;
 
-#[tokio::test]
-#[serial(process_environment)]
-async fn explicit_path_loads_and_environment_overrides_it() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("explicit.yaml");
-    fs::write(
-        &path,
-        minimal_config("sqlite:///from-file.sqlite3?mode=rwc"),
-    )
-    .unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH", "DATABASE_URL", "QUEUE_URL"]);
-    _guard.set("YORISHIRO_CONFIG_PATH", &path);
-    _guard.set("DATABASE_URL", "sqlite:///from-env.sqlite3?mode=rwc");
-    _guard.remove("QUEUE_URL");
-    let config = load(&Environment::Development).await.unwrap();
-    assert_eq!(config.database.uri, "sqlite:///from-env.sqlite3?mode=rwc");
-}
+use super::EnvGuard;
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn explicit_missing_path_never_falls_back() {
-    let directory = tempdir().unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH"]);
+async fn development_uses_loco_environment_config_and_typed_settings() {
+    let _guard = EnvGuard::capture(&[
+        "DATABASE_URL",
+        "QUEUE_URL",
+        "YORISHIRO_QUEUE_KIND",
+        "YORISHIRO_EMBEDDING_PROVIDER",
+    ]);
+    _guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
     _guard.set(
-        "YORISHIRO_CONFIG_PATH",
-        directory.path().join("missing.yaml"),
+        "QUEUE_URL",
+        "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
     );
-    let error = load(&Environment::Development)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("failed to read"));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn explicit_unreadable_path_never_falls_back() {
-    let directory = tempdir().unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH"]);
-    _guard.set("YORISHIRO_CONFIG_PATH", directory.path());
-    let error = load(&Environment::Development)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("failed to read"));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn explicit_invalid_path_never_falls_back() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("explicit.yaml");
-    fs::write(&path, "logger: [not valid for Config\n").unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&["YORISHIRO_CONFIG_PATH"]);
-    _guard.set("YORISHIRO_CONFIG_PATH", path);
-    let error = load(&Environment::Development)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("explicit.yaml"));
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn canonical_file_in_current_directory_wins() {
-    let directory = tempdir().unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&[
-        "YORISHIRO_CONFIG_PATH",
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-    ]);
-    fs::write(
-        directory.path().join(CANONICAL_CONFIG_FILE),
-        minimal_config("sqlite:///canonical.sqlite3?mode=rwc"),
-    )
-    .unwrap();
-    for variable in [
-        "YORISHIRO_CONFIG_PATH",
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-    ] {
-        _guard.remove(variable);
-    }
-    let config = load(&Environment::Development).await.unwrap();
-    assert_eq!(config.database.uri, "sqlite:///canonical.sqlite3?mode=rwc");
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn canonical_file_wins_when_legacy_file_also_exists() {
-    let directory = tempdir().unwrap();
-    let legacy_directory = directory.path().join("config");
-    fs::create_dir(&legacy_directory).unwrap();
-    fs::write(
-        legacy_directory.join("development.yaml"),
-        minimal_config("sqlite:///legacy.sqlite3?mode=rwc"),
-    )
-    .unwrap();
-    fs::write(
-        directory.path().join(CANONICAL_CONFIG_FILE),
-        minimal_config("sqlite:///canonical.sqlite3?mode=rwc"),
-    )
-    .unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&[
-        "YORISHIRO_CONFIG_PATH",
-        "LOCO_CONFIG_FOLDER",
-        "DATABASE_URL",
-        "QUEUE_URL",
-        "YORISHIRO_QUEUE_KIND",
-    ]);
-    _guard.remove("YORISHIRO_CONFIG_PATH");
-    _guard.set("LOCO_CONFIG_FOLDER", &legacy_directory);
-    _guard.remove("DATABASE_URL");
-    _guard.remove("QUEUE_URL");
     _guard.remove("YORISHIRO_QUEUE_KIND");
-    let config = load(&Environment::Development).await.unwrap();
-    assert_eq!(config.database.uri, "sqlite:///canonical.sqlite3?mode=rwc");
-}
+    _guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
-#[tokio::test]
-#[serial(process_environment)]
-async fn legacy_environment_file_is_the_final_fallback() {
-    let directory = tempdir().unwrap();
-    let config_directory = directory.path().join("config");
-    fs::create_dir(&config_directory).unwrap();
-    fs::write(
-        config_directory.join("test_postgres.yaml"),
-        minimal_config("{{ get_env(name=\"DATABASE_URL\") }}"),
-    )
-    .unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
-    let _guard = EnvGuard::capture(&[
-        "YORISHIRO_CONFIG_PATH",
-        "LOCO_CONFIG_FOLDER",
-        "DATABASE_URL",
-    ]);
-    _guard.remove("YORISHIRO_CONFIG_PATH");
-    _guard.set("LOCO_CONFIG_FOLDER", &config_directory);
-    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
-    let config = load(&Environment::Any("test_postgres".into()))
-        .await
-        .unwrap();
+    let config = load(&Environment::Development).await.unwrap();
+    let settings = config.settings::<serde_json::Value>().unwrap();
+
     assert_eq!(
         config.database.uri,
-        "postgres://test:test@localhost:5432/test"
+        "sqlite:///tmp/config-load.sqlite3?mode=rwc"
     );
+    assert_eq!(settings["embedding"]["provider"], "none");
 }
 
 #[tokio::test]
 #[serial(process_environment)]
-async fn valkey_test_config_keeps_queue_external_to_postgres() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
-    _guard.set("DATABASE_URL", "postgres://test:test@localhost:5432/test");
-    _guard.set("QUEUE_URL", "redis://localhost:6379");
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-
-    let config = load(&Environment::Any("test_valkey".into())).await.unwrap();
-    assert!(config.database.uri.starts_with("postgres://"));
-    match config.queue {
-        Some(QueueConfig::Redis(queue)) => assert_eq!(queue.uri, "redis://localhost:6379"),
-        other => panic!("test_valkey must configure a Redis queue, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-#[serial(process_environment)]
-async fn test_environment_selects_valkey_for_sqlite_database() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
+async fn test_environment_selects_backend_specific_loco_config() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL"]);
     _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
     _guard.set("QUEUE_URL", "redis://localhost:6379");
-    _guard.remove("YORISHIRO_QUEUE_KIND");
 
     let config = load(&Environment::Test).await.unwrap();
+
     assert!(config.database.uri.starts_with("sqlite://"));
-    match config.queue {
-        Some(QueueConfig::Redis(queue)) => assert_eq!(queue.uri, "redis://localhost:6379"),
-        other => panic!("SQLite test with Valkey must configure a Redis queue, got {other:?}"),
-    }
+    assert!(matches!(
+        config.queue,
+        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://localhost:6379"
+    ));
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[serial(process_environment)]
-async fn dangling_canonical_symlink_does_not_fall_back_to_legacy_config() {
-    let directory = tempdir().unwrap();
-    std::os::unix::fs::symlink(
-        directory.path().join("missing.yaml"),
-        directory.path().join(CANONICAL_CONFIG_FILE),
-    )
-    .unwrap();
-    let _dir = CurrentDirGuard::enter(directory.path());
+async fn test_configs_disable_external_embedding_downloads_by_default() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
+    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
+    _guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
+    _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
+
+    let config = load(&Environment::Any("test_sqlite".into())).await.unwrap();
+    let settings = config.settings::<serde_json::Value>().unwrap();
+
+    assert_eq!(settings["embedding"]["provider"], "none");
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn production_config_is_the_packaged_loco_config() {
+    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
+    _guard.remove("DATABASE_URL");
+    _guard.remove("QUEUE_URL");
+    _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
+
+    let config = load(&Environment::Production).await.unwrap();
+    let settings = config.settings::<serde_json::Value>().unwrap();
+
+    assert_eq!(
+        config.database.uri,
+        "sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc"
+    );
+    assert_eq!(settings["embedding"]["provider"], "local");
+}
+
+#[tokio::test]
+#[serial(process_environment)]
+async fn production_supports_postgres_and_valkey_queues() {
     let _guard = EnvGuard::capture(&[
-        "YORISHIRO_CONFIG_PATH",
         "DATABASE_URL",
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
+        "YORISHIRO_EMBEDDING_PROVIDER",
     ]);
-    _guard.remove("YORISHIRO_CONFIG_PATH");
-    _guard.remove("DATABASE_URL");
-    _guard.remove("QUEUE_URL");
+    _guard.set("DATABASE_URL", "postgres://db/yorishiro");
+    _guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
     _guard.remove("YORISHIRO_QUEUE_KIND");
-    let error = load(&Environment::Development)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("failed to read"));
+    _guard.remove("QUEUE_URL");
+
+    let postgres_queue = load(&Environment::Production).await.unwrap();
+
+    assert_eq!(postgres_queue.database.uri, "postgres://db/yorishiro");
+    assert!(matches!(
+        postgres_queue.queue,
+        Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/yorishiro"
+    ));
+
+    _guard.set("YORISHIRO_QUEUE_KIND", "Redis");
+    _guard.set("QUEUE_URL", "redis://valkey:6379");
+
+    let valkey_queue = load(&Environment::Production).await.unwrap();
+
+    assert_eq!(valkey_queue.database.uri, "postgres://db/yorishiro");
+    assert!(matches!(
+        valkey_queue.queue,
+        Some(QueueConfig::Redis(queue)) if queue.uri == "redis://valkey:6379"
+    ));
 }

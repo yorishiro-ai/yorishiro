@@ -11,7 +11,8 @@ Type=simple
 User=yorishiro
 Group=yorishiro
 WorkingDirectory=/var/lib/yorishiro
-Environment=YORISHIRO_CONFIG_PATH=/etc/yorishiro/yorishiro.yaml
+Environment=LOCO_ENV=production
+Environment=LOCO_CONFIG_FOLDER=/etc/yorishiro
 ExecStart=/usr/bin/yorishiro start --worker=worker-class:tenant-private,worker-class:official,worker-class:shared,infer-fill
 Restart=on-failure
 RestartSec=5s

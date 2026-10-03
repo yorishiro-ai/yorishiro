@@ -14,7 +14,7 @@
 #
 # The caller supplies one exact edition-first package filename.
 #
-# The unconfigured-start section exercises the zero-config default: yorishiro.yaml boots
+# The unconfigured-start section exercises the zero-config default: production.yaml boots
 # against a local SQLite file with no external dependencies (DATABASE_URL defaults to
 # sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc, HOST defaults to http://localhost,
 # and the queue uses its separate packaged SQLite file), so an unconfigured install starts successfully
@@ -119,7 +119,7 @@ docker exec "$PG" psql -U yorishiro -d yorishiro \
 # lookups stop working: an artefact of running systemd in Docker, not something an operator meets
 # on a real host.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
-docker exec "$APP" bash -c "cat > /etc/yorishiro/yorishiro.yaml <<EOF
+docker exec "$APP" bash -c "cat > /etc/yorishiro/production.yaml <<EOF
 logger:
   enable: true
   pretty_backtrace: false

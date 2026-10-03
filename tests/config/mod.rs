@@ -1,6 +1,4 @@
-mod init;
 mod load;
-mod overrides;
 mod validate;
 
 pub(crate) fn minimal_config(uri: &str) -> String {
@@ -9,4 +7,4 @@ pub(crate) fn minimal_config(uri: &str) -> String {
     )
 }
 
-pub(crate) use crate::{CurrentDirGuard, EnvGuard};
+pub(crate) use crate::EnvGuard;

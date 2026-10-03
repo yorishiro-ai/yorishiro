@@ -39,7 +39,7 @@ PostgreSQL と Redis のキュー設定は変更ありません。
 
 ## 設定ファイル
 
-本番用の SQLite 専用設定ファイルはありません。`yorishiro.yaml` に `sqlite://` URL を設定してください。
+本番用の SQLite 専用設定ファイルはありません。`config/production.yaml` で `DATABASE_URL` に `sqlite://` URL を設定してください。
 アプリケーションのパスを変更する場合は、`QUEUE_URL` に別の SQLite ファイルを指定してください。
 
 ## 認証

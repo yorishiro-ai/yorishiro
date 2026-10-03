@@ -23,15 +23,16 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/usr/bin/yorishiro` | The binary |
 | `/lib/systemd/system/yorishiro.service` | Systemd unit |
 | `/lib/systemd/system/yorishiro-worker.service` | Tagged background worker unit |
-| `/etc/yorishiro/yorishiro.yaml` | Editable canonical configuration template |
+| `/etc/yorishiro/production.yaml` | Editable Loco production configuration |
 
 The EE package installs the same shared paths and additionally installs `/etc/yorishiro/LICENSE.enterprise`.
 CE does not install the enterprise licence file.
 
 ## Configuration
 
-Edit `/etc/yorishiro/yorishiro.yaml` to configure the packaged service.
+Edit `/etc/yorishiro/production.yaml` to configure the packaged service.
 Package upgrades preserve local changes to this file.
+The application database can use SQLite or PostgreSQL, while the queue can independently use SQLite, PostgreSQL, or Valkey.
 
 ```yaml
 database:
@@ -42,6 +43,8 @@ queue:
 server:
   host: https://yorishiro.example.com
 ```
+
+For Valkey, set `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL=redis://valkey:6379` in the service environment instead of using the PostgreSQL queue block.
 
 See [docs/configuration.md](../configuration.md) for all settings.
 

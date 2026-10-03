@@ -25,7 +25,7 @@ run_deb_transition() {
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$UNIFIED_DIR":/unified:ro ubuntu:24.04 bash -eu -c "
     apt-get update -qq
     apt-get install -y -qq systemd-sysv $base
-    printf 'edited-by-transition' > /etc/yorishiro/yorishiro.yaml
+    printf 'edited-by-transition' > /etc/yorishiro/production.yaml
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
@@ -34,7 +34,7 @@ run_deb_transition() {
     apt-get install -y -qq /pkg/yorishiro-${to}-${VERSION}-amd64.deb
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${to})\" = 'install ok installed'
     test \"\$(dpkg-query -W -f='\${Status}' yorishiro-${from} 2>/dev/null || true)\" != 'install ok installed'
-    grep -qx edited-by-transition /etc/yorishiro/yorishiro.yaml
+    grep -qx edited-by-transition /etc/yorishiro/production.yaml
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = yorishiro:yorishiro
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service
@@ -60,7 +60,7 @@ run_rpm_transition() {
   if [ "$from" = yorishiro ]; then base="/unified/yorishiro-${VERSION}-amd64.rpm"; fi
   docker run --rm -v "$PKG_DIR":/pkg:ro -v "$UNIFIED_DIR":/unified:ro almalinux:10 bash -eu -c "
     dnf install -y -q $base
-    printf 'edited-by-transition' > /etc/yorishiro/yorishiro.yaml
+    printf 'edited-by-transition' > /etc/yorishiro/production.yaml
     mkdir -p /var/lib/yorishiro
     printf 'state' > /var/lib/yorishiro/transition-state
     chown -R yorishiro:yorishiro /var/lib/yorishiro
@@ -69,7 +69,7 @@ run_rpm_transition() {
     dnf install -y -q /pkg/yorishiro-${to}-${VERSION}-amd64.rpm
     rpm -q yorishiro-${to}
     ! rpm -q yorishiro-${from}
-    grep -qx edited-by-transition /etc/yorishiro/yorishiro.yaml
+    grep -qx edited-by-transition /etc/yorishiro/production.yaml
     test \"\$(cat /var/lib/yorishiro/transition-state)\" = state
     test \"\$(stat -c '%U:%G' /var/lib/yorishiro)\" = yorishiro:yorishiro
     test -L /etc/systemd/system/multi-user.target.wants/yorishiro.service

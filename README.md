@@ -109,15 +109,12 @@ For installation instructions, see [docs/en/installation.md](docs/en/installatio
 
 ## Configuration
 
-The public configuration file is `yorishiro.yaml`, written as plain YAML. Run
-`yorishiro config init` to create a fully commented local skeleton; use
-`--force` only when replacing an existing file intentionally. Configuration is
-resolved from `YORISHIRO_CONFIG_PATH` when set (a missing, unreadable, or invalid
-file is an error), or from `./yorishiro.yaml` otherwise.
-Environment variables explicitly override supported fields; Tera and `get_env`
-expressions are not accepted in the canonical file. The generated local skeleton
-uses a relative SQLite path, while package and Docker installations use
-`/var/lib/yorishiro`.
+Configuration follows Loco's environment layout under `config/`.
+`LOCO_ENV` selects `config/<environment>.yaml`, and `LOCO_CONFIG_FOLDER` can select another configuration directory.
+The YAML files use Loco's Tera `get_env` expressions for deployment overrides.
+Source development defaults to `config/development.yaml`, while package and Docker installations run with `config/production.yaml`.
+Application data can use SQLite or PostgreSQL, and the queue can independently use SQLite, PostgreSQL, or Valkey through Loco's `Redis` queue provider.
+With no backend variables set, package and Docker installations store the SQLite defaults under `/var/lib/yorishiro`.
 
 ## Documentation
 
