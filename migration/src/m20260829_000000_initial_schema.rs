@@ -1642,7 +1642,7 @@ async fn create_functions_and_credentials(manager: &SchemaManager<'_>) -> Result
     // Both overloads, with `audit` in the returned column list.
     // `RETURNS TABLE`'s column list cannot be widened with ALTER FUNCTION, so both
     // overloads are created in their final shape from the start.
-    // `authenticate` (services::auth) needs `audit` to populate `AuthContext`, which is what `require_audit` reads to decide whether a key may reach the audit-log read endpoint.
+    // `Entity::authenticate` (models::api_keys) needs `audit` to populate `AuthContext`, which is what `require_audit` reads to decide whether a key may reach the audit-log read endpoint.
     //
     // No-op on SQLite: no stored function exists on that backend, and `authenticate_sqlite` is the entity-API replica that stands in for it.
     helpers::pg_only(

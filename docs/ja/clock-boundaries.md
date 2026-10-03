@@ -19,8 +19,8 @@
 | 呼び出し箇所 | 分類 | 見送った理由 |
 |---|---|---|
 | `src/db.rs`、`src/models/compute_credit_ledger.rs`、`schema_schemas.rs`、`system_maintenance.rs`、`tenant_reindex_schedules.rs`、`workspace_schema_forks.rs`、`ee/models/billing.rs`、`compute_credit_ledger.rs`、`embedding_keys.rs`、`entity_columns.rs`、`inference_jobs.rs`、`llm_keys.rs`、`marketplace.rs`、`worker_classes.rs`、`workspace_schema_forks.rs`、`ee/services/official_templates.rs`、`ee/services/origin.rs`、`src/models/api_keys.rs`、`migration/src/helpers.rs`、`migration/src/m20260829_000000_initial_schema/schema.rs` | `created_at`、`updated_at`、`last_used_at`、origin 時刻などの永続化 timestamp | データベースとモデルの timestamp は永続化の責務であり、外部から観測される期限判定ではありません。抽象化すると seam が広がり、トランザクションや backend の default の意味を変える危険があります。 |
-| `src/services/access_log.rs`、`src/services/db_load_guard.rs`、`ee/tasks/sqlite_ann_benchmark.rs` | 単調時計による経過時間の計測 | これらは実時間の期限や予定を判定せず、実行時間だけを計測します。`Instant` が適切な時計であり、置換を必要とする決定テストもありません。 |
-| `src/services/rate_limit.rs` | 単調時計による quota window | 経過時間で window を管理しており、単調時計を置き換える決定テストは現時点で必要ありません。 |
+| `src/controllers/middleware/access_log.rs`、`src/initializers/db_load_guard.rs`、`ee/tasks/sqlite_ann_benchmark.rs` | 単調時計による経過時間の計測 | これらは実時間の期限や予定を判定せず、実行時間だけを計測します。`Instant` が適切な時計であり、置換を必要とする決定テストもありません。 |
+| `src/controllers/middleware/rate_limit.rs` | 単調時計による quota window | 経過時間で window を管理しており、単調時計を置き換える決定テストは現時点で必要ありません。 |
 | `src/services/embedding/model_fetch.rs` | stale な partial download の filesystem mtime | 本番の判定は filesystem metadata に基づき、テストも mtime を直接設定します。時計 seam を追加しても外部動作のテストは改善しません。 |
 
 プロセス全体の clock、service locator、データベース timestamp の抽象化、`Instant` の置換は導入していません。

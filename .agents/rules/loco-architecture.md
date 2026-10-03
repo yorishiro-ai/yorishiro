@@ -18,9 +18,11 @@ This repository follows Loco 1.2.0 and SeaORM 2.0.4 conventions unless a documen
 
 - Controllers authenticate, parse input, call model or use-case operations, and render responses.
 - Controllers do not build ordinary entity queries when a named model finder can own the tenant and authorization constraints.
-- `services/` is reserved for external integrations, protocol adapters, middleware, and orchestration that is not owned by one table.
-- A service may own a transaction or workflow, but table-specific reads and writes remain model methods.
-- MCP tool implementations remain under `src/services/mcp/`; `src/controllers/mcp.rs` only mounts the transport.
+- A workflow that spans several tables is a model-level operation beside the table models, not a service; table-specific reads and writes remain methods on the owning model.
+- MCP is an entry point, so its tools live under `src/controllers/mcp/` beside the REST handlers, and follow the same rule: authenticate, parse, call a model operation, render.
+- Request middleware, the authentication guard, and the edition seam live under `src/controllers/middleware/`.
+- Request and response transport types live under `src/dtos/<controller>.rs`.
+- `src/services/` is limited to external clients that Loco has no place for (embedding providers).
 
 ## Application lifecycle
 
