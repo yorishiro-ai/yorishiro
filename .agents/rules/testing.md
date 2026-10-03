@@ -8,11 +8,15 @@ All commands run from the repository root. `make -C . <target>` works from any d
 |---|---|---|
 | `make test-postgres` | Full suite with Rust's default parallel execution and backend-gate verification | PostgreSQL |
 | `make test-sqlite` | Full suite with Rust's default parallel execution and backend-gate verification | SQLite |
-| `make check` | `cargo check --locked --workspace` | — |
-| `make clippy` | `cargo clippy --locked --workspace --tests -- -D warnings` | — |
+| `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
+| `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
+| `make clippy-ce` | Clippy for CE library and binaries | CE |
+| `make clippy-ee` | Clippy for EE and integration tests | EE |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
-| `make check-all` | `fmt-check + check + clippy` (CI check job) | — |
-| `make build` | `cargo build --locked --workspace` | — |
+| `make check-all` | Formatting, Python/public API checks, CE check, and CE Clippy | CE |
+| `make check-all-ee` | Formatting, Python/public API checks, EE check, and EE Clippy | EE |
+| `make build-ce` | `cargo build --locked --no-default-features --workspace` | CE |
+| `make build-ee` | `cargo build --locked --features enterprise --workspace` | EE |
 | `make entities` | Spin up pgvector container, migrate, generate entities, tear down | PostgreSQL |
 
 ### Environment variables

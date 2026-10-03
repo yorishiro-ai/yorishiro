@@ -13,7 +13,9 @@
 
 ## Before pushing
 
-Run `make check-all` (`fmt-check + check + clippy`). Confirm all pass before pushing.
+Run `make check-all` for CE changes.
+Run `make check-all-ee` when changing EE or shared APIs that EE consumes.
+Confirm the relevant backend suites pass before pushing.
 
 ## Before merging
 
