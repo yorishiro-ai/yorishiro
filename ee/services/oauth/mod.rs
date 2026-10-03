@@ -1,29 +1,24 @@
 //! OAuth2/OIDC login: an additional, optional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/login` (email/password).
-//! See `config::OAuthConfig` for how this is enabled/disabled, and `controllers::oauth` for the three routes that use this module.
+//! Configuration lives in `data::oauth`; browser state lives beside `controllers::oauth`; user provisioning lives in `models::oauth_users`.
 
-pub mod config;
 mod discovery;
 mod id_token;
-mod state_token;
-mod users;
-
-pub use config::OAuthConfig;
-pub use state_token::STATE_TTL_SECS;
-pub use users::{ProvisionedLogin, find_or_create};
 
 use std::sync::Arc;
 
 use crate::YorishiroError;
+use crate::ee::controllers::oauth::state_token;
+use crate::ee::data::oauth::OAuthConfig;
 
 /// Everything `GET /auth/oauth/authorize` needs to build its redirect and set the CSRF cookie that binds the flow to this browser (see `state_token` module docs).
-pub struct AuthorizeRedirect {
+pub(crate) struct AuthorizeRedirect {
     pub url: String,
     pub csrf_cookie_value: String,
 }
 
 /// Builds the provider's authorize URL (the OAuth 2.0 authorize endpoint) with a freshly issued, signed `state` (see `state_token`) and PKCE challenge (RFC 7636) attached.
 /// `openid email profile` is a fixed scope request, not configurable: `email` is the one claim `users::find_or_create` requires.
-pub async fn build_authorize_redirect(
+pub(crate) async fn build_authorize_redirect(
     config: &OAuthConfig,
 ) -> Result<AuthorizeRedirect, YorishiroError> {
     build_authorize_redirect_with_http(config, discovery::production()).await
@@ -56,7 +51,7 @@ async fn build_authorize_redirect_with_http(
 }
 
 /// The verified result of a callback: the identity provider's subject id/email/display name, ready to be handed to `users::find_or_create`.
-pub struct CallbackIdentity {
+pub(crate) struct CallbackIdentity {
     pub subject_id: String,
     pub email: Option<String>,
     pub display_name: Option<String>,
@@ -65,7 +60,7 @@ pub struct CallbackIdentity {
 /// Handles `GET /auth/oauth/callback`'s core logic: verifies `state` and the CSRF cookie it is bound to (see `state_token` module docs), exchanges `code` for tokens, and verifies the returned ID token.
 ///
 /// `csrf_cookie_value` is `None` when the browser presented no CSRF cookie at all: treated the same as a mismatched cookie, both rejected before `state` is trusted.
-pub async fn handle_callback(
+pub(crate) async fn handle_callback(
     config: &OAuthConfig,
     code: &str,
     state: &str,

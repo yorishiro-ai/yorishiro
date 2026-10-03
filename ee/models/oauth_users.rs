@@ -1,6 +1,10 @@
 //! Reading and writing the OAuth identity columns on `user_users`.
 //!
-//! The query alone: what to do with a lookup's result (first login vs. returning user, tenant and workspace auto-provisioning) is `services::oauth::users`'s.
+//! OAuth identity persistence and first-login tenant/workspace provisioning.
+
+mod provisioning;
+
+pub use provisioning::find_or_create;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::user_users;
@@ -17,7 +21,7 @@ pub struct OAuthUser {
 /// Looks up a user previously provisioned through this exact provider + subject id pair.
 /// Keyed on the pair (not email alone) because the subject id is what the provider actually guarantees stable and unique: an email can be reassigned or changed at the provider, but `sub` never changes for the same account.
 /// Returns `None` on first login for a given identity, whether or not a different (e.g. password-based) account already exists under the same email.
-/// Callers decide how to reconcile that (see `services::oauth::users::find_or_create`).
+/// Callers decide how to reconcile that (see `models::oauth_users::find_or_create`).
 pub async fn find_by_oauth_identity(
     conn: &impl ConnectionTrait,
     provider: &str,
@@ -46,7 +50,7 @@ pub enum CreateOauthUserError {
 }
 
 /// Creates a new OAuth-provisioned user row (`password_hash` left `NULL`, per `users_auth_method_check`).
-/// Does not touch tenancy: see `services::oauth::users::find_or_create` for the caller that wires a freshly created user into a tenant, workspace and membership.
+/// Does not touch tenancy: see `models::oauth_users::find_or_create` for the caller that wires a freshly created user into a tenant, workspace and membership.
 ///
 /// Takes `&impl ConnectionTrait` (rather than a pool handle) so `find_or_create` can run this on the same transaction as `tenancy::add_member`: both must succeed or fail together, or a crash between them would leave an orphaned user row with no tenant membership, and every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
 pub async fn create_oauth_user(

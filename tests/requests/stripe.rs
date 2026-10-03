@@ -8,8 +8,8 @@ use serial_test::serial;
 use sha2::Sha256;
 use uuid::Uuid;
 use yorishiro::app::App;
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::ee::models::billing;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::tenant_tenants;
 
 type HmacSha256 = Hmac<Sha256>;

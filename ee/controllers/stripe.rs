@@ -11,9 +11,9 @@ use loco_rs::controller::Routes;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
 use crate::db;
+use crate::ee::data::non_empty_env;
+use crate::ee::data::plan::{Plan, StripePriceMapping};
 use crate::ee::models::{billing, stripe_events};
-use crate::ee::services::non_empty_env;
-use crate::ee::services::plan::{Plan, StripePriceMapping};
 use crate::error::ResultExt;
 use crate::error::YorishiroError;
 use crate::models::tenancy;
@@ -24,7 +24,7 @@ mod inbound {
     use chrono::Utc;
     use serde::Deserialize;
 
-    use crate::ee::services::hmac_sign;
+    use crate::ee::controllers::hmac_sign;
 
     #[derive(Debug)]
     pub(super) enum Error {
@@ -310,7 +310,7 @@ const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 #[derive(Clone, Default)]
 pub struct StripeConfig {
     pub webhook_secret: Option<String>,
-    pub price_mapping: StripePriceMapping,
+    pub(crate) price_mapping: StripePriceMapping,
 }
 
 impl StripeConfig {

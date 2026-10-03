@@ -13,12 +13,12 @@ use loco_rs::controller::Routes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::models::marketplace;
 use crate::ee::models::marketplace::{
     self as marketplace_models, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest,
     TemplateReviewRecord, TemplateVersionRecord, TemplateVersionStatus,
 };
-use crate::ee::services::authz;
-use crate::ee::services::marketplace;
 use crate::models::template_templates::TemplateVisibility;
 
 /// Authentication for every route in this module.

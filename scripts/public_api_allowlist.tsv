@@ -307,3 +307,38 @@ ee/controllers/openapi.rs	struct	WorkerClassResponse	openapi-transport: enterpri
 src/models/entity_entities.rs	use	migration::{drift,migration_dry_run}	seaorm-facade: re-export of model operations that the integration-test crate calls; split from a wider re-export when the unused operations were narrowed to the crate.
 src/models/entity_entities.rs	use	snapshots::undo_job	seaorm-facade: re-export of model operations that the integration-test crate calls; split from a wider re-export when the unused operations were narrowed to the crate.
 src/models/entity_entities.rs	use	snapshots::{delete_snapshot,snapshot}	seaorm-facade: re-export of model operations that the integration-test crate calls; split from a wider re-export when the unused operations were narrowed to the crate.
+ee/controllers/middleware/auth.rs	const	WORKSPACE_HEADER	integration-test: request tests send the tenant-scoped workspace selection header.
+ee/controllers/middleware/edition.rs	field	LicenceClaims::exp	integration-test: licence tests construct signed claims and expiry-boundary states.
+ee/controllers/middleware/edition.rs	field	LicenceClaims::plan	integration-test: licence tests construct signed claims for plan behavior.
+ee/controllers/middleware/edition.rs	field	LicenceClaims::sub	integration-test: licence tests construct complete signed claims.
+ee/controllers/middleware/edition.rs	fn	LicenceState::is_active	integration-test: licence tests verify the current-time gate.
+ee/controllers/middleware/edition.rs	fn	LicenceState::is_active_at	integration-test: licence tests verify exact expiry boundaries without clock sleeps.
+ee/controllers/middleware/edition.rs	fn	LicenceState::licensed	integration-test: request tests install an active edition state without production signing keys.
+ee/controllers/middleware/edition.rs	fn	verify	integration-test: licence tests verify generated RSA-signed tokens against throwaway keys.
+ee/controllers/middleware/edition.rs	struct	LicenceClaims	integration-test: licence tests construct and sign claims.
+ee/controllers/middleware/edition.rs	struct	LicenceState	integration-test: request tests install the edition seam in shared_store.
+ee/controllers/middleware/mod.rs	mod	edition	integration-test: exposes licence test types through the middleware overlay matching CE.
+ee/controllers/mod.rs	mod	middleware	integration-test: exposes enterprise middleware test seams.
+ee/models/api_keys.rs	field	CreatedTenantApiKey::id	integration-test: task-compatible tenant key result exposes its persisted id.
+ee/models/api_keys.rs	field	CreatedTenantApiKey::plaintext	integration-test: request tests authenticate with the one-time tenant key secret.
+ee/models/api_keys.rs	fn	create_tenant_api_key	integration-test: request tests issue tenant-scoped credentials against the identity pool.
+ee/models/api_keys.rs	struct	CreatedTenantApiKey	integration-test: typed result of tenant-scoped key issuance.
+ee/models/embedding_keys.rs	struct	EmbeddingKeyResolver	integration-test: request tests exercise the installed provider resolver seam.
+ee/models/mod.rs	mod	api_keys	integration-test: exposes enterprise API-key persistence to request tests.
+ee/models/mod.rs	mod	schema_schemas	integration-test: exposes the schema merge race-test seam.
+ee/models/mod.rs	mod	template_templates	integration-test: exposes official-template seeding operations to request tests.
+ee/models/schema_schemas.rs	use	origin::{MergeReadHook,merge_apply_with_read_hook}	integration-test: exposes only the read-race coordination seam and operation.
+ee/models/schema_schemas/origin.rs	fn	merge_apply_with_read_hook	integration-test: deterministically coordinates the origin acknowledgement race.
+ee/models/schema_schemas/origin.rs	trait	MergeReadHook	integration-test: injects a barrier after the origin revision read.
+ee/models/template_templates.rs	const	OFFICIAL_TENANT_ID	integration-test: official-template tests assert ownership by the infrastructure tenant.
+ee/models/template_templates.rs	field	SeedOutcome::published	integration-test: seed idempotency tests inspect the published set.
+ee/models/template_templates.rs	field	SeedOutcome::unchanged	integration-test: seed idempotency tests inspect unchanged templates.
+ee/models/template_templates.rs	field	SeedOutcome::updated	integration-test: seed idempotency tests inspect updated templates.
+ee/models/template_templates.rs	fn	seed_official_templates	integration-test: seed tests run the same model operation as the Loco task.
+ee/models/template_templates.rs	struct	SeedOutcome	integration-test: typed result inspected by official-template tests.
+ee/models/worker_classes.rs	struct	WorkerClassAssignmentResolver	integration-test: request tests exercise the installed worker-class resolver seam.
+ee/controllers/middleware/mod.rs	mod	auth	integration-test: exposes the tenant workspace header used by request tests.
+ee/models/oauth_users.rs	use	provisioning::find_or_create	integration-test: exposes first-login provisioning through the canonical OAuth user model facade.
+ee/models/oauth_users/provisioning.rs	field	ProvisionedLogin::workspace_id	integration-test: provisioning tests verify the created workspace contents.
+ee/models/oauth_users/provisioning.rs	fn	find_or_create	integration-test: request tests exercise transactional first-login provisioning directly.
+ee/models/oauth_users/provisioning.rs	struct	ProvisionedLogin	integration-test: typed result returned by first-login provisioning.

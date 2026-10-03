@@ -16,11 +16,11 @@ use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 
+use crate::ee::controllers::middleware::auth as authz;
 use crate::ee::models::inference_jobs;
 use crate::ee::models::inference_jobs::InferenceJobStatus;
 use crate::ee::models::inference_proposals;
 use crate::ee::models::llm_keys;
-use crate::ee::services::authz;
 
 /// `POST /api/schemas/active/{name}/infer-fill`
 ///

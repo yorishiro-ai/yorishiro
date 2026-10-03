@@ -15,8 +15,8 @@ use loco_rs::controller::Routes;
 use sea_orm::EntityTrait;
 use serde::Deserialize;
 
+use crate::ee::controllers::middleware::auth as authz;
 use crate::ee::models::embedding_keys::{self, EmbeddingKeyDescription};
-use crate::ee::services::authz;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly, matching `inference.rs`'s own `require_scope`.
 #[derive(Deserialize)]

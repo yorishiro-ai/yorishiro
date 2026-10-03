@@ -14,7 +14,7 @@ use loco_rs::app::AppContext;
 use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
-use crate::ee::services::merge::{self, MergePlan};
+use super::merge::{self, MergePlan};
 
 /// A narrow seam used to coordinate the merge read/acknowledgement race test.
 #[async_trait::async_trait]
@@ -36,7 +36,7 @@ impl MergeReadHook for NoopMergeReadHook {
 ///
 /// Refuses rather than guesses when a piece is missing: a schema with no origin has nothing to follow, and one copied before snapshots were recorded has no ancestor.
 /// Substituting the current template for the missing base would read every local addition as a conflict, which is worse than saying so.
-pub async fn merge_preview(
+pub(crate) async fn merge_preview(
     schema_conn: &impl ConnectionTrait,
     ctx: &AppContext,
     tenant_id: Uuid,
@@ -140,7 +140,7 @@ async fn merge_sides(
 ///
 /// The new version's merge base is what upstream says *now*, not the merged result.
 /// That is the point the next merge compares from.
-pub async fn merge_apply(
+pub(crate) async fn merge_apply(
     schema_conn: &impl ConnectionTrait,
     ctx: &AppContext,
     tenant_id: Uuid,

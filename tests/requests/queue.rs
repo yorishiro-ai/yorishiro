@@ -23,7 +23,7 @@ use loco_rs::environment::Environment;
 use loco_rs::prelude::*;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::{
     queue_job_lifecycles, tenant_billing, tenant_tenants, workspace_workspaces,
 };

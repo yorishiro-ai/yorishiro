@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::services::worker_class_resolver::WorkerClassAssignmentResolver;
+use yorishiro::ee::models::worker_classes::WorkerClassAssignmentResolver;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};

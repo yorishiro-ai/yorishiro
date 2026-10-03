@@ -5,7 +5,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::template_templates;
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::{entity_entities, schema_schemas, template_templates as templates};

@@ -14,9 +14,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
+use crate::ee::controllers::middleware::auth::authenticate_tenant_admin;
 use crate::ee::models::billing;
 use crate::ee::models::usage::{self, TenantUsage};
-use crate::ee::services::authz::authenticate_tenant_admin;
 
 #[derive(Debug, Serialize)]
 pub struct TenantOverview {

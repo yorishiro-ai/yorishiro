@@ -15,8 +15,8 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use serde::Deserialize;
 
+use crate::ee::controllers::middleware::auth as authz;
 use crate::ee::models::worker_classes::{self, WorkerClassAssignment};
-use crate::ee::services::authz;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly, matching `inference.rs`'s/`embedding.rs`'s own `require_scope`.
 #[derive(Debug, Deserialize)]

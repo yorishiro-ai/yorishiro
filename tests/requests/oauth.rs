@@ -9,8 +9,7 @@ use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;
 use sha2::Sha256;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
-use yorishiro::ee::services::oauth;
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::tenant_tenants;
 
 /// The OAuth routes carry the licence gate, so an unlicensed process answers 404 to all three before
@@ -37,7 +36,7 @@ const ISSUER_URL: &str = "http://127.0.0.1:1";
 const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 
-/// A signed `state` value in the exact shape `services::oauth::state_token::issue` produces: this crate keeps that module private, so a test that needs a validly-signed fixture (rather than exercising the rejection paths, which need no valid signature at all) builds one the same way, HMAC-SHA256 under the client secret.
+/// A signed `state` value in the exact shape `controllers::oauth::state_token::issue` produces: this crate keeps that module private, so a test that needs a validly-signed fixture (rather than exercising the rejection paths, which need no valid signature at all) builds one the same way, HMAC-SHA256 under the client secret.
 fn sign_state(payload: &str) -> String {
     let mut mac =
         Hmac::<Sha256>::new_from_slice(CLIENT_SECRET.as_bytes()).expect("any key length is valid");
@@ -308,7 +307,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let result = oauth::find_or_create(
+        let result = yorishiro::ee::models::oauth_users::find_or_create(
             &txn,
             "oidc",
             "a-brand-new-subject",
@@ -349,7 +348,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let provisioned = oauth::find_or_create(
+        let provisioned = yorishiro::ee::models::oauth_users::find_or_create(
             &txn,
             "oidc",
             "a-first-login-subject",

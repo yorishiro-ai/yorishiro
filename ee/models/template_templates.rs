@@ -1,5 +1,5 @@
 //! Publishes the community edition's built-in templates as official marketplace listings.
-//! Bypasses `services::marketplace::publish_version`'s ownership check, since the seed has no authenticated tenant to check ownership against.
+//! Bypasses `models::marketplace::publish_version`'s ownership check, since the seed has no authenticated tenant to check ownership against.
 //! Invoked from a Loco task (`register_tasks`), not a request path.
 
 use crate::db;
@@ -20,7 +20,7 @@ pub const OFFICIAL_TENANT_ID: Uuid = INFRASTRUCTURE_TENANT_ID;
 
 /// Shown as the listing's author.
 /// `template_templates.author` is free text, so this does not require a user account.
-pub const OFFICIAL_AUTHOR: &str = "Yorishiro";
+pub(crate) const OFFICIAL_AUTHOR: &str = "Yorishiro";
 
 const OFFICIAL_TENANT_NAME: &str = "Yorishiro Official";
 
@@ -103,7 +103,9 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
 
 /// Creates the official-templates publisher tenant if it does not already exist.
 /// Idempotent (`ON CONFLICT DO NOTHING` on the fixed id).
-pub async fn ensure_official_tenant(conn: &impl ConnectionTrait) -> Result<(), YorishiroError> {
+pub(crate) async fn ensure_official_tenant(
+    conn: &impl ConnectionTrait,
+) -> Result<(), YorishiroError> {
     // Bypasses tenancy::create_tenant: the publisher is infrastructure, not subject to YORISHIRO_MAX_TENANTS.
     let active = tenant_tenants::ActiveModel {
         id: ActiveValue::Set(OFFICIAL_TENANT_ID),

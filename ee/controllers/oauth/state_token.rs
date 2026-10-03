@@ -1,6 +1,6 @@
 //! The `state` parameter carried through the OAuth2 authorization-code round trip.
 //!
-//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::ee::services::hmac_sign`], rather than stored server-side and looked up by an opaque id.
+//! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::ee::controllers::hmac_sign`], rather than stored server-side and looked up by an opaque id.
 //!
 //! The signature alone only proves this process issued *some* `state`, not that the browser presenting it is the one the flow was started for.
 //! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
@@ -11,35 +11,35 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
-use crate::ee::services::hmac_sign;
+use crate::ee::controllers::hmac_sign;
 
 /// How long a `state` value remains acceptable after being issued.
 /// Also used as the CSRF cookie's max-age, so the cookie never outlives the `state` that depends on it.
-pub const STATE_TTL_SECS: i64 = 600;
+pub(crate) const STATE_TTL_SECS: i64 = 600;
 
 /// Number of random bytes in the CSRF cookie value.
 /// Only its SHA-256 hash is ever embedded in `state`, so this need not resist offline brute-forcing on its own.
 const CSRF_COOKIE_BYTES: usize = 16;
 
-pub struct IssuedState {
+pub(crate) struct IssuedState {
     /// The opaque value to embed in the authorize URL's `state` query parameter.
     /// Carries the PKCE code verifier too, so the callback can recover it via [`verify`] without this process having kept anything in memory in between.
-    pub state: String,
+    pub(crate) state: String,
     /// The PKCE code challenge (`BASE64URL(SHA256(verifier))`) to send in the authorize request.
-    pub pkce_challenge: String,
+    pub(crate) pkce_challenge: String,
     /// The random value to set as the CSRF cookie.
     /// `state` carries only its SHA-256 hash, never the value itself.
-    pub csrf_cookie_value: String,
+    pub(crate) csrf_cookie_value: String,
 }
 
 /// The verified result of a `state`: the PKCE verifier it carries, and the CSRF hash it expects the callback's cookie to match.
-pub struct VerifiedState {
-    pub pkce_verifier: String,
-    pub csrf_hash: String,
+pub(crate) struct VerifiedState {
+    pub(crate) pkce_verifier: String,
+    pub(crate) csrf_hash: String,
 }
 
 /// Generates a fresh CSRF cookie value and PKCE verifier, and packs the PKCE verifier plus the CSRF value's hash into a signed `state` value.
-pub fn issue(signing_key: &[u8]) -> IssuedState {
+pub(crate) fn issue(signing_key: &[u8]) -> IssuedState {
     issue_at(signing_key, chrono::Utc::now().timestamp())
 }
 
@@ -71,7 +71,7 @@ fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
 /// This alone does **not** prove the presenting browser is the one the flow was started for.
 /// See the module docs.
 /// Callers must separately check the returned `csrf_hash` against the SHA-256 hash of the browser's CSRF cookie.
-pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
+pub(crate) fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     verify_at(signing_key, state, chrono::Utc::now().timestamp())
 }
 
@@ -105,7 +105,7 @@ fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState>
 }
 
 /// Hashes a CSRF cookie value the same way [`issue`] does, for `callback` to compare against [`VerifiedState::csrf_hash`].
-pub fn hash_csrf_cookie(cookie_value: &str) -> String {
+pub(crate) fn hash_csrf_cookie(cookie_value: &str) -> String {
     hex::encode(Sha256::digest(cookie_value.as_bytes()))
 }
 

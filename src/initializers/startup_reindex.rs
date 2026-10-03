@@ -40,7 +40,7 @@ impl Initializer for StartupReindex {
 ///
 /// **Community edition only.** This feature compares every workspace's stamped model
 /// against the deployment-wide provider. Under EE a workspace can carry its own assignment
-/// (see `ee::services::embedding_resolver`), so the comparison would flag every workspace
+/// (see `ee::models::embedding_keys`), so the comparison would flag every workspace
 /// as a mismatch and reindex them with the wrong provider. Skip when a licence is active.
 async fn detect_startup_reindex(ctx: &AppContext) {
     // CE-only: under EE per-workspace provider assignment makes this comparison invalid.

@@ -6,28 +6,28 @@
 
 use crate::YorishiroError;
 
-use crate::ee::services::non_empty_env;
+use crate::ee::data::non_empty_env;
 
 #[derive(Clone)]
-pub struct OAuthConfig {
+pub(crate) struct OAuthConfig {
     /// The identity provider's issuer URL, e.g. `https://accounts.google.com`.
     /// OIDC discovery is fetched from this at request time, not cached at startup.
-    pub issuer_url: String,
-    pub client_id: String,
-    pub client_secret: String,
+    pub(crate) issuer_url: String,
+    pub(crate) client_id: String,
+    pub(crate) client_secret: String,
     /// Where the provider redirects back to after the user authenticates.
     /// Defaults to a `localhost`-rewritten `YORISHIRO_BIND`, see [`default_redirect_uri`]: a bind address is usually `0.0.0.0:...`, not a host a browser can reach.
-    pub redirect_uri: String,
+    pub(crate) redirect_uri: String,
     /// HMAC key used to sign the `state` parameter that round-trips through the provider.
     /// Derived from `client_secret` so no separate secret needs provisioning.
-    pub state_signing_key: Vec<u8>,
+    pub(crate) state_signing_key: Vec<u8>,
 }
 
 impl OAuthConfig {
     /// Reads the four `YORISHIRO_OAUTH_*` variables.
     /// Returns `Ok(None)` when `YORISHIRO_OAUTH_ISSUER_URL` is unset or empty: OAuth login is opt-in, and every other variable is meaningless without an issuer to talk to.
     /// `YORISHIRO_OAUTH_CLIENT_ID`/`YORISHIRO_OAUTH_CLIENT_SECRET` are required once the issuer is set; a deployment that sets the issuer but leaves one of these unset or empty gets `Err` naming which, rather than silently leaving OAuth half-configured or being treated the same as simply unconfigured.
-    pub fn from_env() -> Result<Option<Self>, YorishiroError> {
+    pub(crate) fn from_env() -> Result<Option<Self>, YorishiroError> {
         let Some(issuer_url) = non_empty_env("YORISHIRO_OAUTH_ISSUER_URL") else {
             return Ok(None);
         };
@@ -51,7 +51,7 @@ impl OAuthConfig {
 
     /// Whether the CSRF cookie `authorize` sets should carry the `Secure` attribute.
     /// Tied to `redirect_uri`'s scheme rather than a separate variable.
-    pub fn cookies_require_secure(&self) -> bool {
+    pub(crate) fn cookies_require_secure(&self) -> bool {
         self.redirect_uri.starts_with("https://")
     }
 }
@@ -62,7 +62,7 @@ fn require_non_empty_env(key: &str) -> Result<String, YorishiroError> {
 }
 
 /// The pure fold `require_non_empty_env` wraps, split out so tests can exercise every case (unset, set-but-empty, set) without mutating the process environment.
-pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
+pub(crate) fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
     match raw.filter(|s| !s.is_empty()) {
         Some(value) => Ok(value.to_string()),
         None => Err(YorishiroError::Internal(anyhow::anyhow!(
@@ -84,7 +84,7 @@ fn default_redirect_uri() -> String {
 /// Rewrites `host:port` to `localhost:port` when the host is an all-interfaces bind address (`0.0.0.0` or `::`), leaving everything else as given.
 /// Parses the whole string as a [`std::net::SocketAddr`] rather than doing a substring replace, which would corrupt an address like `10.0.0.0:8081` into `1localhost:8081`.
 /// A `bind` that is not a valid `SocketAddr` at all passes through unchanged.
-pub fn rewrite_unspecified_host(bind: &str) -> String {
+pub(crate) fn rewrite_unspecified_host(bind: &str) -> String {
     match bind.parse::<std::net::SocketAddr>() {
         Ok(addr) if addr.ip().is_unspecified() => format!("localhost:{}", addr.port()),
         _ => bind.to_string(),

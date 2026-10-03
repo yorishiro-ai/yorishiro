@@ -1,4 +1,4 @@
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState, verify};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState, verify};
 
 /// A keypair generated fresh per test process rather than checked into the repository: it signs only throwaway JWTs this suite mints and verifies itself, so committing it would be a private key in source control for no reason a scanner can tell apart from a real one.
 struct TestKeypair {

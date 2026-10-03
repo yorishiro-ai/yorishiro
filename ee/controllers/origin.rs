@@ -19,9 +19,10 @@ use loco_rs::controller::Routes;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::ee::models::origin as origin_model;
-use crate::ee::services::merge::MergePlan;
-use crate::ee::services::{authz, origin};
+use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::models::schema_schemas as origin_model;
+use crate::ee::models::schema_schemas as origin;
+use crate::ee::models::schema_schemas::MergePlan;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
 /// The response of a merge, matching the community edition's schema-creation response shape so a client written against that response shape needs no change.

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Plan {
+pub(crate) enum Plan {
     Free,
     Pro,
     Team,
@@ -15,7 +15,7 @@ pub enum Plan {
 /// Internal scheduling priority derived from the tenant's subscription plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PriorityTier {
+pub(crate) enum PriorityTier {
     Low,
     Normal,
     High,
@@ -23,16 +23,17 @@ pub enum PriorityTier {
 
 /// Bounded compute policy used by the worker-class resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ComputePolicy {
-    pub priority: PriorityTier,
-    pub queue_start_objective_seconds: Option<u32>,
-    pub base_official_concurrency: u32,
-    pub burst_ceiling: u32,
+pub(crate) struct ComputePolicy {
+    pub(crate) priority: PriorityTier,
+    pub(crate) queue_start_objective_seconds: Option<u32>,
+    pub(crate) base_official_concurrency: u32,
+    pub(crate) burst_ceiling: u32,
 }
 
 impl ComputePolicy {
+    #[cfg(test)]
     #[must_use]
-    pub fn is_eligible_burst(self, observed_official_demand: u32, available_credits: i64) -> bool {
+    fn is_eligible_burst(self, observed_official_demand: u32, available_credits: i64) -> bool {
         observed_official_demand > self.base_official_concurrency
             && observed_official_demand <= self.burst_ceiling
             && available_credits > 0
@@ -43,13 +44,13 @@ impl ComputePolicy {
 /// `max_workspaces` is written straight onto `tenant_tenants` (see `crate::models::tenancy::set_tenant_max_workspaces`); `default_max_entities` is the cap a caller should pass to `tenancy::create_workspace` for any workspace created while this plan is active.
 /// Existing workspaces keep whatever cap they were created with, since retroactively shrinking a cap could put an existing workspace over its own limit.
 #[derive(Debug, Clone, Copy)]
-pub struct PlanCaps {
-    pub max_workspaces: Option<i32>,
-    pub default_max_entities: Option<i32>,
+pub(crate) struct PlanCaps {
+    pub(crate) max_workspaces: Option<i32>,
+    pub(crate) default_max_entities: Option<i32>,
 }
 
 impl Plan {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Plan::Free => "free",
             Plan::Pro => "pro",
@@ -59,7 +60,10 @@ impl Plan {
 
     /// Maps a Stripe Price id to the plan it represents.
     /// The mapping is configured via env vars rather than hardcoded, since Stripe price ids are specific to each Stripe account.
-    pub fn from_stripe_price_id(price_id: &str, mapping: &StripePriceMapping) -> Option<Self> {
+    pub(crate) fn from_stripe_price_id(
+        price_id: &str,
+        mapping: &StripePriceMapping,
+    ) -> Option<Self> {
         if mapping.pro_price_id.as_deref() == Some(price_id) {
             Some(Plan::Pro)
         } else if mapping.team_price_id.as_deref() == Some(price_id) {
@@ -69,7 +73,7 @@ impl Plan {
         }
     }
 
-    pub fn caps(self) -> PlanCaps {
+    pub(crate) fn caps(self) -> PlanCaps {
         match self {
             Plan::Free => PlanCaps {
                 max_workspaces: Some(1),
@@ -88,7 +92,7 @@ impl Plan {
 
     /// Returns the bounded scheduling policy for this plan.
     #[must_use]
-    pub fn compute_policy(self) -> ComputePolicy {
+    pub(crate) fn compute_policy(self) -> ComputePolicy {
         let (priority, queue_start_objective_seconds, base_official_concurrency) = match self {
             Self::Free => (PriorityTier::Low, None, 1),
             Self::Pro => (PriorityTier::Normal, Some(60), 4),
@@ -102,7 +106,7 @@ impl Plan {
         }
     }
 
-    pub fn from_db_str(value: &str) -> Result<Self, crate::YorishiroError> {
+    pub(crate) fn from_db_str(value: &str) -> Result<Self, crate::YorishiroError> {
         match value {
             "free" => Ok(Self::Free),
             "pro" => Ok(Self::Pro),
@@ -151,16 +155,16 @@ mod tests {
 /// Which Stripe Price id corresponds to which plan, read from `YORISHIRO_STRIPE_PRICE_PRO`/`YORISHIRO_STRIPE_PRICE_TEAM`.
 /// Both are `None` (no mapping) until an operator configures real Stripe price ids.
 #[derive(Debug, Clone, Default)]
-pub struct StripePriceMapping {
-    pub pro_price_id: Option<String>,
-    pub team_price_id: Option<String>,
+pub(crate) struct StripePriceMapping {
+    pub(crate) pro_price_id: Option<String>,
+    pub(crate) team_price_id: Option<String>,
 }
 
 impl StripePriceMapping {
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         Self {
-            pro_price_id: crate::ee::services::non_empty_env("YORISHIRO_STRIPE_PRICE_PRO"),
-            team_price_id: crate::ee::services::non_empty_env("YORISHIRO_STRIPE_PRICE_TEAM"),
+            pro_price_id: crate::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_PRO"),
+            team_price_id: crate::ee::data::non_empty_env("YORISHIRO_STRIPE_PRICE_TEAM"),
         }
     }
 }

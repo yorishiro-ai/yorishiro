@@ -15,16 +15,13 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use crate::ee::models::oauth_users::{
-    CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_identity,
-};
+use super::{CreateOauthUserError, OAuthUser, create_oauth_user, find_by_oauth_identity};
 
 /// The workspace an OAuth login should issue its API key for, alongside the tenant/membership role that key's scope is derived from: everything the callback controller needs to call `IdentityApiKeys::create_api_key` exactly the way `POST /auth/login` does.
 pub struct ProvisionedLogin {
-    pub user_id: Uuid,
-    pub email: String,
+    pub(crate) user_id: Uuid,
     pub workspace_id: Uuid,
-    pub role: MembershipRole,
+    pub(crate) role: MembershipRole,
 }
 
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
@@ -108,7 +105,7 @@ pub async fn find_or_create(
         conn,
         tenant.id,
         "default",
-        crate::ee::services::plan::Plan::Free
+        crate::ee::data::plan::Plan::Free
             .caps()
             .default_max_entities,
         None,
@@ -134,7 +131,6 @@ pub async fn find_or_create(
 
     Ok(ProvisionedLogin {
         user_id: user.id,
-        email: user.email,
         workspace_id: workspace.id,
         role: MembershipRole::Member,
     })
@@ -181,7 +177,6 @@ async fn resolve_existing_login(
 
     Ok(ProvisionedLogin {
         user_id: user.id,
-        email: user.email,
         workspace_id: workspace.id,
         role,
     })

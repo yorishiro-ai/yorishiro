@@ -14,8 +14,8 @@ use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use serde::Deserialize;
 
+use crate::ee::controllers::middleware::auth as authz;
 use crate::ee::models::entity_columns::{self, ColumnPreference};
-use crate::ee::services::authz;
 
 /// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
 #[derive(Debug, Deserialize)]

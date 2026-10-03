@@ -17,7 +17,7 @@ use crate::models::schema_schemas::metaschema::{EntityTypeDef, FieldDef, MetaSch
 /// What should happen to one field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MergeVerdict {
+pub(crate) enum MergeVerdict {
     /// Upstream added it and the workspace has nothing by that name.
     /// Safe to take: it is new structure, and adding an optional field invalidates nothing already stored.
     AutoAdd,
@@ -34,31 +34,31 @@ pub enum MergeVerdict {
 
 /// One field's classification.
 #[derive(Debug, Clone, Serialize)]
-pub struct FieldMerge {
-    pub entity_type: String,
-    pub field: String,
-    pub verdict: MergeVerdict,
+pub(crate) struct FieldMerge {
+    pub(crate) entity_type: String,
+    pub(crate) field: String,
+    pub(crate) verdict: MergeVerdict,
     /// What differs, in the terms the operator will judge it by.
-    pub detail: String,
+    pub(crate) detail: String,
 }
 
 /// The classification of every field that is not identical across the three.
 #[derive(Debug, Clone, Serialize)]
-pub struct MergePlan {
-    pub fields: Vec<FieldMerge>,
-    pub summary: MergeDiffSummary,
+pub(crate) struct MergePlan {
+    pub(crate) fields: Vec<FieldMerge>,
+    pub(crate) summary: MergeDiffSummary,
 }
 
 impl MergePlan {
     /// Whether anything needs a person.
     /// A plan with no conflicts can be applied whole; one with any cannot be applied at all, since a partial merge would leave the schema in a state neither side asked for.
-    pub fn has_conflicts(&self) -> bool {
+    pub(crate) fn has_conflicts(&self) -> bool {
         self.fields
             .iter()
             .any(|f| f.verdict == MergeVerdict::Conflict)
     }
 
-    pub fn conflicts(&self) -> impl Iterator<Item = &FieldMerge> {
+    pub(crate) fn conflicts(&self) -> impl Iterator<Item = &FieldMerge> {
         self.fields
             .iter()
             .filter(|f| f.verdict == MergeVerdict::Conflict)
@@ -69,7 +69,7 @@ impl MergePlan {
 ///
 /// `base` is the template as copied, `upstream` the template now, `local` the workspace's own.
 /// Fields identical in all three are omitted: a plan lists what to decide, not what exists.
-pub fn three_way(
+pub(crate) fn three_way(
     base: &MetaSchemaDefinition,
     upstream: &MetaSchemaDefinition,
     local: &MetaSchemaDefinition,
@@ -234,7 +234,7 @@ fn type_name(field: &FieldDef) -> String {
 ///
 /// The result is a definition, not a stored schema.
 /// Whether writing it mints a new version is a separate decision, and one this function deliberately does not make.
-pub fn apply_plan(
+pub(crate) fn apply_plan(
     plan: &MergePlan,
     upstream: &MetaSchemaDefinition,
     local: &MetaSchemaDefinition,

@@ -6,11 +6,26 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
-use crate::workers::embedding_sync::WorkerClass;
+use crate::workers::embedding_sync::{WorkerClass, WorkerClassResolver};
+use async_trait::async_trait;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
 use uuid::Uuid;
+
+/// Resolves the explicit assignment from this table, leaving the shared fallback to the caller.
+pub struct WorkerClassAssignmentResolver;
+
+#[async_trait]
+impl WorkerClassResolver for WorkerClassAssignmentResolver {
+    async fn resolve(
+        &self,
+        conn: &sea_orm::DatabaseConnection,
+        workspace_id: Uuid,
+    ) -> Result<Option<WorkerClass>, YorishiroError> {
+        get(conn, workspace_id).await
+    }
+}
 
 /// What a workspace has configured, for an endpoint to report.
 #[derive(Debug, Clone, Serialize)]

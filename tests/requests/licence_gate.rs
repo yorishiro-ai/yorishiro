@@ -37,7 +37,7 @@
 //! notices.
 use super::boot_request;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
 /// Overwrites the enterprise-edition state the test process booted with.
 ///

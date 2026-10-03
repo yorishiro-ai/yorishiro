@@ -8,6 +8,8 @@
 //! `status` is the exception: past the gate it answers `200` whether or not OAuth is configured, and `500` on that same partial-configuration error, but never `404`.
 //! That is what makes it the route `licence_gate.rs` tests the gate with, since its `404` can only come from the gate, while `authorize` and `callback` produce one of their own whenever the issuer is unset.
 
+pub(crate) mod state_token;
+
 use crate::YorishiroError;
 use crate::controllers::ApiError;
 use crate::error::ResultExt;
@@ -21,8 +23,8 @@ use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 
+use crate::ee::data::oauth::OAuthConfig;
 use crate::ee::services::oauth;
-use crate::ee::services::oauth::OAuthConfig;
 
 /// Name of the CSRF cookie `authorize` sets and `callback` reads back.
 const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
@@ -43,7 +45,7 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 /// Builds a `Set-Cookie` header value for the CSRF cookie: `HttpOnly`, `SameSite=Lax`, scoped to the callback path only, `Secure` when the configured redirect URI is itself `https://` (see `OAuthConfig::cookies_require_secure`), and expiring with the `state` it is bound to.
 fn csrf_set_cookie(value: &str, secure: bool) -> String {
     let secure_attr = if secure { "; Secure" } else { "" };
-    let max_age = oauth::STATE_TTL_SECS;
+    let max_age = state_token::STATE_TTL_SECS;
     format!(
         "{CSRF_COOKIE_NAME}={value}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; \
          Max-Age={max_age}{secure_attr}",
@@ -144,7 +146,7 @@ async fn callback(
     let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
 
     let txn = ctx.db.begin().await.internal()?;
-    let provisioned = oauth::find_or_create(
+    let provisioned = crate::ee::models::oauth_users::find_or_create(
         &txn,
         "oidc",
         &identity.subject_id,

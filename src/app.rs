@@ -76,7 +76,7 @@ impl Hooks for App {
         ctx.shared_store
             .insert(Arc::new(LocoJobDispatcher) as Arc<dyn ReindexDispatcher>);
         #[cfg(feature = "enterprise")]
-        crate::ee::services::boot::compose_context(&ctx);
+        crate::ee::app::compose_context(&ctx);
         Ok(ctx)
     }
 
@@ -413,7 +413,7 @@ impl Hooks for App {
         queue.register(ReindexWorkerOfficial::build(ctx)).await?;
         queue.register(ReindexWorkerShared::build(ctx)).await?;
         #[cfg(feature = "enterprise")]
-        crate::ee::services::boot::connect_workers(ctx, queue).await?;
+        crate::ee::app::connect_workers(ctx, queue).await?;
         Ok(())
     }
 
@@ -435,7 +435,7 @@ impl Hooks for App {
         tasks.register(tasks::maintenance_status::MaintenanceStatus);
         tasks.register(tasks::db_load_guard::DbLoadGuard);
         #[cfg(feature = "enterprise")]
-        crate::ee::services::boot::register_tasks(tasks);
+        crate::ee::app::register_tasks(tasks);
     }
 
     async fn on_shutdown(ctx: &AppContext) {
@@ -450,7 +450,7 @@ impl Hooks for App {
     /// seeded what it owns.
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         #[cfg(feature = "enterprise")]
-        crate::ee::services::boot::seed(ctx).await?;
+        crate::ee::app::seed(ctx).await?;
         let fixtures = base.join("fixtures");
         let tenants = fixtures.join("tenant_tenants.yaml");
         if tenants.exists() {

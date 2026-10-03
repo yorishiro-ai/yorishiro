@@ -4,13 +4,13 @@ use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::api_keys::ApiKeyScope;
 
 use super::fixtures::{self, TenantArgs};
 
 /// `shared_store.insert` is keyed by `TypeId` (see `App::after_context`'s own doc comment), so this overwrites the enterprise-edition state the test process booted with, the same way production code layers a later insert over an earlier one.
-/// Simpler than round-tripping a real RSA-signed token through `YORISHIRO_LICENSE_KEY`, which `services::licence`'s own tests already cover.
+/// Simpler than round-tripping a real RSA-signed token through `YORISHIRO_LICENSE_KEY`, which `controllers::middleware::edition`'s own tests already cover.
 fn licence(ctx: &loco_rs::app::AppContext) {
     ctx.shared_store
         .insert(std::sync::Arc::new(LicenceState::licensed(LicenceClaims {

@@ -21,6 +21,7 @@ None of them owns domain logic or builds ordinary queries.
 
 `ee/` is an overlay on `src/`.
 It mirrors the folder hierarchy and file names of the community edition, so a community path tells you where its enterprise counterpart lives.
+Its `services/` directory follows the same restriction: only outbound LLM and OAuth clients remain there; enterprise authentication, licence middleware, plan data, and persistence live under their matching controller, data, and model paths.
 
 ## Generator Boundary
 

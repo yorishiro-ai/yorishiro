@@ -15,7 +15,7 @@ use crate::workers::queue::QueuePolicy;
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) {
     // An absent or invalid licence key warns and continues rather than failing boot.
-    let licence = Arc::new(crate::ee::services::licence::LicenceState::from_env());
+    let licence = Arc::new(crate::ee::controllers::middleware::edition::LicenceState::from_env());
     ctx.shared_store.insert(licence.clone());
     ctx.shared_store
         .insert(licence as Arc<dyn crate::controllers::middleware::edition::EnterpriseEdition>);
@@ -31,17 +31,17 @@ pub(crate) fn compose_context(ctx: &AppContext) {
     } else {
         // Replaces the default authenticator installed by the base context builder.
         ctx.shared_store.insert(Arc::new(
-            crate::ee::services::tenant_auth::TenantScopedAuthenticator,
+            crate::ee::controllers::middleware::auth::TenantScopedAuthenticator,
         )
             as Arc<dyn crate::controllers::middleware::auth::Authenticator>);
     }
 
     ctx.shared_store.insert(
-        Arc::new(crate::ee::services::embedding_resolver::EmbeddingKeyResolver)
+        Arc::new(crate::ee::models::embedding_keys::EmbeddingKeyResolver)
             as Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>,
     );
     ctx.shared_store.insert(Arc::new(
-        crate::ee::services::worker_class_resolver::WorkerClassAssignmentResolver,
+        crate::ee::models::worker_classes::WorkerClassAssignmentResolver,
     ) as Arc<dyn WorkerClassResolver>);
     // Replaces the community queue policy installed by the base context builder.
     ctx.shared_store
@@ -70,6 +70,6 @@ pub(crate) fn register_tasks(tasks: &mut Tasks) {
 
 /// Performs the enterprise portion of application seeding.
 pub(crate) async fn seed(ctx: &AppContext) -> Result<()> {
-    crate::ee::services::official_templates::ensure_official_tenant(&ctx.db).await?;
+    crate::ee::models::template_templates::ensure_official_tenant(&ctx.db).await?;
     Ok(())
 }

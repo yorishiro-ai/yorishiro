@@ -351,7 +351,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         }
 
         #[async_trait::async_trait]
-        impl yorishiro::ee::services::origin::MergeReadHook for ReadBarrier {
+        impl yorishiro::ee::models::schema_schemas::MergeReadHook for ReadBarrier {
             async fn after_revision_read(&self) {
                 self.ready.notify_one();
                 self.release.notified().await;
@@ -412,7 +412,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         let merge_barrier = barrier.clone();
         let merge = tokio::spawn(async move {
             let txn = merge_db.begin().await.expect("begin merge transaction");
-            let result = yorishiro::ee::services::origin::merge_apply_with_read_hook(
+            let result = yorishiro::ee::models::schema_schemas::merge_apply_with_read_hook(
                 &txn,
                 &merge_ctx,
                 tenant_id,

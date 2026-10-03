@@ -1,12 +1,12 @@
 //! Reading which schemas have an origin template that moved on without them.
 //!
-//! The query alone: what to do about a change is `services::origin`'s, which decides whether a merge is safe and what it would produce.
+//! The query alone: what to do about a change is `models::schema_schemas`'s, which decides whether a merge is safe and what it would produce.
 //!
 //! Owns no table.
 //! `schema_schemas` and `template_templates` are both base's; both are read here on `ctx.db` (the migration/admin connection), since `template_templates` carries no GRANT to `yorishiro_app` and a request's RLS-scoped connection cannot see it at all.
 //! That does not make this base's: the endpoint it serves is enterprise, and an edition is decided by what a feature is rather than by which tables it reads.
 
-use crate::ee::services::merge;
+use super::merge;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
 use crate::models::schema_schemas::UpstreamChange;
@@ -40,7 +40,7 @@ struct Row {
 /// The explicit `origin_updated_at IS NULL` state is the source of truth.
 /// It survives local schema versioning and is cleared only by a successful merge acknowledgement.
 /// Stays raw SQL because this projection joins control-plane and workspace tables and computes its merge summary from both definitions.
-pub async fn list_with_upstream_changes(
+pub(crate) async fn list_with_upstream_changes(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     page: ListParams,

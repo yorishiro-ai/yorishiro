@@ -9,16 +9,16 @@ use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
-use crate::ee::models::marketplace::{
-    self, InsertForkOutcome, PublishVersionRequest, SubmitReviewRequest, TemplateReviewRecord,
-    TemplateVersionRecord,
+use super::{
+    self as marketplace, InsertForkOutcome, PublishVersionRequest, SubmitReviewRequest,
+    TemplateReviewRecord, TemplateVersionRecord,
 };
 use crate::models::template_templates::TemplateVisibility;
 
 /// Publishes the next version of a template.
 ///
 /// Only the owning tenant may publish, and the version number is assigned in the insert itself rather than taken from the caller: letting a client choose it invites gaps and collisions in a sequence other tenants read as history.
-pub async fn publish_version(
+pub(crate) async fn publish_version(
     ctx: &AppContext,
     tenant_id: Uuid,
     template_id: Uuid,
@@ -45,7 +45,7 @@ pub async fn publish_version(
 /// Records this tenant's review, replacing its previous one if it had left one.
 ///
 /// `tenant_id` comes from the authenticated context, never from the request body: taking it from input would let any caller review as any tenant, which is the whole value of a rating.
-pub async fn submit_review(
+pub(crate) async fn submit_review(
     ctx: &AppContext,
     tenant_id: Uuid,
     template_id: Uuid,
@@ -73,7 +73,7 @@ pub async fn submit_review(
 /// Copies a published version of someone else's template into the caller's own library.
 ///
 /// The copy records `fork_of`, and takes the definition from the *version* rather than the template row: the template keeps moving as its owner edits it, so forking "the template" would install whatever it happened to be at that instant rather than the version chosen.
-pub async fn fork_template(
+pub(crate) async fn fork_template(
     ctx: &AppContext,
     tenant_id: Uuid,
     template_id: Uuid,
@@ -114,7 +114,7 @@ pub async fn fork_template(
 
 /// Sets a template's marketplace visibility.
 /// Only its owning tenant may.
-pub async fn set_visibility(
+pub(crate) async fn set_visibility(
     ctx: &AppContext,
     tenant_id: Uuid,
     template_id: Uuid,

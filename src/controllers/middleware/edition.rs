@@ -27,7 +27,7 @@ pub fn is_active(ctx: &AppContext) -> bool {
 /// **Per request, not per boot.** Mounting the gated routes conditionally at startup would be
 /// simpler and is wrong: `LicenceState::is_active` compares `exp` against the current time on every
 /// call precisely so a key that lapses while the process runs stops unlocking enterprise features without
-/// a restart (see `ee::services::licence`). A route set decided once at boot cannot un-mount, which
+/// a restart (see `ee::controllers::middleware::edition`). A route set decided once at boot cannot un-mount, which
 /// would turn that property into a silent enforcement hole.
 ///
 /// Applied through `Routes::layer`, which wraps each handler's own `MethodRouter`, so it reaches

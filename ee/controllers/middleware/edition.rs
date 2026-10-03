@@ -9,16 +9,16 @@
 //!
 //! No key means the enterprise features are disabled, never that the process refuses to start: a deployment that only wants the free half must keep working with no licence configured at all.
 
-use super::plan::Plan;
 use crate::YorishiroError;
+use crate::ee::data::plan::Plan;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 
 /// The public half of the signing key, compiled in.
 /// Rotating it means replacing this file and cutting a release; keys signed by the previous private key stop verifying at that point.
-// Resolved from this file's own directory (`ee/services/`), so the key stays inside `ee/` beside
+// Resolved from this file's own directory (`ee/controllers/middleware/`), so the key stays inside `ee/` beside
 // the code it verifies for.
-const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../keys/licence-public.pem");
+const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../../keys/licence-public.pem");
 
 /// What a licence key asserts.
 ///
@@ -84,7 +84,7 @@ impl LicenceState {
     ///
     /// An absent, empty or invalid key all yield an unlicensed state rather than aborting startup: refusing to boot would take down the free half over a enterprise-feature misconfiguration.
     /// An invalid one is logged at `warn`, since it almost certainly means someone expected enterprise features to be on.
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         let from_env =
             std::env::var_os("YORISHIRO_LICENSE_KEY").map(|v| v.into_string().unwrap_or_default());
 
@@ -155,7 +155,7 @@ impl crate::controllers::middleware::edition::EnterpriseEdition for LicenceState
 #[cfg(test)]
 mod tests {
     use super::{LicenceClaims, LicenceState};
-    use crate::ee::services::plan::Plan;
+    use crate::ee::data::plan::Plan;
 
     #[test]
     fn active_licence_plan_is_safe_and_expires_into_fallback() {
