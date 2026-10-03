@@ -37,6 +37,11 @@ pub struct ReindexArgs {
     pub worker_class: WorkerClass,
 }
 
+impl ReindexArgs {
+    /// The name this job is recorded under in the queue lifecycle.
+    pub(crate) const JOB_NAME: &'static str = "reindex";
+}
+
 /// Shared implementation of the reindex worker's `perform` body: builds the provider,
 /// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
 ///

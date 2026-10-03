@@ -25,7 +25,7 @@ impl InferFillDispatcher for LocoJobDispatcher {
             &ctx.db,
             crate::models::queue_job_lifecycles::Enqueue {
                 id: lifecycle_id,
-                job_name: "infer_fill",
+                job_name: InferFillArgs::JOB_NAME,
                 worker_class: "shared",
                 workspace_id: Some(args.workspace_id),
                 plan: None,

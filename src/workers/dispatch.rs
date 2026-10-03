@@ -33,7 +33,7 @@ pub(crate) struct LocoJobDispatcher;
 impl EmbeddingSyncDispatcher for LocoJobDispatcher {
     async fn dispatch(&self, ctx: &AppContext, args: EmbeddingSyncArgs) -> loco_rs::Result<String> {
         let spec = JobSpec {
-            job_name: "embedding_sync",
+            job_name: EmbeddingSyncArgs::JOB_NAME,
             workspace_id: args.workspace_id,
             class: args.worker_class,
         };
@@ -80,7 +80,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
 impl ReindexDispatcher for LocoJobDispatcher {
     async fn dispatch(&self, ctx: &AppContext, args: ReindexArgs) -> loco_rs::Result<String> {
         let spec = JobSpec {
-            job_name: "reindex",
+            job_name: ReindexArgs::JOB_NAME,
             workspace_id: args.workspace_id,
             class: args.worker_class,
         };

@@ -117,6 +117,11 @@ pub struct EmbeddingSyncArgs {
     pub worker_class: WorkerClass,
 }
 
+impl EmbeddingSyncArgs {
+    /// The name this job is recorded under in the queue lifecycle.
+    pub(crate) const JOB_NAME: &'static str = "embedding_sync";
+}
+
 /// Loco has no automatic retry, so the return value decides what an operator can recover: `Err` marks the job `Failed`, which `retry_failed` can find and re-run, while `Ok` marks it `Completed` and forgets it.
 /// A structural failure (a schema no longer defining the embedded field, a dimension count not matching the provider) will not go away on retry, so it is logged and reported `Ok`.
 /// A transient one (`ProviderBusy`, `ProviderUnreachable`, `Internal`) propagates as `Err`: reporting those `Ok` would let a whole provider outage mark itself `Completed` with every embedding still `NULL`, indistinguishable from jobs that never needed to run.

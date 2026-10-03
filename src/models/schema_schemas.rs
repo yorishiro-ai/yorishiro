@@ -391,7 +391,10 @@ pub async fn create_schema(
     if previous.is_some() {
         // `update_many` is a builder call and never runs `ActiveModelBehavior::before_save`, so `updated_at` is set explicitly here or archiving a schema version would leave its timestamp stale.
         Entity::update_many()
-            .col_expr(Column::Status, Expr::value("archived"))
+            .col_expr(
+                Column::Status,
+                Expr::value(SchemaStatus::Archived.as_db_str()),
+            )
             .col_expr(
                 Column::UpdatedAt,
                 Expr::value(chrono::Utc::now().fixed_offset()),

@@ -33,6 +33,11 @@ pub struct InferFillArgs {
     pub schema_name: String,
 }
 
+impl InferFillArgs {
+    /// The name this job is recorded under in the queue lifecycle.
+    pub(crate) const JOB_NAME: &'static str = "infer_fill";
+}
+
 #[async_trait]
 pub(crate) trait InferFillDispatcher: Send + Sync {
     async fn dispatch(&self, ctx: &AppContext, args: InferFillArgs) -> loco_rs::Result<String>;
