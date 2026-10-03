@@ -46,7 +46,7 @@ pub async fn delete_relation(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/relations", params(("source_id" = Option<Uuid>, Query), ("target_id" = Option<Uuid>, Query), ("relation_type" = Option<String>, Query), ("status" = Option<super::openapi::RelationStatus>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::RelationRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/relations", params(("source_id" = Option<Uuid>, Query), ("target_id" = Option<Uuid>, Query), ("relation_type" = Option<String>, Query), ("status" = Option<crate::models::entity_relations::RelationStatus>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::RelationRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn list_relations(
     authorized: Authorized<ReadScope>,
     Query(params): Query<ListRelationsParams>,

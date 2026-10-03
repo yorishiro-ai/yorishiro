@@ -18,7 +18,7 @@
 /// }
 /// ```
 ///
-/// Generates `ALL`, `as_db_str`, `from_db_str` (`None` for anything undefined, which callers should treat as a corrupt row rather than a missing value), `Display`, `FromStr`, `Serialize`, and `Deserialize`.
+/// Generates `ALL`, `as_db_str`, `from_db_str` (`None` for anything undefined, which callers should treat as a corrupt row rather than a missing value), `Display`, `FromStr`, `Serialize`, `Deserialize`, and, with the `openapi` feature, the OpenAPI string-enum schema.
 /// Serde derives and `#[serde(...)]` attributes must not be added: they would be a second copy of the table.
 macro_rules! db_enum {
     (
@@ -53,6 +53,23 @@ macro_rules! db_enum {
                 }
             }
         }
+
+        // The contract is derived from the same table as every other conversion, so the documented
+        // values cannot drift from the stored ones.
+        #[cfg(feature = "openapi")]
+        impl ::utoipa::PartialSchema for $name {
+            fn schema() -> ::utoipa::openapi::RefOr<::utoipa::openapi::schema::Schema> {
+                ::utoipa::openapi::schema::ObjectBuilder::new()
+                    .schema_type(::utoipa::openapi::schema::SchemaType::new(
+                        ::utoipa::openapi::schema::Type::String,
+                    ))
+                    .enum_values(Some([$($text),+]))
+                    .into()
+            }
+        }
+
+        #[cfg(feature = "openapi")]
+        impl ::utoipa::ToSchema for $name {}
 
         impl ::core::fmt::Display for $name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

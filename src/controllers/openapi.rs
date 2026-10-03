@@ -6,6 +6,15 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::models::api_key_audit_log::AuditAction;
+use crate::models::api_keys::ApiKeyScope;
+use crate::models::entity_relations::RelationStatus;
+use crate::models::schema_schemas::{SchemaOriginStatus, SchemaStatus};
+use crate::models::system_maintenance::MaintenanceMode;
+use crate::models::template_templates::TemplateVisibility;
+use crate::models::tenancy::MembershipRole;
+use crate::models::workspace_workspaces::WorkspaceStatus;
+
 #[derive(ToSchema)]
 pub struct ApiErrorBody {
     pub error: ApiErrorDetail,
@@ -188,14 +197,6 @@ pub struct CreateRelationRequest {
     pub relation_type: String,
     #[schema(nullable = true)]
     pub properties: Option<Value>,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RelationStatus {
-    Active,
-    Deprecated,
-    Archived,
 }
 
 #[derive(ToSchema)]
@@ -421,14 +422,6 @@ pub struct MaintenanceResponse {
 }
 
 #[derive(ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MaintenanceMode {
-    Off,
-    ReadOnly,
-    FullLock,
-}
-
-#[derive(ToSchema)]
 pub struct SetMaintenanceRequest {
     pub mode: MaintenanceMode,
     #[schema(nullable = true)]
@@ -445,61 +438,6 @@ pub struct WhoAmIResponse {
     #[schema(nullable = true)]
     pub user_id: Option<Uuid>,
     pub audit: bool,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum MembershipRole {
-    Owner,
-    Admin,
-    Member,
-    Viewer,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ApiKeyScope {
-    Read,
-    Write,
-    Schema,
-    Migration,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SchemaStatus {
-    Active,
-    Archived,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SchemaOriginStatus {
-    Linked,
-    Detached,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkspaceStatus {
-    SchemaPending,
-    Active,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AuditAction {
-    UndoMigrationJob,
-    SetMaintenance,
-    ReindexEmbeddings,
-    FillDefaults,
-}
-
-#[derive(ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum TemplateVisibility {
-    Tenant,
-    Community,
 }
 
 #[derive(ToSchema)]
