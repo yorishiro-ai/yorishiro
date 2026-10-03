@@ -3,10 +3,9 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff, validate_definition};
 pub use crate::models::_entities::schema_schemas::{ActiveModel, Entity, Model};
@@ -39,79 +38,19 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SchemaStatus {
-    Active,
-    Archived,
-}
-
-impl SchemaStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Archived => "archived",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
+db_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum SchemaStatus {
+        Active = "active",
+        Archived = "archived",
     }
 }
 
-impl fmt::Display for SchemaStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for SchemaStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "active" => Ok(Self::Active),
-            "archived" => Ok(Self::Archived),
-            _ => Err(format!("unknown schema status: {value}")),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SchemaOriginStatus {
-    Linked,
-    Detached,
-}
-
-impl SchemaOriginStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Linked => "linked",
-            Self::Detached => "detached",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-}
-
-impl fmt::Display for SchemaOriginStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for SchemaOriginStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "linked" => Ok(Self::Linked),
-            "detached" => Ok(Self::Detached),
-            _ => Err(format!("unknown schema origin status: {value}")),
-        }
+db_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum SchemaOriginStatus {
+        Linked = "linked",
+        Detached = "detached",
     }
 }
 

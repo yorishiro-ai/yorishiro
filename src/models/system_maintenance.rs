@@ -5,10 +5,9 @@
 
 pub use crate::models::_entities::system_maintenance::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
+use serde::Serialize;
 
+use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 
 pub const DEFAULT_RETRY_AFTER_SECONDS: u32 = 300;
@@ -35,50 +34,18 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// What the deployment is currently refusing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MaintenanceMode {
-    /// Serving normally.
-    Off,
-    /// Reads served, writes refused with 423.
-    ReadOnly,
-    /// Everything refused with 503.
-    FullLock,
-}
-
-impl MaintenanceMode {
-    pub fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::ReadOnly => "read_only",
-            Self::FullLock => "full_lock",
-        }
-    }
-
-    /// Parses the stored value.
-    /// Unknown values are rejected rather than treated as `Off`: reading a row this crate does not understand and concluding "serve everything" would turn a corrupt row into an outage of the protection itself.
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-}
-
-impl fmt::Display for MaintenanceMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for MaintenanceMode {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "off" => Ok(Self::Off),
-            "read_only" | "read-only" => Ok(Self::ReadOnly),
-            "full_lock" | "full-lock" => Ok(Self::FullLock),
-            _ => Err(format!("unknown maintenance mode: {value}")),
-        }
+db_enum! {
+    /// What the deployment is currently refusing.
+    ///
+    /// Unknown stored values are rejected rather than treated as `Off`: reading a row this crate does not understand and concluding "serve everything" would turn a corrupt row into an outage of the protection itself.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum MaintenanceMode {
+        /// Serving normally.
+        Off = "off",
+        /// Reads served, writes refused with 423.
+        ReadOnly = "read_only" | "read-only",
+        /// Everything refused with 503.
+        FullLock = "full_lock" | "full-lock",
     }
 }
 

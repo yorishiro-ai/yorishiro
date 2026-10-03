@@ -5,9 +5,10 @@
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, DatabaseTransaction};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
 use crate::models::_entities::{
     tenant_tenants, user_users, workspace_invites, workspace_workspaces,
@@ -25,38 +26,18 @@ mod workspace;
 /// It is excluded from tenant-limit counts.
 pub const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 
-/// Mirrors the `tenant_memberships.role` check constraint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MembershipRole {
-    Owner,
-    Admin,
-    Member,
-    Viewer,
+db_enum! {
+    /// Mirrors the `tenant_memberships.role` check constraint.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MembershipRole {
+        Owner = "owner",
+        Admin = "admin",
+        Member = "member",
+        Viewer = "viewer",
+    }
 }
 
 impl MembershipRole {
-    /// Returns the database representation of this role.
-    pub fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Admin => "admin",
-            Self::Member => "member",
-            Self::Viewer => "viewer",
-        }
-    }
-
-    /// Parses a database role representation.
-    pub fn from_db_str(s: &str) -> Option<Self> {
-        match s {
-            "owner" => Some(Self::Owner),
-            "admin" => Some(Self::Admin),
-            "member" => Some(Self::Member),
-            "viewer" => Some(Self::Viewer),
-            _ => None,
-        }
-    }
-
     /// Returns the highest API key scope a member with this role may be issued.
     pub fn max_scope(self) -> ApiKeyScope {
         match self {

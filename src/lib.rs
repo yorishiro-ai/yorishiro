@@ -2,6 +2,7 @@ pub mod app;
 pub mod config;
 pub mod controllers;
 pub mod db;
+mod db_enum;
 
 /// The enterprise edition.
 ///

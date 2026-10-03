@@ -136,7 +136,7 @@ mod tests {
         crate::models::queue_job_lifecycles::Entity::update_many()
             .col_expr(
                 crate::models::queue_job_lifecycles::Column::Status,
-                Expr::value(status.as_str()),
+                Expr::value(status.as_db_str()),
             )
             .col_expr(
                 crate::models::queue_job_lifecycles::Column::EnqueueAt,

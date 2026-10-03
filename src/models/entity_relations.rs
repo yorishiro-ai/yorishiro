@@ -2,51 +2,19 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::str::FromStr;
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model};
 use crate::models::entity_entities::{self, EntityRecord};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RelationStatus {
-    Active,
-    Deprecated,
-    Archived,
-}
-
-impl RelationStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Deprecated => "deprecated",
-            Self::Archived => "archived",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-}
-
-impl std::fmt::Display for RelationStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for RelationStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "active" => Ok(Self::Active),
-            "deprecated" => Ok(Self::Deprecated),
-            "archived" => Ok(Self::Archived),
-            _ => Err(format!("unknown relation status: {value}")),
-        }
+db_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum RelationStatus {
+        Active = "active",
+        Deprecated = "deprecated",
+        Archived = "archived",
     }
 }
 

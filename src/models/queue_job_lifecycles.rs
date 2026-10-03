@@ -9,58 +9,32 @@ use sea_orm::{
 };
 use tokio::task::JoinHandle;
 
+use crate::db_enum::db_enum;
+
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
 const LEASE_DURATION_MINUTES: i64 = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LifecycleStatus {
-    Queued,
-    Running,
-    Retrying,
-    Completed,
-    Failed,
-    Cancelled,
-    Unavailable,
+db_enum! {
+    /// Where a queued job stands.
+    /// Matches `status`'s CHECK constraint string-for-string.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum LifecycleStatus {
+        Queued = "queued",
+        Running = "running",
+        Retrying = "retrying",
+        Completed = "completed",
+        Failed = "failed",
+        Cancelled = "cancelled",
+        Unavailable = "unavailable",
+    }
 }
 
 impl LifecycleStatus {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Retrying => "retrying",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Unavailable => "unavailable",
-        }
+    /// A stored status this crate does not define is a corrupt row, not a missing one.
+    fn from_row(value: &str) -> Result<Self, DbErr> {
+        Self::from_db_str(value)
+            .ok_or_else(|| DbErr::Type(format!("unknown queue lifecycle status {value:?}")))
     }
-
-    fn from_db(value: &str) -> Result<Self, DbErr> {
-        match value {
-            "queued" => Ok(Self::Queued),
-            "running" => Ok(Self::Running),
-            "retrying" => Ok(Self::Retrying),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            "cancelled" => Ok(Self::Cancelled),
-            "unavailable" => Ok(Self::Unavailable),
-            other => Err(DbErr::Type(format!(
-                "unknown queue lifecycle status {other:?}"
-            ))),
-        }
-    }
-
-    #[cfg(test)]
-    const ALL: [Self; 7] = [
-        Self::Queued,
-        Self::Running,
-        Self::Retrying,
-        Self::Completed,
-        Self::Failed,
-        Self::Cancelled,
-        Self::Unavailable,
-    ];
 }
 
 #[async_trait::async_trait]
@@ -87,8 +61,8 @@ impl Entity {
             .map(crate::workers::embedding_sync::WorkerClass::as_db_str);
         Entity::find()
             .filter(Column::Status.is_in([
-                LifecycleStatus::Queued.as_str(),
-                LifecycleStatus::Retrying.as_str(),
+                LifecycleStatus::Queued.as_db_str(),
+                LifecycleStatus::Retrying.as_db_str(),
             ]))
             .filter(Column::WorkerClass.is_in(lower_classes))
             .filter(Column::EnqueueAt.lte(cutoff))
@@ -107,7 +81,7 @@ impl Entity {
             worker_class: Set(enqueue.worker_class.as_db_str().to_owned()),
             workspace_id: Set(enqueue.workspace_id),
             plan: Set(enqueue.plan.map(str::to_owned)),
-            status: Set(LifecycleStatus::Queued.as_str().to_owned()),
+            status: Set(LifecycleStatus::Queued.as_db_str().to_owned()),
             enqueue_at: Set(Utc::now().fixed_offset()),
             claim_at: Set(None),
             start_at: Set(None),
@@ -152,7 +126,7 @@ impl Entity {
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
-                Expr::value(LifecycleStatus::Retrying.as_str()),
+                Expr::value(LifecycleStatus::Retrying.as_db_str()),
             )
             .col_expr(Column::RetryAt, Expr::value(now))
             .col_expr(
@@ -164,11 +138,11 @@ impl Entity {
             .filter(if let Some(attempt) = attempt {
                 Column::Attempt
                     .eq(attempt)
-                    .and(Column::Status.eq(LifecycleStatus::Running.as_str()))
+                    .and(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
             } else {
                 Column::Status.is_in([
-                    LifecycleStatus::Queued.as_str(),
-                    LifecycleStatus::Retrying.as_str(),
+                    LifecycleStatus::Queued.as_db_str(),
+                    LifecycleStatus::Retrying.as_db_str(),
                 ])
             })
             .exec(db)
@@ -190,7 +164,7 @@ impl Entity {
         let result = Entity::update_many()
             .col_expr(
                 Column::Status,
-                Expr::value(LifecycleStatus::Retrying.as_str()),
+                Expr::value(LifecycleStatus::Retrying.as_db_str()),
             )
             .col_expr(Column::RetryAt, Expr::value(now))
             .col_expr(
@@ -200,7 +174,7 @@ impl Entity {
             .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
             .filter(Column::Id.eq(id))
             .filter(Column::Attempt.eq(attempt))
-            .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
+            .filter(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
             .filter(
                 Column::LeaseUntil
                     .is_not_null()
@@ -234,7 +208,7 @@ impl Entity {
             .col_expr(Column::LeaseUntil, Expr::value(now + lease_duration()))
             .filter(Column::Id.eq(id))
             .filter(Column::Attempt.eq(attempt))
-            .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
+            .filter(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
             .exec(db)
             .await?;
         Ok(result.rows_affected == 1)
@@ -287,7 +261,7 @@ impl Entity {
     ) -> Result<(), DbErr> {
         let now = Utc::now().fixed_offset();
         let mut update = Entity::update_many()
-            .col_expr(Column::Status, Expr::value(status.as_str()))
+            .col_expr(Column::Status, Expr::value(status.as_db_str()))
             .col_expr(
                 Column::LeaseUntil,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
@@ -297,7 +271,7 @@ impl Entity {
         if let Some(attempt) = attempt {
             update = update
                 .filter(Column::Attempt.eq(attempt))
-                .filter(Column::Status.eq(LifecycleStatus::Running.as_str()));
+                .filter(Column::Status.eq(LifecycleStatus::Running.as_db_str()));
         }
         match status {
             LifecycleStatus::Completed => {
@@ -335,7 +309,7 @@ async fn admit(
         .one(txn)
         .await?
         .ok_or_else(|| DbErr::RecordNotFound("queue lifecycle".into()))?;
-    let status = LifecycleStatus::from_db(&row.status)?;
+    let status = LifecycleStatus::from_row(&row.status)?;
     match status {
         LifecycleStatus::Completed | LifecycleStatus::Cancelled => return Ok(Admission::Terminal),
         LifecycleStatus::Running if running_lease_is_live(row.lease_until, now) => {
@@ -404,7 +378,7 @@ async fn in_flight(
 ) -> Result<u64, DbErr> {
     Entity::find()
         .filter(Column::ConcurrencyKey.eq(key))
-        .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
+        .filter(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
         .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
         .filter(Column::Id.ne(except))
         .count(db)
@@ -420,18 +394,18 @@ async fn claim(
     now: DateTimeWithTimeZone,
 ) -> Result<u64, DbErr> {
     let claimable = if recovered {
-        Column::Status.eq(LifecycleStatus::Running.as_str())
+        Column::Status.eq(LifecycleStatus::Running.as_db_str())
     } else {
         Column::Status.is_in([
-            LifecycleStatus::Queued.as_str(),
-            LifecycleStatus::Failed.as_str(),
-            LifecycleStatus::Retrying.as_str(),
+            LifecycleStatus::Queued.as_db_str(),
+            LifecycleStatus::Failed.as_db_str(),
+            LifecycleStatus::Retrying.as_db_str(),
         ])
     };
     let result = Entity::update_many()
         .col_expr(
             Column::Status,
-            Expr::value(LifecycleStatus::Running.as_str()),
+            Expr::value(LifecycleStatus::Running.as_db_str()),
         )
         .col_expr(Column::ClaimAt, Expr::value(now))
         .col_expr(Column::StartAt, Expr::value(now))
@@ -518,12 +492,32 @@ mod tests {
 
     use super::{Admission, Enqueue, Entity, LifecycleStatus, lease_duration};
 
+    #[tokio::test]
+    async fn the_database_accepts_every_status_the_enum_defines() {
+        use sea_orm::{ColumnTrait, QueryFilter};
+
+        let db = database().await;
+        let id = uuid::Uuid::now_v7();
+        enqueue(&db, id, None).await;
+        for status in LifecycleStatus::ALL {
+            Entity::update_many()
+                .col_expr(
+                    super::Column::Status,
+                    sea_orm::sea_query::Expr::value(status.as_db_str()),
+                )
+                .filter(super::Column::Id.eq(id))
+                .exec(&db)
+                .await
+                .unwrap_or_else(|error| panic!("CHECK constraint rejected {status}: {error}"));
+        }
+    }
+
     #[test]
     fn lifecycle_status_values_round_trip() {
         for status in LifecycleStatus::ALL {
-            assert_eq!(LifecycleStatus::from_db(status.as_str()), Ok(status));
+            assert_eq!(LifecycleStatus::from_row(status.as_db_str()), Ok(*status));
         }
-        assert!(LifecycleStatus::from_db("unknown").is_err());
+        assert!(LifecycleStatus::from_row("unknown").is_err());
     }
 
     async fn database() -> sea_orm::DatabaseConnection {

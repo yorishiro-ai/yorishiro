@@ -7,9 +7,9 @@
 
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
-use serde::Serialize;
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::api_key_audit_log::{ActiveModel, Entity, Model};
 
@@ -35,29 +35,19 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
-/// The closed set of operations this table records.
-/// Matches `action`'s CHECK constraint string-for-string; a variant added here without a matching value in the constraint fails every insert at the database, not silently.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuditAction {
-    /// `entity_entities::undo_job`: a `Migration`-scoped batch undo, restoring every entity a job's snapshots cover.
-    UndoMigrationJob,
-    /// `system_maintenance::set`: a `Migration`-scoped maintenance mode change.
-    SetMaintenance,
-    /// `embedding::reindex_workspace`: a `Migration`-scoped embedding reindex, replacing all vectors in a workspace with those from a new model.
-    ReindexEmbeddings,
-    /// `entity_entities::fill_defaults`: a `Migration`-scoped batch fill of absent required fields.
-    FillDefaults,
-}
-
-impl AuditAction {
-    pub fn as_db_str(self) -> &'static str {
-        match self {
-            Self::UndoMigrationJob => "undo_migration_job",
-            Self::SetMaintenance => "set_maintenance",
-            Self::ReindexEmbeddings => "reindex_embeddings",
-            Self::FillDefaults => "fill_defaults",
-        }
+db_enum! {
+    /// The closed set of operations this table records.
+    /// Matches `action`'s CHECK constraint string-for-string; a variant added here without a matching value in the constraint fails every insert at the database, not silently.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum AuditAction {
+        /// `entity_entities::undo_job`: a `Migration`-scoped batch undo, restoring every entity a job's snapshots cover.
+        UndoMigrationJob = "undo_migration_job",
+        /// `system_maintenance::set`: a `Migration`-scoped maintenance mode change.
+        SetMaintenance = "set_maintenance",
+        /// `embedding::reindex_workspace`: a `Migration`-scoped embedding reindex, replacing all vectors in a workspace with those from a new model.
+        ReindexEmbeddings = "reindex_embeddings",
+        /// `entity_entities::fill_defaults`: a `Migration`-scoped batch fill of absent required fields.
+        FillDefaults = "fill_defaults",
     }
 }
 

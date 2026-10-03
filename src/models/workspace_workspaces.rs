@@ -1,9 +1,8 @@
 use sea_orm::entity::prelude::*;
 use sea_orm::{QuerySelect, Statement};
 use serde::Serialize;
-use std::fmt;
-use std::str::FromStr;
 
+use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::workspace_workspaces::{ActiveModel, Entity, Model};
 
@@ -182,41 +181,11 @@ impl TryFrom<Model> for WorkspaceRecord {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkspaceStatus {
-    SchemaPending,
-    Active,
-}
-
-impl WorkspaceStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::SchemaPending => "schema_pending",
-            Self::Active => "active",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-}
-
-impl fmt::Display for WorkspaceStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for WorkspaceStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "schema_pending" => Ok(Self::SchemaPending),
-            "active" => Ok(Self::Active),
-            _ => Err(format!("unknown workspace status: {value}")),
-        }
+db_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum WorkspaceStatus {
+        SchemaPending = "schema_pending",
+        Active = "active",
     }
 }
 

@@ -6,10 +6,9 @@
 pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
+use serde::Serialize;
 
+use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
 use crate::metaschema::MetaSchemaDefinition;
 use crate::models::schema_schemas;
@@ -82,49 +81,21 @@ impl TryFrom<Model> for TemplateRecord {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TemplateVisibility {
-    Tenant,
-    Community,
+db_enum! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum TemplateVisibility {
+        Tenant = "tenant",
+        Community = "community",
+    }
 }
 
 impl TemplateVisibility {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Tenant => "tenant",
-            Self::Community => "community",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-
     pub fn parse_input(value: &str) -> Result<Self, YorishiroError> {
         Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("unknown visibility '{value}'"),
             details: Vec::new(),
             hint: "use 'tenant' to keep it private or 'community' to list it".into(),
         })
-    }
-}
-
-impl fmt::Display for TemplateVisibility {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for TemplateVisibility {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "tenant" => Ok(Self::Tenant),
-            "community" => Ok(Self::Community),
-            _ => Err(format!("unknown template visibility: {value}")),
-        }
     }
 }
 

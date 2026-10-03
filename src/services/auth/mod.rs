@@ -3,6 +3,8 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
+
 mod authenticate;
 mod authenticator;
 mod authorize;
@@ -38,43 +40,22 @@ pub fn extract_bearer_key(parts: &Parts) -> Option<&str> {
 pub(crate) const KEY_PREFIX_BYTES: usize = 6;
 pub(crate) const KEY_SECRET_BYTES: usize = 24;
 
-/// Permission level held by an API key.
-/// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
-/// The serde representation matches the DB `scope` column ('read'/'write'/'schema'/'migration').
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum ApiKeyScope {
-    Read,
-    Write,
-    Schema,
-    /// Running a batch migration, and switching maintenance mode.
-    /// Above `schema` because both act on data already stored.
-    Migration,
+db_enum! {
+    /// Permission level held by an API key.
+    /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
+    /// The wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum ApiKeyScope {
+        Read = "read",
+        Write = "write",
+        Schema = "schema",
+        /// Running a batch migration, and switching maintenance mode.
+        /// Above `schema` because both act on data already stored.
+        Migration = "migration",
+    }
 }
 
 impl ApiKeyScope {
-    pub fn as_db_str(self) -> &'static str {
-        match self {
-            ApiKeyScope::Read => "read",
-            ApiKeyScope::Write => "write",
-            ApiKeyScope::Schema => "schema",
-            ApiKeyScope::Migration => "migration",
-        }
-    }
-
-    /// `None` for anything this crate does not define, which the caller should treat as a corrupt row rather than a missing scope.
-    pub fn from_db_str(s: &str) -> Option<Self> {
-        match s {
-            "read" => Some(ApiKeyScope::Read),
-            "write" => Some(ApiKeyScope::Write),
-            "schema" => Some(ApiKeyScope::Schema),
-            "migration" => Some(ApiKeyScope::Migration),
-            _ => None,
-        }
-    }
-
     /// Whether a key with this scope can perform an operation requiring `required`.
     pub fn satisfies(self, required: ApiKeyScope) -> bool {
         self >= required

@@ -24,34 +24,36 @@ use loco_rs::bgworker::BackgroundWorker;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
 use crate::models::entity_entities;
 use crate::services::embedding;
 use crate::workers::dispatch::EmbeddingSyncDispatcher;
 
-/// Which class of worker process a queued job is meant for.
-///
-/// Routes jobs by `BackgroundWorker::tags()` rather than by named queue: `queue: Option<String>` is
-/// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
-/// named-queue split would mean switching to Redis first.
-///
-/// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
-/// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
-/// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
-/// process would then dequeue every class's work rather than its own.
-///
-/// Hence one type per class ([`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`],
-/// [`EmbeddingSyncWorkerShared`]), each fixed to a single tag, so the class picked at enqueue time
-/// is the tag that lands in the queue table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerClass {
-    /// Runs only on compute a single tenant registered for its own workspaces.
-    TenantPrivate,
-    /// Runs only on compute this deployment operates itself.
-    Official,
-    /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
-    Shared,
+db_enum! {
+    /// Which class of worker process a queued job is meant for.
+    ///
+    /// Routes jobs by `BackgroundWorker::tags()` rather than by named queue: `queue: Option<String>` is
+    /// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
+    /// named-queue split would mean switching to Redis first.
+    ///
+    /// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
+    /// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
+    /// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
+    /// process would then dequeue every class's work rather than its own.
+    ///
+    /// Hence one type per class ([`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`],
+    /// [`EmbeddingSyncWorkerShared`]), each fixed to a single tag, so the class picked at enqueue time
+    /// is the tag that lands in the queue table.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum WorkerClass {
+        /// Runs only on compute a single tenant registered for its own workspaces.
+        TenantPrivate = "tenant_private",
+        /// Runs only on compute this deployment operates itself.
+        Official = "official",
+        /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
+        Shared = "shared",
+    }
 }
 
 impl WorkerClass {
@@ -63,32 +65,6 @@ impl WorkerClass {
             Self::TenantPrivate => "worker-class:tenant-private",
             Self::Official => "worker-class:official",
             Self::Shared => "worker-class:shared",
-        }
-    }
-
-    /// The `snake_case` wire form this type already serializes to, usable as a plain string for `ee/`'s `workspace_worker_classes`.
-    /// Reusing it rather than inventing a second representation keeps a database value and a queue payload byte-identical to an operator inspecting either.
-    #[must_use]
-    pub fn as_db_str(self) -> &'static str {
-        match self {
-            Self::TenantPrivate => "tenant_private",
-            Self::Official => "official",
-            Self::Shared => "shared",
-        }
-    }
-
-    /// The inverse of [`Self::as_db_str`].
-    ///
-    /// # Errors
-    /// Returns an error if `value` is not one of the three known strings: a row written by a future variant this binary doesn't know about, or a hand-edited/corrupted value.
-    pub fn from_db_str(value: &str) -> Result<Self, YorishiroError> {
-        match value {
-            "tenant_private" => Ok(Self::TenantPrivate),
-            "official" => Ok(Self::Official),
-            "shared" => Ok(Self::Shared),
-            other => Err(YorishiroError::Internal(anyhow::anyhow!(
-                "unknown worker_class value: {other:?}"
-            ))),
         }
     }
 }
