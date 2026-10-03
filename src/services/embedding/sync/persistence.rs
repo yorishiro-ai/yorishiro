@@ -18,12 +18,8 @@ pub(super) async fn embed_and_write(
 ) -> Result<bool, YorishiroError> {
     let backend = conn.get_database_backend();
 
-    // SQLite stores vectors as raw little-endian f32 bytes in the BLOB column.
     let blob_bytes = if backend == DatabaseBackend::Sqlite {
-        let raw = unsafe {
-            std::slice::from_raw_parts(input.vector.as_ptr() as *const u8, input.vector.len() * 4)
-        };
-        raw.to_vec()
+        crate::db::sqlite_vec_blob(&input.vector)
     } else {
         Vec::new()
     };

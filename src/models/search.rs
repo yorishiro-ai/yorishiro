@@ -169,10 +169,6 @@ impl VectorKnn {
         limit: i64,
         table_name: &str,
     ) -> Self {
-        // Convert the vector to raw LE f32 bytes for `vec_distance_cosine`.
-        let blob_bytes =
-            unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-
         // `vec_distance_cosine` computes the cosine distance between two vectors.
         // `e.id = ee.entity_id` joins without depending on rowids (VACUUM may
         // renumber them, see sqlite.org/lang_vacuum.html).
@@ -183,7 +179,7 @@ impl VectorKnn {
              WHERE ee.embedding IS NOT NULL AND e.workspace_id = ?"
         );
         let mut values: Vec<sea_orm::Value> = vec![
-            sea_orm::Value::from(blob_bytes.to_vec()),
+            sea_orm::Value::from(crate::db::sqlite_vec_blob(&vector)),
             workspace_id.into(),
         ];
         if let Some(entity_type) = &query.entity_type {
