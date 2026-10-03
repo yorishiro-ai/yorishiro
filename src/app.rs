@@ -1,13 +1,8 @@
-mod context;
-mod routes;
-mod seed;
-mod workers;
-
 use async_trait::async_trait;
 use loco_rs::{
     Result,
     app::{AppContext, Hooks, Initializer},
-    bgworker::Queue,
+    bgworker::{BackgroundWorker, Queue},
     boot::{BootResult, StartMode, create_app},
     config::Config,
     controller::AppRoutes,
@@ -21,12 +16,17 @@ use std::sync::Arc;
 use crate::controllers;
 #[cfg(feature = "enterprise")]
 use crate::controllers::middleware::edition;
-use crate::controllers::route_inventory::RouteInventory;
-#[cfg(feature = "enterprise")]
-use crate::controllers::route_inventory::{Edition, RouteClass};
+use crate::controllers::route_inventory::{Edition, RouteClass, RouteInventory};
+use crate::db::AppContextBackend;
 use crate::initializers;
-use crate::workers::dispatch::LocoJobDispatcher;
-use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
+use crate::tasks;
+use crate::workers::dispatch::{EmbeddingSyncDispatcher, LocoJobDispatcher, ReindexDispatcher};
+use crate::workers::embedding_sync::{
+    EmbeddingSyncWorkerOfficial, EmbeddingSyncWorkerShared, EmbeddingSyncWorkerTenantPrivate,
+};
+use crate::workers::reindex::{
+    ReindexWorkerOfficial, ReindexWorkerShared, ReindexWorkerTenantPrivate,
+};
 
 pub(crate) async fn queue_concurrency_policy(
     ctx: &AppContext,
@@ -195,7 +195,7 @@ impl Hooks for App {
     }
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
-        let ctx = context::build(ctx).await?;
+        let ctx = install_services(ctx).await?;
         ctx.shared_store
             .insert(Arc::new(LocoJobDispatcher) as Arc<dyn EmbeddingSyncDispatcher>);
         ctx.shared_store
@@ -228,110 +228,205 @@ impl Hooks for App {
     fn routes(ctx: &AppContext) -> AppRoutes {
         #[cfg(feature = "enterprise")]
         let gate = axum::middleware::from_fn_with_state(ctx.clone(), edition::licence_gate);
-        #[cfg(feature = "enterprise")]
-        let (mut app_routes, mut inventory) = routes::community();
-        #[cfg(not(feature = "enterprise"))]
-        let (app_routes, inventory) = routes::community();
+        let mut inventory = RouteInventory::default();
+        inventory.add_allowlisted_exclusions();
+        let mut app_routes = AppRoutes::with_default_routes();
+        inventory.add_infrastructure(&app_routes);
 
-        #[cfg(feature = "enterprise")]
+        // Registers a route group with Loco and records it, with its OpenAPI document when the
+        // `openapi` feature is on, in the inventory that `validate` checks and swagger serves.
         macro_rules! mount {
-            ($route:expr, $edition:expr, $gated:expr) => {{
-                let route = $route;
-                let inventory_routes = AppRoutes::empty().add_route(route.clone());
-                inventory.add_group(&inventory_routes, $edition, $gated, RouteClass::Public);
-                app_routes = app_routes.add_route(route);
+            ($routes:expr, $edition:expr, $gated:expr $(, $docs:expr)?) => {{
+                let routes = $routes;
+                let group = AppRoutes::empty().add_route(routes.clone());
+                inventory.add_group(&group, $edition, $gated, RouteClass::Public);
+                $(
+                    #[cfg(feature = "openapi")]
+                    inventory.add_docs($docs);
+                )?
+                app_routes = app_routes.add_route(routes);
             }};
         }
 
+        mount!(
+            controllers::audit_log::routes(),
+            Edition::Community,
+            false,
+            controllers::audit_log::openapi_docs()
+        );
+        mount!(
+            controllers::api_keys::routes(),
+            Edition::Community,
+            false,
+            controllers::api_keys::openapi_docs()
+        );
+        mount!(
+            controllers::auth::routes(),
+            Edition::Community,
+            false,
+            controllers::auth::openapi_docs()
+        );
+        mount!(
+            controllers::entities::routes(),
+            Edition::Community,
+            false,
+            controllers::entities::openapi_docs()
+        );
+        mount!(
+            controllers::entities::migration_routes(),
+            Edition::Community,
+            false
+        );
+        mount!(
+            controllers::export::routes(),
+            Edition::Community,
+            false,
+            controllers::export::openapi_docs()
+        );
+        mount!(
+            controllers::import::routes(),
+            Edition::Community,
+            false,
+            controllers::import::openapi_docs()
+        );
+        mount!(
+            controllers::members::routes(),
+            Edition::Community,
+            false,
+            controllers::members::openapi_docs()
+        );
+        mount!(
+            controllers::relations::routes(),
+            Edition::Community,
+            false,
+            controllers::relations::openapi_docs()
+        );
+        mount!(
+            controllers::schemas::routes(),
+            Edition::Community,
+            false,
+            controllers::schemas::openapi_docs()
+        );
+        mount!(
+            controllers::schemas::template_routes(),
+            Edition::Community,
+            false,
+            controllers::schemas::template_openapi_docs()
+        );
+        mount!(
+            controllers::search::routes(),
+            Edition::Community,
+            false,
+            controllers::search::openapi_docs()
+        );
+        mount!(
+            controllers::setup::routes(),
+            Edition::Community,
+            false,
+            controllers::setup::openapi_docs()
+        );
+        mount!(
+            controllers::system::routes(),
+            Edition::Community,
+            false,
+            controllers::system::openapi_docs()
+        );
+        mount!(
+            controllers::template_library::routes(),
+            Edition::Community,
+            false,
+            controllers::template_library::openapi_docs()
+        );
+        mount!(
+            controllers::whoami::routes(),
+            Edition::Community,
+            false,
+            controllers::whoami::openapi_docs()
+        );
+        mount!(
+            controllers::workspaces::routes(),
+            Edition::Community,
+            false,
+            controllers::workspaces::openapi_docs()
+        );
+
+        // The enterprise edition's routes are mounted unconditionally; the inventory records the
+        // edition boundary and the licence gate separately from runtime reachability.
         #[cfg(feature = "enterprise")]
         {
-            // The enterprise edition's routes are mounted unconditionally; the inventory records the
-            // edition boundary and the licence gate separately from runtime reachability.
             mount!(
                 crate::ee::controllers::dashboard::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::dashboard::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::dashboard::openapi_docs());
             mount!(
                 crate::ee::controllers::embedding::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::embedding::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::embedding::openapi_docs());
             mount!(
                 crate::ee::controllers::entity_columns::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::entity_columns::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::entity_columns::openapi_docs());
             mount!(
                 crate::ee::controllers::inference::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::inference::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::inference::openapi_docs());
             mount!(
                 crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
                 Edition::Enterprise,
-                true
+                true,
+                crate::ee::controllers::inference::gated_openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::inference::gated_openapi_docs());
             mount!(
                 crate::ee::controllers::inference::inference_job_status_routes()
                     .layer(gate.clone()),
                 Edition::Enterprise,
-                true
+                true,
+                crate::ee::controllers::inference::job_status_openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::inference::job_status_openapi_docs());
             mount!(
                 crate::ee::controllers::marketplace::routes().layer(gate.clone()),
                 Edition::Enterprise,
-                true
+                true,
+                crate::ee::controllers::marketplace::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::marketplace::openapi_docs());
             mount!(
                 crate::ee::controllers::oauth::routes().layer(gate.clone()),
                 Edition::Enterprise,
-                true
+                true,
+                crate::ee::controllers::oauth::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::oauth::openapi_docs());
             mount!(
                 crate::ee::controllers::origin::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::origin::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::origin::openapi_docs());
             mount!(
                 crate::ee::controllers::schema_forks::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::schema_forks::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::schema_forks::openapi_docs());
             mount!(
-                crate::ee::controllers::stripe::routes().layer(gate),
+                crate::ee::controllers::stripe::routes().layer(gate.clone()),
                 Edition::Enterprise,
-                true
+                true,
+                crate::ee::controllers::stripe::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::stripe::openapi_docs());
             mount!(
                 crate::ee::controllers::worker_class::routes(),
                 Edition::Enterprise,
-                false
+                false,
+                crate::ee::controllers::worker_class::openapi_docs()
             );
-            #[cfg(feature = "openapi")]
-            inventory.add_docs(crate::ee::controllers::worker_class::openapi_docs());
         }
 
         ctx.shared_store.insert(inventory);
@@ -431,14 +526,42 @@ impl Hooks for App {
     }
 
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
-        workers::connect_workers(ctx, queue).await?;
+        queue
+            .register(EmbeddingSyncWorkerTenantPrivate::build(ctx))
+            .await?;
+        queue
+            .register(EmbeddingSyncWorkerOfficial::build(ctx))
+            .await?;
+        queue
+            .register(EmbeddingSyncWorkerShared::build(ctx))
+            .await?;
+        queue
+            .register(ReindexWorkerTenantPrivate::build(ctx))
+            .await?;
+        queue.register(ReindexWorkerOfficial::build(ctx)).await?;
+        queue.register(ReindexWorkerShared::build(ctx)).await?;
         #[cfg(feature = "enterprise")]
         crate::ee::services::boot::connect_workers(ctx, queue).await?;
         Ok(())
     }
 
     fn register_tasks(tasks: &mut Tasks) {
-        workers::register_tasks(tasks);
+        tasks.register(tasks::create_tenant::CreateTenant);
+        tasks.register(tasks::create_workspace::CreateWorkspace);
+        tasks.register(tasks::create_api_key::CreateApiKey);
+        tasks.register(tasks::create_invite::CreateInvite);
+        tasks.register(tasks::list_tenants::ListTenants);
+        tasks.register(tasks::list_workspaces::ListWorkspaces);
+        tasks.register(tasks::create_user::CreateUser);
+        tasks.register(tasks::add_member::AddMember);
+        tasks.register(tasks::list_members::ListMembers);
+        tasks.register(tasks::list_api_keys::ListApiKeys);
+        tasks.register(tasks::revoke_api_key::RevokeApiKey);
+        tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
+        tasks.register(tasks::reindex_embeddings::ReindexEmbeddings);
+        tasks.register(tasks::maintenance::Maintenance);
+        tasks.register(tasks::maintenance_status::MaintenanceStatus);
+        tasks.register(tasks::db_load_guard::DbLoadGuard);
         #[cfg(feature = "enterprise")]
         crate::ee::services::boot::register_tasks(tasks);
     }
@@ -450,15 +573,66 @@ impl Hooks for App {
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())
     }
-    /// Publishing the templates themselves stays `seed_official_templates`'s own job; this only
-    /// ensures the tenant that owns them exists.
-    ///
-    /// That tenant is `INFRASTRUCTURE_TENANT_ID` (the nil UUID), which `models::tenancy` already
-    /// knows about and already excludes from every count it takes against `YORISHIRO_MAX_TENANTS`,
-    /// so seeding it cannot consume a single-tenant deployment's one slot.
+
+    /// Seeds the demo tenant and workspace from `fixtures/`, after the enterprise edition has
+    /// seeded what it owns.
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         #[cfg(feature = "enterprise")]
         crate::ee::services::boot::seed(ctx).await?;
-        seed::community(ctx, base).await
+        let fixtures = base.join("fixtures");
+        let tenants = fixtures.join("tenant_tenants.yaml");
+        if tenants.exists() {
+            loco_rs::db::seed::<crate::models::tenant_tenants::ActiveModel>(
+                &ctx.db,
+                &tenants.display().to_string(),
+            )
+            .await?;
+        }
+        let workspaces = fixtures.join("workspace_workspaces.yaml");
+        if workspaces.exists() {
+            loco_rs::db::seed::<crate::models::workspace_workspaces::ActiveModel>(
+                &ctx.db,
+                &workspaces.display().to_string(),
+            )
+            .await?;
+        }
+        Ok(())
     }
+}
+
+/// Builds the pools and shared services every entry point, tasks included, depends on.
+async fn install_services(ctx: AppContext) -> Result<AppContext> {
+    if ctx.is_sqlite() {
+        crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
+            .map_err(loco_rs::Error::Message)?;
+    }
+    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
+
+    if ctx.is_postgres() {
+        crate::db::install_pools(&ctx).await?;
+        // Replaced by a later `shared_store.insert` when an edition brings its own rule:
+        // `Arc<dyn Trait>` is keyed by `TypeId`, so the later insert wins without changing any call site.
+        ctx.shared_store
+            .insert(crate::controllers::middleware::auth::default_authenticator());
+    }
+
+    // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the
+    // error to the first search.
+    let embedding_provider = crate::services::embedding::build_embedding_provider(&settings)
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("failed to build embedding provider: {e}")))?;
+    ctx.shared_store.insert(embedding_provider);
+    // Both resolvers are installed on every backend, unlike the authenticator above: they read
+    // `ctx.db` directly, and a per-workspace assignment is not an RLS concept.
+    ctx.shared_store
+        .insert(crate::services::embedding::default_embedding_resolver());
+    ctx.shared_store
+        .insert(crate::workers::embedding_sync::default_worker_class_resolver());
+    // The per-workspace search token budget is request-scoped state, so it lives in `shared_store`
+    // rather than being built fresh in `after_routes` like the per-IP auth limiter.
+    ctx.shared_store.insert(Arc::new(
+        crate::controllers::middleware::rate_limit::RateLimiter::search(&settings),
+    ));
+    ctx.shared_store.insert(settings);
+    Ok(ctx)
 }

@@ -59,6 +59,24 @@ impl AppContextBackend for loco_rs::app::AppContext {
 /// `match cli.command` that dispatches to `Start`/`create_app`/`H::boot`.  Every
 /// subcommand (`task`, `db`, `scheduler`) opens `ctx.db` there, before any `Hooks` method
 /// runs.
+/// Builds the tenant and identity pools on PostgreSQL and stores them as the [`DbHandle`] every authenticated path resolves through.
+///
+/// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI), so it needs no hooks: it never scopes to a workspace.
+pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<()> {
+    let database_url = &ctx.config.database.uri;
+    let max_connections = ctx.config.database.max_connections;
+    let tenant = TenantDb::connect(database_url, max_connections)
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
+    let identity = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .connect(database_url)
+        .await
+        .map_err(|e| loco_rs::Error::Message(format!("failed to build identity pool: {e}")))?;
+    ctx.shared_store.insert(DbHandle { tenant, identity });
+    Ok(())
+}
+
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.
 ///
 /// Written out value by value, so the bytes are little-endian on every host rather than whatever order the host happens to use.
