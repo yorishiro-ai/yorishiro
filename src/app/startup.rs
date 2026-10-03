@@ -46,7 +46,7 @@ pub(super) async fn after_boot(
             .get::<crate::config::Settings>()
             .expect("application settings were installed in after_context");
         if let Some(config) =
-            crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings)
+            crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings.db_load_guard)
         {
             let ctx = result.app_context.clone();
             let task = spawn(async move { crate::services::db_load_guard::run(ctx, config).await });

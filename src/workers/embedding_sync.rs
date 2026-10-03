@@ -296,7 +296,7 @@ macro_rules! embedding_sync_worker_for_class {
                                 &self.ctx.db,
                                 id,
                                 attempt,
-                                "completed",
+                                crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
                                 None,
                             )
                             .await;

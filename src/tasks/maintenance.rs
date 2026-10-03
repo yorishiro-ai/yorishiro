@@ -35,7 +35,7 @@ impl Task for Maintenance {
                 details: vec![],
                 hint: String::new(),
             })?,
-            Err(_) => 300,
+            Err(_) => system_maintenance::DEFAULT_RETRY_AFTER_SECONDS,
         };
         let reason = vars.cli_arg("reason").ok().map(str::to_string);
 

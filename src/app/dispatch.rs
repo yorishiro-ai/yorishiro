@@ -26,7 +26,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
         let (plan, concurrency_limit) = match queue_concurrency_policy(
             ctx,
             args.workspace_id,
-            worker_class,
+            args.worker_class,
         )
         .await
         {
@@ -37,7 +37,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                     crate::models::queue_job_lifecycles::Enqueue {
                         id: lifecycle_id,
                         job_name: "embedding_sync",
-                        worker_class,
+                        worker_class: args.worker_class,
                         workspace_id: Some(args.workspace_id),
                         plan: None,
                         concurrency_key: Some(worker_class),
@@ -49,7 +49,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                     &ctx.db,
                     lifecycle_id,
                     None,
-                    "unavailable",
+                    crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
                     Some(&error),
                 )
                 .await;
@@ -68,7 +68,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                         crate::models::queue_job_lifecycles::Enqueue {
                             id: lifecycle_id,
                             job_name: "embedding_sync",
-                            worker_class,
+                            worker_class: args.worker_class,
                             workspace_id: Some(args.workspace_id),
                             plan: Some(&plan),
                             concurrency_key: Some(&concurrency_key),
@@ -80,7 +80,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                         &ctx.db,
                         lifecycle_id,
                         None,
-                        "unavailable",
+                        crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
                         Some(&diagnostic),
                     )
                     .await;
@@ -107,7 +107,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
             crate::models::queue_job_lifecycles::Enqueue {
                 id: lifecycle_id,
                 job_name: "embedding_sync",
-                worker_class,
+                worker_class: args.worker_class,
                 workspace_id: Some(args.workspace_id),
                 plan: Some(&plan),
                 concurrency_key: Some(&concurrency_key),
@@ -166,7 +166,7 @@ impl EmbeddingSyncDispatcher for LocoJobDispatcher {
                     &ctx.db,
                     lifecycle_id,
                     None,
-                    "unavailable",
+                    crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
                     Some(&error.to_string()),
                 )
                 .await;
@@ -194,7 +194,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
         let (plan, concurrency_limit) = match queue_concurrency_policy(
             ctx,
             args.workspace_id,
-            worker_class,
+            args.worker_class,
         )
         .await
         {
@@ -205,7 +205,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                     crate::models::queue_job_lifecycles::Enqueue {
                         id: lifecycle_id,
                         job_name: "reindex",
-                        worker_class,
+                        worker_class: args.worker_class,
                         workspace_id: Some(args.workspace_id),
                         plan: None,
                         concurrency_key: Some(worker_class),
@@ -217,7 +217,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                     &ctx.db,
                     lifecycle_id,
                     None,
-                    "unavailable",
+                    crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
                     Some(&error),
                 )
                 .await;
@@ -244,7 +244,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
             crate::models::queue_job_lifecycles::Enqueue {
                 id: lifecycle_id,
                 job_name: "reindex",
-                worker_class,
+                worker_class: args.worker_class,
                 workspace_id: Some(args.workspace_id),
                 plan: Some(&plan),
                 concurrency_key: Some(&concurrency_key),
@@ -303,7 +303,7 @@ impl ReindexDispatcher for LocoJobDispatcher {
                     &ctx.db,
                     lifecycle_id,
                     None,
-                    "unavailable",
+                    crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
                     Some(&error.to_string()),
                 )
                 .await;

@@ -6,6 +6,8 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy::{self, MembershipRole};
 
+const DEFAULT_INVITE_TTL_HOURS: i64 = 72;
+
 /// `cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner`
 ///
 /// `role` is one of `owner`/`admin`/`member`/`viewer`.
@@ -47,7 +49,7 @@ impl Task for CreateInvite {
                 details: vec![],
                 hint: String::new(),
             })?,
-            Err(_) => 72,
+            Err(_) => DEFAULT_INVITE_TTL_HOURS,
         };
 
         let (invite, token) = tenancy::create_invite(

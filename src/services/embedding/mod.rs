@@ -7,10 +7,6 @@ pub mod sync;
 
 pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 
-pub(crate) fn default_local_model() -> &'static str {
-    model_fetch::DEFAULT_MODEL.short_id
-}
-
 pub use openai::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
 
 use std::sync::Arc;
@@ -181,8 +177,8 @@ pub(crate) async fn build_embedding_provider(
         return Ok(std::sync::Arc::new(provider));
     }
 
-    match config.provider.as_str() {
-        "none" => {
+    match config.provider {
+        crate::config::EmbeddingProvider::None => {
             tracing::info!(
                 "embedding provider explicitly disabled (YORISHIRO_EMBEDDING_PROVIDER=none)"
             );
@@ -191,11 +187,8 @@ pub(crate) async fn build_embedding_provider(
                 remedy: "YORISHIRO_EMBEDDING_PROVIDER is set to \"none\"; unset it or set YORISHIRO_EMBEDDING_PROVIDER=local or YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL to enable embeddings",
             }))
         }
-        "local" => build_local_provider(config).await,
-        other => {
-            if other != "openai" {
-                anyhow::bail!("unknown embedding provider {other:?}");
-            }
+        crate::config::EmbeddingProvider::Local => build_local_provider(config).await,
+        crate::config::EmbeddingProvider::Openai => {
             tracing::info!(
                 "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
             );

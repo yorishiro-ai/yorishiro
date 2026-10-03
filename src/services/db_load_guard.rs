@@ -31,8 +31,7 @@ impl LoadGuardConfig {
     ///
     /// `YORISHIRO_DB_LOAD_THRESHOLD` defaults to zero, which disables the guard.
     /// `YORISHIRO_DB_LOAD_SUSTAIN_SECS` defaults to 30 and `YORISHIRO_DB_LOAD_POLL_SECS` defaults to 5.
-    pub(crate) fn from_settings(settings: &crate::config::Settings) -> Option<Self> {
-        let settings = &settings.db_load_guard;
+    pub(crate) fn from_settings(settings: &crate::config::DbLoadGuard) -> Option<Self> {
         if settings.threshold <= 0 {
             return None;
         }
@@ -40,7 +39,7 @@ impl LoadGuardConfig {
         Some(Self {
             threshold: settings.threshold,
             sustain: Duration::from_secs(settings.sustain_seconds),
-            poll: Duration::from_secs(settings.poll_seconds.max(1)),
+            poll: Duration::from_secs(settings.poll_seconds),
         })
     }
 }
@@ -223,7 +222,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
 /// Performs one diagnostic task invocation without changing maintenance mode.
 pub(crate) async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
     let settings = ctx.config.settings::<crate::config::Settings>()?;
-    let Some(config) = LoadGuardConfig::from_settings(&settings) else {
+    let Some(config) = LoadGuardConfig::from_settings(&settings.db_load_guard) else {
         return Ok(());
     };
     let active = poll(ctx).await?;
@@ -427,16 +426,5 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn zero_poll_interval_falls_back_to_one_second() {
-        let mut settings = crate::config::Settings::default();
-        settings.db_load_guard.threshold = 10;
-        settings.db_load_guard.poll_seconds = 0;
-        assert_eq!(
-            LoadGuardConfig::from_settings(&settings).unwrap().poll,
-            Duration::from_secs(1)
-        );
     }
 }

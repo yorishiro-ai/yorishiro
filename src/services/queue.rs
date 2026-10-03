@@ -4,6 +4,10 @@ use chrono::Utc;
 
 use crate::workers::embedding_sync::WorkerClass;
 
+const TENANT_PRIVATE_PRIORITY: i32 = 300;
+const OFFICIAL_PRIORITY: i32 = 200;
+const SHARED_PRIORITY: i32 = 100;
+
 /// The provider priority bands used by all three supported Loco providers.
 ///
 /// Loco defines larger values as more urgent and resolves ties by `run_at`, then
@@ -11,9 +15,9 @@ use crate::workers::embedding_sync::WorkerClass;
 /// does the ordering, while this module owns the application policy.
 pub(crate) const fn priority(class: WorkerClass) -> i32 {
     match class {
-        WorkerClass::TenantPrivate => 300,
-        WorkerClass::Official => 200,
-        WorkerClass::Shared => 100,
+        WorkerClass::TenantPrivate => TENANT_PRIVATE_PRIORITY,
+        WorkerClass::Official => OFFICIAL_PRIORITY,
+        WorkerClass::Shared => SHARED_PRIORITY,
     }
 }
 
@@ -46,9 +50,9 @@ async fn decide_for_dispatch_at(
     class: WorkerClass,
     now: chrono::DateTime<chrono::FixedOffset>,
 ) -> Result<Decision, sea_orm::DbErr> {
-    let lower_classes: &[&str] = match class {
-        WorkerClass::TenantPrivate => &["official", "shared"],
-        WorkerClass::Official => &["shared"],
+    let lower_classes: &[WorkerClass] = match class {
+        WorkerClass::TenantPrivate => &[WorkerClass::Official, WorkerClass::Shared],
+        WorkerClass::Official => &[WorkerClass::Shared],
         WorkerClass::Shared => &[],
     };
     if lower_classes.is_empty() {
@@ -110,8 +114,8 @@ mod tests {
 
     async fn lifecycle(
         db: &sea_orm::DatabaseConnection,
-        class: &str,
-        status: &str,
+        class: WorkerClass,
+        status: crate::models::queue_job_lifecycles::LifecycleStatus,
         enqueue_at: chrono::DateTime<chrono::FixedOffset>,
     ) {
         let id = uuid::Uuid::now_v7();
@@ -132,7 +136,7 @@ mod tests {
         crate::models::queue_job_lifecycles::Entity::update_many()
             .col_expr(
                 crate::models::queue_job_lifecycles::Column::Status,
-                Expr::value(status),
+                Expr::value(status.as_str()),
             )
             .col_expr(
                 crate::models::queue_job_lifecycles::Column::EnqueueAt,
@@ -168,8 +172,8 @@ mod tests {
             .fixed_offset();
         lifecycle(
             &db,
-            "shared",
-            "retrying",
+            WorkerClass::Shared,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Retrying,
             now - Duration::seconds(STARVATION_WAIT_SECONDS),
         )
         .await;
@@ -183,8 +187,8 @@ mod tests {
         let fresh = database().await;
         lifecycle(
             &fresh,
-            "shared",
-            "queued",
+            WorkerClass::Shared,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Queued,
             now - Duration::seconds(STARVATION_WAIT_SECONDS - 1),
         )
         .await;
@@ -203,10 +207,16 @@ mod tests {
             .single()
             .unwrap()
             .fixed_offset();
-        for status in ["running", "completed", "failed", "cancelled", "unavailable"] {
+        for status in [
+            crate::models::queue_job_lifecycles::LifecycleStatus::Running,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Failed,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Cancelled,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
+        ] {
             lifecycle(
                 &db,
-                "shared",
+                WorkerClass::Shared,
                 status,
                 now - Duration::seconds(STARVATION_WAIT_SECONDS + 1),
             )
@@ -222,8 +232,8 @@ mod tests {
 
         lifecycle(
             &db,
-            "official",
-            "queued",
+            WorkerClass::Official,
+            crate::models::queue_job_lifecycles::LifecycleStatus::Queued,
             now - Duration::seconds(STARVATION_WAIT_SECONDS + 1),
         )
         .await;

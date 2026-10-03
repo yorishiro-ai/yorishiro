@@ -30,7 +30,7 @@ use dispatch::LocoJobDispatcher;
 async fn queue_concurrency_policy(
     ctx: &AppContext,
     workspace_id: uuid::Uuid,
-    class: &str,
+    class: crate::workers::embedding_sync::WorkerClass,
 ) -> Result<(String, i32), String> {
     #[cfg(not(feature = "enterprise"))]
     {
@@ -68,13 +68,11 @@ async fn queue_concurrency_policy(
             }
         };
         let limit = match class {
-            "official" => plan.compute_policy().base_official_concurrency as i32,
-            "tenant_private" | "shared" => 1,
-            _ => {
-                return Err(format!(
-                    "queue policy unavailable: unknown worker class {class}"
-                ));
+            crate::workers::embedding_sync::WorkerClass::Official => {
+                plan.compute_policy().base_official_concurrency as i32
             }
+            crate::workers::embedding_sync::WorkerClass::TenantPrivate
+            | crate::workers::embedding_sync::WorkerClass::Shared => 1,
         };
         Ok((plan.as_str().to_owned(), limit))
     }
@@ -144,7 +142,7 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
                     &ctx.db,
                     lifecycle_id,
                     None,
-                    "unavailable",
+                    crate::models::queue_job_lifecycles::LifecycleStatus::Unavailable,
                     Some(&error.to_string()),
                 )
                 .await;

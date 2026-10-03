@@ -7,6 +7,60 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect, TransactionTrait};
 use tokio::task::JoinHandle;
 
+const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
+const LEASE_DURATION_MINUTES: i64 = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LifecycleStatus {
+    Queued,
+    Running,
+    Retrying,
+    Completed,
+    Failed,
+    Cancelled,
+    Unavailable,
+}
+
+impl LifecycleStatus {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Retrying => "retrying",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Unavailable => "unavailable",
+        }
+    }
+
+    fn from_db(value: &str) -> Result<Self, DbErr> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "retrying" => Ok(Self::Retrying),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            "unavailable" => Ok(Self::Unavailable),
+            other => Err(DbErr::Type(format!(
+                "unknown queue lifecycle status {other:?}"
+            ))),
+        }
+    }
+
+    #[cfg(test)]
+    const ALL: [Self; 7] = [
+        Self::Queued,
+        Self::Running,
+        Self::Retrying,
+        Self::Completed,
+        Self::Failed,
+        Self::Cancelled,
+        Self::Unavailable,
+    ];
+}
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
@@ -22,12 +76,19 @@ impl ActiveModelBehavior for ActiveModel {
 impl Entity {
     pub(crate) async fn count_waiting_lower_classes(
         db: &impl ConnectionTrait,
-        lower_classes: &[&str],
+        lower_classes: &[crate::workers::embedding_sync::WorkerClass],
         cutoff: DateTimeWithTimeZone,
     ) -> Result<u64, DbErr> {
+        let lower_classes = lower_classes
+            .iter()
+            .copied()
+            .map(crate::workers::embedding_sync::WorkerClass::as_db_str);
         Entity::find()
-            .filter(Column::Status.is_in(["queued", "retrying"]))
-            .filter(Column::WorkerClass.is_in(lower_classes.iter().copied()))
+            .filter(Column::Status.is_in([
+                LifecycleStatus::Queued.as_str(),
+                LifecycleStatus::Retrying.as_str(),
+            ]))
+            .filter(Column::WorkerClass.is_in(lower_classes))
             .filter(Column::EnqueueAt.lte(cutoff))
             .count(db)
             .await
@@ -41,10 +102,10 @@ impl Entity {
             id: Set(enqueue.id),
             provider_job_id: Set(None),
             job_name: Set(enqueue.job_name.to_owned()),
-            worker_class: Set(enqueue.worker_class.to_owned()),
+            worker_class: Set(enqueue.worker_class.as_db_str().to_owned()),
             workspace_id: Set(enqueue.workspace_id),
             plan: Set(enqueue.plan.map(str::to_owned)),
-            status: Set("queued".to_owned()),
+            status: Set(LifecycleStatus::Queued.as_str().to_owned()),
             enqueue_at: Set(Utc::now().fixed_offset()),
             claim_at: Set(None),
             start_at: Set(None),
@@ -87,7 +148,10 @@ impl Entity {
     ) -> Result<(), DbErr> {
         let now = Utc::now().fixed_offset();
         let result = Entity::update_many()
-            .col_expr(Column::Status, Expr::value("retrying"))
+            .col_expr(
+                Column::Status,
+                Expr::value(LifecycleStatus::Retrying.as_str()),
+            )
             .col_expr(Column::RetryAt, Expr::value(now))
             .col_expr(
                 Column::LeaseUntil,
@@ -98,9 +162,12 @@ impl Entity {
             .filter(if let Some(attempt) = attempt {
                 Column::Attempt
                     .eq(attempt)
-                    .and(Column::Status.eq("running"))
+                    .and(Column::Status.eq(LifecycleStatus::Running.as_str()))
             } else {
-                Column::Status.is_in(["queued", "retrying"])
+                Column::Status.is_in([
+                    LifecycleStatus::Queued.as_str(),
+                    LifecycleStatus::Retrying.as_str(),
+                ])
             })
             .exec(db)
             .await?;
@@ -119,7 +186,10 @@ impl Entity {
         now: DateTimeWithTimeZone,
     ) -> Result<(), DbErr> {
         let result = Entity::update_many()
-            .col_expr(Column::Status, Expr::value("retrying"))
+            .col_expr(
+                Column::Status,
+                Expr::value(LifecycleStatus::Retrying.as_str()),
+            )
             .col_expr(Column::RetryAt, Expr::value(now))
             .col_expr(
                 Column::LeaseUntil,
@@ -128,7 +198,7 @@ impl Entity {
             .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
             .filter(Column::Id.eq(id))
             .filter(Column::Attempt.eq(attempt))
-            .filter(Column::Status.eq("running"))
+            .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
             .filter(
                 Column::LeaseUntil
                     .is_not_null()
@@ -162,7 +232,7 @@ impl Entity {
             .col_expr(Column::LeaseUntil, Expr::value(now + lease_duration()))
             .filter(Column::Id.eq(id))
             .filter(Column::Attempt.eq(attempt))
-            .filter(Column::Status.eq("running"))
+            .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
             .exec(db)
             .await?;
         Ok(result.rows_affected == 1)
@@ -170,7 +240,8 @@ impl Entity {
 
     pub(crate) fn heartbeat(db: DatabaseConnection, id: Uuid, attempt: i32) -> JoinHandle<()> {
         tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             ticker.tick().await;
             loop {
                 match Self::renew(&db, id, attempt, Utc::now().fixed_offset()).await {
@@ -197,7 +268,8 @@ impl Entity {
             txn.rollback().await?;
             return Err(DbErr::RecordNotFound("queue lifecycle".into()));
         };
-        if initial.status == "running" {
+        let initial_status = LifecycleStatus::from_db(&initial.status)?;
+        if initial_status == LifecycleStatus::Running {
             if running_lease_is_live(initial.lease_until, now) {
                 txn.rollback().await?;
                 return Ok(Admission::Duplicate {
@@ -206,7 +278,10 @@ impl Entity {
             }
             tracing::warn!(lifecycle_id = %id, "reclaiming expired queue lease");
         }
-        if matches!(initial.status.as_str(), "completed" | "cancelled") {
+        if matches!(
+            initial_status,
+            LifecycleStatus::Completed | LifecycleStatus::Cancelled
+        ) {
             txn.rollback().await?;
             return Ok(Admission::Terminal);
         }
@@ -217,7 +292,7 @@ impl Entity {
             if let Some(limit) = limit {
                 let in_flight = Entity::find()
                     .filter(Column::ConcurrencyKey.eq(key.clone()))
-                    .filter(Column::Status.eq("running"))
+                    .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
                     .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
                     .filter(Column::Id.ne(id))
                     .count(&txn)
@@ -233,15 +308,19 @@ impl Entity {
                     );
                     txn.rollback().await?;
                     return Ok(Admission::Saturated {
-                        attempt: (initial.status == "running").then_some(initial.attempt),
+                        attempt: (initial_status == LifecycleStatus::Running)
+                            .then_some(initial.attempt),
                     });
                 }
             }
         }
-        let recovered = initial.status == "running";
+        let recovered = initial_status == LifecycleStatus::Running;
         let lease_until = now + lease_duration();
         let result = Entity::update_many()
-            .col_expr(Column::Status, Expr::value("running"))
+            .col_expr(
+                Column::Status,
+                Expr::value(LifecycleStatus::Running.as_str()),
+            )
             .col_expr(Column::ClaimAt, Expr::value(now))
             .col_expr(Column::StartAt, Expr::value(now))
             .col_expr(Column::AdmittedAt, Expr::value(now))
@@ -257,9 +336,13 @@ impl Entity {
             .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
             .filter(Column::Id.eq(id))
             .filter(if recovered {
-                Column::Status.eq("running")
+                Column::Status.eq(LifecycleStatus::Running.as_str())
             } else {
-                Column::Status.is_in(["queued", "failed", "retrying"])
+                Column::Status.is_in([
+                    LifecycleStatus::Queued.as_str(),
+                    LifecycleStatus::Failed.as_str(),
+                    LifecycleStatus::Retrying.as_str(),
+                ])
             })
             .exec(&txn)
             .await?;
@@ -269,7 +352,7 @@ impl Entity {
                 Some(
                     Entity::find()
                         .filter(Column::ConcurrencyKey.eq(key.clone()))
-                        .filter(Column::Status.eq("running"))
+                        .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
                         .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
                         .count(db)
                         .await?,
@@ -307,12 +390,12 @@ impl Entity {
         db: &impl ConnectionTrait,
         id: Uuid,
         attempt: Option<i32>,
-        status: &str,
+        status: LifecycleStatus,
         error: Option<&str>,
     ) -> Result<(), DbErr> {
         let now = Utc::now().fixed_offset();
         let mut update = Entity::update_many()
-            .col_expr(Column::Status, Expr::value(status))
+            .col_expr(Column::Status, Expr::value(status.as_str()))
             .col_expr(
                 Column::LeaseUntil,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
@@ -322,13 +405,21 @@ impl Entity {
         if let Some(attempt) = attempt {
             update = update
                 .filter(Column::Attempt.eq(attempt))
-                .filter(Column::Status.eq("running"));
+                .filter(Column::Status.eq(LifecycleStatus::Running.as_str()));
         }
         match status {
-            "completed" => update = update.col_expr(Column::CompletedAt, Expr::value(now)),
-            "failed" => update = update.col_expr(Column::FailedAt, Expr::value(now)),
-            "retrying" => update = update.col_expr(Column::RetryAt, Expr::value(now)),
-            "cancelled" => update = update.col_expr(Column::CancelledAt, Expr::value(now)),
+            LifecycleStatus::Completed => {
+                update = update.col_expr(Column::CompletedAt, Expr::value(now));
+            }
+            LifecycleStatus::Failed => {
+                update = update.col_expr(Column::FailedAt, Expr::value(now));
+            }
+            LifecycleStatus::Retrying => {
+                update = update.col_expr(Column::RetryAt, Expr::value(now));
+            }
+            LifecycleStatus::Cancelled => {
+                update = update.col_expr(Column::CancelledAt, Expr::value(now));
+            }
             _ => {}
         }
         let result = update.exec(db).await?;
@@ -365,13 +456,13 @@ fn running_lease_is_live(
 }
 
 fn lease_duration() -> chrono::Duration {
-    chrono::Duration::minutes(5)
+    chrono::Duration::minutes(LEASE_DURATION_MINUTES)
 }
 
 pub(crate) struct Enqueue<'a> {
     pub(crate) id: Uuid,
     pub(crate) job_name: &'a str,
-    pub(crate) worker_class: &'a str,
+    pub(crate) worker_class: crate::workers::embedding_sync::WorkerClass,
     pub(crate) workspace_id: Option<Uuid>,
     pub(crate) plan: Option<&'a str>,
     pub(crate) concurrency_key: Option<&'a str>,
@@ -394,7 +485,15 @@ mod tests {
     use sea_orm::{ConnectionTrait, Database, DatabaseBackend, EntityTrait, Statement};
     use tempfile::tempdir;
 
-    use super::{Admission, Enqueue, Entity, lease_duration};
+    use super::{Admission, Enqueue, Entity, LifecycleStatus, lease_duration};
+
+    #[test]
+    fn lifecycle_status_values_round_trip() {
+        for status in LifecycleStatus::ALL {
+            assert_eq!(LifecycleStatus::from_db(status.as_str()), Ok(status));
+        }
+        assert!(LifecycleStatus::from_db("unknown").is_err());
+    }
 
     async fn database() -> sea_orm::DatabaseConnection {
         let path = tempdir().unwrap().keep().join("queue.sqlite3");
@@ -411,7 +510,7 @@ mod tests {
             Enqueue {
                 id,
                 job_name: "test",
-                worker_class: "shared",
+                worker_class: crate::workers::embedding_sync::WorkerClass::Shared,
                 workspace_id: None,
                 plan: None,
                 concurrency_key: Some("shared"),
@@ -507,14 +606,26 @@ mod tests {
             Admission::Recovered { attempt: 2 }
         );
         assert!(
-            Entity::finish(&db, id, Some(1), "completed", None)
-                .await
-                .is_err()
+            Entity::finish(
+                &db,
+                id,
+                Some(1),
+                crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+                None
+            )
+            .await
+            .is_err()
         );
         assert!(
-            Entity::finish(&db, id, Some(2), "completed", None)
-                .await
-                .is_ok()
+            Entity::finish(
+                &db,
+                id,
+                Some(2),
+                crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+                None
+            )
+            .await
+            .is_ok()
         );
     }
 
@@ -610,13 +721,25 @@ mod tests {
         assert_eq!(row.status, "retrying");
         assert_eq!(row.attempt, 1);
         assert!(
-            Entity::finish(&db, expired, Some(1), "completed", None)
-                .await
-                .is_err()
-        );
-        Entity::finish(&db, active, Some(1), "completed", None)
+            Entity::finish(
+                &db,
+                expired,
+                Some(1),
+                crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+                None
+            )
             .await
-            .unwrap();
+            .is_err()
+        );
+        Entity::finish(
+            &db,
+            active,
+            Some(1),
+            crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             Entity::start_at(&db, expired, expired_at).await.unwrap(),
             Admission::Started { attempt: 2 }

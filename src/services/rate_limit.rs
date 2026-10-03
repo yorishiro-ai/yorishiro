@@ -9,6 +9,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+const ONE_MINUTE: Duration = Duration::from_secs(60);
+
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
@@ -52,10 +54,7 @@ impl RateLimiter {
     /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is known and is the thing whose consumption matters.
     /// The default is high enough that ordinary use never reaches it: it is there to bound a runaway agent, not to ration.
     pub(crate) fn search(config: &crate::config::Settings) -> Self {
-        Self::new(
-            config.rate_limit.search_tokens_per_minute,
-            Duration::from_secs(60),
-        )
+        Self::new(config.rate_limit.search_tokens_per_minute, ONE_MINUTE)
     }
 
     /// Returns `true` if this call is within the limit, `false` if `key` has exhausted its quota for the current window.

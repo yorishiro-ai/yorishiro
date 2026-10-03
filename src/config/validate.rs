@@ -17,6 +17,18 @@ pub(super) fn validate(config: &Config) -> Result<()> {
             "settings.max_tenants must not be negative".into(),
         ));
     }
+    if settings.embedding.dimensions == 0
+        || settings.embedding.local_max_sequence_length == 0
+        || settings.rate_limit.auth_max_requests == 0
+        || settings.rate_limit.auth_window_seconds == 0
+        || settings.rate_limit.search_tokens_per_minute == 0
+        || settings.db_load_guard.sustain_seconds == 0
+        || settings.db_load_guard.poll_seconds == 0
+    {
+        return Err(Error::Message(
+            "embedding dimensions and sequence length, rate limits, and database load guard durations must be greater than zero".into(),
+        ));
+    }
     validate_queue_policy(config)
 }
 

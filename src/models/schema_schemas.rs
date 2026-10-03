@@ -198,7 +198,7 @@ pub async fn get_active_schema(
     let row = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Name.eq(name))
-        .filter(Column::Status.eq("active"))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
         .order_by_desc(Column::Version)
         .one(conn)
         .await
@@ -222,7 +222,7 @@ pub async fn count_active(
 
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
-        .filter(Column::Status.eq("active"))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
         .count(conn)
         .await
         .internal()
@@ -392,7 +392,7 @@ pub async fn create_schema(
     let previous = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Name.eq(&name))
-        .filter(Column::Status.eq("active"))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
         .order_by_desc(Column::Version)
         .one(conn)
         .await
@@ -454,7 +454,7 @@ pub async fn create_schema(
             )
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Name.eq(&name))
-            .filter(Column::Status.eq("active"))
+            .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
             .exec(conn)
             .await
             .internal()?;
