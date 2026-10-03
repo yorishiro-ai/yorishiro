@@ -1,13 +1,13 @@
 name: Documentation Check
 
-# Runs on develop/loco-rebuild. The source-path detection below covers `src/` and `ee/`, which is
+# Runs on develop. The source-path detection below covers `src/` and `ee/`, which is
 # where this repository's Rust lives; `master`'s own layout is different and its workflow is
 # separate.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop, loco-rebuild]
+    branches: [develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

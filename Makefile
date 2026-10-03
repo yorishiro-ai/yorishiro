@@ -13,7 +13,7 @@ YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
 check: check-ce
 
 check-ce:
-	cargo check --locked --no-default-features --workspace
+	cargo check --locked --no-default-features --features community --workspace
 
 check-ee:
 	cargo check --locked --features enterprise --workspace
@@ -21,7 +21,7 @@ check-ee:
 clippy: clippy-ce
 
 clippy-ce:
-	cargo clippy --locked --no-default-features --workspace --lib --bins -- -D warnings
+	cargo clippy --locked --no-default-features --features community --workspace --lib --bins -- -D warnings
 
 clippy-ee:
 	cargo clippy --locked --workspace --tests --features test-support -- -D warnings
@@ -66,7 +66,7 @@ test-redis:
 build: build-ce
 
 build-ce:
-	cargo build --locked --no-default-features --workspace
+	cargo build --locked --no-default-features --features community --workspace
 
 build-ee:
 	cargo build --locked --features enterprise --workspace

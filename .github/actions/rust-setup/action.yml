@@ -11,16 +11,29 @@ inputs:
     required: false
     default: ''
   toolchain:
-    description: Rust toolchain to install
+    description: Rust toolchain to install. Empty means the channel pinned in rust-toolchain.toml.
     required: false
-    default: '1.97.0'
+    default: ''
 runs:
   using: composite
   steps:
+    - name: Resolve the toolchain
+      id: resolve
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        toolchain="${TOOLCHAIN:-$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)}"
+        if [ -z "$toolchain" ]; then
+          echo "::error::no toolchain input and no channel in rust-toolchain.toml" >&2
+          exit 1
+        fi
+        echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+
     - name: Set up Rust toolchain
       uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
       with:
-        toolchain: ${{ inputs.toolchain }}
+        toolchain: ${{ steps.resolve.outputs.toolchain }}
         components: ${{ inputs.components }}
 
     - name: Add targets

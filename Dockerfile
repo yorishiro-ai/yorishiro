@@ -12,7 +12,10 @@
 # copied the result into the cargo build so the SPA could be embedded. That directory does not
 # exist on this branch: the frontend is not part of the rebuild yet. When it returns, its stage
 # comes back with it, in the same change that adds the directory.
-FROM rust:1.97-slim AS builder
+# Pinned in rust-toolchain.toml: the release workflows pass that channel as RUST_VERSION, and CI
+# fails when this default drifts from it, so a plain `docker build` agrees with them.
+ARG RUST_VERSION=1.97.0
+FROM rust:${RUST_VERSION}-slim AS builder
 ARG EDITION=ee
 
 RUN apt-get update && apt-get install -y \
@@ -32,7 +35,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     RUSTC_WRAPPER= cargo install sccache --locked --version 0.10.0 \
     && export RUSTC_WRAPPER=/usr/local/cargo/bin/sccache \
     && (case "$EDITION" in \
-      ce) cargo build --locked --no-default-features --release --bin yorishiro ;; \
+      ce) cargo build --locked --no-default-features --features community --release --bin yorishiro ;; \
       ee) cargo build --locked --features enterprise --release --bin yorishiro ;; \
       *) echo "unknown EDITION=$EDITION" >&2; exit 1 ;; \
     esac) \
@@ -41,7 +44,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # The binary uses the system C++ runtime for candle/tokenizers support, so the runtime image
 # installs the same libgcc/libstdc++ dependencies declared by the native packages.
 # ca-certificates is for the OpenAI-compatible provider's TLS, curl for the HEALTHCHECK.
-# The base stays on the same glibc as the builder (debian trixie, matching rust:1.97-slim).
+# The base stays on the same glibc as the builder (debian trixie, matching the rust:*-slim builder).
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y \

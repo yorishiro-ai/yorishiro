@@ -11,11 +11,14 @@ default-run = "yorishiro"
 
 [features]
 default = ["enterprise"]
+# The community edition: build it with `--no-default-features --features community`.
+community = ["openapi"]
+# The enterprise edition is the community edition plus the `ee/` overlay.
 enterprise = [
+  "community",
   "dep:base64",
   "dep:hmac",
   "dep:jsonwebtoken",
-  "openapi",
 ]
 openapi = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 test-support = []

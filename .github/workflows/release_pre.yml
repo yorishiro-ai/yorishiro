@@ -22,14 +22,18 @@ env:
   IMAGE_NAME: ghcr.io/yorishiro-ai/yorishiro
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
+
+# One release at a time: two dispatches racing would race on tags and on develop.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-26.04
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       ref: ${{ steps.plan.outputs.ref }}
@@ -96,7 +100,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
@@ -105,7 +109,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-directories: ~/.cache/ort.pyke.io
 
@@ -114,33 +118,12 @@ jobs:
           BUILD_SHA: ${{ needs.prepare.outputs.tag }}
         run: |
           if [ "${{ matrix.edition }}" = ce ]; then
-            cargo build --locked --no-default-features --release --bin yorishiro
+            cargo build --locked --no-default-features --features community --release --bin yorishiro
           else
             cargo build --locked --features enterprise --release --bin yorishiro
           fi
 
-      - name: Install nfpm
-        env:
-          NFPM_VERSION: 2.47.0
-          ARCH: ${{ matrix.arch }}
-          EDITION: ${{ matrix.edition }}
-        run: |
-          case "$ARCH" in
-            amd64) asset_arch=x86_64 ;;
-            arm64) asset_arch=arm64 ;;
-            *) echo "no nfpm asset known for arch '$ARCH'" >&2; exit 1 ;;
-          esac
-          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
-          asset="nfpm_${NFPM_VERSION}_Linux_${asset_arch}.tar.gz"
-
-          curl -fsSL -o /tmp/nfpm.tar.gz "${base}/${asset}"
-          curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
-          ( cd /tmp && cp nfpm.tar.gz "$asset" \
-            && sha256sum --check --ignore-missing --strict nfpm-checksums.txt \
-            && rm -f "$asset" )
-          tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
-          sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
-          nfpm --version
+      - uses: ./.github/actions/install-nfpm
 
       - name: Package (deb and rpm)
         env:
@@ -171,7 +154,7 @@ jobs:
     needs: [binary, prepare]
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
@@ -199,15 +182,13 @@ jobs:
             rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
             rpm -qp --obsoletes "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
           done
+      - uses: ./.github/actions/install-nfpm
       - name: Build retired unified packages for migration tests
         env:
           VERSION: ${{ needs.prepare.outputs.tag }}
           ARCH: amd64
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/nfpm.tar.gz https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz
-          tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
-          sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           mkdir -p target/release /tmp/unified
           dpkg-deb -x "dist/yorishiro-ce-${VERSION}-amd64.deb" /tmp/ce
           cp /tmp/ce/usr/bin/yorishiro target/release/yorishiro
@@ -242,6 +223,8 @@ jobs:
             arch: arm64
             edition: ee
     runs-on: ${{ matrix.os }}
+    permissions:
+      packages: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -258,12 +241,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read the pinned Rust version
+        id: rust
+        run: echo "version=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           push: ${{ !inputs.dry_run }}
           provenance: false
-          build-args: EDITION=${{ matrix.edition }}
+          build-args: |
+            EDITION=${{ matrix.edition }}
+            RUST_VERSION=${{ steps.rust.outputs.version }}
           tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-${{ matrix.edition }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
@@ -272,6 +261,8 @@ jobs:
     needs: [docker, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    permissions:
+      packages: write
     strategy:
       matrix:
         edition: [ce, ee]
@@ -300,6 +291,8 @@ jobs:
     needs: [docker-manifest, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    permissions:
+      packages: read
     strategy:
       matrix:
         edition: [ce, ee]
@@ -356,6 +349,10 @@ jobs:
     needs: [binary, smoke, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

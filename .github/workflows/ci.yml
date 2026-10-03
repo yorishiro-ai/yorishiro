@@ -7,7 +7,7 @@ name: CI
 
 on:
   push:
-    branches: [develop, loco-rebuild]
+    branches: [develop]
     paths-ignore:
       - "docs/**"
       - "ee/docs/**"
@@ -17,7 +17,7 @@ on:
       - ".github/workflows/release_pre.yml"
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop, loco-rebuild]
+    branches: [develop]
     paths-ignore:
       - "docs/**"
       - "ee/docs/**"
@@ -31,9 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  checks: write
   contents: read
-  actions: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,6 +51,7 @@ jobs:
   ce:
     name: Community edition
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-setup
@@ -65,12 +64,15 @@ jobs:
         run: make check-ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
-      - name: Test CE MCP inventory
-        run: cargo test --locked --no-default-features --lib services::mcp::tests
+      - name: Test CE library
+        # The whole CE lib suite, not a name filter: a filter that stops matching still passes
+        # with zero tests, which is how the old `services::mcp::tests` filter went unnoticed.
+        run: cargo test --locked --no-default-features --features community --lib
 
   check:
     name: Enterprise edition
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -133,6 +135,22 @@ jobs:
           PUBLIC_API_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           PUBLIC_API_HEAD_REF: WORKTREE
 
+      - name: Check pinned versions agree
+        # Versions that cannot be read from their source of truth at run time are checked instead:
+        # a service image or a Docker build default cannot take a step output.
+        run: |
+          toolchain="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+          grep -qx "ARG RUST_VERSION=${toolchain}" Dockerfile \
+            || { echo "::error::Dockerfile's RUST_VERSION default is not rust-toolchain.toml's channel ${toolchain}"; exit 1; }
+          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+' 'sccache --locked --version [0-9.]+'; do
+            found="$(grep -rhoE "$pattern" .github docker-compose.yml Dockerfile Makefile | sort -u)"
+            if [ "$(wc -l <<<"$found")" -ne 1 ]; then
+              echo "::error::pinned versions disagree for '$pattern':"
+              echo "$found"
+              exit 1
+            fi
+          done
+
       - name: Check for allow(dead_code)
         run: |
           # SeaORM FromQueryResult requires exact field names for column mapping,
@@ -167,20 +185,25 @@ jobs:
         run: cargo clippy --locked --workspace --lib --features enterprise -- --force-warn clippy::missing_errors_doc --force-warn clippy::missing_panics_doc
 
   msrv:
-    name: MSRV (Rust 1.94)
+    name: MSRV
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Read the MSRV from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/rust-setup
         with:
-          toolchain: '1.94.0'
-      - run: rustc +1.94.0 --version --verbose
-      - run: cargo +1.94.0 check --locked --no-default-features --workspace
-      - run: cargo +1.94.0 check --locked --features enterprise --workspace
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - run: rustc +${{ steps.msrv.outputs.version }} --version --verbose
+      - run: cargo +${{ steps.msrv.outputs.version }} check --locked --no-default-features --features community --workspace
+      - run: cargo +${{ steps.msrv.outputs.version }} check --locked --features enterprise --workspace
 
   prepare-embedding:
     name: Models
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -225,6 +248,7 @@ jobs:
     name: "Test (DB: ${{ matrix.db }}, Queue: ${{ matrix.queue }})"
     needs: prepare-embedding
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -314,8 +338,9 @@ jobs:
       - name: Build workspace
         run: cargo build --locked --workspace
 
-      - name: Install sea-orm-cli with postgres-vector feature
-        run: cargo install sea-orm-cli --locked --version 2.0.4 --features postgres-vector,sqlx-postgres,sqlx-sqlite
+      # Only the entity regeneration check shells out to sea-orm-cli, and that runs on PostgreSQL.
+      - if: matrix.backend == 'postgres'
+        uses: ./.github/actions/sea-orm-cli
 
       - name: Install pgvector and pg_trgm (postgres only)
         if: matrix.backend == 'postgres'

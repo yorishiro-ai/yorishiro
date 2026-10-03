@@ -13,6 +13,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   coverage:
     runs-on: ubuntu-latest
@@ -53,8 +56,7 @@ jobs:
       - name: Build workspace
         run: cargo build --locked --workspace
 
-      - name: Install sea-orm-cli with postgres-vector feature
-        run: cargo install sea-orm-cli --locked --version 2.0.4 --features postgres-vector,sqlx-postgres,sqlx-sqlite
+      - uses: ./.github/actions/sea-orm-cli
 
       - name: Install pgvector and pg_trgm
         run: |
