@@ -9,10 +9,10 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::{
     ReadScope, Verified, db_handle, resolve_embedding_provider, search_token_limiter,
 };
+use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
 use crate::models::search::{self, SearchHit};
-use crate::services::rate_limit::charge_search_tokens;
 
 #[derive(Deserialize)]
 pub struct SearchEntitiesParams {

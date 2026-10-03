@@ -437,15 +437,16 @@ impl Hooks for App {
             .shared_store
             .get::<crate::data::settings::Settings>()
             .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
-        let rate_limiter =
-            std::sync::Arc::new(crate::services::rate_limit::RateLimiter::auth(&settings));
+        let rate_limiter = std::sync::Arc::new(
+            crate::controllers::middleware::rate_limit::RateLimiter::auth(&settings),
+        );
         let router = router.layer(axum::middleware::from_fn_with_state(
             rate_limiter,
-            crate::services::rate_limit::enforce,
+            crate::controllers::middleware::rate_limit::enforce,
         ));
         Ok(router.layer(axum::middleware::from_fn_with_state(
             ctx.clone(),
-            crate::services::maintenance::maintenance_guard,
+            crate::controllers::middleware::maintenance::maintenance_guard,
         )))
     }
 
@@ -468,7 +469,7 @@ impl Hooks for App {
         let mut stack = loco_rs::controller::middleware::default_middleware_stack(ctx);
         stack.replace(
             "logger",
-            Box::new(crate::services::access_log::Middleware::new(
+            Box::new(crate::controllers::middleware::access_log::Middleware::new(
                 &logger_config,
                 &ctx.environment,
             )),

@@ -48,10 +48,9 @@ pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
     ctx.shared_store
         .insert(crate::workers::embedding_sync::default_worker_class_resolver());
     // Per-workspace search token budget: a request scope, so it belongs in shared_store rather than being built fresh in after_routes like the (per-IP, request-scoped-only) auth rate limiter is.
-    ctx.shared_store
-        .insert(Arc::new(crate::services::rate_limit::RateLimiter::search(
-            &settings,
-        )));
+    ctx.shared_store.insert(Arc::new(
+        crate::controllers::middleware::rate_limit::RateLimiter::search(&settings),
+    ));
     ctx.shared_store.insert(settings);
 
     Ok(ctx)

@@ -8,6 +8,7 @@ pub mod extractors;
 pub mod import;
 pub mod mcp;
 pub mod members;
+pub mod middleware;
 #[cfg(feature = "openapi")]
 pub mod openapi;
 pub mod relations;

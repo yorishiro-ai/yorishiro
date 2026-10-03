@@ -120,9 +120,9 @@ pub(crate) async fn resolve_worker_class(
 /// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 pub(crate) fn search_token_limiter(
     ctx: &AppContext,
-) -> Result<Arc<crate::services::rate_limit::RateLimiter>, ApiError> {
+) -> Result<Arc<crate::controllers::middleware::rate_limit::RateLimiter>, ApiError> {
     ctx.shared_store
-        .get::<Arc<crate::services::rate_limit::RateLimiter>>()
+        .get::<Arc<crate::controllers::middleware::rate_limit::RateLimiter>>()
         .ok_or_else(|| {
             ApiError(YorishiroError::Internal(anyhow::anyhow!(
                 "search token RateLimiter missing"

@@ -12,10 +12,10 @@ use serde_json::Value;
 
 use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::controllers::extractors::{db_handle, resolve_embedding_provider, search_token_limiter};
+use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::error::YorishiroError;
 use crate::models::search;
 use crate::services::auth::ApiKeyScope;
-use crate::services::rate_limit::charge_search_tokens;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SearchEntitiesArgs {

@@ -84,3 +84,7 @@ src/data/mod.rs	mod	config	integration-test: `data::config::load` is the Loco co
 src/data/config.rs	fn	load	integration-test: loads an environment exactly as `Hooks::load_config` does, so request tests and config tests share one path.
 src/data/mod.rs	mod	templates	integration-test: built-in template data that the integration-test crate counts and inspects.
 src/controllers/mcp/mod.rs	fn	mount	app-hooks: mounts the MCP transport from `Hooks::after_routes`; previously `src/controllers/mcp.rs`, folded into the MCP controller module.
+src/controllers/middleware/mod.rs	mod	access_log	openapi-transport: request-layer module moved from `services/` into the controller layer; integration tests and `app::App` reach it by path.
+src/controllers/middleware/mod.rs	mod	maintenance	openapi-transport: request-layer module moved from `services/` into the controller layer; integration tests and `app::App` reach it by path.
+src/controllers/middleware/mod.rs	mod	rate_limit	openapi-transport: request-layer module moved from `services/` into the controller layer; integration tests and `app::App` reach it by path.
+src/controllers/mod.rs	mod	middleware	openapi-transport: request-layer module moved from `services/` into the controller layer; integration tests and `app::App` reach it by path.
