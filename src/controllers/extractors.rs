@@ -7,10 +7,10 @@ use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
+use crate::controllers::middleware::auth::{self, Authenticator};
 use crate::db::{AppContextBackend, DbHandle};
 use crate::error::YorishiroError;
-use crate::services::auth;
-use crate::services::auth::{ApiKeyScope, Authenticator};
+use crate::models::api_keys::{self, ApiKeyScope};
 
 use super::ApiError;
 
@@ -36,7 +36,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
     })
 }
 
-/// Also used by the MCP adapter (`services::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
+/// Also used by the MCP adapter (`controllers::mcp`), which authorizes per-tool rather than through this file's `FromRequestParts` impls, but still needs the same `DbHandle` out of `shared_store`.
 pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
     ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
         ApiError(YorishiroError::Internal(anyhow::anyhow!(
@@ -45,7 +45,7 @@ pub(crate) fn db_handle(ctx: &AppContext) -> Result<DbHandle, ApiError> {
     })
 }
 
-/// See `db_handle`'s doc comment: also used by `services::mcp`.
+/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 pub(crate) fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, ApiError> {
     ctx.shared_store
         .get::<Arc<dyn Authenticator>>()
@@ -56,7 +56,7 @@ pub(crate) fn authenticator(ctx: &AppContext) -> Result<Arc<dyn Authenticator>, 
         })
 }
 
-/// See `db_handle`'s doc comment: also used by `services::mcp`.
+/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 /// Returns the deployment-wide provider, ignoring any workspace-level assignment: the caller has no `workspace_id` yet (setup, a fresh workspace's dimension stamp) or explicitly wants the deployment default regardless of what a workspace is assigned.
 /// A caller resolving a provider *for* a workspace's own work (search, embedding sync) wants `resolve_embedding_provider` instead.
 pub(crate) fn embedding_provider(
@@ -72,7 +72,7 @@ pub(crate) fn embedding_provider(
 }
 
 /// The embedding provider `workspace_id` should actually use: its own assignment through the `WorkspaceEmbeddingResolver` trait object if it has one, the deployment default otherwise.
-/// Also used by `services::mcp`.
+/// Also used by `controllers::mcp`.
 pub(crate) async fn resolve_embedding_provider(
     ctx: &AppContext,
     workspace_id: Uuid,
@@ -117,12 +117,12 @@ pub(crate) async fn resolve_worker_class(
         .unwrap_or(crate::workers::embedding_sync::WorkerClass::Shared))
 }
 
-/// See `db_handle`'s doc comment: also used by `services::mcp`.
+/// See `db_handle`'s doc comment: also used by `controllers::mcp`.
 pub(crate) fn search_token_limiter(
     ctx: &AppContext,
-) -> Result<Arc<crate::services::rate_limit::RateLimiter>, ApiError> {
+) -> Result<Arc<crate::controllers::middleware::rate_limit::RateLimiter>, ApiError> {
     ctx.shared_store
-        .get::<Arc<crate::services::rate_limit::RateLimiter>>()
+        .get::<Arc<crate::controllers::middleware::rate_limit::RateLimiter>>()
         .ok_or_else(|| {
             ApiError(YorishiroError::Internal(anyhow::anyhow!(
                 "search token RateLimiter missing"
@@ -132,7 +132,7 @@ pub(crate) fn search_token_limiter(
 
 /// The sole entry point for authenticated requests with no scope requirement and no DB connection.
 /// Requiring this type as a handler argument is itself a declaration that "this route requires authentication."
-pub struct AuthContext(pub auth::AuthContext);
+pub struct AuthContext(pub api_keys::AuthContext);
 
 impl<S> FromRequestParts<S> for AuthContext
 where
@@ -148,10 +148,10 @@ where
 
         // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.is_sqlite() {
-            let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
+            let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
-            auth::touch_last_used_sqlite(&app_ctx.db, ctx.api_key_id).await;
+            api_keys::Entity::touch_last_used(&app_ctx.db, ctx.api_key_id).await;
             return Ok(AuthContext(ctx));
         }
 
@@ -171,7 +171,7 @@ where
 }
 
 /// Marker for declaring an endpoint's required API key scope at the type level.
-pub trait RequiredScope {
+pub(crate) trait RequiredScope {
     const SCOPE: ApiKeyScope;
 }
 
@@ -180,7 +180,7 @@ impl RequiredScope for ReadScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Read;
 }
 
-pub struct WriteScope;
+pub(crate) struct WriteScope;
 impl RequiredScope for WriteScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Write;
 }
@@ -190,7 +190,7 @@ impl RequiredScope for SchemaScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Schema;
 }
 
-pub struct MigrationScope;
+pub(crate) struct MigrationScope;
 impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
@@ -201,7 +201,7 @@ impl RequiredScope for MigrationScope {
 /// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
 /// A read-only handler can just let it drop; a rollback of nothing-written is a no-op.
 pub struct Authorized<R> {
-    pub ctx: auth::AuthContext,
+    pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
     _scope: PhantomData<R>,
 }
@@ -265,8 +265,8 @@ where
 
 /// As `Authorized<R>`, but for the `audit` grant rather than a `RequiredScope`.
 /// Not generic over `R` the way `Authorized<R>` is: `audit` is one grant, not a family of scopes, so there is nothing for a type parameter to select between.
-pub struct AuditAuthorized {
-    pub ctx: auth::AuthContext,
+pub(crate) struct AuditAuthorized {
+    pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
 }
 
@@ -311,7 +311,7 @@ where
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified<R> {
-    pub ctx: auth::AuthContext,
+    pub ctx: api_keys::AuthContext,
     _scope: PhantomData<R>,
 }
 
@@ -331,11 +331,11 @@ where
 
         // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.is_sqlite() {
-            let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
+            let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
             auth::require_scope(&ctx, R::SCOPE)?;
-            auth::touch_last_used_sqlite(&app_ctx.db, ctx.api_key_id).await;
+            api_keys::Entity::touch_last_used(&app_ctx.db, ctx.api_key_id).await;
             return Ok(Verified {
                 ctx,
                 _scope: PhantomData,

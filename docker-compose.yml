@@ -74,15 +74,13 @@ services:
     # start for about 522 MiB. Both files or neither, though: exactly one present is a startup
     # error rather than a partial fetch.
     environment:
-      # These override their documented counterparts in /app/yorishiro.yaml.
+      # These override their documented counterparts in /app/config/production.yaml.
       DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
       QUEUE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
       HOST: http://localhost:5150
       LOG_LEVEL: info
-      # The local embedding provider, reading the mount above. Unlike the settings below it,
-      # this is not the binary's default: without it the OpenAI-compatible provider is selected,
-      # and with neither YORISHIRO_EMBEDDING_BASE_URL nor YORISHIRO_EMBEDDING_MODEL set the app
-      # starts with no embedding backend and errors on the first search.
+      # Explicitly retain the packaged default: run the local embedding provider and fetch its
+      # model into the container cache when no read-only model mount is supplied.
       YORISHIRO_EMBEDDING_PROVIDER: local
       # YORISHIRO_LOCAL_MODEL_PATH and YORISHIRO_LOCAL_TOKENIZER_PATH were removed: the
       # operator-chosen path was structurally unbound from the model identifier, so the

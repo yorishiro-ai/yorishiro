@@ -207,7 +207,7 @@ impl From<YorishiroError> for loco_rs::Error {
 
 /// Machine-readable classification of a validation error.
 ///
-/// New branches in `src/metaschema/validate.rs` should get their own variant here.
+/// New branches in `src/models/schema_schemas/metaschema/validate.rs` should get their own variant here.
 /// Use the `Other` catch-all for errors that do not fit a specific classification.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum ValidationErrorCode {
@@ -215,7 +215,7 @@ pub enum ValidationErrorCode {
     TypeMismatch,
     /// A required field was empty or missing.
     EmptyRequired,
-    /// Object nesting exceeds [`crate::metaschema::MAX_OBJECT_DEPTH`].
+    /// Object nesting exceeds [`crate::models::schema_schemas::metaschema::MAX_OBJECT_DEPTH`].
     DepthExceeded,
     /// A numeric field uses minimum/maximum on a non-numeric type.
     NumericOnNonNumeric,
@@ -241,6 +241,7 @@ pub enum ValidationErrorCode {
 
 /// A single validation error detail, included in `ValidationFailed.details`.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ValidationDetail {
     /// JSON pointer to the field being validated (e.g. `/entity_types/foo/fields/bar`).
     pub field: String,
@@ -249,6 +250,7 @@ pub struct ValidationDetail {
     pub problem: String,
     /// Machine-readable classification of the error.
     /// Clients should switch on this to render localized messages.
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub code: ValidationErrorCode,
     /// The expected value (e.g. "string", "object", "5"), or `None` if not applicable.
     pub expected: Option<String>,

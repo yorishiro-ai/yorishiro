@@ -5,14 +5,6 @@ use utoipa::openapi::path::{HttpMethod, Operation};
 #[cfg(feature = "openapi")]
 use utoipa::openapi::{RefOr, Schema};
 
-/// The edition that owns a REST route.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Edition {
-    Community,
-    #[cfg(feature = "openapi")]
-    Enterprise,
-}
-
 /// Whether a route is part of the public REST contract or an implementation endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RouteClass {
@@ -26,10 +18,6 @@ pub(crate) enum RouteClass {
 pub(crate) struct RouteEntry {
     pub(crate) path: String,
     pub(crate) method: Method,
-    #[cfg(feature = "openapi")]
-    pub(crate) edition: Edition,
-    #[cfg(feature = "openapi")]
-    pub(crate) gated: bool,
     pub(crate) operation_id: String,
     #[cfg(feature = "openapi")]
     pub(crate) class: RouteClass,
@@ -91,25 +79,15 @@ pub(crate) struct InfrastructureExclusion {
 }
 
 impl RouteInventory {
-    pub(crate) fn add_group(
-        &mut self,
-        routes: &AppRoutes,
-        edition: Edition,
-        gated: bool,
-        class: RouteClass,
-    ) {
+    pub(crate) fn add_group(&mut self, routes: &AppRoutes, class: RouteClass) {
         #[cfg(not(feature = "openapi"))]
-        let _ = (edition, gated, class);
+        let _ = class;
         for route in routes.collect() {
             for method in route.actions {
                 let operation_id = operation_id(&method, &route.uri);
                 self.entries.push(RouteEntry {
                     path: route.uri.clone(),
                     method,
-                    #[cfg(feature = "openapi")]
-                    edition,
-                    #[cfg(feature = "openapi")]
-                    gated,
                     operation_id,
                     #[cfg(feature = "openapi")]
                     class,
@@ -131,10 +109,6 @@ impl RouteInventory {
                 self.entries.push(RouteEntry {
                     path: route.uri.clone(),
                     method: method.clone(),
-                    #[cfg(feature = "openapi")]
-                    edition: Edition::Community,
-                    #[cfg(feature = "openapi")]
-                    gated: false,
                     operation_id: operation_id(&method, &route.uri),
                     #[cfg(feature = "openapi")]
                     class: RouteClass::Infrastructure,
@@ -144,11 +118,10 @@ impl RouteInventory {
     }
 
     #[cfg(feature = "openapi")]
-    pub(crate) fn public(&self, edition: Edition) -> impl Iterator<Item = &RouteEntry> {
-        self.entries.iter().filter(move |entry| {
-            entry.class == RouteClass::Public
-                && (edition == Edition::Enterprise || entry.edition == Edition::Community)
-        })
+    pub(crate) fn public(&self) -> impl Iterator<Item = &RouteEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.class == RouteClass::Public)
     }
 
     pub(crate) fn validate(&self) {
@@ -188,7 +161,7 @@ impl RouteInventory {
                     );
                 }
             }
-            for entry in self.public(Edition::Enterprise) {
+            for entry in self.public() {
                 assert!(
                     self.docs.iter().any(|doc| {
                         doc.path == entry.path
@@ -201,7 +174,7 @@ impl RouteInventory {
             }
             for doc in &self.docs {
                 assert!(
-                    self.public(Edition::Enterprise).any(|entry| {
+                    self.public().any(|entry| {
                         doc.path == entry.path
                             && doc.methods.contains(&openapi_method(&entry.method))
                     }),

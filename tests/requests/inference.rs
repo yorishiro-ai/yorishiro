@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::ee::models::inference_jobs::{self, InferenceJobStatus};
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
 use yorishiro::ee::workers::infer_fill::{InferFillArgs, TestInferFillDispatcher};
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::auth::ApiKeyScope;
 
 /// `shared_store.insert` is keyed by `TypeId`, so this overwrites the enterprise-edition state the test process booted with.
 /// See `marketplace.rs`'s own copy of this helper.
@@ -23,10 +23,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: Utc::now().timestamp() + 60 * 60,
-        }))
-            as std::sync::Arc<
-                dyn yorishiro::services::edition::EnterpriseEdition,
-            >);
+        })) as std::sync::Arc<LicenceState>);
 }
 
 struct Setup {

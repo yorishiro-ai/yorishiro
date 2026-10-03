@@ -5,6 +5,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::entity_embeddings;
 use crate::models::entity_entities;
 use crate::services::embedding;
 
@@ -19,7 +20,7 @@ use crate::services::embedding;
 /// This calls `sync_embedding_for_record`, the same guarded path a normal entity write uses, deliberately: if the deployment's configured provider does not match a workspace's stamped model (`services/embedding/sync.rs`'s write-time model check), every candidate here fails for that reason and none get a vector.
 /// That is correct, not a bug to route around: filling NULLs with vectors from a model the workspace is not stamped for would create the same silent model mix that check exists to prevent, just via this recovery path instead of an ordinary write.
 /// `reindex_embeddings` is the tool for actually changing a workspace's model; this one is not, and must not be adapted into one.
-pub struct ResyncEmbeddings;
+pub(crate) struct ResyncEmbeddings;
 
 #[derive(FromQueryResult, Clone)]
 struct CandidateRow {
@@ -73,7 +74,12 @@ impl Task for ResyncEmbeddings {
 
         // An unconfigured embedding provider satisfies the dimension count but errors on every actual call.
         // Probe it once up front so a misconfiguration is one clear failure, not N per-candidate ones that read as an ordinary "N failed" outcome.
-        let provider = embedding::build_embedding_provider().await.internal()?;
+        let provider = app_context
+            .shared_store
+            .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
+            .ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
+            })?;
         provider
             .embed_batch(&[])
             .await
@@ -113,13 +119,11 @@ impl Task for ResyncEmbeddings {
                 created_by: candidate.created_by,
                 updated_by: candidate.updated_by,
             };
-            let licenced = crate::services::edition::is_active(app_context);
-            let result = embedding::sync::sync_embedding_for_record(
+            let result = entity_embeddings::sync_embedding_for_record(
                 &app_context.db,
                 workspace_id,
                 &record,
                 provider.as_ref(),
-                licenced,
             )
             .await;
 

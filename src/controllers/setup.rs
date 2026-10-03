@@ -1,10 +1,8 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/login`.
 //!
 //! Unlike `/auth/signup`, which redeems an invite into an *existing* tenant, this creates the deployment's first tenant/workspace from scratch: there is no one to invite from yet.
-//! Gated on `YORISHIRO_MAX_TENANTS` resolving to an actual cap rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
-//! `0` means unlimited, and so does an unset variable as far as this module is concerned: both resolve to `Ok(None)` and disable the wizard.
-//! What differs is who arrives here with it unset, which is an edition-level default rather than anything this module decides.
-//! The base binary (`src/bin/main.rs`) sets it to `1` when the operator has not, so a self-hosted deployment is single-tenant and the wizard is on; `ee/`'s binary sets nothing, so the enterprise edition defaults to unlimited and the wizard is off unless an operator asks for a cap.
+//! Gated on `settings.max_tenants` resolving to an actual cap rather than a separate flag, so the wizard can never be enabled on a deployment that lacks the tenant cap that makes it safe: without that cap, anyone could hit `POST /setup` between a deploy and its first real tenant and claim ownership of the whole deployment.
+//! `0` means unlimited and disables the wizard; the environment YAML supplies the single-tenant default.
 
 use axum::Json;
 use axum::extract::State;
@@ -14,28 +12,25 @@ use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::embedding_provider;
+use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole};
 
-fn wizard_enabled() -> bool {
-    matches!(tenancy::max_tenants_from_env(), Ok(Some(_)))
+fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
+    let settings = ctx
+        .shared_store
+        .get::<crate::data::settings::Settings>()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
+    Ok((settings.max_tenants > 0).then_some(settings.max_tenants))
 }
 
-#[derive(Serialize)]
-pub struct SetupStatusResponse {
-    /// True when the wizard is enabled and no tenant exists yet: the client should show the setup form instead of the login form.
-    pub setup_required: bool,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = super::openapi::SetupStatusResponse)), security(()), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = crate::dtos::setup::SetupStatusResponse)), security(()), tag = "community"))]
 pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
-    let setup_required = if wizard_enabled() {
+    let setup_required = if max_tenants(&ctx)?.is_some() {
         tenancy::count_tenants(&ctx.db).await? == 0
     } else {
         false
@@ -43,29 +38,13 @@ pub async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRes
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-#[derive(Deserialize)]
-pub struct SetupRequest {
-    pub email: String,
-    pub password: String,
-    pub display_name: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct SetupResponse {
-    pub user_id: Uuid,
-    pub email: String,
-    pub tenant_id: Uuid,
-    pub workspace_id: Uuid,
-    /// A freshly issued API key, scoped to the new owner account: shown only here, same as `/auth/login`'s, so the setup screen can log straight into the dashboard afterward.
-    pub api_key: String,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = super::openapi::SetupRequest, responses((status = 201, body = super::openapi::SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = crate::dtos::setup::SetupRequest, responses((status = 201, body = crate::dtos::setup::SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 pub async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if !wizard_enabled() {
+    let max_tenants = max_tenants(&ctx)?;
+    if max_tenants.is_none() {
         return Err(YorishiroError::not_found(
             "the setup wizard is not enabled on this deployment",
         )
@@ -96,7 +75,7 @@ pub async fn setup(
         .into());
     }
 
-    let tenant = tenancy::create_tenant(&txn, "default").await?;
+    let tenant = tenancy::create_tenant_with_limit(&txn, "default", max_tenants).await?;
 
     let workspace = tenancy::create_workspace(
         &txn,

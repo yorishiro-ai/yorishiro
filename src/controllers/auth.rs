@@ -9,42 +9,18 @@ use axum::routing::post;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::controllers::ApiError;
+use crate::dtos::auth::{LoginRequest, LoginResponse, SignupRequest, SignupResponse};
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::IdentityApiKeys;
-use crate::models::tenancy::{self, MembershipRole, WorkspaceSummary};
-use crate::services::auth::ApiKeyScope;
-
-#[derive(Deserialize)]
-pub struct SignupRequest {
-    /// The plaintext token from an `admin create-invite`-issued invitation.
-    /// Omit it to create a fresh tenant and join it as `Owner` instead.
-    pub invite_token: Option<String>,
-    /// Required when `invite_token` is omitted, rejected when it is present.
-    pub email: Option<String>,
-    pub password: String,
-    pub display_name: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct SignupResponse {
-    pub user_id: Uuid,
-    pub email: String,
-    pub tenant_id: Uuid,
-    pub role: MembershipRole,
-    /// The workspaces the new member can now log into.
-    /// The client picks one and passes its id to `/auth/login`.
-    pub workspaces: Vec<WorkspaceSummary>,
-}
+use crate::models::tenancy::{self, MembershipRole};
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/signup",
-    request_body = super::openapi::SignupRequest,
-    responses((status = 201, body = super::openapi::SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
+    request_body = crate::dtos::auth::SignupRequest,
+    responses((status = 201, body = crate::dtos::auth::SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
 ))]
@@ -130,7 +106,12 @@ async fn signup_without_invite(
     // tenant + user + membership run in one transaction, same reasoning as signup_with_invite's create_user + add_member: a request that dies part-way must not leave rows nothing can finish or undo.
     let tenant_name = body.display_name.as_deref().unwrap_or(email);
     let txn = ctx.db.begin().await.internal()?;
-    let tenant = tenancy::create_tenant(&txn, tenant_name).await?;
+    let settings = ctx
+        .shared_store
+        .get::<crate::data::settings::Settings>()
+        .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
+    let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
+    let tenant = tenancy::create_tenant_with_limit(&txn, tenant_name, max_tenants).await?;
     let user =
         tenancy::create_user(&txn, email, &body.password, body.display_name.as_deref()).await?;
     tenancy::add_member(&txn, tenant.id, user.id, MembershipRole::Owner).await?;
@@ -148,32 +129,11 @@ async fn signup_without_invite(
     ))
 }
 
-#[derive(Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
-    /// Which of the account's workspaces to issue an API key for.
-    /// Omit this when the account can only reach one workspace; it resolves automatically.
-    /// An account reaching more than one must specify explicitly (422 otherwise), and the refusal lists the candidates.
-    pub workspace_id: Option<Uuid>,
-}
-
-#[derive(Serialize)]
-pub struct LoginResponse {
-    /// The freshly issued API key's plaintext.
-    /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
-    pub api_key: String,
-    pub api_key_id: Uuid,
-    pub workspace_id: Uuid,
-    pub scope: ApiKeyScope,
-    pub user_id: Uuid,
-}
-
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/auth/login",
-    request_body = super::openapi::LoginRequest,
-    responses((status = 200, body = super::openapi::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)),
+    request_body = crate::dtos::auth::LoginRequest,
+    responses((status = 200, body = crate::dtos::auth::LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)),
     security(()),
     tag = "community"
 ))]

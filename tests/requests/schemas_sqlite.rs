@@ -7,7 +7,7 @@ use yorishiro::app::App;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
 use yorishiro::models::tenancy::{self, MembershipRole};
-use yorishiro::services::auth::ApiKeyScope;
+use yorishiro::models::api_keys::ApiKeyScope;
 
 struct Setup {
     key: String,

@@ -51,7 +51,7 @@ fn http_client() -> Client {
 
 /// Applies `is_https_or_loopback` to the initial request URL itself: the same rule `redirect_policy` enforces for every redirect hop.
 fn require_https_or_loopback(url: &str) -> Result<(), YorishiroError> {
-    let parsed = url::Url::parse(url).internal()?;
+    let parsed = reqwest::Url::parse(url).internal()?;
     if is_https_or_loopback(&parsed) {
         return Ok(());
     }

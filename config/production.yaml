@@ -1,30 +1,26 @@
 # Loco configuration file documentation
 #
-# Legacy migration fallback only. New deployments should use ./yorishiro.yaml or
-# set YORISHIRO_CONFIG_PATH to the canonical plain-YAML file.
-#
 # This is the production environment.
 #
-# Nothing is required: an unconfigured start boots against a local SQLite file with no
-# external dependencies — no Postgres, no Redis, no embedding backend — and serves a
-# single-tenant trial instance.
+# Yorishiro supports SQLite or PostgreSQL for application data.
+# Queue storage is configured independently through Loco's queue provider.
+# This release supports SQLite, PostgreSQL, and the Redis-compatible provider.
+# An unconfigured start uses local SQLite files and serves a single-tenant trial instance.
 # The default database is `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` (an
 # absolute path, independent of the process's CWD), while SQLite jobs use the separate
 # `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc` file.
 # `HOST` defaults to `http://localhost`, which is enough for a trial instance that nobody
 # needs to reach externally.
 #
-# To use PostgreSQL as the database, set `DATABASE_URL` to a `postgres://` URI.
+# To use PostgreSQL for application data, set `DATABASE_URL` to a `postgres://` URI.
 # When you do, `YORISHIRO_QUEUE_KIND` defaults to `Postgres` and the queue uses `DATABASE_URL`
 # as its connection URI (the same instance), so you need only one database running.
-# Setting `YORISHIRO_QUEUE_KIND=Redis` explicitly still overrides this derivation and requires
-# `QUEUE_URL` to be set.
+# Set `YORISHIRO_QUEUE_KIND=Redis` and a `redis://` or `rediss://` `QUEUE_URL` to use the Redis-compatible provider independently of the application database.
 #
 # The enterprise edition variables below are not rendered by this file (they are read
 # directly via `std::env::var` in `ee/`), but listed here for completeness so this
 # document is the single reference for every configuration option:
 #   YORISHIRO_BIND          - Network bind address used by `ee/`'s OAuth redirect URI logic
-#   YORISHIRO_CONFIG_PATH   - Strict path to the canonical Yorishiro configuration file
 #   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
 
 # Application logging configuration
@@ -88,6 +84,7 @@ server:
 # Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
 # With DATABASE_URL unset, SQLite uses a separate queue file.
 # PostgreSQL continues to use DATABASE_URL unless QUEUE_URL is set.
+# `Redis` is Loco's provider variant name for Redis-compatible queue services.
 # QUEUE_URL takes no default when an external backend is required (Redis, or explicit
 # non-SQLite queue), matching this file's own no-silent-fallback convention.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat="://") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
@@ -131,6 +128,26 @@ queue:
 
 workers:
   mode: BackgroundQueue
+
+settings:
+  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
+  embedding:
+    provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="local") %>
+    dimensions: <%= get_env(name="YORISHIRO_EMBEDDING_DIMENSIONS", default="768") %>
+    base_url: <%= get_env(name="YORISHIRO_EMBEDDING_BASE_URL", default="") %>
+    api_key: '<%= get_env(name="YORISHIRO_EMBEDDING_API_KEY", default="") %>'
+    model: <%= get_env(name="YORISHIRO_EMBEDDING_MODEL", default="") %>
+    send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
+    local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
+    local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
+  rate_limit:
+    auth_max_requests: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_MAX", default="10") %>
+    auth_window_seconds: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS", default="60") %>
+    search_tokens_per_minute: <%= get_env(name="YORISHIRO_SEARCH_TOKENS_PER_MINUTE", default="100000") %>
+  db_load_guard:
+    threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
+    sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
+    poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
 
 
 # Mailer Configuration.

@@ -8,6 +8,8 @@
 //! `status` is the exception: past the gate it answers `200` whether or not OAuth is configured, and `500` on that same partial-configuration error, but never `404`.
 //! That is what makes it the route `licence_gate.rs` tests the gate with, since its `404` can only come from the gate, while `authorize` and `callback` produce one of their own whenever the issuer is unset.
 
+pub(crate) mod state_token;
+
 use crate::YorishiroError;
 use crate::controllers::ApiError;
 use crate::error::ResultExt;
@@ -19,10 +21,10 @@ use axum::response::{IntoResponse, Redirect, Response};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
 
+use crate::ee::data::oauth::OAuthConfig;
+use crate::ee::dtos::oauth::{CallbackParams, OAuthStatus};
 use crate::ee::services::oauth;
-use crate::ee::services::oauth::OAuthConfig;
 
 /// Name of the CSRF cookie `authorize` sets and `callback` reads back.
 const CSRF_COOKIE_NAME: &str = "ysr_oauth_csrf";
@@ -43,7 +45,7 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 /// Builds a `Set-Cookie` header value for the CSRF cookie: `HttpOnly`, `SameSite=Lax`, scoped to the callback path only, `Secure` when the configured redirect URI is itself `https://` (see `OAuthConfig::cookies_require_secure`), and expiring with the `state` it is bound to.
 fn csrf_set_cookie(value: &str, secure: bool) -> String {
     let secure_attr = if secure { "; Secure" } else { "" };
-    let max_age = oauth::STATE_TTL_SECS;
+    let max_age = state_token::STATE_TTL_SECS;
     format!(
         "{CSRF_COOKIE_NAME}={value}; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; \
          Max-Age={max_age}{secure_attr}",
@@ -55,15 +57,9 @@ fn csrf_clear_cookie() -> String {
     format!("{CSRF_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/auth/oauth/callback; Max-Age=0")
 }
 
-#[derive(Debug, Serialize)]
-pub struct OAuthStatus {
-    /// `false` when `YORISHIRO_OAUTH_ISSUER_URL` is unset, in which case `authorize`/`callback` return `404`.
-    pub enabled: bool,
-}
-
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
 /// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = crate::ee::controllers::openapi::OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
 async fn status() -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_env()?.is_some(),
@@ -87,13 +83,6 @@ async fn authorize() -> Result<Response, ApiError> {
         Redirect::to(&redirect.url),
     )
         .into_response())
-}
-
-#[derive(Deserialize)]
-struct CallbackParams {
-    code: Option<String>,
-    state: Option<String>,
-    error: Option<String>,
 }
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
@@ -133,15 +122,25 @@ async fn callback(
         })?;
     let embedding_model = embedding_provider.model_name();
     let embedding_dimensions = embedding_provider.dimensions() as i32;
+    let settings = ctx
+        .shared_store
+        .get::<crate::data::settings::Settings>()
+        .ok_or_else(|| {
+            ApiError(YorishiroError::Internal(anyhow::anyhow!(
+                "application settings missing"
+            )))
+        })?;
+    let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
 
     let txn = ctx.db.begin().await.internal()?;
-    let provisioned = oauth::find_or_create(
+    let provisioned = crate::ee::models::user_users::find_or_create(
         &txn,
         "oidc",
         &identity.subject_id,
         identity.email.as_deref(),
         identity.display_name.as_deref(),
         (&embedding_model, embedding_dimensions),
+        max_tenants,
     )
     .await?;
     txn.commit().await.internal()?;

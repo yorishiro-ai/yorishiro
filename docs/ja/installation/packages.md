@@ -23,15 +23,16 @@ $ sudo dpkg -i yorishiro-ce-<VERSION>-amd64.deb
 | `/usr/bin/yorishiro` | バイナリ |
 | `/lib/systemd/system/yorishiro.service` | systemdユニット |
 | `/lib/systemd/system/yorishiro-worker.service` | タグ付きバックグラウンドワーカーユニット |
-| `/etc/yorishiro/yorishiro.yaml` | 編集可能な正規設定テンプレート |
+| `/etc/yorishiro/production.yaml` | 編集可能な Loco production 設定 |
 
 EE パッケージは同じ共有パスに加えて `/etc/yorishiro/LICENSE.enterprise` をインストールします。
 CE は EE ライセンスファイルをインストールしません。
 
 ## 設定
 
-パッケージ版サービスの設定は `/etc/yorishiro/yorishiro.yaml` を編集します。
+パッケージ版サービスの設定は `/etc/yorishiro/production.yaml` を編集します。
 パッケージを更新しても、このファイルに加えた変更は保持されます。
+アプリケーションデータベースは SQLite または PostgreSQL を利用でき、キューの保存先は Loco のキュープロバイダとして独立して選択できます。
 
 ```yaml
 database:
@@ -42,6 +43,8 @@ queue:
 server:
   host: https://yorishiro.example.com
 ```
+
+Redis 互換キューサービスを使う場合は、PostgreSQL のキューブロックの代わりにサービス環境へ `YORISHIRO_QUEUE_KIND=Redis` と接続先の `QUEUE_URL` を設定します。
 
 全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
 

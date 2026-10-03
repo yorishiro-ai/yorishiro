@@ -6,7 +6,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::Entity as ApiKeys;
 
 /// `cargo loco task list_api_keys workspace_id:<uuid>`
-pub struct ListApiKeys;
+pub(crate) struct ListApiKeys;
 
 #[async_trait]
 impl Task for ListApiKeys {

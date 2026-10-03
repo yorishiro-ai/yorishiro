@@ -3,8 +3,8 @@ use loco_rs::task::Vars;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::Entity as ApiKeys;
-use crate::services::auth::ApiKeyScope;
 
 /// `cargo loco task create_api_key workspace_id:<uuid> scope:write`
 ///
@@ -13,7 +13,7 @@ use crate::services::auth::ApiKeyScope;
 /// `audit` is optional (`audit:true` to set it, anything else or omitted is `false`): the independent grant that lets this key read `GET /api/audit-log`, regardless of `scope`.
 ///
 /// Wraps `api_keys::Entity::create_api_key`, which does the actual insert (and the workspace-exists check) on `ctx.db`.
-pub struct CreateApiKey;
+pub(crate) struct CreateApiKey;
 
 #[async_trait]
 impl Task for CreateApiKey {

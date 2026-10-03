@@ -1,0 +1,15 @@
+name: sea-orm-cli
+description: Installs the sea-orm-cli version Cargo.lock resolves, which `db entities` shells out to (checkout stays in each caller)
+
+runs:
+  using: composite
+  steps:
+    - name: Install sea-orm-cli with postgres-vector feature
+      shell: bash
+      run: |
+        version="$(awk '/^name = "sea-orm-cli"$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock)"
+        if [ -z "$version" ]; then
+          echo "::error::Cargo.lock has no sea-orm-cli package" >&2
+          exit 1
+        fi
+        cargo install sea-orm-cli --locked --version "$version" --features postgres-vector,sqlx-postgres,sqlx-sqlite

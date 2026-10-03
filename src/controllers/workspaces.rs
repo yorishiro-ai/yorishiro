@@ -3,17 +3,16 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
-use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
-use serde::{Deserialize, Serialize};
+use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::extractors::{Authorized, ReadScope, embedding_provider};
 use crate::controllers::members::require_tenant_admin;
+use crate::dtos::workspaces::{CreateWorkspaceRequest, WorkspaceDetail};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces;
 use crate::models::tenancy;
@@ -36,37 +35,17 @@ async fn get_workspace_in_tenant(
     Ok(workspace)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [super::openapi::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
-pub async fn list_workspaces(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [crate::models::workspace_workspaces::WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
 ) -> Result<Json<Vec<WorkspaceRecord>>, ApiError> {
-    let workspaces = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(auth.tenant_id))
-        .all(&ctx.db)
-        .await
-        .map_err(|err| ApiError::from(YorishiroError::Internal(err.into())))?;
     Ok(Json(
-        workspaces
-            .into_iter()
-            .map(WorkspaceRecord::try_from)
-            .collect::<Result<_, _>>()?,
+        crate::models::workspace_workspaces::list_for_tenant(&ctx.db, auth.tenant_id).await?,
     ))
 }
 
-#[derive(Deserialize)]
-pub struct CreateWorkspaceRequest {
-    pub name: String,
-    /// Cap on the number of entities this workspace may hold.
-    /// Omit for unlimited.
-    pub max_entities: Option<i32>,
-    /// Schema to associate with this workspace.
-    /// Omit to leave it unset.
-    #[serde(default)]
-    pub schema_id: Option<Uuid>,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = super::openapi::CreateWorkspaceRequest, responses((status = 201, body = super::openapi::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = crate::dtos::workspaces::CreateWorkspaceRequest, responses((status = 201, body = crate::models::workspace_workspaces::WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -93,21 +72,7 @@ pub async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
-#[derive(Serialize)]
-pub struct WorkspaceDetail {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub name: String,
-    pub max_entities: Option<i32>,
-    pub schema_id: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
-    pub entity_count: i64,
-    pub relation_count: i64,
-    /// Currently *active* schemas only (one per distinct schema name), not a raw row count, which would also include archived versions.
-    pub schema_count: i64,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = super::openapi::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = crate::dtos::workspaces::WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn get_workspace(
     State(ctx): State<AppContext>,
     authorized: Authorized<ReadScope>,
@@ -133,7 +98,7 @@ pub async fn get_workspace(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
-pub async fn delete_workspace(
+pub(crate) async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(id): Path<Uuid>,

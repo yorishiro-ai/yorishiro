@@ -12,7 +12,7 @@
 | `migration/src/` | Schema migrations |
 | `src/tasks/` | Admin and one-off commands |
 | `ee/` | Enterprise edition (mirrors `models/`, `controllers/`, `services/`) |
-| `src/templates/json/` | Built-in JSON template assets |
+| `data/templates/` | Built-in JSON template assets embedded by `src/data/templates.rs` |
 
 - `src/models/_entities/` is auto-generated. Never edit by hand.
 - Root files under `src/models/` are Loco generator compatibility markers. Keep them when moving model implementations into feature directories.

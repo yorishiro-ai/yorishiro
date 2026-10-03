@@ -4,32 +4,25 @@
 //! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::error::{ResultExt, YorishiroError};
-use crate::services::auth::{ApiKeyScope, require_scope};
+use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::Deserialize;
 
-use crate::ee::models::entity_columns::{self, ColumnPreference};
-use crate::ee::services::authz;
-
-/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
-#[derive(Debug, Deserialize)]
-pub struct SetColumnsRequest {
-    /// Field names from the schema, in the order they should be displayed.
-    /// An empty list is a choice ("show no fields"), distinct from never having chosen, which is what `DELETE` restores.
-    pub columns: Vec<String>,
-}
+use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::dtos::entity_columns::SetColumnsRequest;
+use crate::ee::models::entity_column_preferences::{self, ColumnPreference};
 
 /// `GET /api/workspace/entity-columns`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/entity-columns", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::controllers::openapi::ColumnPreference]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/entity-columns", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::ColumnPreference]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn list_columns(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<ColumnPreference>>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
@@ -42,12 +35,13 @@ async fn list_columns(
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
         .await
         .internal()?;
-    let stored = entity_columns::list(&schema_txn, auth_ctx.workspace_id, page.into()).await?;
+    let stored =
+        entity_column_preferences::list(&schema_txn, auth_ctx.workspace_id, page.into()).await?;
     Ok(Json(stored))
 }
 
 /// `PUT /api/workspace/entity-columns/{entity_type}`
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/entity-columns/{entity_type}", params(("entity_type" = String, Path)), request_body = crate::controllers::openapi::SetColumnsRequest, responses((status = 200, body = crate::controllers::openapi::ColumnPreference), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/entity-columns/{entity_type}", params(("entity_type" = String, Path)), request_body = crate::ee::controllers::openapi::SetColumnsRequest, responses((status = 200, body = crate::ee::controllers::openapi::ColumnPreference), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"]))), tag = "enterprise"))]
 async fn set_columns(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -65,7 +59,7 @@ async fn set_columns(
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
         .await
         .internal()?;
-    let stored = entity_columns::set(
+    let stored = entity_column_preferences::set(
         &schema_txn,
         auth_ctx.workspace_id,
         &entity_type,
@@ -94,7 +88,7 @@ async fn reset_columns(
         .begin_for_workspace(auth_ctx.tenant_id, auth_ctx.workspace_id)
         .await
         .internal()?;
-    entity_columns::clear(&schema_txn, auth_ctx.workspace_id, &entity_type).await?;
+    entity_column_preferences::clear(&schema_txn, auth_ctx.workspace_id, &entity_type).await?;
     schema_txn.commit().await.internal()?;
     Ok(StatusCode::NO_CONTENT)
 }

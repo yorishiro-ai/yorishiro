@@ -6,12 +6,14 @@ use uuid::Uuid;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy::{self, MembershipRole};
 
+const DEFAULT_INVITE_TTL_HOURS: i64 = 72;
+
 /// `cargo loco task create_invite tenant_id:<uuid> email:user@example.com role:owner`
 ///
 /// `role` is one of `owner`/`admin`/`member`/`viewer`.
 /// `ttl_hours` is optional, defaulting to 72.
 /// This is the invite step of the real invite→signup→login path: a key minted directly instead carries no `user_id`, so writes made with it are unattributed.
-pub struct CreateInvite;
+pub(crate) struct CreateInvite;
 
 #[async_trait]
 impl Task for CreateInvite {
@@ -47,7 +49,7 @@ impl Task for CreateInvite {
                 details: vec![],
                 hint: String::new(),
             })?,
-            Err(_) => 72,
+            Err(_) => DEFAULT_INVITE_TTL_HOURS,
         };
 
         let (invite, token) = tenancy::create_invite(

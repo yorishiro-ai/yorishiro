@@ -1,6 +1,8 @@
 /// Tests for object nesting depth validation in metaschema definitions.
 use yorishiro::error::YorishiroError;
-use yorishiro::metaschema::{MAX_OBJECT_DEPTH, MetaSchemaDefinition, validate_definition};
+use yorishiro::models::schema_schemas::metaschema::{
+    MAX_OBJECT_DEPTH, MetaSchemaDefinition, validate_definition,
+};
 
 /// Builds an object-typed field nested `depth` levels deep.
 fn nested_object(depth: usize) -> serde_json::Value {

@@ -1,7 +1,9 @@
 pub mod app;
-pub mod config;
 pub mod controllers;
+pub mod data;
 pub mod db;
+mod db_enum;
+pub mod dtos;
 
 /// The enterprise edition.
 ///
@@ -11,17 +13,15 @@ pub mod db;
 /// Compiling them into this crate does not change that scoping, since the files stay where the
 /// licence points.
 ///
-/// The enterprise edition is not a separate compilation unit. What it serves is decided at runtime by
-/// `app::licence_gate`.
+/// The enterprise edition is not a separate compilation unit.
 #[cfg(feature = "enterprise")]
 #[path = "../ee/mod.rs"]
 pub mod ee;
 pub mod error;
-pub mod metaschema;
+pub(crate) mod initializers;
 pub mod models;
 pub mod services;
 pub mod tasks;
-pub mod templates;
 pub mod workers;
 
 pub use error::YorishiroError;

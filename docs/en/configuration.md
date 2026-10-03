@@ -99,38 +99,39 @@ This is the port of the earlier guard implementation, with its opt-in default re
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | `30` | Seconds the busy or quiet condition must persist |
 | `YORISHIRO_DB_LOAD_POLL_SECS` | `5` | Seconds between PostgreSQL activity samples; non-positive values fall back to `5` |
 
-## Main configuration (`yorishiro.yaml`)
+## Environment configuration
 
-`yorishiro.yaml` is the canonical configuration file.
-Create a documented skeleton in the current directory with `yorishiro config init`.
-The command refuses to replace an existing file unless you pass `--force`.
-It logs the replacement before writing when `--force` replaces an existing file.
+Yorishiro uses Loco's `config/<environment>.yaml` layout.
+`LOCO_ENV` selects the environment and defaults to `development`.
+`LOCO_CONFIG_FOLDER` can point Loco at another directory containing the selected YAML file.
+Package and Docker installations set `LOCO_ENV=production` and provide `production.yaml` in their configuration directory.
 
-Yorishiro reads `YORISHIRO_CONFIG_PATH` first when it is set.
-That path is strict: a missing, unreadable, or invalid file is an error and does not fall back.
-Otherwise Yorishiro reads `./yorishiro.yaml` when present.
-The canonical file is plain YAML.
-Do not add Loco's Tera syntax to `yorishiro.yaml`.
-
-The following environment variables explicitly override its fields, so deploy-time secrets and addresses do not need template interpolation: `DATABASE_URL`, `DB_LOGGING`, `DB_CONNECT_TIMEOUT`, `DB_IDLE_TIMEOUT`, `DB_MIN_CONNECTIONS`, `DB_MAX_CONNECTIONS`, `DB_AUTO_MIGRATE`, `PORT`, `BINDING`, `HOST`, `LOG_LEVEL`, `QUEUE_URL`, `YORISHIRO_QUEUE_KIND`, `YORISHIRO_QUEUE_WORKERS`, `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, and `MAILER_PASSWORD`.
-
-An unconfigured skeleton starts with SQLite locally. No external services are needed.
+The YAML files use Loco's Tera `get_env` expressions for deploy-time values such as `DATABASE_URL`, `QUEUE_URL`, and embedding settings.
+Application data supports SQLite and PostgreSQL.
+Queue storage is selected independently through Loco's queue provider.
+This release provides SQLite, PostgreSQL, and Redis-compatible queue providers.
+An unconfigured development or production environment uses SQLite for both roles, so no external service is required.
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | `postgres://` URI for multi-tenant or vector search |
 | `HOST` | `http://localhost` | Your server's hostname or address |
-| `YORISHIRO_QUEUE_KIND` | YAML value | `Sqlite`, `Postgres`, or `Redis` |
-| `QUEUE_URL` | YAML value | Queue connection URI |
+| `YORISHIRO_MAX_TENANTS` | `1` | Tenant cap; `0` allows unlimited tenants and disables the first-run setup wizard |
+| `YORISHIRO_QUEUE_KIND` | Derived from `DATABASE_URL` | Loco queue provider: `Sqlite`, `Postgres`, or `Redis` in this release |
+| `QUEUE_URL` | Provider default | Queue provider URI, including `redis://` or `rediss://` for the Redis-compatible provider |
 | `YORISHIRO_EMBEDDING_BASE_URL` | Unset | Embeddings endpoint URL |
 | `YORISHIRO_EMBEDDING_MODEL` | Unset | Embeddings model name |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | Embedding provider (`none`, `local`, or unset for local) |
 
 When both the application and queue use SQLite, the queue URI must name a separate file.
-The packaged default is `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`, while the local skeleton uses `sqlite://yorishiro_queue.sqlite3?mode=rwc`.
+The packaged default is `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`, while `config/development.yaml` uses `sqlite://yorishiro_queue.sqlite3?mode=rwc`.
 Boot rejects equivalent shared-file URIs after normalizing SQLite paths and ignoring connection query parameters.
 Set `QUEUE_URL` explicitly when moving an existing installation or choosing a custom location.
-PostgreSQL and Redis queue behavior is unaffected.
+PostgreSQL and Redis-compatible queues do not share the SQLite file restriction.
+
+The application database and queue provider do not have to use the same backend.
+For example, a PostgreSQL application database can use a Redis-compatible queue service by setting `YORISHIRO_QUEUE_KIND=Redis` and an appropriate `QUEUE_URL`.
+Additional queue providers can be added without changing the application database configuration.
 
 ### Mailer
 
@@ -146,7 +147,7 @@ Yorishiro uses the `LOG_LEVEL` environment variable to set logging verbosity (`d
 A worker is an executable process that dequeues and runs background jobs.
 A worker pool is a target group selected by `WorkerClass`: `TenantPrivate`, `Official`, or `Shared`.
 The queue is durable job backlog storage, not a worker pool or a database connection pool.
-Yorishiro requires `workers.mode: BackgroundQueue` in canonical, packaged, and legacy configuration files.
+Yorishiro requires `workers.mode: BackgroundQueue` in every environment configuration.
 `ForegroundBlocking` and `BackgroundAsync` are rejected at configuration load and application boot.
 
 Run the HTTP server and workers as separate processes.
@@ -202,7 +203,7 @@ Configure the schedule through the API endpoint (`POST /api/identity/tenants/sch
 The five-minute interval sets the next `scheduled_for` time.
 On each scheduler tick, any overdue `scheduled_for` runs, with no missed-run grace cutoff.
 
-To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to `yorishiro.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
+To run the scheduler on a fixed cron schedule, add a `scheduler:` entry to the selected `config/<environment>.yaml` that names the `TenantReindexScheduler` task. See the Loco documentation for the scheduler configuration format.
 
 Run `cargo loco scheduler` as a separate process from the HTTP server and workers.
 With PostgreSQL, any number of scheduler replicas may use the same database.

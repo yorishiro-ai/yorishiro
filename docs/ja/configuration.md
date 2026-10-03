@@ -112,39 +112,39 @@ PostgreSQL の負荷ガードは、デプロイメント全体のメンテナン
 | `YORISHIRO_DB_LOAD_SUSTAIN_SECS` | `30` | 負荷が高い、または低い状態を維持する秒数 |
 | `YORISHIRO_DB_LOAD_POLL_SECS` | `5` | PostgreSQL の状態を確認する間隔。0 以下の場合は `5` |
 
-## メイン設定（`yorishiro.yaml`）
+## 環境別設定
 
-`yorishiro.yaml` が正規の設定ファイルです。
-カレントディレクトリにコメント付きの雛形を作成するには `yorishiro config init` を実行します。
-既存のファイルは `--force` なしでは置き換えません。
-`--force` で既存ファイルを置き換える場合は、書き込み前にそのことをログへ出力します。
+Yorishiro は Loco 標準の `config/<environment>.yaml` 構成を使います。
+`LOCO_ENV` が環境を選び、未設定時は `development` です。
+`LOCO_CONFIG_FOLDER` で、選択した YAML を置く別のディレクトリを指定できます。
+パッケージ版と Docker 版は `LOCO_ENV=production` を設定し、それぞれの設定ディレクトリにある `production.yaml` を使います。
 
-`YORISHIRO_CONFIG_PATH` が設定されている場合、Yorishiro はまずそのパスを読みます。
-このパスは厳密に扱われます。
-未設定の場合は `./yorishiro.yaml` があれば読みます。
-正規ファイルはプレーン YAML です。
-`yorishiro.yaml` に Loco の Tera 構文を追加してはいけません。
-
-デプロイ時のシークレットやアドレスにテンプレート展開は不要です。
-次の環境変数が明示的に YAML の値を上書きします: `DATABASE_URL`, `DB_LOGGING`, `DB_CONNECT_TIMEOUT`, `DB_IDLE_TIMEOUT`, `DB_MIN_CONNECTIONS`, `DB_MAX_CONNECTIONS`, `DB_AUTO_MIGRATE`, `PORT`, `BINDING`, `HOST`, `LOG_LEVEL`, `QUEUE_URL`, `YORISHIRO_QUEUE_KIND`, `YORISHIRO_QUEUE_WORKERS`, `YORISHIRO_QUEUE_REAPER_AGE_MINUTES`, `MAILER_HOST`, `MAILER_PORT`, `MAILER_USER`, `MAILER_PASSWORD`。
-
-雛形の既定値では SQLite で起動します。外部サービスは不要です。
+YAML では Loco の Tera `get_env` 式を使い、`DATABASE_URL`、`QUEUE_URL`、埋め込み設定などのデプロイ時の値を読み込みます。
+アプリケーションデータは SQLite と PostgreSQL に対応します。
+キューの保存先は Loco のキュープロバイダとして独立して選択します。
+このリリースでは SQLite、PostgreSQL、Redis 互換キュープロバイダを利用できます。
+development と production の未設定時は両方に SQLite を使うため、外部サービスは不要です。
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` | マルチテナントまたはベクトル検索には `postgres://` を指定 |
 | `HOST` | `http://localhost` | サーバのホスト名またはアドレス |
-| `YORISHIRO_QUEUE_KIND` | YAML の値 | `Sqlite`、`Postgres`、`Redis` |
-| `QUEUE_URL` | YAML の値 | キュー接続 URI |
+| `YORISHIRO_MAX_TENANTS` | `1` | テナント上限。`0` は無制限となり、初回セットアップウィザードを無効化 |
+| `YORISHIRO_QUEUE_KIND` | `DATABASE_URL` から導出 | Loco のキュープロバイダ。このリリースでは `Sqlite`、`Postgres`、`Redis` |
+| `QUEUE_URL` | プロバイダ別の既定値 | キュープロバイダの接続 URI。Redis 互換プロバイダは `redis://` または `rediss://` |
 | `YORISHIRO_EMBEDDING_BASE_URL` | 未設定 | 埋め込みエンドポイントの URL |
 | `YORISHIRO_EMBEDDING_MODEL` | 未設定 | 埋め込みモデル名 |
 | `YORISHIRO_EMBEDDING_PROVIDER` | `local` | 埋め込みプロバイダ（`none` で無効、`local` でローカル、未設定でローカル） |
 
 アプリケーションとキューの両方に SQLite を使う場合、キュー URI は別ファイルを指定する必要があります。
-パッケージ版の既定値は `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`、ローカル雛形の既定値は `sqlite://yorishiro_queue.sqlite3?mode=rwc` です。
+パッケージ版の既定値は `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc`、`config/development.yaml` の既定値は `sqlite://yorishiro_queue.sqlite3?mode=rwc` です。
 起動時に SQLite のパスを正規化し、接続クエリを除いて同じファイルになる設定を拒否します。
 既存インストールの移行や保存場所の変更には `QUEUE_URL` を明示してください。
-PostgreSQL と Redis のキュー動作には影響しません。
+PostgreSQL と Redis 互換キューには SQLite の同一ファイル制約はありません。
+
+アプリケーションデータベースとキュープロバイダは同じバックエンドを使う必要はありません。
+たとえば PostgreSQL のアプリケーションデータベースと Redis 互換キューサービスを組み合わせる場合は、`YORISHIRO_QUEUE_KIND=Redis` と適切な `QUEUE_URL` を設定します。
+今後キュープロバイダが増えても、アプリケーションデータベースの設定は変わりません。
 
 ### メール
 
@@ -160,7 +160,7 @@ Yorishiro は既定ではメールを送信しません。
 ワーカーは、バックグラウンドジョブを取り出して実行する実行プロセスです。
 ワーカープールは `WorkerClass` で選ぶ対象グループで、`TenantPrivate`、`Official`、`Shared` のいずれかです。
 キューは永続化されたジョブのバックログであり、ワーカープールやデータベース接続プールとは別のものです。
-正規設定、パッケージ設定、移行期間中の旧設定では `workers.mode: BackgroundQueue` が必須です。
+すべての環境設定で `workers.mode: BackgroundQueue` が必須です。
 `ForegroundBlocking` と `BackgroundAsync` は設定読み込み時とアプリケーション起動時に拒否されます。
 
 HTTP サーバとワーカーは別プロセスで起動します。
@@ -205,7 +205,7 @@ API エンドポイント（`POST /api/identity/tenants/schedule` など）で I
 5 分の間隔で次の `scheduled_for` 時刻を設定します。
 各 scheduler tick では、期限を過ぎた `scheduled_for` を実行し、未実行分の猶予時間による打ち切りはありません。
 
-`yorishiro.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
+選択した `config/<environment>.yaml` に `scheduler:` エントリを追加して、`TenantReindexScheduler` タスクを固定の cron スケジュールで実行できます。Loco のドキュメントを参照してください。
 
 `cargo loco scheduler` は HTTP サーバとワーカーとは別のプロセスとして実行します。
 PostgreSQL では、同じデータベースを使う scheduler replica を複数起動できます。

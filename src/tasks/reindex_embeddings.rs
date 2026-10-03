@@ -1,10 +1,10 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
-use sea_orm::{FromQueryResult, Statement};
 use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
+use crate::models::entity_embeddings;
 use crate::services::embedding;
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
@@ -13,7 +13,7 @@ use crate::services::embedding;
 ///
 /// Unlike `resync_embeddings`, which only fills entities whose `embedding` column is NULL, this re-embeds every entity with `x-embed` fields regardless of whether it already has a vector: the whole point is replacing vectors from the old model, not filling gaps left by the old model.
 ///
-/// The restamp happens only after every entity embeds successfully, never before and never partially; `embedding::sync::reindex_workspace` is where that ordering actually lives, and this task is a thin CLI shell over it.
+/// The restamp happens only after every entity embeds successfully, never before and never partially; `entity_embeddings::reindex_workspace` is where that ordering actually lives, and this task is a thin CLI shell over it.
 /// Restamping first (or on partial success) would make the stamp claim a model that only some of the workspace's vectors actually came from, passing the write-time model check while the column itself still holds a mix: the exact failure this whole mechanism exists to prevent, just caused by the migration tool instead of an unconfigured deployment.
 /// A failure partway through leaves the workspace stamped with its old model, which correctly keeps the write-time check refusing new writes until this task is re-run and succeeds; re-running is safe, since every entity is re-embedded again regardless of whether an earlier attempt already wrote a (partial, mixed) result.
 ///
@@ -22,12 +22,7 @@ use crate::services::embedding;
 /// This loads every candidate `EntityRecord` into memory in one batch, the same shape `resync_embeddings` already uses, rather than paging: consistent with that task, not a new consideration introduced here.
 ///
 /// PostgreSQL only, for the same reason as `resync_embeddings`: `entity_entities` has no `embedding` column at all on SQLite.
-pub struct ReindexEmbeddings;
-
-#[derive(FromQueryResult)]
-struct CandidateId {
-    id: Uuid,
-}
+pub(crate) struct ReindexEmbeddings;
 
 #[async_trait]
 impl Task for ReindexEmbeddings {
@@ -51,9 +46,12 @@ impl Task for ReindexEmbeddings {
         // Mirrors resync_embeddings's own up-front probe: an unconfigured provider satisfies the
         // dimension count but errors on every actual call, so this turns that into one clear
         // failure instead of N per-entity ones that would read as an ordinary "N failed" outcome.
-        let provider = embedding::build_embedding_provider().await.map_err(|err| {
-            YorishiroError::Internal(anyhow::anyhow!("failed to build embedding provider: {err}"))
-        })?;
+        let provider = app_context
+            .shared_store
+            .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
+            .ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("embedding provider missing"))
+            })?;
         provider
             .embed_batch(&[])
             .await
@@ -75,11 +73,13 @@ impl Task for ReindexEmbeddings {
             .map(|v| v.parse().unwrap_or(false))
             .unwrap_or(false);
         if !force {
-            let licenced = crate::services::edition::is_active(app_context);
-            let chain =
-                embedding::sync::resolve_embedding_chain(&app_context.db, workspace_id, licenced)
-                    .await
-                    .map_err(|err| YorishiroError::Internal(err.into()))?;
+            let chain = entity_embeddings::resolve_embedding_chain(
+                &app_context.db,
+                workspace_id,
+                provider.dimensions(),
+            )
+            .await
+            .map_err(|err| YorishiroError::Internal(err.into()))?;
             if chain.workspace_model.as_deref() == Some(provider.model_name().as_str()) {
                 println!(
                     "workspace {} already stamped with model {:?}; nothing to reindex \
@@ -91,15 +91,10 @@ impl Task for ReindexEmbeddings {
             }
         }
 
-        let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT id FROM entity_entities WHERE workspace_id = $1",
-            [workspace_id.into()],
-        ))
-        .all(&app_context.db)
-        .await
-        .map_err(|err| YorishiroError::Internal(err.into()))?;
-        let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.id).collect();
+        let candidate_ids =
+            crate::models::entity_entities::ids_for_workspace(&app_context.db, workspace_id)
+                .await
+                .map_err(|err| YorishiroError::Internal(err.into()))?;
 
         // Serialize concurrent reindex runs against the same workspace: two runs with different
         // providers would both bypass the write-time model check by design, and embedding writes

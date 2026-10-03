@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use yorishiro::error::YorishiroError;
-use yorishiro::metaschema::{
+use yorishiro::models::schema_schemas::metaschema::{
     ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MAX_OBJECT_DEPTH, MetaSchemaDefinition,
     RelationTypeDef, validate_definition,
 };

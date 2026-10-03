@@ -11,7 +11,6 @@ mod workers;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serial_test::serial;
@@ -67,24 +66,6 @@ impl Drop for EnvGuard {
                 }
             }
         }
-    }
-}
-
-pub(crate) struct CurrentDirGuard {
-    original: PathBuf,
-}
-
-impl CurrentDirGuard {
-    pub(crate) fn enter(path: &Path) -> Self {
-        let original = env::current_dir().unwrap();
-        env::set_current_dir(path).unwrap();
-        Self { original }
-    }
-}
-
-impl Drop for CurrentDirGuard {
-    fn drop(&mut self) {
-        env::set_current_dir(&self.original).unwrap();
     }
 }
 

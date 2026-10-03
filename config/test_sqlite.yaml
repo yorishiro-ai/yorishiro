@@ -44,6 +44,26 @@ queue:
 workers:
   mode: BackgroundQueue
 
+settings:
+  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>
+  embedding:
+    provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="none") %>
+    dimensions: <%= get_env(name="YORISHIRO_EMBEDDING_DIMENSIONS", default="768") %>
+    base_url: <%= get_env(name="YORISHIRO_EMBEDDING_BASE_URL", default="") %>
+    api_key: '<%= get_env(name="YORISHIRO_EMBEDDING_API_KEY", default="") %>'
+    model: <%= get_env(name="YORISHIRO_EMBEDDING_MODEL", default="") %>
+    send_dimensions_param: <%= get_env(name="YORISHIRO_EMBEDDING_SEND_DIMENSIONS_PARAM", default="false") %>
+    local_model: <%= get_env(name="YORISHIRO_LOCAL_MODEL", default="multilingual-e5-base") %>
+    local_max_sequence_length: <%= get_env(name="YORISHIRO_LOCAL_MAX_SEQUENCE_LENGTH", default="512") %>
+  rate_limit:
+    auth_max_requests: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_MAX", default="10") %>
+    auth_window_seconds: <%= get_env(name="YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS", default="60") %>
+    search_tokens_per_minute: <%= get_env(name="YORISHIRO_SEARCH_TOKENS_PER_MINUTE", default="100000") %>
+  db_load_guard:
+    threshold: <%= get_env(name="YORISHIRO_DB_LOAD_THRESHOLD", default="0") %>
+    sustain_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_SUSTAIN_SECS", default="30") %>
+    poll_seconds: <%= get_env(name="YORISHIRO_DB_LOAD_POLL_SECS", default="5") %>
+
 # Database Configuration
 database:
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'

@@ -10,6 +10,10 @@ pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
+    fn use_transaction(&self) -> Option<bool> {
+        crate::helpers::use_transaction()
+    }
+
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .alter_table(

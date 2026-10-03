@@ -2,7 +2,7 @@ use loco_rs::{
     controller::middleware::{MiddlewareLayer, logger},
     environment::Environment,
 };
-use yorishiro::services::access_log::{Middleware, path_only};
+use yorishiro::controllers::middleware::access_log::{Middleware, path_only};
 
 #[test]
 fn access_log_target_excludes_oauth_query_parameters() {

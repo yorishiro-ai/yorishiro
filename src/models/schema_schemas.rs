@@ -1,0 +1,451 @@
+use chrono::{DateTime, Utc};
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::db_enum::db_enum;
+use crate::error::{ResultExt, YorishiroError};
+pub use crate::models::_entities::schema_schemas::{ActiveModel, Entity, Model};
+
+pub mod metaschema;
+
+use metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
+
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
+    async fn before_save<C>(self, db: &C, _insert: bool) -> std::result::Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        let mut this = self;
+        this.id = crate::db::sqlite_generated_id(db, this.id);
+        // Stamped on insert as well as update, unlike the seven models that stamp only on update: those tables' `updated_at` columns carry a database default on both backends, and this one cannot.
+        // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `schema_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
+        // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
+        if !this.updated_at.is_set() {
+            this.updated_at = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().into()));
+        }
+        Ok(this)
+    }
+}
+
+// implement your read-oriented logic here
+impl Model {}
+
+// implement your write-oriented logic here
+impl ActiveModel {}
+
+// implement your custom finders, selectors oriented logic here
+impl Entity {}
+
+db_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum SchemaStatus {
+        Active = "active",
+        Archived = "archived",
+    }
+}
+
+db_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum SchemaOriginStatus {
+        Linked = "linked",
+        Detached = "detached",
+    }
+}
+
+/// Serializes every producer of a schema version for one workspace and name.
+/// Fork heads use this same lock as ordinary schema creation, so both paths
+/// observe one version sequence even when they run concurrently.
+pub async fn lock_version(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    name: &str,
+) -> Result<(), YorishiroError> {
+    crate::db::lock_for_update(conn, &format!("{workspace_id}:{name}"))
+        .await
+        .internal()
+}
+
+/// One version of a workspace's schema.
+//
+// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SchemaRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub version: i32,
+    #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
+    pub definition: MetaSchemaDefinition,
+    pub status: SchemaStatus,
+    pub origin_template_id: Option<Uuid>,
+    pub origin_status: SchemaOriginStatus,
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<serde_json::Value>))]
+    pub origin_snapshot: Option<MetaSchemaDefinition>,
+    pub origin_updated_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl TryFrom<Model> for SchemaRecord {
+    type Error = YorishiroError;
+
+    fn try_from(row: Model) -> Result<Self, Self::Error> {
+        Ok(SchemaRecord {
+            id: row.id,
+            tenant_id: row.tenant_id,
+            workspace_id: row.workspace_id,
+            name: row.name,
+            version: row.version,
+            definition: serde_json::from_value(row.definition).internal()?,
+            status: SchemaStatus::from_db_str(&row.status).ok_or_else(|| {
+                YorishiroError::Internal(anyhow::anyhow!("unknown schema status: {}", row.status))
+            })?,
+            origin_template_id: row.origin_template_id,
+            origin_status: SchemaOriginStatus::from_db_str(&row.origin_status).ok_or_else(
+                || {
+                    YorishiroError::Internal(anyhow::anyhow!(
+                        "unknown schema origin status: {}",
+                        row.origin_status
+                    ))
+                },
+            )?,
+            origin_snapshot: row
+                .origin_snapshot
+                .map(serde_json::from_value)
+                .transpose()
+                .internal()?,
+            origin_updated_at: row.origin_updated_at.map(|t| t.into()),
+            created_at: row.created_at.into(),
+        })
+    }
+}
+
+/// Fetches the currently active schema (the latest version with status='active') for the given workspace and name.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+pub async fn get_active_schema(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    name: &str,
+) -> Result<SchemaRecord, YorishiroError> {
+    // SQLite serializes UUIDs as binary in SeaORM queries, but the migration stores them as
+    // hex strings in TEXT columns. Convert to hex for the filter so the comparison works.
+    use crate::models::_entities::schema_schemas::Column;
+
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Name.eq(name))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
+        .order_by_desc(Column::Version)
+        .one(conn)
+        .await
+        .internal()?;
+
+    match row {
+        Some(row) => row.try_into(),
+        None => Err(YorishiroError::not_found(format!(
+            "no active schema named '{name}'"
+        ))),
+    }
+}
+
+/// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
+/// For workspace-detail summaries, this is a more meaningful "how many schemas does this workspace define" figure than counting every archived version too.
+pub(crate) async fn count_active(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<i64, YorishiroError> {
+    use crate::models::_entities::schema_schemas::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
+        .count(conn)
+        .await
+        .internal()
+        .map(|n| n as i64)
+}
+
+/// Fetches every schema version (active and archived) for the workspace, ordered by `(name, version)`, for a full-workspace data export.
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
+pub async fn export_all(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<Vec<SchemaRecord>, YorishiroError> {
+    use crate::models::_entities::schema_schemas::Column;
+
+    Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::Name)
+        .order_by_asc(Column::Version)
+        .all(conn)
+        .await
+        .internal()?
+        .into_iter()
+        .map(SchemaRecord::try_from)
+        .collect()
+}
+
+/// Fetches a specific schema version by id (used to resolve the version an entity references).
+///
+/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+pub(crate) async fn get_by_id(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    schema_id: Uuid,
+) -> Result<SchemaRecord, YorishiroError> {
+    use crate::models::_entities::schema_schemas::Column;
+
+    let row = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Id.eq(schema_id))
+        .one(conn)
+        .await
+        .internal()?;
+
+    match row {
+        Some(row) => row.try_into(),
+        None => Err(YorishiroError::not_found(format!(
+            "schema '{schema_id}' was not found"
+        ))),
+    }
+}
+
+/// A schema whose origin template has been edited since the copy was taken.
+///
+/// The signal only (what changed and where), with no diff and no application.
+/// Whether to follow the upstream edit is the workspace's call, since applying it could invalidate entities already stored against the current definition.
+///
+/// Lives here rather than in `ee/` because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
+/// The endpoint that produces one (`ee/`'s `GET /api/schemas/upstream-changes`) is what makes following it enterprise, not the shape of the value itself.
+#[derive(Clone, Serialize)]
+pub struct UpstreamChange {
+    pub schema_id: Uuid,
+    pub schema_name: String,
+    /// The version of the schema currently in use here.
+    pub version: i32,
+    pub template_id: Uuid,
+    pub(crate) template_name: String,
+    /// When the template was last edited.
+    pub(crate) changed_at: DateTime<Utc>,
+    /// Whether a push notification has been sent for this schema's upstream change.
+    pub pending_notification: bool,
+    pub summary: MergeDiffSummary,
+}
+
+/// Counts the decisions in a computed origin merge plan.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct MergeDiffSummary {
+    pub total_fields: usize,
+    pub auto_add: usize,
+    pub(crate) auto_update: usize,
+    pub keep_local: usize,
+    pub conflict: usize,
+    pub has_conflicts: bool,
+}
+
+/// A schema in a listing.
+/// A lightweight summary that omits the `definition` body.
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub(crate) struct SchemaSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub version: i32,
+    pub status: SchemaStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<Model> for SchemaSummary {
+    fn from(model: Model) -> Self {
+        Self {
+            id: model.id,
+            name: model.name,
+            version: model.version,
+            status: SchemaStatus::from_db_str(&model.status).unwrap_or(SchemaStatus::Archived),
+            created_at: model.created_at.into(),
+        }
+    }
+}
+
+/// Lists all of a workspace's schemas (every version, including archived) ordered by name and version.
+pub(crate) async fn list(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<SchemaSummary>, YorishiroError> {
+    use crate::models::_entities::schema_schemas::Column;
+
+    let rows = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .order_by_asc(Column::Name)
+        .order_by_asc(Column::Version)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .all(conn)
+        .await
+        .internal()?;
+
+    Ok(rows.into_iter().map(SchemaSummary::from).collect())
+}
+
+/// Marks every schema that follows `template_id` as having a pending upstream notification.
+///
+/// Sets `origin_updated_at` to `NULL` for all linked schemas referencing the template.
+/// The merge endpoint clears it back to `Some(NOW())` after applying the upstream change.
+pub(crate) async fn notify_upstream_change(
+    conn: &impl ConnectionTrait,
+    template_id: Uuid,
+) -> Result<usize, YorishiroError> {
+    use crate::models::_entities::schema_schemas::{Column, Entity};
+    use sea_orm::EntityTrait;
+
+    let result = Entity::update_many()
+        .col_expr(Column::OriginUpdatedAt, Expr::value(None::<DateTime<Utc>>))
+        .filter(Column::OriginTemplateId.eq(template_id))
+        .filter(Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+
+    Ok(result.rows_affected as usize)
+}
+
+pub async fn create_schema(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+    definition: MetaSchemaDefinition,
+    origin_template_id: Option<Uuid>,
+    origin_snapshot: Option<MetaSchemaDefinition>,
+) -> Result<(SchemaRecord, VersioningDiff), YorishiroError> {
+    use crate::models::_entities::schema_schemas::Column;
+
+    validate_definition(&definition)?;
+    let name = definition.name.clone();
+
+    lock_version(conn, workspace_id, &name).await?;
+
+    let previous = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Name.eq(&name))
+        .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
+        .order_by_desc(Column::Version)
+        .one(conn)
+        .await
+        .internal()?
+        .map(SchemaRecord::try_from)
+        .transpose()?;
+
+    // Only the first version of a name mints an origin from what the caller passed.
+    // Every later one inherits the complete origin state from its predecessor, including a pending notification.
+    // Replacing a pending active version must not acknowledge the update merely because a local version was created.
+    let (origin_template_id, origin_snapshot, origin_updated_at) = match &previous {
+        Some(previous) if origin_template_id.is_none() => (
+            previous.origin_template_id,
+            previous.origin_snapshot.clone(),
+            previous.origin_updated_at,
+        ),
+        _ => (
+            origin_template_id,
+            origin_snapshot,
+            if origin_template_id.is_some() {
+                Some(chrono::Utc::now())
+            } else {
+                None
+            },
+        ),
+    };
+
+    let latest_version = Entity::find()
+        .filter(Column::WorkspaceId.eq(workspace_id))
+        .filter(Column::Name.eq(&name))
+        .order_by_desc(Column::Version)
+        .one(conn)
+        .await
+        .internal()?
+        .map(|row| row.version)
+        .unwrap_or(0);
+
+    let (next_version, diff) = match &previous {
+        Some(previous) => {
+            let diff = metaschema::diff(&previous.definition, &definition);
+            (latest_version + 1, diff)
+        }
+        None => (
+            latest_version + 1,
+            VersioningDiff {
+                is_breaking: false,
+                reasons: Vec::new(),
+            },
+        ),
+    };
+
+    if previous.is_some() {
+        // `update_many` is a builder call and never runs `ActiveModelBehavior::before_save`, so `updated_at` is set explicitly here or archiving a schema version would leave its timestamp stale.
+        Entity::update_many()
+            .col_expr(
+                Column::Status,
+                Expr::value(SchemaStatus::Archived.as_db_str()),
+            )
+            .col_expr(
+                Column::UpdatedAt,
+                Expr::value(chrono::Utc::now().fixed_offset()),
+            )
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Name.eq(&name))
+            .filter(Column::Status.eq(SchemaStatus::Active.as_db_str()))
+            .exec(conn)
+            .await
+            .internal()?;
+    }
+
+    let definition_json = serde_json::to_value(&definition).internal()?;
+    let origin_snapshot_json = origin_snapshot
+        .map(|snapshot| serde_json::to_value(&snapshot))
+        .transpose()
+        .internal()?;
+    let origin_status = if origin_template_id.is_some() {
+        SchemaOriginStatus::Linked.as_db_str()
+    } else {
+        SchemaOriginStatus::Detached.as_db_str()
+    };
+
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        workspace_id: ActiveValue::Set(workspace_id),
+        name: ActiveValue::Set(name.clone()),
+        version: ActiveValue::Set(next_version),
+        definition: ActiveValue::Set(definition_json),
+        status: ActiveValue::Set(SchemaStatus::Active.as_db_str().to_string()),
+        origin_template_id: ActiveValue::Set(origin_template_id),
+        origin_status: ActiveValue::Set(origin_status.to_string()),
+        origin_snapshot: ActiveValue::Set(origin_snapshot_json),
+        origin_updated_at: ActiveValue::Set(origin_updated_at.map(Into::into)),
+        ..Default::default()
+    };
+    let row = active.insert(conn).await.map_err(|err| {
+        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
+            YorishiroError::Conflict {
+                message: format!(
+                    "schema '{name}' version {next_version} already exists (concurrent create?)"
+                ),
+            }
+        } else {
+            YorishiroError::Internal(err.into())
+        }
+    })?;
+
+    // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.
+    // Unconditional and idempotent: every version after the first finds it active already, and checking first would only add a round trip.
+    crate::models::workspace_workspaces::mark_active(conn, workspace_id, row.id).await?;
+
+    Ok((row.try_into()?, diff))
+}

@@ -37,7 +37,7 @@ pub(super) struct Artifact {
 ///
 /// The model and tokenizer artifacts live on the same definition rather than as two independent statics, deliberately: both output 768 dimensions on the two models defined below, so a mismatched model/tokenizer pairing would pass every shape check silently, embedding with the wrong vocabulary while looking healthy.
 /// Pairing them on one struct makes that swap a compile-time impossibility rather than a runtime risk to guard against.
-pub struct LocalModelDef {
+pub(crate) struct LocalModelDef {
     /// The model identifier reported by [`super::EmbeddingProvider::model_name`] and stamped onto a workspace at creation.
     /// A HuggingFace repo id, since that is the only identifier that survives an implementation change (this codebase's own `ort` to `candle` migration already outlived one such identifier).
     pub(super) id: &'static str,
@@ -50,7 +50,7 @@ pub struct LocalModelDef {
     revision: &'static str,
     model: Artifact,
     tokenizer: Artifact,
-    /// Output vector width. Both definitions below happen to produce 768, which is what lets a deployment mix them in one `entity_entities.embedding vector(768)` column at all; see the write-time model check in `services/embedding/sync.rs` for why that coincidence still needs guarding.
+    /// Output vector width. Both definitions below happen to produce 768, which is what lets a deployment mix them in one `entity_entities.embedding vector(768)` column at all; see the write-time model check in `models/entity_embeddings/write.rs` for why that coincidence still needs guarding.
     pub(super) dimensions: usize,
     /// Upper bound on tokenized sequence length before truncation.
     ///
@@ -69,7 +69,7 @@ pub struct LocalModelDef {
 /// The `candle-transformers` model family a [`LocalModelDef`] loads through.
 /// A backend branch on this stays internal to `local.rs`'s own load/forward code, per this repository's own rule that a backend distinction must not change the function signature or return type for callers.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Architecture {
+pub(crate) enum Architecture {
     /// `candle_transformers::models::xlm_roberta::XLMRobertaModel`.
     XlmRoberta,
 }
@@ -108,12 +108,13 @@ pub(super) static MULTILINGUAL_E5_BASE: LocalModelDef = LocalModelDef {
 ///
 /// `multilingual-e5-base`, not `nomic-embed-text-v1.5`: this codebase's search and recall are not English-only, and only the multilingual model serves that well.
 /// `multilingual-e5-base` is used instead of `nomic-embed-text-v1.5` because this codebase's search and recall are not English-only.
-/// The write-time model check (`services/embedding/sync.rs`) refuses a write whose vector doesn't match the workspace's stamped model, and the `reindex_embeddings` task moves a workspace between models: together these prevent the "stamp says one model, data holds another" failure.
+/// The write-time model check (`models/entity_embeddings/write.rs`) refuses a write whose vector doesn't match the workspace's stamped model, and the `reindex_embeddings` task moves a workspace between models: together these prevent the "stamp says one model, data holds another" failure.
 /// A workspace with no stamp (both `embedding_model` and `embedding_dimensions` are `NULL`) inherits the deployment default, so it is also protected: writes go through the stamp that `sync_embedding` sets on the first embed, and the model check compares against that stamp.
 /// `docs/configuration.md`'s "Moving a workspace between embedding models" section documents the procedure for every other workspace: change configuration, restart, then reindex.
 pub(super) const DEFAULT_MODEL: &LocalModelDef = &MULTILINGUAL_E5_BASE;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 static NEXT_STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -157,7 +158,8 @@ async fn ensure_file(
     artifact: &Artifact,
 ) -> anyhow::Result<PathBuf> {
     let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
         .build()
         .expect("reqwest client configuration is static and always valid");
     ensure_file_with_http(dir, def, artifact, &client, &ReqwestArtifactHttp).await
@@ -432,7 +434,7 @@ async fn download_verified(
         );
     }
 
-    let digest = hex_encode(&hasher.finalize());
+    let digest = hex::encode(hasher.finalize());
     if digest != artifact.sha256 {
         anyhow::bail!(
             "{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",
@@ -441,15 +443,6 @@ async fn download_verified(
     }
 
     Ok(())
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
 }
 
 #[cfg(test)]
@@ -501,7 +494,8 @@ mod tests {
 
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(READ_TIMEOUT)
             .build()
             .unwrap()
     }
@@ -510,7 +504,7 @@ mod tests {
         Artifact {
             remote_path: "test.bin",
             local_name: "test.bin",
-            sha256: Box::leak(hex_encode(&Sha256::digest(bytes)).into_boxed_str()),
+            sha256: Box::leak(hex::encode(Sha256::digest(bytes)).into_boxed_str()),
             size: bytes.len() as u64,
             description: "test artifact",
         }
@@ -544,12 +538,6 @@ mod tests {
                 .to_string_lossy()
                 .contains(".partial.")
         }));
-    }
-
-    #[test]
-    fn hex_encode_pads_single_digit_bytes() {
-        assert_eq!(hex_encode(&[0x00, 0x0f, 0xff, 0xa5]), "000fffa5");
-        assert_eq!(hex_encode(&[]), "");
     }
 
     #[test]

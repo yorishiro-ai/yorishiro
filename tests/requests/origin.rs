@@ -7,9 +7,9 @@ use yorishiro::app::App;
 use yorishiro::models::_entities::{
     api_keys, template_templates, tenant_tenants, workspace_workspaces,
 };
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::auth::ApiKeyScope;
 
 struct Setup {
     tenant_id: Uuid,
@@ -187,7 +187,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             edit_local.text()
         );
         // Edit the template upstream: add a field the workspace does not have.
-        let updated_definition: yorishiro::metaschema::MetaSchemaDefinition =
+        let updated_definition: yorishiro::models::schema_schemas::metaschema::MetaSchemaDefinition =
             serde_json::from_value(serde_json::json!({
             "name": "library-note",
             "entity_types": {
@@ -351,7 +351,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         }
 
         #[async_trait::async_trait]
-        impl yorishiro::ee::services::origin::MergeReadHook for ReadBarrier {
+        impl yorishiro::ee::models::schema_schemas::MergeReadHook for ReadBarrier {
             async fn after_revision_read(&self) {
                 self.ready.notify_one();
                 self.release.notified().await;
@@ -412,7 +412,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         let merge_barrier = barrier.clone();
         let merge = tokio::spawn(async move {
             let txn = merge_db.begin().await.expect("begin merge transaction");
-            let result = yorishiro::ee::services::origin::merge_apply_with_read_hook(
+            let result = yorishiro::ee::models::schema_schemas::merge_apply_with_read_hook(
                 &txn,
                 &merge_ctx,
                 tenant_id,

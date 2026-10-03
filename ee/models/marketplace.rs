@@ -3,7 +3,11 @@
 //! All three are created by the one schema migration in the root `migration` crate; this crate has never had a migration crate of its own, and the tables are base-owned even though only `ee/` reads them.
 //!
 //! Record shapes, input DTOs, and the reads live here.
-//! A write that is a genuine decision (ownership, status validation, version numbering under lock, a rating range) stays in `services::marketplace`, which calls into this module for the insert/update itself.
+//! Write decisions live in the private `write` implementation module.
+
+mod write;
+
+pub(crate) use write::{fork_template, publish_version, set_visibility, submit_review};
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
@@ -13,8 +17,6 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fmt;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
@@ -46,52 +48,22 @@ pub struct TemplateVersionRecord {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TemplateVersionStatus {
-    Draft,
-    Pre,
-    Stable,
+crate::db_enum::db_enum! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum TemplateVersionStatus {
+        Draft = "draft",
+        Pre = "pre",
+        Stable = "stable",
+    }
 }
 
 impl TemplateVersionStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Draft => "draft",
-            Self::Pre => "pre",
-            Self::Stable => "stable",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-
     pub fn parse_publish(value: &str) -> Result<Self, YorishiroError> {
         Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("unknown publish status '{value}'"),
             details: Vec::new(),
             hint: "use one of: draft, pre, stable".into(),
         })
-    }
-}
-
-impl fmt::Display for TemplateVersionStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for TemplateVersionStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "draft" => Ok(Self::Draft),
-            "pre" => Ok(Self::Pre),
-            "stable" => Ok(Self::Stable),
-            _ => Err(format!("unknown template version status: {value}")),
-        }
     }
 }
 
@@ -398,7 +370,7 @@ pub async fn list_versions(
 
 /// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
 ///
-/// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`services::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
+/// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`models::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
 ///
 /// Stays a hand-written `INSERT ... SELECT`, not `ActiveModel::insert`: the version number itself is computed by the same statement that inserts it, which is the concurrency guarantee above.
 /// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
@@ -477,7 +449,7 @@ pub async fn list_reviews(
         .collect()
 }
 
-/// Whether a template visible to `tenant_id` exists, for `services::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
+/// Whether a template visible to `tenant_id` exists, for `models::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
 pub(crate) async fn is_visible(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -667,7 +639,7 @@ pub(crate) async fn insert_fork(
     }
 }
 
-/// Whether a template exists and belongs to `tenant_id`, for `services::marketplace::require_ownership`.
+/// Whether a template exists and belongs to `tenant_id`, for `models::marketplace::require_ownership`.
 pub(crate) async fn is_owned_by(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -686,7 +658,7 @@ pub(crate) async fn is_owned_by(
 }
 
 /// Sets a template's marketplace visibility.
-/// `services::marketplace::set_visibility` has already checked ownership; this is the write alone.
+/// `models::marketplace::set_visibility` has already checked ownership; this is the write alone.
 pub(crate) async fn update_visibility(
     conn: &impl ConnectionTrait,
     template_id: Uuid,

@@ -37,7 +37,7 @@
 //! notices.
 use super::boot_request;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 
 /// Overwrites the enterprise-edition state the test process booted with.
 ///
@@ -51,16 +51,13 @@ fn install_licence(ctx: &loco_rs::app::AppContext, expires_in_secs: i64) {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: chrono::Utc::now().timestamp() + expires_in_secs,
-        }))
-            as std::sync::Arc<
-                dyn yorishiro::services::edition::EnterpriseEdition,
-            >);
+        })) as std::sync::Arc<LicenceState>);
 }
 
 /// One representative gated route, with a method that reaches the layer.
 ///
 /// Authentication is deliberately not set up: 404 rather than 401 to an unauthenticated caller is
-/// what pins the gate's ordering (see `app::licence_gate` for why that ordering matters).
+/// what pins the gate's ordering (see `ee::controllers::middleware::edition::licence_gate` for why that ordering matters).
 ///
 /// Every path in this file is a GET that a route actually declares. A path with no route answers 404
 /// for that reason alone, which would make the unlicensed assertions pass with the gate deleted:
@@ -166,7 +163,7 @@ async fn gated_routes_are_served_with_a_licence() {
 }
 
 /// A key that verified and then lapsed closes the gate again with no restart, which is the property
-/// `app::licence_gate` is a per-request layer to keep.
+/// `ee::controllers::middleware::edition::licence_gate` is a per-request layer to keep.
 #[tokio::test]
 async fn an_expired_licence_closes_the_gate_again() {
     if !super::super::require_postgres_backend() {

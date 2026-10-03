@@ -96,10 +96,10 @@ contents:
     dst: /lib/systemd/system/yorishiro.service
   - src: ./packaging/yorishiro-worker.service
     dst: /lib/systemd/system/yorishiro-worker.service
-  # The systemd unit loads this editable canonical YAML file from /etc/yorishiro.
+  # The systemd unit loads this editable Loco production configuration.
   # `config|noreplace` preserves an operator's changes during package upgrades.
-  - src: ./packaging/yorishiro.yaml
-    dst: /etc/yorishiro/yorishiro.yaml
+  - src: ./config/production.yaml
+    dst: /etc/yorishiro/production.yaml
     type: config|noreplace
     file_info:
       mode: 0640

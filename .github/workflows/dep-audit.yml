@@ -22,7 +22,7 @@ jobs:
           # pinned to master it was permanently false and this cache was never written.
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - name: Install tools
-        run: cargo install cargo-audit cargo-outdated
+        run: cargo install --locked cargo-audit cargo-outdated
       # `cargo audit` exits 0 when it ran and found nothing, and 1 when it ran and has something
       # to report (an advisory, or a warning such as an unmaintained or yanked crate): valid
       # JSON on stdout either way. A higher code means it never ran at all: a bad flag, a missing

@@ -8,8 +8,8 @@ use crate::models::system_maintenance::{self, MaintenanceMode};
 ///
 /// `mode` is one of `off`/`read_only`/`full_lock`.
 /// `read_only` refuses writes with 423; `full_lock` refuses everything with 503; `off` serves normally.
-/// The state is shared by every node (one row in the database), and `/_ping`/`/_health`/`/_readiness` keep answering so an orchestrator does not restart a server that is deliberately paused (see `services::maintenance::always_served`).
-pub struct Maintenance;
+/// The state is shared by every node (one row in the database), and `/_ping`/`/_health`/`/_readiness` keep answering so an orchestrator does not restart a server that is deliberately paused (see `controllers::middleware::maintenance::always_served`).
+pub(crate) struct Maintenance;
 
 #[async_trait]
 impl Task for Maintenance {
@@ -35,7 +35,7 @@ impl Task for Maintenance {
                 details: vec![],
                 hint: String::new(),
             })?,
-            Err(_) => 300,
+            Err(_) => system_maintenance::DEFAULT_RETRY_AFTER_SECONDS,
         };
         let reason = vars.cli_arg("reason").ok().map(str::to_string);
 

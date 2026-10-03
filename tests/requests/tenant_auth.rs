@@ -3,7 +3,8 @@ use axum::http::StatusCode;
 use serial_test::serial;
 use yorishiro::app::App;
 use yorishiro::db::DbHandle;
-use yorishiro::ee::services::tenant_auth::{WORKSPACE_HEADER, create_tenant_api_key};
+use yorishiro::ee::controllers::middleware::auth::WORKSPACE_HEADER;
+use yorishiro::ee::models::api_keys::create_tenant_api_key;
 
 /// Installing `TenantScopedAuthenticator` (`App::after_context`) must not break a workspace-scoped key on a route base itself defines.
 #[tokio::test]

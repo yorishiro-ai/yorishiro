@@ -11,9 +11,9 @@ use loco_rs::controller::Routes;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
 use crate::db;
-use crate::ee::models::{billing, stripe_events};
-use crate::ee::services::non_empty_env;
-use crate::ee::services::plan::{Plan, StripePriceMapping};
+use crate::ee::data::non_empty_env;
+use crate::ee::data::plan::{Plan, StripePriceMapping};
+use crate::ee::models::{stripe_events, tenant_billing};
 use crate::error::ResultExt;
 use crate::error::YorishiroError;
 use crate::models::tenancy;
@@ -24,7 +24,7 @@ mod inbound {
     use chrono::Utc;
     use serde::Deserialize;
 
-    use crate::ee::services::hmac_sign;
+    use crate::ee::controllers::hmac_sign;
 
     #[derive(Debug)]
     pub(super) enum Error {
@@ -310,7 +310,7 @@ const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 #[derive(Clone, Default)]
 pub struct StripeConfig {
     pub webhook_secret: Option<String>,
-    pub price_mapping: StripePriceMapping,
+    pub(crate) price_mapping: StripePriceMapping,
 }
 
 impl StripeConfig {
@@ -383,7 +383,7 @@ async fn resolve_tenant_by_customer(
     let Some(customer_id) = object.get("customer").and_then(|v| v.as_str()) else {
         return Ok(None);
     };
-    Ok(billing::get_by_stripe_customer(conn, customer_id)
+    Ok(tenant_billing::get_by_stripe_customer(conn, customer_id)
         .await?
         .map(|record| record.tenant_id))
 }
@@ -467,7 +467,7 @@ async fn apply_stripe_event(
                 tracing::warn!("checkout.session.completed missing client_reference_id/customer");
                 return Ok(());
             };
-            billing::link_stripe_customer(&txn, tenant_id, customer_id).await?;
+            tenant_billing::link_stripe_customer(&txn, tenant_id, customer_id).await?;
         }
         "customer.subscription.created" | "customer.subscription.updated" => {
             let object = &event.data.object;
@@ -496,7 +496,7 @@ async fn apply_stripe_event(
                 return Ok(());
             };
             let caps = plan.caps();
-            billing::set_plan(&txn, tenant_id, plan.as_str()).await?;
+            tenant_billing::set_plan(&txn, tenant_id, plan.as_str()).await?;
             tenancy::set_tenant_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
         }
         "customer.subscription.deleted" => {
@@ -505,7 +505,7 @@ async fn apply_stripe_event(
                 return Ok(());
             };
             let caps = Plan::Free.caps();
-            billing::set_plan(&txn, tenant_id, Plan::Free.as_str()).await?;
+            tenant_billing::set_plan(&txn, tenant_id, Plan::Free.as_str()).await?;
             tenancy::set_tenant_max_workspaces(&txn, tenant_id, caps.max_workspaces).await?;
         }
         _ => {}

@@ -6,7 +6,7 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenancy;
 
 /// `cargo loco task list_members tenant_id:<uuid>`
-pub struct ListMembers;
+pub(crate) struct ListMembers;
 
 #[async_trait]
 impl Task for ListMembers {

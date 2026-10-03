@@ -7,10 +7,14 @@
 //! `#[path]` instead.
 //!
 //! This is a module of the application crate, not a crate of its own, so one binary carries both
-//! editions. What a deployment actually serves is decided at runtime: `app::licence_gate` answers
+//! editions. What a deployment actually serves is decided at runtime: `ee::controllers::middleware::edition::licence_gate` answers
 //! 404 on the gated routes until a valid licence key is configured.
 
+pub(crate) mod app;
 pub mod controllers;
+pub(crate) mod data;
+pub mod db;
+pub(crate) mod dtos;
 pub mod models;
 pub mod services;
 pub mod tasks;

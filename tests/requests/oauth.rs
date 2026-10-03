@@ -1,4 +1,4 @@
-//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `billing::` functions directly alongside HTTP requests).
+//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
 use super::boot_request;
@@ -9,8 +9,7 @@ use sea_orm::{ActiveValue, EntityTrait, TransactionTrait};
 use serial_test::serial;
 use sha2::Sha256;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
-use yorishiro::ee::services::oauth;
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::tenant_tenants;
 
 /// The OAuth routes carry the licence gate, so an unlicensed process answers 404 to all three before
@@ -25,10 +24,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: chrono::Utc::now().timestamp() + 60 * 60,
-        }))
-            as std::sync::Arc<
-                dyn yorishiro::services::edition::EnterpriseEdition,
-            >);
+        })) as std::sync::Arc<LicenceState>);
 }
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
@@ -37,7 +33,7 @@ const ISSUER_URL: &str = "http://127.0.0.1:1";
 const CLIENT_ID: &str = "test-client";
 const CLIENT_SECRET: &str = "test-client-secret";
 
-/// A signed `state` value in the exact shape `services::oauth::state_token::issue` produces: this crate keeps that module private, so a test that needs a validly-signed fixture (rather than exercising the rejection paths, which need no valid signature at all) builds one the same way, HMAC-SHA256 under the client secret.
+/// A signed `state` value in the exact shape `controllers::oauth::state_token::issue` produces: this crate keeps that module private, so a test that needs a validly-signed fixture (rather than exercising the rejection paths, which need no valid signature at all) builds one the same way, HMAC-SHA256 under the client secret.
 fn sign_state(payload: &str) -> String {
     let mut mac =
         Hmac::<Sha256>::new_from_slice(CLIENT_SECRET.as_bytes()).expect("any key length is valid");
@@ -306,17 +302,16 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             .await
             .unwrap();
 
-        let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
-        guard.set("YORISHIRO_MAX_TENANTS", "1");
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let result = oauth::find_or_create(
+        let result = yorishiro::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-brand-new-subject",
             Some("newcomer@example.com"),
             None,
             ("test-model", 768),
+            Some(1),
         )
         .await;
         // The call is expected to be refused; make the rollback explicit so a
@@ -350,13 +345,14 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let provisioned = oauth::find_or_create(
+        let provisioned = yorishiro::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-first-login-subject",
             Some("firstlogin@example.com"),
             None,
             ("test-model", 768),
+            None,
         )
         .await
         .expect("first login provisioning");

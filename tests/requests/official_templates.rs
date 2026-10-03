@@ -1,10 +1,10 @@
-//! `seed_official_templates` has no HTTP surface (it is a Loco task, `cargo loco task seed_official_templates`), so this calls the service function directly against `ctx.db`, matching how `tests/requests/stripe.rs` calls `billing::` functions directly alongside HTTP requests in the same suite.
+//! `seed_official_templates` has no HTTP surface (it is a Loco task, `cargo loco task seed_official_templates`), so this calls the service function directly against `ctx.db`, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests in the same suite.
 
 use super::boot_request;
 use loco_rs::app::Hooks;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::app::App;
-use yorishiro::ee::services::official_templates::{self, OFFICIAL_TENANT_ID};
+use yorishiro::ee::models::template_templates::{self as official_templates, OFFICIAL_TENANT_ID};
 use yorishiro::models::_entities::{template_versions, tenant_tenants};
 
 /// A first run publishes every built-in template and creates the official tenant; a second run republishes nothing.
@@ -14,7 +14,7 @@ async fn seeding_is_idempotent_and_creates_the_official_tenant() {
         return;
     }
     boot_request::<App, _, _>(|_request, ctx| async move {
-        let built_in_count = yorishiro::templates::list_templates().len();
+        let built_in_count = yorishiro::data::templates::list_templates().len();
 
         let first = official_templates::seed_official_templates(&ctx)
             .await

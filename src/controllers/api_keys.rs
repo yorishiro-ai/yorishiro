@@ -3,48 +3,22 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
-use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::EntityTrait;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::members::require_tenant_admin;
+use crate::dtos::api_keys::{
+    ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
+};
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
-use crate::services::auth::ApiKeyScope;
 
 const MAX_NAME_LENGTH: usize = 100;
-
-#[derive(Deserialize)]
-pub(crate) struct CreateApiKeyRequest {
-    pub(crate) name: String,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ApiKeyRecord {
-    pub(crate) id: Uuid,
-    pub(crate) prefix: String,
-    pub(crate) name: String,
-    pub(crate) created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct CreateApiKeyResponse {
-    pub(crate) id: Uuid,
-    pub(crate) prefix: String,
-    pub(crate) full_key: String,
-    pub(crate) name: String,
-    pub(crate) created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ListApiKeysResponse {
-    pub(crate) keys: Vec<ApiKeyRecord>,
-}
 
 fn validate_name(name: &str) -> Result<String, YorishiroError> {
     let name = name.trim();
@@ -64,7 +38,7 @@ fn validate_name(name: &str) -> Result<String, YorishiroError> {
     Ok(name.to_owned())
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys", request_body = super::openapi::CreateApiKeyRequest, responses((status = 201, body = super::openapi::CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys", request_body = crate::dtos::api_keys::CreateApiKeyRequest, responses((status = 201, body = crate::dtos::api_keys::CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub(crate) async fn create(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -99,7 +73,7 @@ pub(crate) async fn create(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/api-keys", responses((status = 200, body = super::openapi::ListApiKeysResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/api-keys", responses((status = 200, body = crate::dtos::api_keys::ListApiKeysResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "community"))]
 pub(crate) async fn list(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,

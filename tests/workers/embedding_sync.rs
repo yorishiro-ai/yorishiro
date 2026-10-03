@@ -63,7 +63,7 @@ fn db_str_round_trips_and_matches_the_serde_wire_form() {
 
 #[test]
 fn from_db_str_rejects_an_unknown_value() {
-    assert!(WorkerClass::from_db_str("not-a-real-class").is_err());
+    assert!(WorkerClass::from_db_str("not-a-real-class").is_none());
 }
 
 /// `App::connect_workers` registers each of the three types under its own `class_name()`.

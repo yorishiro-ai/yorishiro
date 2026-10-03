@@ -5,10 +5,10 @@ use sea_orm::{ActiveModelTrait, ActiveValue, TransactionTrait};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::models::_entities::template_templates;
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::{entity_entities, schema_schemas, template_templates as templates};
-use yorishiro::services::auth::ApiKeyScope;
 
 use super::boot_request;
 use super::fixtures::{self, TenantArgs, issue_api_key};
@@ -111,8 +111,8 @@ fn install_licence(ctx: &loco_rs::app::AppContext, active: bool) {
     } else {
         LicenceState::default()
     };
-    ctx.shared_store.insert(std::sync::Arc::new(state)
-        as std::sync::Arc<dyn yorishiro::services::edition::EnterpriseEdition>);
+    ctx.shared_store
+        .insert(std::sync::Arc::new(state) as std::sync::Arc<LicenceState>);
 }
 
 fn tool_result_json(response: &Value) -> Value {

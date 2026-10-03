@@ -107,14 +107,13 @@ ceでできることはeeでもすべて利用可能です。eeはceの上に以
 
 ## 設定
 
-公開設定ファイルは、プレーンな YAML の `yorishiro.yaml` です。
-`yorishiro config init` でコメント付きのローカル用ひな形を作成できます。
-既存ファイルを置き換える場合だけ `--force` を指定してください。
-設定の解決順序は、`YORISHIRO_CONFIG_PATH`（指定時は存在しない・読めない・不正なファイルをエラーにする）、
-`./yorishiro.yaml` から読み込みます。
-対応する環境変数は YAML の値を明示的に上書きします。
-canonical ファイルでは Tera や `get_env` 式は使用できません。
-CLI が生成するローカルひな形は相対 SQLite パスを使い、パッケージと Docker の設定は `/var/lib/yorishiro` を使います。
+設定は Loco 標準の `config/` 配下に置きます。
+`LOCO_ENV` が `config/<environment>.yaml` を選び、`LOCO_CONFIG_FOLDER` で別の設定ディレクトリを指定できます。
+YAML では Loco の Tera `get_env` 式を使ってデプロイ時の値を上書きします。
+ソース開発では `config/development.yaml` を使い、パッケージと Docker では `config/production.yaml` を使います。
+アプリケーションデータは SQLite または PostgreSQL を利用できます。
+キューの保存先は Loco のキュープロバイダとして独立して選択でき、このリリースでは SQLite、PostgreSQL、Redis 互換プロバイダを利用できます。
+バックエンド変数を設定しない場合のみ、パッケージと Docker は SQLite の既定データを `/var/lib/yorishiro` に保存します。
 
 ## ドキュメント
 

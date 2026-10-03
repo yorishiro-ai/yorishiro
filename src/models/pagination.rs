@@ -5,7 +5,7 @@
 /// Applies to every paginated list, not `search.rs`'s `DEFAULT_SEARCH_LIMIT`: vector/trigram
 /// search is a different kind of query (ranked by relevance, not a page over a stable order) and
 /// keeps its own, deliberately smaller, default.
-pub const DEFAULT_LIST_LIMIT: i64 = 50;
+pub(crate) const DEFAULT_LIST_LIMIT: i64 = 50;
 
 pub const MAX_LIST_LIMIT: i64 = 200;
 
@@ -51,7 +51,7 @@ impl ListParams {
     /// to the internal 0-based offset/limit representation.
     ///
     /// `page` is clamped to `>= 1` (no page 0), and `page_size` to `[1, MAX_LIST_LIMIT]`.
-    pub fn from_pagination_query(page: u64, page_size: u64) -> Self {
+    pub(crate) fn from_pagination_query(page: u64, page_size: u64) -> Self {
         let page = page.max(1) as i64;
         let page_size = page_size.clamp(1, MAX_LIST_LIMIT as u64) as i64;
         let offset = (page - 1) * page_size;

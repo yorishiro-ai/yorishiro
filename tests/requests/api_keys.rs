@@ -118,7 +118,7 @@ async fn api_key_lifecycle_rejects_non_admin_and_cross_tenant_ids() {
         let member_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             workspace_id,
-            yorishiro::services::auth::ApiKeyScope::Read,
+            yorishiro::models::api_keys::ApiKeyScope::Read,
             Some(member.id),
             false,
         )

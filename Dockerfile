@@ -12,7 +12,10 @@
 # copied the result into the cargo build so the SPA could be embedded. That directory does not
 # exist on this branch: the frontend is not part of the rebuild yet. When it returns, its stage
 # comes back with it, in the same change that adds the directory.
-FROM rust:1.97-slim AS builder
+# Pinned in rust-toolchain.toml: the release workflows pass that channel as RUST_VERSION, and CI
+# fails when this default drifts from it, so a plain `docker build` agrees with them.
+ARG RUST_VERSION=1.97.0
+FROM rust:${RUST_VERSION}-slim AS builder
 ARG EDITION=ee
 
 RUN apt-get update && apt-get install -y \
@@ -32,7 +35,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     RUSTC_WRAPPER= cargo install sccache --locked --version 0.10.0 \
     && export RUSTC_WRAPPER=/usr/local/cargo/bin/sccache \
     && (case "$EDITION" in \
-      ce) cargo build --locked --no-default-features --release --bin yorishiro ;; \
+      ce) cargo build --locked --no-default-features --features community --release --bin yorishiro ;; \
       ee) cargo build --locked --features enterprise --release --bin yorishiro ;; \
       *) echo "unknown EDITION=$EDITION" >&2; exit 1 ;; \
     esac) \
@@ -41,7 +44,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # The binary uses the system C++ runtime for candle/tokenizers support, so the runtime image
 # installs the same libgcc/libstdc++ dependencies declared by the native packages.
 # ca-certificates is for the OpenAI-compatible provider's TLS, curl for the HEALTHCHECK.
-# The base stays on the same glibc as the builder (debian trixie, matching rust:1.97-slim).
+# The base stays on the same glibc as the builder (debian trixie, matching the rust:*-slim builder).
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y \
@@ -53,16 +56,15 @@ RUN apt-get update && apt-get install -y \
     && useradd --system --create-home --home-dir /home/yorishiro yorishiro
 
 COPY --from=builder /usr/local/bin/yorishiro /usr/local/bin/yorishiro
-# The runtime image ships the canonical plain-YAML configuration.
-# Deployments can mount a replacement at this path or set YORISHIRO_CONFIG_PATH.
-COPY packaging/yorishiro.yaml /app/yorishiro.yaml
+# Keep Loco's environment-based configuration layout in the runtime image.
+COPY config/production.yaml /app/config/production.yaml
 
 # Relative paths in embedding provider settings (YORISHIRO_LOCAL_MODEL_PATH defaults to
 # `models/model.safetensors`) resolve against this directory, so a model directory can be
 # bind-mounted here without also needing an absolute-path override. Without a mount the provider
 # fetches the model on first use instead, into $HOME/.cache/yorishiro/models.
 WORKDIR /app
-# The packaged canonical YAML defaults SQLite state to /var/lib/yorishiro.
+# The production configuration defaults SQLite state to /var/lib/yorishiro.
 # Create it in the image so an unconfigured non-root container can boot and persist data.
 RUN chown -R yorishiro:yorishiro /app \
     && install -d -o yorishiro -g yorishiro /var/lib/yorishiro \
@@ -79,8 +81,10 @@ RUN chown -R yorishiro:yorishiro /app \
 # `--no-create-home` container as the reason the no-`HOME` branch exists at all. It was
 # describing this image.
 ENV HOME=/home/yorishiro
+ENV LOCO_ENV=production
+ENV LOCO_CONFIG_FOLDER=/app/config
 USER yorishiro
-# 5150 is the server's own default port (`yorishiro.yaml`'s `server.port`), which is what the
+# 5150 is the server's own default port (`config/production.yaml`'s `server.port`), which is what the
 # compose file and the healthcheck below expect.
 EXPOSE 5150
 # `/_ping` rather than `/_health`: both come from loco's default routes, and `_ping` answers

@@ -9,7 +9,7 @@ name: Security
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop, loco-rebuild]
+    branches: [develop]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"

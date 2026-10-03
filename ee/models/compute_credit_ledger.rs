@@ -28,35 +28,12 @@ pub struct LedgerEntry {
     pub transaction_type: TransactionType,
 }
 
-/// Which kind of ledger event this row records.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum TransactionType {
-    Earn,
-    Spend,
-}
-
-impl TransactionType {
-    /// Serialize to the string stored in the database.
-    #[must_use]
-    pub fn as_db_str(&self) -> &'static str {
-        match self {
-            Self::Earn => "earn",
-            Self::Spend => "spend",
-        }
-    }
-
-    /// Parse from a database value.
-    ///
-    /// # Errors
-    /// Returns an error if `value` is not one of the two known strings.
-    pub fn from_db_str(value: &str) -> Result<Self, YorishiroError> {
-        match value {
-            "earn" => Ok(Self::Earn),
-            "spend" => Ok(Self::Spend),
-            other => Err(YorishiroError::Internal(anyhow::anyhow!(
-                "unknown transaction_type value: {other:?}"
-            ))),
-        }
+crate::db_enum::db_enum! {
+    /// Which kind of ledger event this row records.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum TransactionType {
+        Earn = "earn",
+        Spend = "spend",
     }
 }
 

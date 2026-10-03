@@ -3,11 +3,11 @@ use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::services::worker_class_resolver::WorkerClassAssignmentResolver;
+use yorishiro::ee::models::workspace_worker_classes::WorkerClassAssignmentResolver;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
+use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};
 use yorishiro::models::workspace_workspaces::WORKSPACE_STATUS_ACTIVE;
-use yorishiro::services::auth::ApiKeyScope;
 use yorishiro::workers::embedding_sync::WorkerClassResolver;
 
 struct Setup {
@@ -119,7 +119,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
     .await;
 }
 
-/// Re-`PUT`ting a different class replaces the assignment rather than erroring or adding a second row, matching the `ON CONFLICT` upsert `embedding_keys::set`/`llm_keys::set` both use.
+/// Re-`PUT`ting a different class replaces the assignment rather than erroring or adding a second row, matching the `ON CONFLICT` upsert `workspace_embedding_keys::set`/`workspace_llm_keys::set` both use.
 #[tokio::test]
 async fn setting_a_new_class_replaces_the_old_one() {
     if !super::super::require_postgres_backend() {
@@ -184,7 +184,7 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "an unassigned workspace must resolve to None so the caller falls back to WorkerClass::Shared"
         );
 
-        yorishiro::ee::models::worker_classes::set(
+        yorishiro::ee::models::workspace_worker_classes::set(
             &ctx.db,
             setup.workspace_id,
             yorishiro::workers::embedding_sync::WorkerClass::Official,

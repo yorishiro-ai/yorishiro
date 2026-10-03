@@ -1,21 +1,2 @@
-pub(crate) mod authz;
-pub(crate) mod boot;
-pub mod embedding_resolver;
-pub(crate) mod hmac_sign;
 pub mod inference;
-pub mod licence;
-pub mod marketplace;
-pub(crate) mod mcp;
-pub mod merge;
 pub mod oauth;
-pub mod official_templates;
-pub mod origin;
-pub mod plan;
-pub mod tenant_auth;
-pub mod worker_class_resolver;
-
-/// Reads an environment variable, treating both "unset" and "set to an empty string" as absent.
-/// `env::var(...).ok()` alone would treat `FOO=` (set but empty) as present.
-pub fn non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|s| !s.is_empty())
-}

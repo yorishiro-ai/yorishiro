@@ -19,40 +19,41 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
+use crate::models::entity_embeddings;
 use crate::models::entity_entities;
-use crate::services::embedding;
 use crate::workers::dispatch::EmbeddingSyncDispatcher;
 
-/// Which class of worker process a queued job is meant for.
-///
-/// Routes jobs by `BackgroundWorker::tags()` rather than by named queue: `queue: Option<String>` is
-/// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
-/// named-queue split would mean switching to Redis first.
-///
-/// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
-/// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
-/// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
-/// process would then dequeue every class's work rather than its own.
-///
-/// Hence one type per class ([`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`],
-/// [`EmbeddingSyncWorkerShared`]), each fixed to a single tag, so the class picked at enqueue time
-/// is the tag that lands in the queue table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerClass {
-    /// Runs only on compute a single tenant registered for its own workspaces.
-    TenantPrivate,
-    /// Runs only on compute this deployment operates itself.
-    Official,
-    /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
-    Shared,
+db_enum! {
+    /// Which class of worker process a queued job is meant for.
+    ///
+    /// Routes jobs by `BackgroundWorker::tags()` rather than by named queue: `queue: Option<String>` is
+    /// silently discarded by the Postgres provider's `enqueue` (it has no column for it), so a
+    /// named-queue split would mean switching to Redis first.
+    ///
+    /// `tags()` takes no arguments and is called before a job's own `args` are seen (`loco-rs` 1.2.0's
+    /// `perform_later_with_priority`), so one worker *type* carries one fixed tag set. A single type
+    /// tagged with every class would put all three tags on every job, and a `--worker=worker-class:...`
+    /// process would then dequeue every class's work rather than its own.
+    ///
+    /// Hence one type per class ([`EmbeddingSyncWorkerTenantPrivate`], [`EmbeddingSyncWorkerOfficial`],
+    /// [`EmbeddingSyncWorkerShared`]), each fixed to a single tag, so the class picked at enqueue time
+    /// is the tag that lands in the queue table.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum WorkerClass {
+        /// Runs only on compute a single tenant registered for its own workspaces.
+        TenantPrivate = "tenant_private",
+        /// Runs only on compute this deployment operates itself.
+        Official = "official",
+        /// Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.
+        Shared = "shared",
+    }
 }
 
 impl WorkerClass {
@@ -64,32 +65,6 @@ impl WorkerClass {
             Self::TenantPrivate => "worker-class:tenant-private",
             Self::Official => "worker-class:official",
             Self::Shared => "worker-class:shared",
-        }
-    }
-
-    /// The `snake_case` wire form this type already serializes to, usable as a plain string for `ee/`'s `workspace_worker_classes`.
-    /// Reusing it rather than inventing a second representation keeps a database value and a queue payload byte-identical to an operator inspecting either.
-    #[must_use]
-    pub fn as_db_str(self) -> &'static str {
-        match self {
-            Self::TenantPrivate => "tenant_private",
-            Self::Official => "official",
-            Self::Shared => "shared",
-        }
-    }
-
-    /// The inverse of [`Self::as_db_str`].
-    ///
-    /// # Errors
-    /// Returns an error if `value` is not one of the three known strings: a row written by a future variant this binary doesn't know about, or a hand-edited/corrupted value.
-    pub fn from_db_str(value: &str) -> Result<Self, YorishiroError> {
-        match value {
-            "tenant_private" => Ok(Self::TenantPrivate),
-            "official" => Ok(Self::Official),
-            "shared" => Ok(Self::Shared),
-            other => Err(YorishiroError::Internal(anyhow::anyhow!(
-                "unknown worker_class value: {other:?}"
-            ))),
         }
     }
 }
@@ -112,7 +87,7 @@ pub trait WorkerClassResolver: Send + Sync {
 }
 
 /// This crate's own rule: no workspace has a worker-class assignment, so every job stays `Shared`.
-pub struct DefaultWorkerClassResolver;
+pub(crate) struct DefaultWorkerClassResolver;
 
 #[async_trait]
 impl WorkerClassResolver for DefaultWorkerClassResolver {
@@ -127,7 +102,7 @@ impl WorkerClassResolver for DefaultWorkerClassResolver {
 
 /// The resolver a deployment gets when it does not choose one.
 #[must_use]
-pub fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
+pub(crate) fn default_worker_class_resolver() -> Arc<dyn WorkerClassResolver> {
     Arc::new(DefaultWorkerClassResolver)
 }
 
@@ -140,6 +115,11 @@ pub struct EmbeddingSyncArgs {
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
     pub worker_class: WorkerClass,
+}
+
+impl EmbeddingSyncArgs {
+    /// The name this job is recorded under in the queue lifecycle.
+    pub(crate) const JOB_NAME: &'static str = "embedding_sync";
 }
 
 /// Loco has no automatic retry, so the return value decides what an operator can recover: `Err` marks the job `Failed`, which `retry_failed` can find and re-run, while `Ok` marks it `Completed` and forgets it.
@@ -179,14 +159,11 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
         }
     };
 
-    let licenced = crate::services::edition::is_active(ctx);
-
-    if let Err(err) = embedding::sync::sync_embedding_for_record(
+    if let Err(err) = entity_embeddings::sync_embedding_for_record(
         &ctx.db,
         args.workspace_id,
         &record,
         provider.as_ref(),
-        licenced,
     )
     .await
     {
@@ -230,97 +207,14 @@ macro_rules! embedding_sync_worker_for_class {
             }
 
             async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-                let admission = if let Some(id) = args.lifecycle_id {
-                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
-                    {
-                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
-                        Ok(
-                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
-                            | crate::models::queue_job_lifecycles::Admission::Terminal,
-                        ) => return Ok(()),
-                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
-                            let scheduling = crate::services::queue::decide($class);
-                            tracing::warn!(
-                                lifecycle_id = %id,
-                                worker_class = $class.as_db_str(),
-                                scheduling_priority = scheduling.priority,
-                                fallback = scheduling.fallback,
-                                "worker capacity saturated; preserving class reservation"
-                            );
-                            match attempt {
-                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
-                                    &self.ctx.db,
-                                    id,
-                                    attempt,
-                                    "worker capacity saturated",
-                                    Utc::now().fixed_offset(),
-                                )
-                                .await,
-                                None => crate::models::queue_job_lifecycles::Entity::defer(
-                                    &self.ctx.db,
-                                    id,
-                                    None,
-                                    "worker capacity saturated",
-                                )
-                                .await,
-                            }
-                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later_with_priority(
-                                &self.ctx,
-                                args.clone(),
-                                Some(scheduling.priority),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
-                    }
-                } else {
-                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
-                };
-                let admitted = admission.attempt().is_some();
-                let attempt = admission.attempt();
-                let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
-                    crate::models::queue_job_lifecycles::Entity::heartbeat(
-                        self.ctx.db.clone(), id, attempt,
-                    )
-                });
-                let result = perform_embedding_sync(&self.ctx, &args).await;
-                if let Some(heartbeat) = heartbeat {
-                    heartbeat.abort();
-                }
-                if admitted {
-                    if let Some(id) = args.lifecycle_id {
-                        if result.is_ok() {
-                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                "completed",
-                                None,
-                            )
-                            .await;
-                        } else if let Some(error) = result.as_ref().err() {
-                            crate::models::queue_job_lifecycles::Entity::defer(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                &error.to_string(),
-                            )
-                            .await
-                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            let scheduling = crate::services::queue::decide($class);
-                            $worker_ty::perform_later_with_priority(
-                                &self.ctx,
-                                args.clone(),
-                                Some(scheduling.priority),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                    }
-                }
-                result
+                crate::workers::lifecycle::perform_with_lifecycle::<Self, _, _, _>(
+                    &self.ctx,
+                    args.lifecycle_id,
+                    $class,
+                    &args,
+                    || perform_embedding_sync(&self.ctx, &args),
+                )
+                .await
             }
         }
     };

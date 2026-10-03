@@ -1,6 +1,8 @@
 use serde_json::json;
 /// Tests for the metaschema projection: converting entity type definitions to JSON schemas.
-use yorishiro::metaschema::{MetaSchemaDefinition, entity_type_to_json_schema};
+use yorishiro::models::schema_schemas::metaschema::{
+    MetaSchemaDefinition, entity_type_to_json_schema,
+};
 
 #[test]
 fn projects_required_and_enum_fields() {

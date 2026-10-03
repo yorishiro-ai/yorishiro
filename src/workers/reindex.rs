@@ -17,8 +17,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
-use loco_rs::prelude::*;
-use sea_orm::{FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -39,6 +37,11 @@ pub struct ReindexArgs {
     pub worker_class: WorkerClass,
 }
 
+impl ReindexArgs {
+    /// The name this job is recorded under in the queue lifecycle.
+    pub(crate) const JOB_NAME: &'static str = "reindex";
+}
+
 /// Shared implementation of the reindex worker's `perform` body: builds the provider,
 /// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
 ///
@@ -46,16 +49,20 @@ pub struct ReindexArgs {
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     // Build and verify the provider: a reindex fails fast if the provider is
     // unconfigured, same as the task.
-    let provider = embedding::build_embedding_provider()
-        .await
-        .map_err(|e| loco_rs::Error::Message(format!("build provider: {e}")))?;
+    let provider = ctx
+        .shared_store
+        .get::<std::sync::Arc<dyn embedding::EmbeddingProvider>>()
+        .ok_or_else(|| loco_rs::Error::Message("embedding provider missing".into()))?;
     provider
         .embed_batch(&[])
         .await
         .map_err(|e| loco_rs::Error::Message(format!("provider must be configured: {e}")))?;
 
     // Fetch all entity IDs for this workspace.
-    let candidate_ids = fetch_candidates(&ctx.db, args.workspace_id).await?;
+    let candidate_ids =
+        crate::models::entity_entities::ids_for_workspace(&ctx.db, args.workspace_id)
+            .await
+            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
 
     // Acquire the session-scoped lock and run the reindex.
     let db_handle = ctx.shared_store.get::<DbHandle>().ok_or_else(|| {
@@ -85,28 +92,6 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
     Ok(())
 }
 
-/// Fetch all entity IDs for a workspace via raw SQL.
-///
-/// PostgreSQL only: `entity_entities` has no `embedding` column on SQLite.
-async fn fetch_candidates(
-    db: &DatabaseConnection,
-    workspace_id: Uuid,
-) -> loco_rs::Result<Vec<Uuid>> {
-    #[derive(FromQueryResult)]
-    struct CandidateId {
-        id: Uuid,
-    }
-    let candidates = CandidateId::find_by_statement(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT id FROM entity_entities WHERE workspace_id = $1",
-        [workspace_id.into()],
-    ))
-    .all(db)
-    .await
-    .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
-    Ok(candidates.into_iter().map(|c| c.id).collect())
-}
-
 /// Declares one `WorkerClass`'s reindex worker type: a thin struct giving `tags()` a fixed single tag,
 /// so that class's reindex jobs are visible only to a worker process asking for it.
 macro_rules! reindex_worker_for_class {
@@ -127,97 +112,14 @@ macro_rules! reindex_worker_for_class {
             }
 
             async fn perform(&self, args: ReindexArgs) -> loco_rs::Result<()> {
-                let admission = if let Some(id) = args.lifecycle_id {
-                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
-                    {
-                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
-                        Ok(
-                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
-                            | crate::models::queue_job_lifecycles::Admission::Terminal,
-                        ) => return Ok(()),
-                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
-                            let scheduling = crate::services::queue::decide($class);
-                            tracing::warn!(
-                                lifecycle_id = %id,
-                                worker_class = $class.as_db_str(),
-                                scheduling_priority = scheduling.priority,
-                                fallback = scheduling.fallback,
-                                "worker capacity saturated; preserving class reservation"
-                            );
-                            match attempt {
-                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
-                                    &self.ctx.db,
-                                    id,
-                                    attempt,
-                                    "worker capacity saturated",
-                                    chrono::Utc::now().fixed_offset(),
-                                )
-                                .await,
-                                None => crate::models::queue_job_lifecycles::Entity::defer(
-                                    &self.ctx.db,
-                                    id,
-                                    None,
-                                    "worker capacity saturated",
-                                )
-                                .await,
-                            }
-                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later_with_priority(
-                                &self.ctx,
-                                args.clone(),
-                                Some(scheduling.priority),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
-                    }
-                } else {
-                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
-                };
-                let admitted = admission.attempt().is_some();
-                let attempt = admission.attempt();
-                let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
-                    crate::models::queue_job_lifecycles::Entity::heartbeat(
-                        self.ctx.db.clone(), id, attempt,
-                    )
-                });
-                let result = perform_reindex(&self.ctx, &args).await;
-                if let Some(heartbeat) = heartbeat {
-                    heartbeat.abort();
-                }
-                if admitted {
-                    if let Some(id) = args.lifecycle_id {
-                        if result.is_ok() {
-                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                "completed",
-                                None,
-                            )
-                            .await;
-                        } else if let Some(error) = result.as_ref().err() {
-                            crate::models::queue_job_lifecycles::Entity::defer(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                &error.to_string(),
-                            )
-                            .await
-                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            let scheduling = crate::services::queue::decide($class);
-                            $worker_ty::perform_later_with_priority(
-                                &self.ctx,
-                                args.clone(),
-                                Some(scheduling.priority),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                    }
-                }
-                result
+                crate::workers::lifecycle::perform_with_lifecycle::<Self, _, _, _>(
+                    &self.ctx,
+                    args.lifecycle_id,
+                    $class,
+                    &args,
+                    || perform_reindex(&self.ctx, &args),
+                )
+                .await
             }
         }
     };
@@ -282,7 +184,10 @@ pub(crate) async fn enqueue_reindex_with_dispatcher(
 }
 
 /// Enqueue a reindex job for `workspace_id` through Loco's queue.
-pub async fn enqueue_reindex(ctx: &AppContext, workspace_id: Uuid) -> loco_rs::Result<String> {
+pub(crate) async fn enqueue_reindex(
+    ctx: &AppContext,
+    workspace_id: Uuid,
+) -> loco_rs::Result<String> {
     if ctx.queue_provider.is_none() {
         return Err(loco_rs::Error::Message(
             "no queue provider configured".into(),

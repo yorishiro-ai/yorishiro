@@ -39,7 +39,7 @@ At least 2 connections are required. The server refuses to start if `max_connect
 
 ## Configuration files
 
-There is no separate SQLite production config file; use `yorishiro.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
+There is no separate SQLite production config file; use `config/production.yaml` and set `DATABASE_URL` to a `sqlite://` URL.
 Set `QUEUE_URL` to another SQLite file when using a custom application path.
 
 ## Authentication

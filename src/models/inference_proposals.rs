@@ -10,13 +10,9 @@ impl ActiveModelBehavior for ActiveModel {
     where
         C: ConnectionTrait,
     {
-        if !insert && self.updated_at.is_unchanged() {
-            let mut this = self;
-            this.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-            Ok(this)
-        } else {
-            Ok(self)
-        }
+        let mut this = self;
+        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        Ok(this)
     }
 }
 

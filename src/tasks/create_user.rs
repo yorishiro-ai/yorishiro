@@ -8,7 +8,7 @@ use crate::models::tenancy;
 ///
 /// Wraps `tenancy::create_user`, which hashes the password (Argon2id) before writing it.
 /// A created user holds no tenant membership yet; follow with `add_member`.
-pub struct CreateUser;
+pub(crate) struct CreateUser;
 
 #[async_trait]
 impl Task for CreateUser {

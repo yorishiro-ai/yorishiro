@@ -1,0 +1,32 @@
+name: Install nfpm
+description: Installs a checksum-verified nfpm for the runner architecture
+
+inputs:
+  version:
+    description: nfpm version without the v prefix
+    required: false
+    default: '2.47.0'
+runs:
+  using: composite
+  steps:
+    - name: Install nfpm
+      shell: bash
+      env:
+        NFPM_VERSION: ${{ inputs.version }}
+      run: |
+        case "$RUNNER_ARCH" in
+          X64) asset_arch=x86_64 ;;
+          ARM64) asset_arch=arm64 ;;
+          *) echo "no nfpm asset known for runner arch '$RUNNER_ARCH'" >&2; exit 1 ;;
+        esac
+        base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+        asset="nfpm_${NFPM_VERSION}_Linux_${asset_arch}.tar.gz"
+
+        curl -fsSL -o /tmp/nfpm.tar.gz "${base}/${asset}"
+        curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"
+        ( cd /tmp && cp nfpm.tar.gz "$asset" \
+          && sha256sum --check --ignore-missing --strict nfpm-checksums.txt \
+          && rm -f "$asset" )
+        tar -xzf /tmp/nfpm.tar.gz -C /tmp nfpm
+        sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
+        nfpm --version

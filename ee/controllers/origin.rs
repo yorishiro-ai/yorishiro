@@ -6,37 +6,29 @@
 //! The scope check is explicit for the same reason: there is no extractor here to carry it.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::VersioningDiff;
-use crate::models::schema_schemas::{MergeDiffSummary, SchemaRecord, UpstreamChange};
-use crate::services::auth::{ApiKeyScope, require_scope};
+use crate::models::api_keys::ApiKeyScope;
+use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::Serialize;
 use uuid::Uuid;
 
-use crate::ee::models::origin as origin_model;
-use crate::ee::services::merge::MergePlan;
-use crate::ee::services::{authz, origin};
-
-/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
-/// The response of a merge, matching the community edition's schema-creation response shape so a client written against that response shape needs no change.
-#[derive(Debug, Serialize)]
-pub struct MergeResponse {
-    pub schema: SchemaRecord,
-    pub diff: VersioningDiff,
-    pub summary: MergeDiffSummary,
-}
+use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::dtos::origin::MergeResponse;
+use crate::ee::models::schema_schemas as origin_model;
+use crate::ee::models::schema_schemas as origin;
+use crate::ee::models::schema_schemas::MergePlan;
 
 /// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::controllers::openapi::UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
@@ -49,7 +41,7 @@ async fn list_upstream_changes(
 }
 
 /// `GET /api/schemas/{schema_id}/merge-preview`: what following the template would do.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}/merge-preview", params(("schema_id" = Uuid, Path)), responses((status = 200, body = crate::controllers::openapi::MergePlan), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}/merge-preview", params(("schema_id" = Uuid, Path)), responses((status = 200, body = crate::ee::controllers::openapi::MergePlan), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn merge_preview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -81,7 +73,7 @@ async fn merge_preview(
 }
 
 /// `POST /api/schemas/{schema_id}/merge`: write the merged definition as the next version.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/merge", params(("schema_id" = Uuid, Path)), responses((status = 201, body = crate::controllers::openapi::MergeResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/merge", params(("schema_id" = Uuid, Path)), responses((status = 201, body = crate::ee::controllers::openapi::MergeResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn merge_apply(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

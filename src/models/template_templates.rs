@@ -1,0 +1,362 @@
+//! CRUD for `template_templates`, the user-contributed schema template library.
+//!
+//! Distinct from `crate::data::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
+//! Runs on `ctx.db` (the migration-role connection): `template_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
+
+pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
+use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
+use serde::Serialize;
+
+use crate::db_enum::db_enum;
+use crate::error::{ResultExt, YorishiroError};
+use crate::models::schema_schemas;
+use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
+
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    async fn before_save<C>(self, db: &C, insert: bool) -> std::result::Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        let mut this = self;
+        this.id = crate::db::sqlite_generated_id(db, this.id);
+        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        Ok(this)
+    }
+}
+
+// implement your read-oriented logic here
+impl Model {}
+
+// implement your write-oriented logic here
+impl ActiveModel {}
+
+// implement your custom finders, selectors oriented logic here
+impl Entity {}
+
+/// A row from the tenant's DB-backed template library, with `definition` parsed.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TemplateRecord {
+    pub id: uuid::Uuid,
+    pub tenant_id: uuid::Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
+    pub definition: MetaSchemaDefinition,
+    pub tags: Vec<String>,
+    pub locale: Option<String>,
+    pub visibility: TemplateVisibility,
+    pub author: Option<String>,
+    pub fork_of: Option<uuid::Uuid>,
+    pub created_by: Option<uuid::Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl TryFrom<Model> for TemplateRecord {
+    type Error = YorishiroError;
+
+    fn try_from(model: Model) -> Result<Self, Self::Error> {
+        let visibility = TemplateVisibility::from_db_str(&model.visibility).ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown template visibility: {}",
+                model.visibility
+            ))
+        })?;
+        Ok(Self {
+            id: model.id,
+            tenant_id: model.tenant_id,
+            name: model.name,
+            description: model.description,
+            definition: serde_json::from_value(model.definition).internal()?,
+            tags: model.tags,
+            locale: model.locale,
+            visibility,
+            author: model.author,
+            fork_of: model.fork_of,
+            created_by: model.created_by,
+            created_at: model.created_at.into(),
+            updated_at: model.updated_at.into(),
+        })
+    }
+}
+
+db_enum! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum TemplateVisibility {
+        Tenant = "tenant",
+        Community = "community",
+    }
+}
+
+impl TemplateVisibility {
+    pub fn parse_input(value: &str) -> Result<Self, YorishiroError> {
+        Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
+            message: format!("unknown visibility '{value}'"),
+            details: Vec::new(),
+            hint: "use 'tenant' to keep it private or 'community' to list it".into(),
+        })
+    }
+}
+
+/// Templates visible to `tenant_id`: its own templates plus any published with community visibility.
+fn visible_to(tenant_id: uuid::Uuid) -> Condition {
+    Condition::any()
+        .add(Column::TenantId.eq(tenant_id))
+        .add(Column::Visibility.eq(TemplateVisibility::Community.as_db_str()))
+}
+
+/// Lists templates visible to `tenant_id`: its own templates plus any published with community visibility.
+pub async fn list_templates(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<TemplateRecord>, YorishiroError> {
+    let rows = Entity::find()
+        .filter(visible_to(tenant_id))
+        .order_by_asc(Column::CreatedAt)
+        .limit(page.limit() as u64)
+        .offset(page.offset() as u64)
+        .all(conn)
+        .await
+        .internal()?;
+
+    rows.into_iter().map(TemplateRecord::try_from).collect()
+}
+
+/// Fetches a single template, allowed when it belongs to `tenant_id` or is community-visible.
+pub async fn get_template(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    template_id: uuid::Uuid,
+) -> Result<TemplateRecord, YorishiroError> {
+    let row = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(visible_to(tenant_id))
+        .one(conn)
+        .await
+        .internal()?;
+
+    match row {
+        Some(row) => row.try_into(),
+        None => Err(YorishiroError::not_found(format!(
+            "template '{template_id}' was not found"
+        ))),
+    }
+}
+
+/// Resolves a `template_id` as either a library template or a built-in, and says which.
+///
+/// A UUID can only mean the library; anything else can only mean a built-in.
+/// Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
+///
+/// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
+pub(crate) async fn resolve_template_definition(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    template_id: &str,
+) -> Result<(MetaSchemaDefinition, Option<uuid::Uuid>), YorishiroError> {
+    match uuid::Uuid::parse_str(template_id) {
+        Ok(id) => {
+            let template = get_template(conn, tenant_id, id).await?;
+            Ok((template.definition, Some(template.id)))
+        }
+        Err(_) => Ok((crate::data::templates::get_template(template_id)?, None)),
+    }
+}
+
+/// Input for creating a new template.
+/// `visibility` is not settable here: every template starts as tenant-private.
+#[derive(Clone, serde::Deserialize)]
+pub(crate) struct CreateTemplateInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub definition: MetaSchemaDefinition,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub locale: Option<String>,
+    pub author: Option<String>,
+}
+
+/// Input for updating an existing template.
+/// Every field is optional; `None` leaves the existing value unchanged.
+#[derive(Clone, serde::Deserialize)]
+pub struct UpdateTemplateInput {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub definition: Option<MetaSchemaDefinition>,
+    pub tags: Option<Vec<String>>,
+    pub locale: Option<String>,
+}
+
+pub(crate) async fn create_template(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    created_by: Option<uuid::Uuid>,
+    input: CreateTemplateInput,
+) -> Result<TemplateRecord, YorishiroError> {
+    crate::models::schema_schemas::metaschema::validate_definition(&input.definition)?;
+    let name = input.name.clone();
+    let definition = serde_json::to_value(&input.definition).internal()?;
+
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        name: ActiveValue::Set(input.name),
+        description: ActiveValue::Set(input.description),
+        definition: ActiveValue::Set(definition),
+        tags: ActiveValue::Set(input.tags),
+        locale: ActiveValue::Set(input.locale),
+        author: ActiveValue::Set(input.author),
+        visibility: ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),
+        created_by: ActiveValue::Set(created_by),
+        ..Default::default()
+    };
+
+    let row = active.insert(conn).await.map_err(|err| {
+        if matches!(
+            err.sql_err(),
+            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+        ) {
+            YorishiroError::Conflict {
+                message: format!("a template named '{name}' already exists for this tenant"),
+            }
+        } else {
+            YorishiroError::Internal(err.into())
+        }
+    })?;
+
+    row.try_into()
+}
+
+/// Updates a template's editable fields.
+/// Only the owning tenant may update its own template (community-visible templates from other tenants are read-only to everyone but their owner).
+pub async fn update_template(
+    conn: &DatabaseTransaction,
+    tenant_id: uuid::Uuid,
+    template_id: uuid::Uuid,
+    input: UpdateTemplateInput,
+) -> Result<TemplateRecord, YorishiroError> {
+    // Publication and merge acknowledgement share this transaction-scoped lock.
+    crate::db::lock_for_update(conn, &format!("template-origin:{template_id}"))
+        .await
+        .internal()?;
+    if let Some(definition) = &input.definition {
+        crate::models::schema_schemas::metaschema::validate_definition(definition)?;
+    }
+
+    if input.name.is_none()
+        && input.description.is_none()
+        && input.definition.is_none()
+        && input.tags.is_none()
+        && input.locale.is_none()
+    {
+        return get_template(conn, tenant_id, template_id).await;
+    }
+
+    let existing = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(Column::TenantId.eq(tenant_id))
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!("template '{template_id}' was not found"))
+        })?;
+
+    // Track whether definition changed before the update moves input.definition.
+    let definition_changed = input.definition.is_some();
+
+    let mut active: ActiveModel = existing.into();
+    if let Some(name) = input.name {
+        active.name = ActiveValue::Set(name);
+    }
+    if let Some(description) = input.description {
+        active.description = ActiveValue::Set(Some(description));
+    }
+    if let Some(definition) = input.definition {
+        active.definition = ActiveValue::Set(serde_json::to_value(&definition).internal()?);
+    }
+    if let Some(tags) = input.tags {
+        active.tags = ActiveValue::Set(tags);
+    }
+    if let Some(locale) = input.locale {
+        active.locale = ActiveValue::Set(Some(locale));
+    }
+
+    let record = active.update(conn).await.internal()?.try_into()?;
+
+    // If the definition changed, stamp origin_updated_at=NULL on every linked schema
+    // following this template so the workspace knows there is an upstream update available.
+    if definition_changed {
+        schema_schemas::notify_upstream_change(conn, template_id).await?;
+    }
+
+    Ok(record)
+}
+
+/// Deletes a template.
+/// Only the owning tenant may delete it.
+pub(crate) async fn delete_template(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    template_id: uuid::Uuid,
+) -> Result<(), YorishiroError> {
+    let result = Entity::delete_many()
+        .filter(Column::Id.eq(template_id))
+        .filter(Column::TenantId.eq(tenant_id))
+        .exec(conn)
+        .await
+        .internal()?;
+
+    if result.rows_affected == 0 {
+        Err(YorishiroError::not_found(format!(
+            "template '{template_id}' was not found"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+/// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned by `tenant_id`, recording `fork_of` so the lineage is traceable.
+pub(crate) async fn fork_template(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    created_by: Option<uuid::Uuid>,
+    source_template_id: uuid::Uuid,
+    new_name: String,
+) -> Result<TemplateRecord, YorishiroError> {
+    let source = get_template(conn, tenant_id, source_template_id).await?;
+    let name = new_name.clone();
+    let definition = serde_json::to_value(&source.definition).internal()?;
+
+    let active = ActiveModel {
+        tenant_id: ActiveValue::Set(tenant_id),
+        name: ActiveValue::Set(new_name),
+        description: ActiveValue::Set(source.description),
+        definition: ActiveValue::Set(definition),
+        tags: ActiveValue::Set(source.tags),
+        locale: ActiveValue::Set(source.locale),
+        author: ActiveValue::Set(source.author),
+        visibility: ActiveValue::Set(TemplateVisibility::Tenant.as_db_str().to_string()),
+        fork_of: ActiveValue::Set(Some(source.id)),
+        created_by: ActiveValue::Set(created_by),
+        ..Default::default()
+    };
+
+    let row = active.insert(conn).await.map_err(|err| {
+        if matches!(
+            err.sql_err(),
+            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+        ) {
+            YorishiroError::Conflict {
+                message: format!("a template named '{name}' already exists for this tenant"),
+            }
+        } else {
+            YorishiroError::Internal(err.into())
+        }
+    })?;
+
+    row.try_into()
+}

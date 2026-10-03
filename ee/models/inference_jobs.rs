@@ -8,59 +8,17 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait,
     QueryFilter, QuerySelect, Set, TransactionTrait,
 };
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum InferenceJobStatus {
-    Queued,
-    Running,
-    Completed,
-    Failed,
-}
-
-impl InferenceJobStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
+crate::db_enum::db_enum! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum InferenceJobStatus {
+        Queued = "queued",
+        Running = "running",
+        Completed = "completed",
+        Failed = "failed",
     }
 }
-
-impl fmt::Display for InferenceJobStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for InferenceJobStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "queued" => Ok(Self::Queued),
-            "running" => Ok(Self::Running),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            _ => Err(format!("unknown inference job status: {value}")),
-        }
-    }
-}
-
-pub const QUEUED: &str = InferenceJobStatus::Queued.as_db_str();
-pub const RUNNING: &str = InferenceJobStatus::Running.as_db_str();
-pub const COMPLETED: &str = InferenceJobStatus::Completed.as_db_str();
-pub const FAILED: &str = InferenceJobStatus::Failed.as_db_str();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InferenceJobRecord {

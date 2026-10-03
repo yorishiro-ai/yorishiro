@@ -8,8 +8,8 @@ use serial_test::serial;
 use sha2::Sha256;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::models::billing;
-use yorishiro::ee::services::licence::{LicenceClaims, LicenceState};
+use yorishiro::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::ee::models::tenant_billing;
 use yorishiro::models::_entities::tenant_tenants;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -28,10 +28,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: Utc::now().timestamp() + 60 * 60,
-        }))
-            as std::sync::Arc<
-                dyn yorishiro::services::edition::EnterpriseEdition,
-            >);
+        })) as std::sync::Arc<LicenceState>);
 }
 
 /// `StripeConfig::from_env` reads process env vars directly, with no DI seam for it, so tests configure the webhook the same way production does: by setting the vars for the duration of the request.
@@ -125,7 +122,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
-            billing::link_stripe_customer(&ctx.db, tenant_id, "cus_1")
+            tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_1")
                 .await
                 .unwrap();
 
@@ -144,14 +141,16 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                 "response: {:?}",
                 first.text()
             );
-            let after_first = billing::get_billing(&ctx.db, tenant_id)
+            let after_first = tenant_billing::get_billing(&ctx.db, tenant_id)
                 .await
                 .unwrap()
                 .and_then(|r| r.plan);
             assert_eq!(after_first.as_deref(), Some("pro"));
 
             // Downgrade directly, bypassing the webhook, so a re-application of the duplicate delivery below would be observable as a plan flip back to `pro`.
-            billing::set_plan(&ctx.db, tenant_id, "free").await.unwrap();
+            tenant_billing::set_plan(&ctx.db, tenant_id, "free")
+                .await
+                .unwrap();
 
             let retry = request
                 .post("/api/stripe/webhook")
@@ -165,7 +164,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
                  retrying): {:?}",
                 retry.text()
             );
-            let after_retry = billing::get_billing(&ctx.db, tenant_id)
+            let after_retry = tenant_billing::get_billing(&ctx.db, tenant_id)
                 .await
                 .unwrap()
                 .and_then(|r| r.plan);
@@ -191,7 +190,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "acme").await;
-            billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
+            tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_cancel")
                 .await
                 .unwrap();
 
@@ -226,7 +225,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
                 del.text()
             );
 
-            let billing_record = billing::get_billing(&ctx.db, tenant_id)
+            let billing_record = tenant_billing::get_billing(&ctx.db, tenant_id)
                 .await
                 .unwrap()
                 .unwrap();
@@ -414,7 +413,7 @@ async fn a_stale_subscription_event_is_not_reapplied() {
         boot_request::<App, _, _>(|request, ctx| async move {
             licence(&ctx);
             let tenant_id = create_tenant(&ctx.db, "stale").await;
-            billing::link_stripe_customer(&ctx.db, tenant_id, "cus_stale")
+            tenant_billing::link_stripe_customer(&ctx.db, tenant_id, "cus_stale")
                 .await
                 .unwrap();
 
@@ -442,7 +441,7 @@ async fn a_stale_subscription_event_is_not_reapplied() {
             assert_eq!(stale.status_code(), StatusCode::OK);
             assert_eq!(stale.text(), "");
             assert_eq!(
-                billing::get_billing(&ctx.db, tenant_id)
+                tenant_billing::get_billing(&ctx.db, tenant_id)
                     .await
                     .unwrap()
                     .and_then(|record| record.plan),
@@ -478,7 +477,7 @@ async fn checkout_completion_links_the_stripe_customer() {
             assert_eq!(response.status_code(), StatusCode::OK);
             assert_eq!(response.text(), "");
             assert_eq!(
-                billing::get_billing(&ctx.db, tenant_id)
+                tenant_billing::get_billing(&ctx.db, tenant_id)
                     .await
                     .unwrap()
                     .and_then(|record| record.stripe_customer_id),

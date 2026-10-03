@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use uuid::Uuid;
+use yorishiro::controllers::middleware::rate_limit::{RateLimiter, charge_search_tokens};
 use yorishiro::error::YorishiroError;
 use yorishiro::services::embedding::EmbeddingProvider;
-use yorishiro::services::rate_limit::{RateLimiter, charge_search_tokens};
 
 /// Counts tokens as the byte length exactly, so a test can pick a query whose cost is known up front rather than depending on the default estimate's rounding.
 struct FixedCostProvider;

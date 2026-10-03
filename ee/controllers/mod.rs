@@ -1,9 +1,13 @@
 pub mod dashboard;
 pub mod embedding;
 pub mod entity_columns;
+pub(crate) mod hmac_sign;
 pub mod inference;
 pub mod marketplace;
+pub(crate) mod mcp;
+pub mod middleware;
 pub mod oauth;
+pub mod openapi;
 pub mod origin;
 pub mod schema_forks;
 pub mod stripe;

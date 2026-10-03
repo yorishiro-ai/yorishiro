@@ -49,5 +49,5 @@ $ docker run -d --name yorishiro --restart unless-stopped -p 80:5150 \
 ## 設定
 
 全設定は [docs/ja/configuration.md](../configuration.md) を参照してください。
-正規の設定ファイルはイメージ内の `/app/yorishiro.yaml` にあります。
-このパスへ置き換えファイルをマウントするか、読み取り可能なファイルを `YORISHIRO_CONFIG_PATH` に設定してください。
+production 設定はイメージ内の `/app/config/production.yaml` にあります。
+このパスへ置き換えファイルをマウントするか、`LOCO_CONFIG_FOLDER` で別の設定ディレクトリを指定してください。

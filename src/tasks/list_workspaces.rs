@@ -2,11 +2,10 @@ use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 use uuid::Uuid;
 
-use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::workspace_workspaces;
+use crate::error::YorishiroError;
 
 /// `cargo loco task list_workspaces tenant_id:<uuid>`
-pub struct ListWorkspaces;
+pub(crate) struct ListWorkspaces;
 
 #[async_trait]
 impl Task for ListWorkspaces {
@@ -29,11 +28,9 @@ impl Task for ListWorkspaces {
                         .into(),
                 })?;
 
-        let workspaces = workspace_workspaces::Entity::find()
-            .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
-            .all(&app_context.db)
-            .await
-            .internal()?;
+        let workspaces =
+            crate::models::workspace_workspaces::models_for_tenant(&app_context.db, tenant_id)
+                .await?;
 
         if workspaces.is_empty() {
             println!("no workspaces for tenant {tenant_id}");

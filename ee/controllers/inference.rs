@@ -4,42 +4,35 @@
 //! A workspace with none configured gets a 422 rather than a fall back to `default` values: a caller who asked for inference and silently received defaults would have no way to tell that nothing was inferred.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::db::AppContextBackend;
 use crate::error::{ResultExt, YorishiroError};
-use crate::services::auth::{ApiKeyScope, AuthContext, require_scope};
+use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
 
+use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::dtos::inference::{InferFillResponse, InferJobStatusResponse, SetLlmKeyRequest};
 use crate::ee::models::inference_jobs;
 use crate::ee::models::inference_jobs::InferenceJobStatus;
 use crate::ee::models::inference_proposals;
-use crate::ee::models::llm_keys;
-use crate::ee::services::authz;
+use crate::ee::models::workspace_llm_keys;
 
 /// `POST /api/schemas/active/{name}/infer-fill`
 ///
 /// Enqueues an async infer-fill job whose answers are stored as reviewable proposals.
 ///
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
-#[derive(Debug, Serialize)]
-pub struct InferFillRequest {
-    /// The durable job ID used by the polling endpoint.
-    pub job_id: String,
-    /// Initial status: always `"queued"`.
-    pub status: InferenceJobStatus,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = crate::ee::controllers::openapi::InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(name): Path<String>,
-) -> Result<Json<InferFillRequest>, ApiError> {
+) -> Result<Json<InferFillResponse>, ApiError> {
     // The server calls an LLM here, which is the definition of an enterprise feature. The licence check is
     // `app::licence_gate`, a layer on this route's own group: it runs before authentication, so an
     // unlicensed deployment answers the same 404 to everyone rather than confirming to a valid key
@@ -49,7 +42,7 @@ async fn infer_fill(
     let workspace_id = auth_ctx.workspace_id;
 
     // Refuse before doing any work: a caller with no key gets one clear error rather than a scan that reports zero applied and reads as "nothing to infer".
-    if llm_keys::get(&ctx.db, workspace_id)
+    if workspace_llm_keys::get(&ctx.db, workspace_id)
         .await
         .internal()?
         .is_none()
@@ -66,7 +59,7 @@ async fn infer_fill(
         .await
         .internal()?;
 
-    Ok(Json(InferFillRequest {
+    Ok(Json(InferFillResponse {
         job_id,
         status: InferenceJobStatus::Queued,
     }))
@@ -78,28 +71,12 @@ async fn infer_fill(
 ///
 /// Requires authentication and read scope, and only returns a job belonging to the
 /// authenticated workspace.
-#[derive(Debug, Serialize)]
-pub struct InferJobStatus {
-    /// The job ID.
-    pub job_id: String,
-    /// One of `queued`, `running`, `completed`, `failed`.
-    pub status: InferenceJobStatus,
-    /// Fields the worker applied directly. Legacy jobs may populate this count.
-    pub applied: Option<i64>,
-    /// Fields stored as proposals. Only present on `completed`.
-    pub proposed: Option<i64>,
-    /// Entities skipped: nothing missing, the model declined to guess, or the guess didn't fit. Only present on `completed`.
-    pub skipped: Option<i64>,
-    /// Error message if the job failed.
-    pub error: Option<String>,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = crate::ee::controllers::openapi::InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn infer_job_status(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(job_id): Path<String>,
-) -> Result<Json<InferJobStatus>, ApiError> {
+) -> Result<Json<InferJobStatusResponse>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let caller_workspace_id = auth_ctx.workspace_id;
@@ -120,7 +97,7 @@ async fn infer_job_status(
 
     let status = result.status;
     let completed = status == InferenceJobStatus::Completed;
-    Ok(Json(InferJobStatus {
+    Ok(Json(InferJobStatusResponse {
         job_id,
         status,
         applied: completed.then_some(result.applied),
@@ -196,7 +173,7 @@ async fn authorized_job(
 }
 
 /// `GET /api/inference-jobs/{job_id}/proposals`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}/proposals", params(("job_id" = String, Path)), responses((status = 200, body = [crate::controllers::openapi::InferenceProposalResponse]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}/proposals", params(("job_id" = String, Path)), responses((status = 200, body = [crate::ee::controllers::openapi::InferenceProposalResponse]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn list_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -209,7 +186,7 @@ async fn list_proposals(
     Ok(Json(proposals))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/reject", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/reject", params(("job_id" = String, Path)), responses((status = 200, body = crate::ee::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn reject_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -222,7 +199,7 @@ async fn reject_proposals(
     Ok(Json(report))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/discard", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/discard", params(("job_id" = String, Path)), responses((status = 200, body = crate::ee::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn discard_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -253,7 +230,7 @@ async fn proposal_transaction(
         .internal()?)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 200, body = crate::ee::controllers::openapi::ProposalConfirmResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn confirm_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -268,7 +245,7 @@ async fn confirm_proposals(
 }
 
 /// `PUT /api/workspace/llm-key`
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/llm-key", request_body = crate::controllers::openapi::LlmKeyRequest, responses((status = 204, description = "LLM credentials saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/llm-key", request_body = crate::ee::controllers::openapi::LlmKeyRequest, responses((status = 204, description = "LLM credentials saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
 async fn set_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -276,7 +253,7 @@ async fn set_llm_key(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    llm_keys::set(
+    workspace_llm_keys::set(
         &ctx.db,
         auth_ctx.workspace_id,
         &body.base_url,
@@ -288,14 +265,14 @@ async fn set_llm_key(
 }
 
 /// `GET /api/workspace/llm-key`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/llm-key", responses((status = 200, body = crate::controllers::openapi::LlmKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/llm-key", responses((status = 200, body = crate::ee::controllers::openapi::LlmKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]
 async fn get_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-) -> Result<Json<llm_keys::LlmKeyDescription>, ApiError> {
+) -> Result<Json<workspace_llm_keys::LlmKeyDescription>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = llm_keys::describe(&ctx.db, auth_ctx.workspace_id)
+    let described = workspace_llm_keys::describe(&ctx.db, auth_ctx.workspace_id)
         .await?
         .ok_or_else(|| YorishiroError::not_found("no LLM credentials configured"))?;
     Ok(Json(described))
@@ -309,18 +286,8 @@ async fn delete_llm_key(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    llm_keys::clear(&ctx.db, auth_ctx.workspace_id).await?;
+    workspace_llm_keys::clear(&ctx.db, auth_ctx.workspace_id).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize)]
-pub struct SetLlmKeyRequest {
-    /// An OpenAI-compatible chat-completions endpoint, e.g. `https://api.openai.com/v1`.
-    pub base_url: String,
-    pub model: String,
-    /// Stored as given and never returned.
-    /// `GET` reports only that one is configured.
-    pub api_key: String,
 }
 
 #[cfg(feature = "openapi")]

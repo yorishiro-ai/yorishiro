@@ -4,47 +4,29 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
+use crate::data::templates::{self, TemplateSummary};
+use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
 use crate::error::YorishiroError;
-use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff};
+use crate::models::schema_schemas::metaschema::{self, MetaSchemaDefinition};
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::template_templates;
-use crate::templates::{self, TemplateSummary};
 
-#[derive(Serialize)]
-pub struct CreateSchemaResponse {
-    pub schema: SchemaRecord,
-    pub diff: VersioningDiff,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [super::openapi::SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
-pub async fn list_schemas(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::models::schema_schemas::SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+pub(crate) async fn list_schemas(
     authorized: Authorized<ReadScope>,
-    Query(page): Query<crate::controllers::PageParams>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
     let workspace_id = authorized.ctx.workspace_id;
     let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.into()).await?;
     Ok(Json(summaries))
 }
 
-/// Either an inline schema definition, or a reference to a template.
-///
-/// `template_id` accepts both kinds of template, because a caller holding an id should not have to know which kind it is: a built-in id (`"task-management"`, see `GET /api/templates`) served from the binary, or a UUID from the tenant's template library (`GET /api/template-library`).
-///
-/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum CreateSchemaRequest {
-    Definition(MetaSchemaDefinition),
-    Template { template_id: String },
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, responses((status = 201, body = super::openapi::CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, responses((status = 201, body = crate::dtos::schemas::CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
 pub async fn create_schema(
     State(ctx): State<AppContext>,
     authorized: Authorized<SchemaScope>,
@@ -87,7 +69,7 @@ pub async fn create_schema(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}", params(("name" = String, Path)), responses((status = 200, body = super::openapi::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}", params(("name" = String, Path)), responses((status = 200, body = crate::models::schema_schemas::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub async fn get_active_schema(
     authorized: Authorized<ReadScope>,
     Path(name): Path<String>,
@@ -97,8 +79,8 @@ pub async fn get_active_schema(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 200, body = super::openapi::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
-pub async fn get_schema_by_id(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 200, body = crate::models::schema_schemas::SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+pub(crate) async fn get_schema_by_id(
     authorized: Authorized<ReadScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
@@ -107,8 +89,8 @@ pub async fn get_schema_by_id(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/templates", responses((status = 200, body = [super::openapi::TemplateSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
-pub async fn list_templates(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/templates", responses((status = 200, body = [crate::data::templates::TemplateSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+pub(crate) async fn list_templates(
     _authorized: Authorized<ReadScope>,
 ) -> Result<Json<Vec<TemplateSummary>>, ApiError> {
     Ok(Json(templates::list_templates()))
@@ -124,7 +106,7 @@ pub async fn get_template(
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}/entity-types/{entity_type}/json-schema", params(("name" = String, Path), ("entity_type" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
-pub async fn get_entity_type_json_schema(
+pub(crate) async fn get_entity_type_json_schema(
     authorized: Authorized<ReadScope>,
     Path((name, entity_type)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
@@ -159,7 +141,7 @@ pub fn routes() -> Routes {
         )
 }
 
-pub fn template_routes() -> Routes {
+pub(crate) fn template_routes() -> Routes {
     Routes::new()
         .prefix("api/templates")
         .add("/", get(list_templates))

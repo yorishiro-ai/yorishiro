@@ -22,7 +22,6 @@ GENERATED_PREFIXES = (
     "src/models/_entities/",
     "src/dtos/",
 )
-MODEL_AREA_DIRS = {"content", "identity", "templates", "system"}
 
 
 class CheckError(RuntimeError):
@@ -430,7 +429,6 @@ def resolve_ref(root: pathlib.Path, ref: str, label: str) -> str:
 def _changed_paths(root: pathlib.Path, base: str, head: str) -> dict[str, str | None]:
     range_args = [base] if head == WORKTREE else [base, head]
     paths: dict[str, str | None] = {}
-    changed_names: set[str] = set()
     diff_commands = [range_args]
     if head == WORKTREE:
         diff_commands.append(["--cached", base])
@@ -455,13 +453,11 @@ def _changed_paths(root: pathlib.Path, base: str, head: str) -> dict[str, str | 
             if status.startswith(("R", "C")) and index + 1 < len(parts):
                 old_path, new_path = parts[index : index + 2]
                 index += 2
-                changed_names.update((old_path, new_path))
                 if new_path.endswith(".rs"):
                     paths[new_path] = old_path
             elif index < len(parts):
                 path = parts[index]
                 index += 1
-                changed_names.add(path)
                 if path.endswith(".rs"):
                     paths[path] = path
     if head == WORKTREE:
@@ -469,32 +465,7 @@ def _changed_paths(root: pathlib.Path, base: str, head: str) -> dict[str, str | 
         for path in untracked.split("\0"):
             if path.endswith(".rs"):
                 paths[path] = None
-                changed_names.add(path)
-    changed = {path: base_path for path, base_path in paths.items() if not is_generated(path)}
-    for path, base_path in list(changed.items()):
-        if not path.startswith("src/models/"):
-            continue
-        relative = pathlib.PurePosixPath(path).relative_to("src/models")
-        if len(relative.parts) < 2 or relative.parts[0] not in MODEL_AREA_DIRS:
-            continue
-        if relative.name == "mod.rs" and len(relative.parts) == 2:
-            continue
-        if relative.name == "mod.rs":
-            old_path = pathlib.PurePosixPath("src/models", relative.parts[-2] + ".rs")
-        else:
-            old_path = pathlib.PurePosixPath("src/models", *relative.parts[1:])
-        if base_path is not None and base_path != path:
-            continue
-        # A new area file only inherits the root file's baseline during a move.
-        # An unchanged root must not make unrelated area additions invisible.
-        if str(old_path) not in changed_names:
-            continue
-        try:
-            _git(root, "cat-file", "-e", f"{base}:{old_path}")
-        except CheckError:
-            continue
-        changed[path] = str(old_path)
-    return changed
+    return {path: base_path for path, base_path in paths.items() if not is_generated(path)}
 
 
 def _source(root: pathlib.Path, head: str, path: str) -> str | None:
