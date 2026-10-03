@@ -11,6 +11,7 @@
 //! 404 on the gated routes until a valid licence key is configured.
 
 pub mod controllers;
+pub mod db;
 pub mod models;
 pub mod services;
 pub mod tasks;

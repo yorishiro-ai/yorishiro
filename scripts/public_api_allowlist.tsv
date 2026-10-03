@@ -133,3 +133,4 @@ src/models/entity_embeddings/reindex.rs	struct	ReindexOutcome	seaorm-facade: emb
 src/models/entity_embeddings/write.rs	fn	sync_embedding_for_record	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
 src/lib.rs	mod	dtos	openapi-transport: Loco `dtos/` layout holding REST request and response types; the integration-test crate and `ee/` reuse them.
 src/models/schema_schemas.rs	mod	metaschema	integration-test: the schema-definition language stored in `schema_schemas.definition`; moved from the top-level `metaschema` module, and `ee/` plus the integration-test crate validate and diff definitions through it.
+ee/mod.rs	mod	db	ce-ee-composition: the enterprise overlay of `src/db.rs`, holding the scheduler-ownership primitives that only `ee/tasks/reindex_scheduler.rs` uses.
