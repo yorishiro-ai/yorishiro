@@ -16,9 +16,7 @@ use crate::workers::queue::QueuePolicy;
 pub(crate) fn compose_context(ctx: &AppContext) {
     // An absent or invalid licence key warns and continues rather than failing boot.
     let licence = Arc::new(crate::ee::controllers::middleware::edition::LicenceState::from_env());
-    ctx.shared_store.insert(licence.clone());
-    ctx.shared_store
-        .insert(licence as Arc<dyn crate::controllers::middleware::edition::EnterpriseEdition>);
+    ctx.shared_store.insert(licence);
 
     if ctx.is_sqlite() {
         // These features use PostgreSQL-only SQL and report their limitation at boot.
@@ -36,12 +34,12 @@ pub(crate) fn compose_context(ctx: &AppContext) {
             as Arc<dyn crate::controllers::middleware::auth::Authenticator>);
     }
 
-    ctx.shared_store.insert(
-        Arc::new(crate::ee::models::embedding_keys::EmbeddingKeyResolver)
-            as Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>,
-    );
     ctx.shared_store.insert(Arc::new(
-        crate::ee::models::worker_classes::WorkerClassAssignmentResolver,
+        crate::ee::models::workspace_embedding_keys::EmbeddingKeyResolver,
+    )
+        as Arc<dyn crate::services::embedding::WorkspaceEmbeddingResolver>);
+    ctx.shared_store.insert(Arc::new(
+        crate::ee::models::workspace_worker_classes::WorkerClassAssignmentResolver,
     ) as Arc<dyn WorkerClassResolver>);
     // Replaces the community queue policy installed by the base context builder.
     ctx.shared_store

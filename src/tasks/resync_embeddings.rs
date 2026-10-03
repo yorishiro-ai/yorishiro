@@ -119,13 +119,11 @@ impl Task for ResyncEmbeddings {
                 created_by: candidate.created_by,
                 updated_by: candidate.updated_by,
             };
-            let licenced = crate::controllers::middleware::edition::is_active(app_context);
             let result = entity_embeddings::sync_embedding_for_record(
                 &app_context.db,
                 workspace_id,
                 &record,
                 provider.as_ref(),
-                licenced,
             )
             .await;
 

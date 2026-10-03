@@ -1,7 +1,5 @@
 //! Re-embeds workspaces whose stored vectors came from a different model than the one now configured.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use axum::Router as AxumRouter;
 use loco_rs::{
@@ -38,19 +36,7 @@ impl Initializer for StartupReindex {
 /// Awaiting the finite scan avoids a process-local task while the actual reindex remains
 /// non-blocking and retryable through the configured queue provider.
 ///
-/// **Community edition only.** This feature compares every workspace's stamped model
-/// against the deployment-wide provider. Under EE a workspace can carry its own assignment
-/// (see `ee::models::embedding_keys`), so the comparison would flag every workspace
-/// as a mismatch and reindex them with the wrong provider. Skip when a licence is active.
 async fn detect_startup_reindex(ctx: &AppContext) {
-    // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
-    if crate::controllers::middleware::edition::is_active(ctx) {
-        tracing::debug!("startup reindex: enterprise licence active, skipping");
-        return;
-    }
-    let Some(provider) = usable_provider(ctx).await else {
-        return;
-    };
     let workspaces = match crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db).await {
         Ok(workspaces) => workspaces,
         Err(err) => {
@@ -59,11 +45,32 @@ async fn detect_startup_reindex(ctx: &AppContext) {
         }
     };
 
-    let provider_model = provider.model_name();
-    for workspace in workspaces
-        .iter()
-        .filter(|workspace| workspace.is_stamped_with_other_model(&provider_model))
-    {
+    for workspace in workspaces {
+        let provider =
+            match crate::controllers::extractors::resolve_embedding_provider(ctx, workspace.id)
+                .await
+            {
+                Ok(provider) => provider,
+                Err(err) => {
+                    tracing::warn!(
+                        workspace_id = %workspace.id,
+                        error = %err.0,
+                        "startup reindex: failed to resolve embedding provider"
+                    );
+                    continue;
+                }
+            };
+        if provider.embed_batch(&[]).await.is_err() {
+            tracing::warn!(
+                workspace_id = %workspace.id,
+                "startup reindex: embedding provider must be configured"
+            );
+            continue;
+        }
+        let provider_model = provider.model_name();
+        if !workspace.is_stamped_with_other_model(&provider_model) {
+            continue;
+        }
         tracing::info!(
             workspace_id = %workspace.id,
             stamped_model = ?workspace.embedding_model,
@@ -72,25 +79,6 @@ async fn detect_startup_reindex(ctx: &AppContext) {
         );
         enqueue_reindex(ctx, workspace.id).await;
     }
-}
-
-/// The deployment's embedding provider, if it is installed and answers.
-/// An unconfigured provider accepts the dimension count but fails every call, so it is probed once here instead of failing once per workspace.
-async fn usable_provider(
-    ctx: &AppContext,
-) -> Option<Arc<dyn crate::services::embedding::EmbeddingProvider>> {
-    let Some(provider) = ctx
-        .shared_store
-        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
-    else {
-        tracing::warn!("startup reindex: embedding provider missing");
-        return None;
-    };
-    if provider.embed_batch(&[]).await.is_err() {
-        tracing::warn!("startup reindex: embedding provider must be configured");
-        return None;
-    }
-    Some(provider)
 }
 
 async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {

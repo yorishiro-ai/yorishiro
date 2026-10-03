@@ -13,16 +13,15 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-pub struct OAuthUser {
-    pub id: Uuid,
-    pub email: String,
+pub(crate) struct OAuthUser {
+    pub(crate) id: Uuid,
 }
 
 /// Looks up a user previously provisioned through this exact provider + subject id pair.
 /// Keyed on the pair (not email alone) because the subject id is what the provider actually guarantees stable and unique: an email can be reassigned or changed at the provider, but `sub` never changes for the same account.
 /// Returns `None` on first login for a given identity, whether or not a different (e.g. password-based) account already exists under the same email.
-/// Callers decide how to reconcile that (see `models::oauth_users::find_or_create`).
-pub async fn find_by_oauth_identity(
+/// Callers decide how to reconcile that (see `models::user_users::find_or_create`).
+pub(crate) async fn find_by_oauth_identity(
     conn: &impl ConnectionTrait,
     provider: &str,
     subject_id: &str,
@@ -34,14 +33,11 @@ pub async fn find_by_oauth_identity(
         .await
         .internal()?;
 
-    Ok(user.map(|u| OAuthUser {
-        id: u.id,
-        email: u.email,
-    }))
+    Ok(user.map(|u| OAuthUser { id: u.id }))
 }
 
 #[derive(Debug)]
-pub enum CreateOauthUserError {
+pub(crate) enum CreateOauthUserError {
     /// Some unique constraint on `user_users` rejected the insert.
     /// This can only be the `email` column's own constraint (a genuinely different account already holds this email): `find_or_create` holds `pg_advisory_xact_lock` for this exact `(provider, subject_id)` for the whole first-login path, including a re-check via `find_by_oauth_identity` immediately before this insert, so no other caller can be concurrently inserting the same identity.
     /// `users_oauth_identity_idx` cannot be the constraint that fired here.
@@ -50,10 +46,10 @@ pub enum CreateOauthUserError {
 }
 
 /// Creates a new OAuth-provisioned user row (`password_hash` left `NULL`, per `users_auth_method_check`).
-/// Does not touch tenancy: see `models::oauth_users::find_or_create` for the caller that wires a freshly created user into a tenant, workspace and membership.
+/// Does not touch tenancy: see `models::user_users::find_or_create` for the caller that wires a freshly created user into a tenant, workspace and membership.
 ///
 /// Takes `&impl ConnectionTrait` (rather than a pool handle) so `find_or_create` can run this on the same transaction as `tenancy::add_member`: both must succeed or fail together, or a crash between them would leave an orphaned user row with no tenant membership, and every later login for that identity would then resolve to a permanent `ScopeInsufficient`.
-pub async fn create_oauth_user(
+pub(crate) async fn create_oauth_user(
     conn: &impl ConnectionTrait,
     email: &str,
     display_name: Option<&str>,
@@ -77,8 +73,5 @@ pub async fn create_oauth_user(
     }
 
     let user = result.internal().map_err(CreateOauthUserError::Other)?;
-    Ok(OAuthUser {
-        id: user.id,
-        email: user.email,
-    })
+    Ok(OAuthUser { id: user.id })
 }

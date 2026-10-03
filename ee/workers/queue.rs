@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::ee::controllers::middleware::edition::LicenceState;
 use crate::ee::data::plan::Plan;
-use crate::ee::models::billing;
+use crate::ee::models::tenant_billing;
 use crate::error::YorishiroError;
 use crate::models::tenancy;
 use crate::workers::embedding_sync::WorkerClass;
@@ -56,7 +56,7 @@ async fn plan_for(ctx: &AppContext, workspace_id: Uuid) -> Result<Plan, String> 
         return Ok(plan);
     }
 
-    let billing = billing::get_billing(&ctx.db, workspace.tenant_id)
+    let billing = tenant_billing::get_billing(&ctx.db, workspace.tenant_id)
         .await
         .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
     let Some(billing) = billing else {

@@ -7,16 +7,16 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TenantUsage {
-    pub tenant_id: Uuid,
-    pub workspace_count: i64,
-    pub member_count: i64,
-    pub entity_count: i64,
+pub(crate) struct TenantUsage {
+    pub(crate) tenant_id: Uuid,
+    pub(crate) workspace_count: i64,
+    pub(crate) member_count: i64,
+    pub(crate) entity_count: i64,
 }
 
 /// Computes usage counters for invoicing/dashboard display.
 /// Runs over `ctx.db` (the admin/migration-role connection), since it aggregates across every workspace in a tenant and `entity_entities` only has a workspace-level RLS policy, not a tenant-wide one.
-pub async fn compute_tenant_usage(
+pub(crate) async fn compute_tenant_usage(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
 ) -> Result<TenantUsage, YorishiroError> {

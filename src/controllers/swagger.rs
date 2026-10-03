@@ -14,13 +14,12 @@ mod implementation {
 
     use axum::Router;
     use axum::http::Method;
-    use utoipa::openapi::extensions::Extensions;
     use utoipa::openapi::path::{HttpMethod, PathItem};
     use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
     use utoipa::openapi::{Components, Info, OpenApiBuilder, PathsBuilder, RefOr, Schema};
     use utoipa_swagger_ui::SwaggerUi;
 
-    use super::super::route_inventory::{Edition, RouteDoc, RouteEntry, RouteInventory};
+    use super::super::route_inventory::{RouteDoc, RouteEntry, RouteInventory};
 
     fn openapi_method(method: &Method) -> HttpMethod {
         match *method {
@@ -105,10 +104,7 @@ mod implementation {
     }
 
     /// Build the document for the operations in the runtime route inventory.
-    pub(crate) fn openapi_for(
-        inventory: &RouteInventory,
-        edition: Edition,
-    ) -> utoipa::openapi::OpenApi {
+    pub(crate) fn openapi_for(inventory: &RouteInventory) -> utoipa::openapi::OpenApi {
         let mut paths = PathsBuilder::new();
         let mut components = Components::new();
         let mut operations = Vec::new();
@@ -122,20 +118,11 @@ mod implementation {
             ),
         );
 
-        for entry in inventory.public(edition) {
+        for entry in inventory.public() {
             let doc = doc_for(&inventory.docs, entry);
             let method = openapi_method(&entry.method);
             let mut operation = doc.operation.clone();
             operation.operation_id = Some(entry.operation_id.clone());
-            if entry.gated {
-                operation
-                    .extensions
-                    .get_or_insert_with(Extensions::default)
-                    .insert(
-                        "x-yorishiro-licence-required".into(),
-                        serde_json::json!(true),
-                    );
-            }
             operations
                 .push(serde_json::to_value(&operation).expect("OpenAPI operation must serialize"));
             paths = paths.path(&entry.path, PathItem::new(method, operation));
@@ -160,10 +147,7 @@ mod implementation {
     }
 
     pub(crate) fn mount(router: Router, inventory: &RouteInventory) -> Router {
-        let swagger = SwaggerUi::new("/docs").url(
-            "/docs/openapi.json",
-            openapi_for(inventory, Edition::Enterprise),
-        );
+        let swagger = SwaggerUi::new("/docs").url("/docs/openapi.json", openapi_for(inventory));
         router.merge(swagger)
     }
 
@@ -191,9 +175,7 @@ mod implementation {
 
         #[test]
         fn empty_inventory_still_has_the_bearer_scheme() {
-            let document =
-                serde_json::to_value(openapi_for(&RouteInventory::default(), Edition::Enterprise))
-                    .unwrap();
+            let document = serde_json::to_value(openapi_for(&RouteInventory::default())).unwrap();
             assert_eq!(
                 document["components"]["securitySchemes"]["bearer_auth"]["scheme"],
                 "bearer"
@@ -206,12 +188,10 @@ mod implementation {
             inventory.entries.push(RouteEntry {
                 path: "/_health".into(),
                 method: Method::GET,
-                edition: Edition::Community,
-                gated: false,
                 operation_id: "get_health".into(),
                 class: RouteClass::Infrastructure,
             });
-            assert_eq!(inventory.public(Edition::Enterprise).count(), 0);
+            assert_eq!(inventory.public().count(), 0);
         }
 
         #[test]

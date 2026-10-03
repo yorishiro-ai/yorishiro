@@ -10,10 +10,12 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::dtos::marketplace::{
+    ForkParams, ForkResponse, PublishVersionRequest as PublishVersionInput, SetVisibilityRequest,
+};
 use crate::ee::models::marketplace;
 use crate::ee::models::marketplace::{
     self as marketplace_models, MarketplaceListing, PublishVersionRequest, SubmitReviewRequest,
@@ -80,18 +82,6 @@ async fn publish_version(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-#[derive(Debug, Deserialize)]
-struct PublishVersionInput {
-    definition: serde_json::Value,
-    changelog: Option<String>,
-    #[serde(default = "default_publish_status")]
-    status: String,
-}
-
-fn default_publish_status() -> String {
-    "draft".to_string()
-}
-
 /// `GET /api/marketplace/{id}/reviews`
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::TemplateReviewRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn list_reviews(
@@ -119,19 +109,6 @@ async fn submit_review(
     Ok(Json(record))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ForkParams {
-    /// Which published version to copy.
-    /// Omitted takes the latest `stable` one.
-    pub version: Option<i32>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ForkResponse {
-    /// The new template in the caller's own library.
-    pub template_id: Uuid,
-}
-
 /// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/fork", params(("id" = Uuid, Path), ("version" = Option<i32>, Query)), responses((status = 201, body = crate::ee::controllers::openapi::ForkResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn fork_template(
@@ -149,12 +126,6 @@ async fn fork_template(
             template_id: forked,
         }),
     ))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SetVisibilityRequest {
-    /// `tenant` to keep it private, `community` to list it in the marketplace.
-    pub visibility: String,
 }
 
 /// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.

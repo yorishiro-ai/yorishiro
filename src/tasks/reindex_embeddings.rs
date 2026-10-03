@@ -73,11 +73,9 @@ impl Task for ReindexEmbeddings {
             .map(|v| v.parse().unwrap_or(false))
             .unwrap_or(false);
         if !force {
-            let licenced = crate::controllers::middleware::edition::is_active(app_context);
             let chain = entity_embeddings::resolve_embedding_chain(
                 &app_context.db,
                 workspace_id,
-                licenced,
                 provider.dimensions(),
             )
             .await

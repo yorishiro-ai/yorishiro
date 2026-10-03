@@ -1,7 +1,7 @@
 //! Find-or-create for OAuth-provisioned users, plus the tenant/workspace auto-provisioning that happens the first time a given identity logs in.
 //! Tenant, workspace, user and membership are all committed together in one transaction, guarded by `crate::db::lock_for_update`.
 //!
-//! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `ee::models::oauth_users` rather than beside the base model, since `user_users` knows nothing about the OAuth-specific lookups over `oauth_provider`/`oauth_subject_id`.
+//! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `ee::models::user_users` rather than beside the base model, since `user_users` knows nothing about the OAuth-specific lookups over `oauth_provider`/`oauth_subject_id`.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_tenants;

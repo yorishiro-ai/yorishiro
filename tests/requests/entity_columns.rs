@@ -161,7 +161,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
         );
 
         let over_limit: Vec<String> = (0
-            ..yorishiro::ee::models::entity_columns::MAX_VISIBLE_COLUMNS + 1)
+            ..yorishiro::ee::models::entity_column_preferences::MAX_VISIBLE_COLUMNS + 1)
             .map(|i| format!("f{i}"))
             .collect();
         let too_many = request

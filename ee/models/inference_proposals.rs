@@ -12,60 +12,17 @@ use sea_orm::{
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::fmt;
-use std::str::FromStr;
 use uuid::Uuid;
 
-const PENDING: &str = "pending";
-const CONFIRMED: &str = "confirmed";
-const REJECTED: &str = "rejected";
-const DISCARDED: &str = "discarded";
-const STALE: &str = "stale";
-const INVALID: &str = "invalid";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProposalStatus {
-    Pending,
-    Confirmed,
-    Rejected,
-    Discarded,
-    Stale,
-    Invalid,
-}
-
-impl ProposalStatus {
-    const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Pending => PENDING,
-            Self::Confirmed => CONFIRMED,
-            Self::Rejected => REJECTED,
-            Self::Discarded => DISCARDED,
-            Self::Stale => STALE,
-            Self::Invalid => INVALID,
-        }
-    }
-}
-
-impl fmt::Display for ProposalStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for ProposalStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            PENDING => Ok(Self::Pending),
-            CONFIRMED => Ok(Self::Confirmed),
-            REJECTED => Ok(Self::Rejected),
-            DISCARDED => Ok(Self::Discarded),
-            STALE => Ok(Self::Stale),
-            INVALID => Ok(Self::Invalid),
-            _ => Err(format!("unknown inference proposal status: {value}")),
-        }
+crate::db_enum::db_enum! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum ProposalStatus {
+        Pending = "pending",
+        Confirmed = "confirmed",
+        Rejected = "rejected",
+        Discarded = "discarded",
+        Stale = "stale",
+        Invalid = "invalid",
     }
 }
 
@@ -181,7 +138,7 @@ pub(crate) async fn record_batch_attempt(
             schema_version: Set(schema_version),
             source_field: Set(source_field),
             proposed: Set(proposed),
-            status: Set(PENDING.to_string()),
+            status: Set(ProposalStatus::Pending.as_db_str().to_string()),
             ..Default::default()
         }
         .insert(conn)
@@ -257,7 +214,7 @@ async fn transition_pending(
         .col_expr(Column::UpdatedAt, Expr::value(chrono::Utc::now()))
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
-        .filter(Column::Status.eq(PENDING))
+        .filter(Column::Status.eq(ProposalStatus::Pending.as_db_str()))
         .exec(conn)
         .await
         .internal()?;
@@ -341,7 +298,7 @@ pub async fn confirm(
                     workspace_id,
                     job_id,
                     entity_id,
-                    STALE,
+                    ProposalStatus::Stale.as_db_str(),
                     proposals.len(),
                 )
                 .await?;
@@ -364,7 +321,7 @@ pub async fn confirm(
                 workspace_id,
                 job_id,
                 entity_id,
-                STALE,
+                ProposalStatus::Stale.as_db_str(),
                 proposals.len(),
             )
             .await?;
@@ -378,7 +335,7 @@ pub async fn confirm(
                 workspace_id,
                 job_id,
                 entity_id,
-                INVALID,
+                ProposalStatus::Invalid.as_db_str(),
                 proposals.len(),
             )
             .await?;
@@ -395,7 +352,7 @@ pub async fn confirm(
                 workspace_id,
                 job_id,
                 entity_id,
-                INVALID,
+                ProposalStatus::Invalid.as_db_str(),
                 proposals.len(),
             )
             .await?;
@@ -410,7 +367,7 @@ pub async fn confirm(
                     workspace_id,
                     job_id,
                     entity_id,
-                    INVALID,
+                    ProposalStatus::Invalid.as_db_str(),
                     proposals.len(),
                 )
                 .await?;
@@ -438,7 +395,7 @@ pub async fn confirm(
                 workspace_id,
                 job_id,
                 entity_id,
-                STALE,
+                ProposalStatus::Stale.as_db_str(),
                 proposals.len(),
             )
             .await?;
@@ -450,7 +407,7 @@ pub async fn confirm(
             workspace_id,
             job_id,
             entity_id,
-            CONFIRMED,
+            ProposalStatus::Confirmed.as_db_str(),
             proposals.len(),
         )
         .await?;
@@ -506,7 +463,7 @@ async fn ensure_entity_marked(
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobId.eq(job_id))
         .filter(Column::EntityId.eq(entity_id))
-        .filter(Column::Status.eq(PENDING))
+        .filter(Column::Status.eq(ProposalStatus::Pending.as_db_str()))
         .exec(conn)
         .await
         .internal()?;

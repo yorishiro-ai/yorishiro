@@ -104,21 +104,13 @@ impl YorishiroMcpServer {
             }
         };
 
-        let licenced = crate::controllers::middleware::edition::is_active(&self.ctx);
-
-        let hits = match search::search_by_vector(
-            &txn,
-            workspace_id,
-            vector,
-            &args.query_text,
-            query,
-            licenced,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let hits =
+            match search::search_by_vector(&txn, workspace_id, vector, &args.query_text, query)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(hits)
     }
 }

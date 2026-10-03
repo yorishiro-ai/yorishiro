@@ -13,6 +13,7 @@ use crate::YorishiroError;
 use crate::ee::data::plan::Plan;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// The public half of the signing key, compiled in.
 /// Rotating it means replacing this file and cutting a release; keys signed by the previous private key stop verifying at that point.
@@ -146,10 +147,44 @@ impl LicenceState {
     }
 }
 
-impl crate::controllers::middleware::edition::EnterpriseEdition for LicenceState {
-    fn is_active(&self) -> bool {
-        Self::is_active(self)
+pub(crate) fn is_active(ctx: &loco_rs::app::AppContext) -> bool {
+    ctx.shared_store
+        .get::<Arc<LicenceState>>()
+        .is_some_and(|state| state.is_active())
+}
+
+pub(crate) async fn licence_gate(
+    axum::extract::State(ctx): axum::extract::State<loco_rs::app::AppContext>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    if is_active(&ctx) {
+        return next.run(request).await;
     }
+
+    crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
+        "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
+    ))
+    .into_response()
+}
+
+/// Marks the OpenAPI operations of a route group that `licence_gate` covers.
+#[cfg(feature = "openapi")]
+pub(crate) fn licence_required(
+    mut docs: Vec<crate::controllers::route_inventory::RouteDoc>,
+) -> Vec<crate::controllers::route_inventory::RouteDoc> {
+    for doc in &mut docs {
+        doc.operation
+            .extensions
+            .get_or_insert_with(Default::default)
+            .insert(
+                "x-yorishiro-licence-required".into(),
+                serde_json::json!(true),
+            );
+    }
+    docs
 }
 
 #[cfg(test)]

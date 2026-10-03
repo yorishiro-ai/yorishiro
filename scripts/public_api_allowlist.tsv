@@ -117,9 +117,6 @@ src/models/api_keys.rs	fn	hash_key	auth-provider-resolver: API-key identity and 
 src/models/api_keys.rs	struct	AuthContext	auth-provider-resolver: API-key identity and persistence moved from `services/auth` into the model that owns API keys; `ee/` and the integration-test crate consume them.
 src/models/api_keys.rs	struct	CreatedApiKey	auth-provider-resolver: API-key identity and persistence moved from `services/auth` into the model that owns API keys; `ee/` and the integration-test crate consume them.
 src/models/system_maintenance.rs	const	AUTO_REASON	integration-test: the marker the database load guard writes, which the integration-test crate asserts on; moved from `services/db_load_guard` into the maintenance model that stores it.
-src/controllers/middleware/edition.rs	fn	is_active	auth-provider-resolver: the edition seam (`EnterpriseEdition`, `is_active`) moved from `services/edition` into the controller layer with the licence gate; `ee/` implements it and the integration-test crate installs fakes.
-src/controllers/middleware/edition.rs	trait	EnterpriseEdition	auth-provider-resolver: the edition seam (`EnterpriseEdition`, `is_active`) moved from `services/edition` into the controller layer with the licence gate; `ee/` implements it and the integration-test crate installs fakes.
-src/controllers/middleware/mod.rs	mod	edition	auth-provider-resolver: the edition seam (`EnterpriseEdition`, `is_active`) moved from `services/edition` into the controller layer with the licence gate; `ee/` implements it and the integration-test crate installs fakes.
 src/models/entity_embeddings.rs	use	reindex::{ReindexFailure,ReindexOutcome,reindex_workspace}	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
 src/models/entity_embeddings.rs	use	write::sync_embedding_for_record	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
 src/models/entity_embeddings/reindex.rs	field	ReindexFailure::entity_id	seaorm-facade: embedding write operations moved from `services/embedding/sync` into the model that owns the embedding tables; workers, tasks, and the integration-test crate call them.
@@ -323,7 +320,7 @@ ee/models/api_keys.rs	field	CreatedTenantApiKey::id	integration-test: task-compa
 ee/models/api_keys.rs	field	CreatedTenantApiKey::plaintext	integration-test: request tests authenticate with the one-time tenant key secret.
 ee/models/api_keys.rs	fn	create_tenant_api_key	integration-test: request tests issue tenant-scoped credentials against the identity pool.
 ee/models/api_keys.rs	struct	CreatedTenantApiKey	integration-test: typed result of tenant-scoped key issuance.
-ee/models/embedding_keys.rs	struct	EmbeddingKeyResolver	integration-test: request tests exercise the installed provider resolver seam.
+ee/models/workspace_embedding_keys.rs	struct	EmbeddingKeyResolver	integration-test: request tests exercise the installed provider resolver seam.
 ee/models/mod.rs	mod	api_keys	integration-test: exposes enterprise API-key persistence to request tests.
 ee/models/mod.rs	mod	schema_schemas	integration-test: exposes the schema merge race-test seam.
 ee/models/mod.rs	mod	template_templates	integration-test: exposes official-template seeding operations to request tests.
@@ -336,9 +333,24 @@ ee/models/template_templates.rs	field	SeedOutcome::unchanged	integration-test: s
 ee/models/template_templates.rs	field	SeedOutcome::updated	integration-test: seed idempotency tests inspect updated templates.
 ee/models/template_templates.rs	fn	seed_official_templates	integration-test: seed tests run the same model operation as the Loco task.
 ee/models/template_templates.rs	struct	SeedOutcome	integration-test: typed result inspected by official-template tests.
-ee/models/worker_classes.rs	struct	WorkerClassAssignmentResolver	integration-test: request tests exercise the installed worker-class resolver seam.
+ee/models/workspace_worker_classes.rs	struct	WorkerClassAssignmentResolver	integration-test: request tests exercise the installed worker-class resolver seam.
 ee/controllers/middleware/mod.rs	mod	auth	integration-test: exposes the tenant workspace header used by request tests.
-ee/models/oauth_users.rs	use	provisioning::find_or_create	integration-test: exposes first-login provisioning through the canonical OAuth user model facade.
-ee/models/oauth_users/provisioning.rs	field	ProvisionedLogin::workspace_id	integration-test: provisioning tests verify the created workspace contents.
-ee/models/oauth_users/provisioning.rs	fn	find_or_create	integration-test: request tests exercise transactional first-login provisioning directly.
-ee/models/oauth_users/provisioning.rs	struct	ProvisionedLogin	integration-test: typed result returned by first-login provisioning.
+ee/models/user_users.rs	use	provisioning::find_or_create	integration-test: exposes first-login provisioning through the canonical OAuth user model facade.
+ee/models/user_users/provisioning.rs	field	ProvisionedLogin::workspace_id	integration-test: provisioning tests verify the created workspace contents.
+ee/models/user_users/provisioning.rs	fn	find_or_create	integration-test: request tests exercise transactional first-login provisioning directly.
+ee/models/user_users/provisioning.rs	struct	ProvisionedLogin	integration-test: typed result returned by first-login provisioning.
+ee/models/entity_column_preferences.rs	const	MAX_VISIBLE_COLUMNS	integration-test: request tests verify the documented visible-column boundary.
+ee/models/mod.rs	mod	entity_column_preferences	integration-test: request tests verify the visible-column boundary through the table-named overlay.
+ee/models/mod.rs	mod	tenant_billing	integration-test: Stripe request tests inspect billing persistence through the table-named overlay.
+ee/models/mod.rs	mod	user_users	integration-test: OAuth request tests exercise first-login provisioning through the table-named overlay.
+ee/models/mod.rs	mod	workspace_embedding_keys	integration-test: embedding request tests exercise the resolver and width-change persistence seam.
+ee/models/mod.rs	mod	workspace_worker_classes	integration-test: worker-class request tests exercise the resolver and assignment persistence seam.
+ee/models/tenant_billing.rs	field	TenantBillingRecord::plan	integration-test: Stripe request tests assert the plan persisted by webhook handling.
+ee/models/tenant_billing.rs	field	TenantBillingRecord::stripe_customer_id	integration-test: Stripe request tests assert the customer mapping persisted by checkout handling.
+ee/models/tenant_billing.rs	fn	get_billing	integration-test: Stripe request tests inspect persisted billing state.
+ee/models/tenant_billing.rs	fn	link_stripe_customer	integration-test: Stripe request tests arrange customer-to-tenant mappings.
+ee/models/tenant_billing.rs	fn	set_plan	integration-test: Stripe request tests arrange prior billing plans.
+ee/models/tenant_billing.rs	struct	TenantBillingRecord	integration-test: typed billing state returned to Stripe request tests.
+ee/models/workspace_embedding_keys.rs	enum	SetOutcome	integration-test: embedding request tests assert whether a provider width changed.
+ee/models/workspace_embedding_keys.rs	fn	set	integration-test: embedding request tests verify width-change persistence directly.
+ee/models/workspace_worker_classes.rs	fn	set	integration-test: worker-class request tests arrange explicit assignments for resolver verification.

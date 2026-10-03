@@ -35,20 +35,15 @@ async fn sync_embedding(
     record: &EntityRecord,
     entity_type_def: &EntityTypeDef,
     provider: &dyn EmbeddingProvider,
-    licenced: bool,
 ) -> Result<(), YorishiroError> {
     let Some(text) = compose_embedding_text(entity_type_def, &record.data) else {
         return Ok(());
     };
 
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    let chain = super::resolution::resolve_embedding_chain(
-        conn,
-        workspace_id,
-        licenced,
-        provider.dimensions(),
-    )
-    .await?;
+    let chain =
+        super::resolution::resolve_embedding_chain(conn, workspace_id, provider.dimensions())
+            .await?;
     let expected_dimensions = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
@@ -125,7 +120,6 @@ pub async fn sync_embedding_for_record(
     workspace_id: Uuid,
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
-    licenced: bool,
 ) -> Result<(), YorishiroError> {
     let schema =
         crate::models::schema_schemas::get_by_id(conn, workspace_id, record.schema_id).await?;
@@ -140,13 +134,5 @@ pub async fn sync_embedding_for_record(
             ))
         })?;
 
-    sync_embedding(
-        conn,
-        workspace_id,
-        record,
-        entity_type_def,
-        provider,
-        licenced,
-    )
-    .await
+    sync_embedding(conn, workspace_id, record, entity_type_def, provider).await
 }

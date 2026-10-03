@@ -201,21 +201,14 @@ impl VectorKnn {
 /// Resolves the workspace's effective embedding width for selecting the correct
 /// width-specific table. Returns the width and the table name.
 ///
-/// Resolves the workspace's effective embedding width for selecting the correct
-/// width-specific table. Returns the width and the table name.
-///
-/// When `licenced` is `false` (community edition or unlicensed), workspace and tenant
-/// defaults are ignored: only the deployment default is used.
 /// Falls back to the deployment default (YORISHIRO_EMBEDDING_DIMENSIONS, default 768).
 pub async fn resolve_search_table(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    licenced: bool,
 ) -> Result<(usize, String), YorishiroError> {
     resolve_search_table_with_dimensions(
         conn,
         workspace_id,
-        licenced,
         crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS,
     )
     .await
@@ -224,13 +217,11 @@ pub async fn resolve_search_table(
 async fn resolve_search_table_with_dimensions(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    licenced: bool,
     deployment_dimensions: usize,
 ) -> Result<(usize, String), YorishiroError> {
     use crate::models::entity_embeddings::resolve_embedding_chain;
 
-    let chain =
-        resolve_embedding_chain(conn, workspace_id, licenced, deployment_dimensions).await?;
+    let chain = resolve_embedding_chain(conn, workspace_id, deployment_dimensions).await?;
     let dimension = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
@@ -248,7 +239,6 @@ pub async fn search_by_vector(
     vector: Vec<f32>,
     query_text: &str,
     query: SearchQuery,
-    licenced: bool,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
     let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
 
@@ -261,7 +251,7 @@ pub async fn search_by_vector(
     }
 
     let (_dimension, embed_table) =
-        resolve_search_table_with_dimensions(conn, workspace_id, licenced, vector.len()).await?;
+        resolve_search_table_with_dimensions(conn, workspace_id, vector.len()).await?;
 
     let knn = match conn.get_database_backend() {
         sea_orm::DatabaseBackend::Postgres => {

@@ -1,4 +1,4 @@
-//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `billing::` functions directly alongside HTTP requests).
+//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
 
 use super::boot_request;
@@ -24,10 +24,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: chrono::Utc::now().timestamp() + 60 * 60,
-        }))
-            as std::sync::Arc<
-                dyn yorishiro::controllers::middleware::edition::EnterpriseEdition,
-            >);
+        })) as std::sync::Arc<LicenceState>);
 }
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
@@ -307,7 +304,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let result = yorishiro::ee::models::oauth_users::find_or_create(
+        let result = yorishiro::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-brand-new-subject",
@@ -348,7 +345,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         licence(&ctx);
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
-        let provisioned = yorishiro::ee::models::oauth_users::find_or_create(
+        let provisioned = yorishiro::ee::models::user_users::find_or_create(
             &txn,
             "oidc",
             "a-first-login-subject",

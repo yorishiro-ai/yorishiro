@@ -17,8 +17,6 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fmt;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
@@ -50,52 +48,22 @@ pub struct TemplateVersionRecord {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TemplateVersionStatus {
-    Draft,
-    Pre,
-    Stable,
+crate::db_enum::db_enum! {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum TemplateVersionStatus {
+        Draft = "draft",
+        Pre = "pre",
+        Stable = "stable",
+    }
 }
 
 impl TemplateVersionStatus {
-    pub const fn as_db_str(self) -> &'static str {
-        match self {
-            Self::Draft => "draft",
-            Self::Pre => "pre",
-            Self::Stable => "stable",
-        }
-    }
-
-    pub fn from_db_str(value: &str) -> Option<Self> {
-        value.parse().ok()
-    }
-
     pub fn parse_publish(value: &str) -> Result<Self, YorishiroError> {
         Self::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
             message: format!("unknown publish status '{value}'"),
             details: Vec::new(),
             hint: "use one of: draft, pre, stable".into(),
         })
-    }
-}
-
-impl fmt::Display for TemplateVersionStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_db_str())
-    }
-}
-
-impl FromStr for TemplateVersionStatus {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "draft" => Ok(Self::Draft),
-            "pre" => Ok(Self::Pre),
-            "stable" => Ok(Self::Stable),
-            _ => Err(format!("unknown template version status: {value}")),
-        }
     }
 }
 

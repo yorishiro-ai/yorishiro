@@ -9,29 +9,19 @@ use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::schema_schemas::metaschema::VersioningDiff;
-use crate::models::schema_schemas::{MergeDiffSummary, SchemaRecord, UpstreamChange};
+use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::ee::controllers::middleware::auth as authz;
+use crate::ee::dtos::origin::MergeResponse;
 use crate::ee::models::schema_schemas as origin_model;
 use crate::ee::models::schema_schemas as origin;
 use crate::ee::models::schema_schemas::MergePlan;
-
-/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly.
-/// The response of a merge, matching the community edition's schema-creation response shape so a client written against that response shape needs no change.
-#[derive(Debug, Serialize)]
-pub struct MergeResponse {
-    pub schema: SchemaRecord,
-    pub diff: VersioningDiff,
-    pub summary: MergeDiffSummary,
-}
 
 /// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "enterprise"))]

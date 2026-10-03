@@ -1,8 +1,8 @@
 //! `GET /api/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
 
 use crate::error::ResultExt;
-use crate::models::_entities::tenant_tenants;
-use crate::models::tenancy::{self, MembershipRecord};
+use crate::models::_entities::tenant_tenants as tenant_tenants_entity;
+use crate::models::tenancy;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -10,23 +10,12 @@ use axum::routing::get;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::EntityTrait;
-use serde::Serialize;
-use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::ee::controllers::middleware::auth::authenticate_tenant_admin;
-use crate::ee::models::billing;
-use crate::ee::models::usage::{self, TenantUsage};
-
-#[derive(Debug, Serialize)]
-pub struct TenantOverview {
-    pub tenant_id: Uuid,
-    /// `null` until a Stripe subscription event has set one: a tenant that has never subscribed has no plan and no cap.
-    pub plan: Option<String>,
-    pub max_workspaces: Option<i32>,
-    pub usage: TenantUsage,
-    pub members: Vec<MembershipRecord>,
-}
+use crate::ee::dtos::dashboard::TenantOverview;
+use crate::ee::models::tenant_billing;
+use crate::ee::models::tenant_tenants;
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = crate::ee::controllers::openapi::TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-roles" = json!(["tenant_admin"]))), tag = "enterprise"))]
 async fn tenant_overview(
@@ -40,13 +29,13 @@ async fn tenant_overview(
             tracing::warn!(error = %err, "hosted dashboard request rejected during authentication")
         })?;
 
-    let tenant = tenant_tenants::Entity::find_by_id(tenant_id)
+    let tenant = tenant_tenants_entity::Entity::find_by_id(tenant_id)
         .one(&ctx.db)
         .await
         .internal()?
         .ok_or_else(|| crate::YorishiroError::not_found("tenant not found"))?;
-    let billing = billing::get_billing(&ctx.db, tenant_id).await?;
-    let usage = usage::compute_tenant_usage(&ctx.db, tenant_id).await?;
+    let billing = tenant_billing::get_billing(&ctx.db, tenant_id).await?;
+    let usage = tenant_tenants::compute_tenant_usage(&ctx.db, tenant_id).await?;
     // The dashboard overview shows every member, not a page: it's a fixed-shape summary, not a browsable list with its own query params.
     // A tenant with more than MAX_LIST_LIMIT members sees a truncated list; flagged rather than silently accepted, since nothing here has measured how common that is.
     let members = tenancy::list_members(

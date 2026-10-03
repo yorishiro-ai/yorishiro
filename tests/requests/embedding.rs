@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use uuid::Uuid;
 use yorishiro::app::App;
-use yorishiro::ee::models::embedding_keys::EmbeddingKeyResolver;
+use yorishiro::ee::models::workspace_embedding_keys::EmbeddingKeyResolver;
 use yorishiro::models::_entities::{api_keys, tenant_tenants, workspace_workspaces};
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy::{self, MembershipRole};
@@ -244,7 +244,7 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
             "an unassigned workspace must resolve to None so the caller falls back to the deployment default"
         );
 
-        let result = yorishiro::ee::models::embedding_keys::set(
+        let result = yorishiro::ee::models::workspace_embedding_keys::set(
             &ctx.db,
             setup.workspace_id,
             "https://embed.example.com/v1",
@@ -257,7 +257,7 @@ async fn resolver_returns_the_workspace_assignment_when_set_and_none_otherwise()
         .await
         .expect("assign workspace embedding key");
         assert!(
-            matches!(result, yorishiro::ee::models::embedding_keys::SetOutcome::Stored),
+            matches!(result, yorishiro::ee::models::workspace_embedding_keys::SetOutcome::Stored),
             "assigning with no expected dimensions must yield Stored"
         );
 

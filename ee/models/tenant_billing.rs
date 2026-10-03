@@ -13,7 +13,7 @@ use uuid::Uuid;
 /// Absent for any tenant that has never been through checkout.
 #[derive(Debug, Clone)]
 pub struct TenantBillingRecord {
-    pub tenant_id: Uuid,
+    pub(crate) tenant_id: Uuid,
     pub plan: Option<String>,
     pub stripe_customer_id: Option<String>,
 }
@@ -44,7 +44,7 @@ pub async fn get_billing(
 
 /// Resolves the tenant a Stripe webhook is about.
 /// Subscription updated/deleted events carry only the Stripe customer id, so this is the inbound lookup path.
-pub async fn get_by_stripe_customer(
+pub(crate) async fn get_by_stripe_customer(
     conn: &impl ConnectionTrait,
     stripe_customer_id: &str,
 ) -> Result<Option<TenantBillingRecord>, YorishiroError> {

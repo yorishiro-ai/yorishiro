@@ -7,22 +7,15 @@ use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
-use crate::workers::embedding_sync::WorkerClass;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
-use serde::Deserialize;
 
 use crate::ee::controllers::middleware::auth as authz;
-use crate::ee::models::worker_classes::{self, WorkerClassAssignment};
-
-/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly, matching `inference.rs`'s/`embedding.rs`'s own `require_scope`.
-#[derive(Debug, Deserialize)]
-pub struct SetWorkerClassRequest {
-    pub worker_class: WorkerClass,
-}
+use crate::ee::dtos::worker_class::SetWorkerClassRequest;
+use crate::ee::models::workspace_worker_classes::{self, WorkerClassAssignment};
 
 /// `PUT /api/workspace/worker-class`
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/worker-class", request_body = crate::ee::controllers::openapi::WorkerClassRequest, responses((status = 204, description = "Worker class saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
@@ -33,7 +26,7 @@ async fn set_worker_class(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    worker_classes::set(&ctx.db, auth_ctx.workspace_id, body.worker_class).await?;
+    workspace_worker_classes::set(&ctx.db, auth_ctx.workspace_id, body.worker_class).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -45,7 +38,7 @@ async fn get_worker_class(
 ) -> Result<Json<WorkerClassAssignment>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = worker_classes::describe(&ctx.db, auth_ctx.workspace_id)
+    let described = workspace_worker_classes::describe(&ctx.db, auth_ctx.workspace_id)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found("no worker class assignment configured for this workspace")
@@ -61,7 +54,7 @@ async fn delete_worker_class(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    worker_classes::clear(&ctx.db, auth_ctx.workspace_id).await?;
+    workspace_worker_classes::clear(&ctx.db, auth_ctx.workspace_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

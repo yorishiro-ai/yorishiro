@@ -17,7 +17,6 @@ pub(crate) struct ResolvedEmbedding {
 pub(crate) async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    licenced: bool,
     deployment_dimensions: usize,
 ) -> Result<ResolvedEmbedding, YorishiroError> {
     let row = crate::models::workspace_workspaces::embedding_chain(conn, workspace_id)
@@ -26,17 +25,9 @@ pub(crate) async fn resolve_embedding_chain(
 
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,
-        workspace_dimensions: if licenced {
-            row.embedding_dimensions
-        } else {
-            None
-        },
-        tenant_model: if licenced { row.tenant_model } else { None },
-        tenant_dimensions: if licenced {
-            row.tenant_dimensions
-        } else {
-            None
-        },
+        workspace_dimensions: row.embedding_dimensions,
+        tenant_model: row.tenant_model,
+        tenant_dimensions: row.tenant_dimensions,
         deployment_dimensions,
     })
 }

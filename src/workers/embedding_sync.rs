@@ -159,14 +159,11 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
         }
     };
 
-    let licenced = crate::controllers::middleware::edition::is_active(ctx);
-
     if let Err(err) = entity_embeddings::sync_embedding_for_record(
         &ctx.db,
         args.workspace_id,
         &record,
         provider.as_ref(),
-        licenced,
     )
     .await
     {

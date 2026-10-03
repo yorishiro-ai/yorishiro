@@ -15,10 +15,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::db::{self, DbHandle};
-use crate::ee::models::entity_fill;
+use crate::ee::models::entity_entities::infer_fill;
 use crate::ee::models::inference_jobs;
 use crate::ee::models::inference_proposals;
-use crate::ee::models::llm_keys;
+use crate::ee::models::workspace_llm_keys;
 use crate::ee::services::inference::InferenceClient;
 use crate::error::ResultExt;
 use crate::models::schema_schemas;
@@ -78,7 +78,7 @@ async fn perform_infer_fill(
     job_id: Uuid,
     attempt: Option<i32>,
 ) -> loco_rs::Result<(i64, i64)> {
-    let config = llm_keys::get(&ctx.db, args.workspace_id)
+    let config = workspace_llm_keys::get(&ctx.db, args.workspace_id)
         .await
         .internal()?
         .ok_or_else(|| {
@@ -106,7 +106,7 @@ async fn perform_infer_fill(
             .await
             .internal()?;
 
-    let rows = entity_fill::entities_on_outdated_schema(
+    let rows = infer_fill::entities_on_outdated_schema(
         &schema_txn,
         args.workspace_id,
         &args.schema_name,

@@ -14,10 +14,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::controllers;
-#[cfg(feature = "enterprise")]
-use crate::controllers::middleware::edition;
-use crate::controllers::route_inventory::{Edition, RouteClass, RouteInventory};
+use crate::controllers::route_inventory::{RouteClass, RouteInventory};
 use crate::db::AppContextBackend;
+#[cfg(feature = "enterprise")]
+use crate::ee::controllers::middleware::edition;
 use crate::initializers;
 use crate::tasks;
 use crate::workers::dispatch::{EmbeddingSyncDispatcher, LocoJobDispatcher, ReindexDispatcher};
@@ -108,10 +108,10 @@ impl Hooks for App {
         // Registers a route group with Loco and records it, with its OpenAPI document when the
         // `openapi` feature is on, in the inventory that `validate` checks and swagger serves.
         macro_rules! mount {
-            ($routes:expr, $edition:expr, $gated:expr $(, $docs:expr)?) => {{
+            ($routes:expr $(, $docs:expr)?) => {{
                 let routes = $routes;
                 let group = AppRoutes::empty().add_route(routes.clone());
-                inventory.add_group(&group, $edition, $gated, RouteClass::Public);
+                inventory.add_group(&group, RouteClass::Public);
                 $(
                     #[cfg(feature = "openapi")]
                     inventory.add_docs($docs);
@@ -122,103 +122,67 @@ impl Hooks for App {
 
         mount!(
             controllers::audit_log::routes(),
-            Edition::Community,
-            false,
             controllers::audit_log::openapi_docs()
         );
         mount!(
             controllers::api_keys::routes(),
-            Edition::Community,
-            false,
             controllers::api_keys::openapi_docs()
         );
         mount!(
             controllers::auth::routes(),
-            Edition::Community,
-            false,
             controllers::auth::openapi_docs()
         );
         mount!(
             controllers::entities::routes(),
-            Edition::Community,
-            false,
             controllers::entities::openapi_docs()
         );
-        mount!(
-            controllers::entities::migration_routes(),
-            Edition::Community,
-            false
-        );
+        mount!(controllers::entities::migration_routes());
         mount!(
             controllers::export::routes(),
-            Edition::Community,
-            false,
             controllers::export::openapi_docs()
         );
         mount!(
             controllers::import::routes(),
-            Edition::Community,
-            false,
             controllers::import::openapi_docs()
         );
         mount!(
             controllers::members::routes(),
-            Edition::Community,
-            false,
             controllers::members::openapi_docs()
         );
         mount!(
             controllers::relations::routes(),
-            Edition::Community,
-            false,
             controllers::relations::openapi_docs()
         );
         mount!(
             controllers::schemas::routes(),
-            Edition::Community,
-            false,
             controllers::schemas::openapi_docs()
         );
         mount!(
             controllers::schemas::template_routes(),
-            Edition::Community,
-            false,
             controllers::schemas::template_openapi_docs()
         );
         mount!(
             controllers::search::routes(),
-            Edition::Community,
-            false,
             controllers::search::openapi_docs()
         );
         mount!(
             controllers::setup::routes(),
-            Edition::Community,
-            false,
             controllers::setup::openapi_docs()
         );
         mount!(
             controllers::system::routes(),
-            Edition::Community,
-            false,
             controllers::system::openapi_docs()
         );
         mount!(
             controllers::template_library::routes(),
-            Edition::Community,
-            false,
             controllers::template_library::openapi_docs()
         );
         mount!(
             controllers::whoami::routes(),
-            Edition::Community,
-            false,
             controllers::whoami::openapi_docs()
         );
         mount!(
             controllers::workspaces::routes(),
-            Edition::Community,
-            false,
             controllers::workspaces::openapi_docs()
         );
 
@@ -228,75 +192,53 @@ impl Hooks for App {
         {
             mount!(
                 crate::ee::controllers::dashboard::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::dashboard::openapi_docs()
             );
             mount!(
                 crate::ee::controllers::embedding::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::embedding::openapi_docs()
             );
             mount!(
                 crate::ee::controllers::entity_columns::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::entity_columns::openapi_docs()
             );
             mount!(
                 crate::ee::controllers::inference::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::inference::openapi_docs()
             );
             mount!(
                 crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
-                Edition::Enterprise,
-                true,
-                crate::ee::controllers::inference::gated_openapi_docs()
+                edition::licence_required(crate::ee::controllers::inference::gated_openapi_docs())
             );
             mount!(
                 crate::ee::controllers::inference::inference_job_status_routes()
                     .layer(gate.clone()),
-                Edition::Enterprise,
-                true,
-                crate::ee::controllers::inference::job_status_openapi_docs()
+                edition::licence_required(
+                    crate::ee::controllers::inference::job_status_openapi_docs()
+                )
             );
             mount!(
                 crate::ee::controllers::marketplace::routes().layer(gate.clone()),
-                Edition::Enterprise,
-                true,
-                crate::ee::controllers::marketplace::openapi_docs()
+                edition::licence_required(crate::ee::controllers::marketplace::openapi_docs())
             );
             mount!(
                 crate::ee::controllers::oauth::routes().layer(gate.clone()),
-                Edition::Enterprise,
-                true,
-                crate::ee::controllers::oauth::openapi_docs()
+                edition::licence_required(crate::ee::controllers::oauth::openapi_docs())
             );
             mount!(
                 crate::ee::controllers::origin::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::origin::openapi_docs()
             );
             mount!(
                 crate::ee::controllers::schema_forks::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::schema_forks::openapi_docs()
             );
             mount!(
                 crate::ee::controllers::stripe::routes().layer(gate.clone()),
-                Edition::Enterprise,
-                true,
-                crate::ee::controllers::stripe::openapi_docs()
+                edition::licence_required(crate::ee::controllers::stripe::openapi_docs())
             );
             mount!(
                 crate::ee::controllers::worker_class::routes(),
-                Edition::Enterprise,
-                false,
                 crate::ee::controllers::worker_class::openapi_docs()
             );
         }
@@ -340,18 +282,16 @@ impl Hooks for App {
             let mut tool_routers = vec![crate::controllers::mcp::community_tool_router()];
             #[cfg(not(feature = "enterprise"))]
             let tool_routers = vec![crate::controllers::mcp::community_tool_router()];
-            #[cfg(not(feature = "enterprise"))]
-            let enterprise_tool_names = std::collections::HashSet::new();
             #[cfg(feature = "enterprise")]
-            if crate::controllers::middleware::edition::is_active(&ctx) {
-                tool_routers.push(enterprise_tool_router);
-            }
+            tool_routers.push(enterprise_tool_router);
             let tool_router = crate::controllers::mcp::compose_tool_routers(tool_routers);
-            crate::controllers::mcp::YorishiroMcpServer::new(
-                ctx,
-                tool_router,
-                enterprise_tool_names,
-            )
+            let server = crate::controllers::mcp::YorishiroMcpServer::new(ctx, tool_router);
+            #[cfg(feature = "enterprise")]
+            let server = server.with_tool_filter(move |ctx, name| {
+                !enterprise_tool_names.contains(name)
+                    || crate::ee::controllers::middleware::edition::is_active(ctx)
+            });
+            server
         });
         let settings = ctx
             .shared_store

@@ -56,17 +56,8 @@ pub(crate) async fn search_entities(
             .map_err(|err| YorishiroError::Internal(err.into()))?
     };
 
-    let licenced = crate::controllers::middleware::edition::is_active(&ctx);
-
-    let hits = search::search_by_vector(
-        &txn,
-        workspace_id,
-        vector,
-        &params.query_text,
-        query,
-        licenced,
-    )
-    .await?;
+    let hits =
+        search::search_by_vector(&txn, workspace_id, vector, &params.query_text, query).await?;
     Ok(Json(hits))
 }
 

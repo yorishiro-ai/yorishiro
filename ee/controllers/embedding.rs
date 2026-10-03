@@ -13,25 +13,10 @@ use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use sea_orm::EntityTrait;
-use serde::Deserialize;
 
 use crate::ee::controllers::middleware::auth as authz;
-use crate::ee::models::embedding_keys::{self, EmbeddingKeyDescription};
-
-/// Base's own extractors enforce a minimum scope by type; without them here, the check is written out explicitly, matching `inference.rs`'s own `require_scope`.
-#[derive(Deserialize)]
-pub struct SetEmbeddingKeyRequest {
-    /// An OpenAI-compatible embeddings endpoint, e.g. `https://api.openai.com/v1`.
-    pub base_url: String,
-    pub model: String,
-    /// Stored as given and never returned.
-    /// `GET` reports only that one is configured.
-    pub api_key: String,
-    pub dimensions: i32,
-    /// Some OpenAI-compatible implementations don't recognize the `dimensions` request parameter.
-    #[serde(default)]
-    pub send_dimensions_param: bool,
-}
+use crate::ee::dtos::embedding::SetEmbeddingKeyRequest;
+use crate::ee::models::workspace_embedding_keys::{self, EmbeddingKeyDescription};
 
 /// `PUT /api/workspace/embedding-key`
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/embedding-key", request_body = crate::ee::controllers::openapi::EmbeddingKeyRequest, responses((status = 204, description = "Embedding provider saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "enterprise"))]
@@ -50,7 +35,7 @@ async fn set_embedding_key(
             .map_err(|err| ApiError(YorishiroError::Internal(err.into())))?
             .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
 
-    match embedding_keys::set(
+    match workspace_embedding_keys::set(
         &ctx.db,
         auth_ctx.workspace_id,
         &body.base_url,
@@ -62,8 +47,8 @@ async fn set_embedding_key(
     )
     .await?
     {
-        embedding_keys::SetOutcome::Stored => {}
-        embedding_keys::SetOutcome::WidthChanged { .. } => {
+        workspace_embedding_keys::SetOutcome::Stored => {}
+        workspace_embedding_keys::SetOutcome::WidthChanged { .. } => {
             // Width changed: enqueue a reindex so the workspace's entities are
             // re-embedded with the new provider's width. Uses the same enqueue
             // path that the reindex scheduler uses (see #307).
@@ -97,7 +82,7 @@ async fn get_embedding_key(
 ) -> Result<Json<EmbeddingKeyDescription>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
-    let described = embedding_keys::describe(&ctx.db, auth_ctx.workspace_id)
+    let described = workspace_embedding_keys::describe(&ctx.db, auth_ctx.workspace_id)
         .await?
         .ok_or_else(|| {
             YorishiroError::not_found("no embedding provider configured for this workspace")
@@ -113,7 +98,7 @@ async fn delete_embedding_key(
 ) -> Result<StatusCode, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-    embedding_keys::clear(&ctx.db, auth_ctx.workspace_id).await?;
+    workspace_embedding_keys::clear(&ctx.db, auth_ctx.workspace_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

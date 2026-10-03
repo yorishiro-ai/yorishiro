@@ -45,19 +45,19 @@ impl WorkspaceEmbeddingResolver for EmbeddingKeyResolver {
 
 /// What a workspace has configured, without the key itself.
 ///
-/// `api_key` is deliberately absent rather than masked, matching `llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
+/// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
 #[derive(Debug, Clone, Serialize)]
-pub struct EmbeddingKeyDescription {
-    pub base_url: String,
-    pub model: String,
-    pub dimensions: i32,
+pub(crate) struct EmbeddingKeyDescription {
+    pub(crate) base_url: String,
+    pub(crate) model: String,
+    pub(crate) dimensions: i32,
     /// Always true when present: the row cannot exist without a key.
     /// Callers use the absence of the whole description to mean "not configured".
-    pub configured: bool,
+    pub(crate) configured: bool,
 }
 
 /// Refuses anything that is not `http://` or `https://`.
-/// Same reasoning as `llm_keys::check_scheme`: the value is interpolated into a request URL, and this rules out only what could never be an OpenAI-compatible endpoint.
+/// Same reasoning as `workspace_llm_keys::check_scheme`: the value is interpolated into a request URL, and this rules out only what could never be an OpenAI-compatible endpoint.
 /// Not SSRF protection.
 fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
     if base_url.starts_with("http://") || base_url.starts_with("https://") {
@@ -71,12 +71,12 @@ fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
 }
 
 /// A workspace's own embedding credentials and model, as `EmbeddingKeyResolver` reads them to build a provider.
-pub struct EmbeddingKeyConfig {
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-    pub dimensions: i32,
-    pub send_dimensions_param: bool,
+pub(crate) struct EmbeddingKeyConfig {
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) model: String,
+    pub(crate) dimensions: i32,
+    pub(crate) send_dimensions_param: bool,
 }
 
 /// Creates or replaces the width-specific embedding table for a workspace that is about to
@@ -88,7 +88,7 @@ pub struct EmbeddingKeyConfig {
 /// This is a DDL call inside the same transaction that stores the key row.
 /// `yorishiro_app` has no CREATE privilege, so DDL via the request path is impossible
 /// outside a transaction that was opened by the migration role (identity pool) or
-/// a local transaction (SQLite). The migration role path is what the `embedding_keys::set`
+/// a local transaction (SQLite). The migration role path is what the `workspace_embedding_keys::set`
 /// call site uses, so this function must live inside that transaction to succeed.
 async fn create_width_table(
     conn: &impl ConnectionTrait,
@@ -274,7 +274,10 @@ pub async fn set(
 
 /// Removes a workspace's own assignment.
 /// It falls back to the deployment default afterward.
-pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
+pub(crate) async fn clear(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .exec(conn)
@@ -285,7 +288,7 @@ pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<()
 
 /// What is configured, for an endpoint to report.
 /// Never includes the key.
-pub async fn describe(
+pub(crate) async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<EmbeddingKeyDescription>, YorishiroError> {
@@ -305,7 +308,7 @@ pub async fn describe(
 
 /// The credentials themselves, for building a provider.
 /// `None` means the workspace has configured none, which `EmbeddingKeyResolver` reads as "fall back to the deployment default".
-pub async fn get(
+pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<EmbeddingKeyConfig>, YorishiroError> {

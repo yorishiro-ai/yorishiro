@@ -23,10 +23,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
             sub: "acme-corp".into(),
             plan: "enterprise".into(),
             exp: Utc::now().timestamp() + 60 * 60,
-        }))
-            as std::sync::Arc<
-                dyn yorishiro::controllers::middleware::edition::EnterpriseEdition,
-            >);
+        })) as std::sync::Arc<LicenceState>);
 }
 
 struct Setup {

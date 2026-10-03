@@ -18,12 +18,12 @@ use crate::ee::services::inference::InferenceConfig;
 ///
 /// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
 #[derive(Debug, Clone, Serialize)]
-pub struct LlmKeyDescription {
-    pub base_url: String,
-    pub model: String,
+pub(crate) struct LlmKeyDescription {
+    pub(crate) base_url: String,
+    pub(crate) model: String,
     /// Always true when present: the row cannot exist without a key.
     /// Callers use the absence of the whole description to mean "not configured".
-    pub configured: bool,
+    pub(crate) configured: bool,
 }
 
 /// Refuses anything that is not `http://` or `https://`.
@@ -45,7 +45,7 @@ fn check_scheme(base_url: &str) -> Result<(), YorishiroError> {
 }
 
 /// Stores or replaces a workspace's credentials.
-pub async fn set(
+pub(crate) async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     base_url: &str,
@@ -90,7 +90,10 @@ pub async fn set(
 
 /// Removes a workspace's credentials.
 /// Inference then refuses until one is configured again.
-pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
+pub(crate) async fn clear(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .exec(conn)
@@ -101,7 +104,7 @@ pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<()
 
 /// What is configured, for an endpoint to report.
 /// Never includes the key.
-pub async fn describe(
+pub(crate) async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
@@ -122,7 +125,7 @@ pub async fn describe(
 ///
 /// `None` means the workspace has configured none.
 /// Callers turn that into a refusal rather than a fallback: inferring nothing and filling defaults instead would look, to the caller, like inference that produced default-shaped answers.
-pub async fn get(
+pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<InferenceConfig>, YorishiroError> {

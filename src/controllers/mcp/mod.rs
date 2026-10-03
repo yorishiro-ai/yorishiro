@@ -7,6 +7,7 @@ mod search;
 mod template_library;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::http::request::Parts;
@@ -33,25 +34,32 @@ use crate::models::api_keys::{ApiKeyScope, AuthContext};
 #[cfg(test)]
 use rmcp::model::Tool;
 
-/// Yorishiro MCP server, assembled from each edition's `#[tool_router]` implementations.
+type ToolFilter = Arc<dyn Fn(&AppContext, &str) -> bool + Send + Sync>;
+
+/// Yorishiro MCP server assembled from registered `#[tool_router]` implementations.
 #[derive(Clone)]
 pub struct YorishiroMcpServer {
     ctx: AppContext,
     tool_router: ToolRouter<Self>,
-    enterprise_tool_names: HashSet<String>,
+    tool_filter: ToolFilter,
 }
 
 impl YorishiroMcpServer {
-    pub(crate) fn new(
-        ctx: AppContext,
-        tool_router: ToolRouter<Self>,
-        enterprise_tool_names: impl IntoIterator<Item = String>,
-    ) -> Self {
+    pub(crate) fn new(ctx: AppContext, tool_router: ToolRouter<Self>) -> Self {
         Self {
             ctx,
             tool_router,
-            enterprise_tool_names: enterprise_tool_names.into_iter().collect(),
+            tool_filter: Arc::new(|_, _| true),
         }
+    }
+
+    #[cfg(feature = "enterprise")]
+    pub(crate) fn with_tool_filter(
+        mut self,
+        filter: impl Fn(&AppContext, &str) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.tool_filter = Arc::new(filter);
+        self
     }
 
     #[cfg(feature = "enterprise")]
@@ -229,9 +237,7 @@ impl ServerHandler for YorishiroMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        if !crate::controllers::middleware::edition::is_active(&self.ctx)
-            && self.is_enterprise_tool(request.name.as_ref())
-        {
+        if !(self.tool_filter)(&self.ctx, request.name.as_ref()) {
             return Err(ErrorData::invalid_params("tool not found", None));
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
@@ -247,9 +253,7 @@ impl ServerHandler for YorishiroMcpServer {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
         let mut tools = self.tool_router.list_all();
-        if !crate::controllers::middleware::edition::is_active(&self.ctx) {
-            tools.retain(|tool| !self.is_enterprise_tool(tool.name.as_ref()));
-        }
+        tools.retain(|tool| (self.tool_filter)(&self.ctx, tool.name.as_ref()));
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools,
@@ -261,9 +265,7 @@ impl ServerHandler for YorishiroMcpServer {
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        if !crate::controllers::middleware::edition::is_active(&self.ctx)
-            && self.is_enterprise_tool(name)
-        {
+        if !(self.tool_filter)(&self.ctx, name) {
             return None;
         }
         self.tool_router.get(name).cloned()
@@ -276,12 +278,6 @@ impl ServerHandler for YorishiroMcpServer {
              header, and the tools available depend on the API key's scope \
              (read/write/schema, where higher scopes include the permissions of lower ones).",
         )
-    }
-}
-
-impl YorishiroMcpServer {
-    fn is_enterprise_tool(&self, name: &str) -> bool {
-        self.enterprise_tool_names.contains(name)
     }
 }
 

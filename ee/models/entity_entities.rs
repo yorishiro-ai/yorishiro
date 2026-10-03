@@ -1,5 +1,7 @@
 //! Enterprise-only persistence on the community `entity_entities` table.
 
+pub(crate) mod infer_fill;
+
 use chrono::Utc;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;

@@ -29,8 +29,8 @@ impl WorkerClassResolver for WorkerClassAssignmentResolver {
 
 /// What a workspace has configured, for an endpoint to report.
 #[derive(Debug, Clone, Serialize)]
-pub struct WorkerClassAssignment {
-    pub worker_class: WorkerClass,
+pub(crate) struct WorkerClassAssignment {
+    pub(crate) worker_class: WorkerClass,
 }
 
 /// Stores or replaces a workspace's own worker-class assignment.
@@ -59,7 +59,10 @@ pub async fn set(
 
 /// Removes a workspace's own assignment.
 /// It falls back to `WorkerClass::Shared` afterward.
-pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<(), YorishiroError> {
+pub(crate) async fn clear(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
     Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .exec(conn)
@@ -69,7 +72,7 @@ pub async fn clear(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<()
 }
 
 /// What is configured, for an endpoint to report.
-pub async fn describe(
+pub(crate) async fn describe(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<WorkerClassAssignment>, YorishiroError> {
@@ -80,7 +83,7 @@ pub async fn describe(
 
 /// The assignment itself, as `WorkerClassAssignmentResolver` reads it to route a queued job.
 /// `None` means the workspace has configured none, which the resolver reads as "fall back to `WorkerClass::Shared`".
-pub async fn get(
+pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<WorkerClass>, YorishiroError> {

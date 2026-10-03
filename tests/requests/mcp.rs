@@ -111,10 +111,8 @@ fn install_licence(ctx: &loco_rs::app::AppContext, active: bool) {
     } else {
         LicenceState::default()
     };
-    ctx.shared_store.insert(std::sync::Arc::new(state)
-        as std::sync::Arc<
-            dyn yorishiro::controllers::middleware::edition::EnterpriseEdition,
-        >);
+    ctx.shared_store
+        .insert(std::sync::Arc::new(state) as std::sync::Arc<LicenceState>);
 }
 
 fn tool_result_json(response: &Value) -> Value {
