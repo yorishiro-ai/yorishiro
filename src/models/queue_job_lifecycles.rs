@@ -4,7 +4,9 @@ pub(crate) use crate::models::_entities::queue_job_lifecycles::{
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect, TransactionTrait};
+use sea_orm::{
+    DatabaseTransaction, ExprTrait, IntoActiveModel, PaginatorTrait, QuerySelect, TransactionTrait,
+};
 use tokio::task::JoinHandle;
 
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
@@ -267,127 +269,13 @@ impl Entity {
         now: DateTimeWithTimeZone,
     ) -> Result<Admission, DbErr> {
         let txn = db.begin().await?;
-        let initial = Entity::find_by_id(id).lock_exclusive().one(&txn).await?;
-        let Some(initial) = initial else {
-            txn.rollback().await?;
-            return Err(DbErr::RecordNotFound("queue lifecycle".into()));
-        };
-        let initial_status = LifecycleStatus::from_db(&initial.status)?;
-        if initial_status == LifecycleStatus::Running {
-            if running_lease_is_live(initial.lease_until, now) {
-                txn.rollback().await?;
-                return Ok(Admission::Duplicate {
-                    attempt: initial.attempt,
-                });
-            }
-            tracing::warn!(lifecycle_id = %id, "reclaiming expired queue lease");
+        let admission = admit(&txn, id, now).await?;
+        // Only an admission wrote anything; every other outcome leaves the row as it found it.
+        match admission {
+            Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
+            _ => txn.rollback().await?,
         }
-        if matches!(
-            initial_status,
-            LifecycleStatus::Completed | LifecycleStatus::Cancelled
-        ) {
-            txn.rollback().await?;
-            return Ok(Admission::Terminal);
-        }
-        let limit = initial.concurrency_limit;
-        let key = initial.concurrency_key;
-        if let Some(ref key) = key {
-            crate::db::lock_for_update(&txn, &format!("queue-concurrency:{key}")).await?;
-            if let Some(limit) = limit {
-                let in_flight = Entity::find()
-                    .filter(Column::ConcurrencyKey.eq(key.clone()))
-                    .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
-                    .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
-                    .filter(Column::Id.ne(id))
-                    .count(&txn)
-                    .await?;
-                if in_flight >= u64::try_from(std::cmp::Ord::max(limit, 0)).unwrap_or(0) {
-                    tracing::warn!(
-                        lifecycle_id = %id,
-                        worker_class = %initial.worker_class,
-                        concurrency_key = %key,
-                        active_capacity = in_flight,
-                        capacity_limit = limit,
-                        "queue capacity saturated"
-                    );
-                    txn.rollback().await?;
-                    return Ok(Admission::Saturated {
-                        attempt: (initial_status == LifecycleStatus::Running)
-                            .then_some(initial.attempt),
-                    });
-                }
-            }
-        }
-        let recovered = initial_status == LifecycleStatus::Running;
-        let lease_until = now + lease_duration();
-        let result = Entity::update_many()
-            .col_expr(
-                Column::Status,
-                Expr::value(LifecycleStatus::Running.as_str()),
-            )
-            .col_expr(Column::ClaimAt, Expr::value(now))
-            .col_expr(Column::StartAt, Expr::value(now))
-            .col_expr(Column::AdmittedAt, Expr::value(now))
-            .col_expr(
-                Column::FailedAt,
-                Expr::value(Option::<DateTimeWithTimeZone>::None),
-            )
-            .col_expr(
-                Column::RetryAt,
-                Expr::value(Option::<DateTimeWithTimeZone>::None),
-            )
-            .col_expr(Column::LeaseUntil, Expr::value(lease_until))
-            .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
-            .filter(Column::Id.eq(id))
-            .filter(if recovered {
-                Column::Status.eq(LifecycleStatus::Running.as_str())
-            } else {
-                Column::Status.is_in([
-                    LifecycleStatus::Queued.as_str(),
-                    LifecycleStatus::Failed.as_str(),
-                    LifecycleStatus::Retrying.as_str(),
-                ])
-            })
-            .exec(&txn)
-            .await?;
-        txn.commit().await?;
-        if result.rows_affected == 1 {
-            let active_capacity = if let Some(ref key) = key {
-                Some(
-                    Entity::find()
-                        .filter(Column::ConcurrencyKey.eq(key.clone()))
-                        .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
-                        .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
-                        .count(db)
-                        .await?,
-                )
-            } else {
-                None
-            };
-            tracing::info!(
-                lifecycle_id = %id,
-                worker_class = %initial.worker_class,
-                active_capacity = ?active_capacity,
-                capacity_limit = ?initial.concurrency_limit,
-                queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(initial.enqueue_at).num_seconds(), 0),
-                "queue job admitted"
-            );
-        }
-        Ok(if result.rows_affected == 1 {
-            if recovered {
-                Admission::Recovered {
-                    attempt: initial.attempt + 1,
-                }
-            } else {
-                Admission::Started {
-                    attempt: initial.attempt + 1,
-                }
-            }
-        } else {
-            Admission::Duplicate {
-                attempt: initial.attempt,
-            }
-        })
+        Ok(admission)
     }
 
     pub(crate) async fn finish(
@@ -432,6 +320,137 @@ impl Entity {
         }
         Ok(())
     }
+}
+
+/// Decides, under the row lock, whether one delivery of a lifecycle may run now.
+///
+/// Statuses are mutually exclusive, so the order of the checks below only decides which outcome is reported first, never which is correct.
+async fn admit(
+    txn: &DatabaseTransaction,
+    id: Uuid,
+    now: DateTimeWithTimeZone,
+) -> Result<Admission, DbErr> {
+    let row = Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(txn)
+        .await?
+        .ok_or_else(|| DbErr::RecordNotFound("queue lifecycle".into()))?;
+    let status = LifecycleStatus::from_db(&row.status)?;
+    match status {
+        LifecycleStatus::Completed | LifecycleStatus::Cancelled => return Ok(Admission::Terminal),
+        LifecycleStatus::Running if running_lease_is_live(row.lease_until, now) => {
+            return Ok(Admission::Duplicate {
+                attempt: row.attempt,
+            });
+        }
+        LifecycleStatus::Running => {
+            tracing::warn!(lifecycle_id = %id, "reclaiming expired queue lease");
+        }
+        _ => {}
+    }
+    let recovered = status == LifecycleStatus::Running;
+
+    let in_flight = match &row.concurrency_key {
+        Some(key) => {
+            crate::db::lock_for_update(txn, &format!("queue-concurrency:{key}")).await?;
+            Some(in_flight(txn, key, now, id).await?)
+        }
+        None => None,
+    };
+    if let (Some(in_flight), Some(limit)) = (in_flight, row.concurrency_limit)
+        && in_flight >= u64::try_from(limit).unwrap_or(0)
+    {
+        tracing::warn!(
+            lifecycle_id = %id,
+            worker_class = %row.worker_class,
+            concurrency_key = ?row.concurrency_key,
+            active_capacity = in_flight,
+            capacity_limit = limit,
+            "queue capacity saturated"
+        );
+        return Ok(Admission::Saturated {
+            attempt: recovered.then_some(row.attempt),
+        });
+    }
+
+    if claim(txn, id, recovered, now).await? != 1 {
+        return Ok(Admission::Duplicate {
+            attempt: row.attempt,
+        });
+    }
+    tracing::info!(
+        lifecycle_id = %id,
+        worker_class = %row.worker_class,
+        // The claimed row now counts toward its own key.
+        active_capacity = ?in_flight.map(|count| count + 1),
+        capacity_limit = ?row.concurrency_limit,
+        queue_start_seconds = std::cmp::Ord::max(now.signed_duration_since(row.enqueue_at).num_seconds(), 0),
+        "queue job admitted"
+    );
+    let attempt = row.attempt + 1;
+    Ok(if recovered {
+        Admission::Recovered { attempt }
+    } else {
+        Admission::Started { attempt }
+    })
+}
+
+/// Attempts running under `key` whose lease has not lapsed, not counting `except`.
+async fn in_flight(
+    db: &impl ConnectionTrait,
+    key: &str,
+    now: DateTimeWithTimeZone,
+    except: Uuid,
+) -> Result<u64, DbErr> {
+    Entity::find()
+        .filter(Column::ConcurrencyKey.eq(key))
+        .filter(Column::Status.eq(LifecycleStatus::Running.as_str()))
+        .filter(Column::LeaseUntil.is_null().or(Column::LeaseUntil.gt(now)))
+        .filter(Column::Id.ne(except))
+        .count(db)
+        .await
+}
+
+/// Moves the row to `running` for a new attempt and returns how many rows that changed.
+/// Reclaiming an expired lease may only take a row that is still running; a fresh claim may only take one that is waiting.
+async fn claim(
+    db: &impl ConnectionTrait,
+    id: Uuid,
+    recovered: bool,
+    now: DateTimeWithTimeZone,
+) -> Result<u64, DbErr> {
+    let claimable = if recovered {
+        Column::Status.eq(LifecycleStatus::Running.as_str())
+    } else {
+        Column::Status.is_in([
+            LifecycleStatus::Queued.as_str(),
+            LifecycleStatus::Failed.as_str(),
+            LifecycleStatus::Retrying.as_str(),
+        ])
+    };
+    let result = Entity::update_many()
+        .col_expr(
+            Column::Status,
+            Expr::value(LifecycleStatus::Running.as_str()),
+        )
+        .col_expr(Column::ClaimAt, Expr::value(now))
+        .col_expr(Column::StartAt, Expr::value(now))
+        .col_expr(Column::AdmittedAt, Expr::value(now))
+        .col_expr(
+            Column::FailedAt,
+            Expr::value(Option::<DateTimeWithTimeZone>::None),
+        )
+        .col_expr(
+            Column::RetryAt,
+            Expr::value(Option::<DateTimeWithTimeZone>::None),
+        )
+        .col_expr(Column::LeaseUntil, Expr::value(now + lease_duration()))
+        .col_expr(Column::Attempt, Expr::col(Column::Attempt).add(1))
+        .filter(Column::Id.eq(id))
+        .filter(claimable)
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
 }
 
 /// Keeps one running attempt's lease alive until it is dropped.

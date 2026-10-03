@@ -227,16 +227,12 @@ impl Hooks for App {
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         startup::register_sqlite_extensions();
-        let run_startup_reindex = startup::should_run_startup_reindex(&mode);
+        let serves_http = startup::serves_http(&mode);
 
         let result = create_app::<Self, Migrator>(mode, environment, config).await?;
 
-        // Startup reindex detection: check if any workspace's stored vectors
-        // were embedded with a model that differs from the current provider.
-        // If so, enqueue a non-blocking reindex so the server stays responsive
-        // while vectors are updated.
-        // Test boot skips deployment startup checks and process-lifetime monitoring.
-        startup::after_boot(&result, environment, run_startup_reindex).await;
+        // Reindexes workspaces whose vectors came from a different model and starts the load monitor.
+        startup::after_boot(&result, environment, serves_http).await?;
 
         Ok(result)
     }

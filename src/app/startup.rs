@@ -25,37 +25,41 @@ pub(super) fn register_sqlite_extensions() {
     crate::db::register_sqlite_extensions();
 }
 
-/// Selects whether post-migration startup work applies to this process mode.
-pub(super) fn should_run_startup_reindex(mode: &StartMode) -> bool {
+/// Whether this process answers HTTP requests.
+/// Deployment-wide startup work (the reindex scan and the load monitor) belongs to the processes users reach, not to queue workers.
+pub(super) fn serves_http(mode: &StartMode) -> bool {
     !matches!(
         mode,
         StartMode::WorkerOnly { .. } | StartMode::WorkerAndScheduler { .. }
     )
 }
 
+/// Runs the deployment-wide startup work once migrations have applied.
+/// Test boots skip it: the scan and the monitor would outlive the test's own database.
 pub(super) async fn after_boot(
     result: &BootResult,
     environment: &Environment,
-    run_startup_reindex: bool,
-) {
-    if !matches!(environment, Environment::Test) && run_startup_reindex {
-        detect_startup_reindex(&result.app_context).await;
-        let settings = result
-            .app_context
-            .shared_store
-            .get::<crate::config::Settings>()
-            .expect("application settings were installed in after_context");
-        if let Some(config) =
-            crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings.db_load_guard)
-        {
-            let ctx = result.app_context.clone();
-            let task = spawn(async move { crate::services::db_load_guard::run(ctx, config).await });
-            result
-                .app_context
-                .shared_store
-                .insert(LoadGuardHandle(task));
-        }
+    serves_http: bool,
+) -> Result<()> {
+    if matches!(environment, Environment::Test) || !serves_http {
+        return Ok(());
     }
+    let ctx = &result.app_context;
+    detect_startup_reindex(ctx).await;
+
+    let settings = ctx
+        .shared_store
+        .get::<crate::config::Settings>()
+        .ok_or_else(|| loco_rs::Error::Message("application settings were not installed".into()))?;
+    if let Some(config) =
+        crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings.db_load_guard)
+    {
+        let ctx_for_task = ctx.clone();
+        let task =
+            spawn(async move { crate::services::db_load_guard::run(ctx_for_task, config).await });
+        ctx.shared_store.insert(LoadGuardHandle(task));
+    }
+    Ok(())
 }
 
 pub(super) async fn shutdown(ctx: &AppContext) {
@@ -90,19 +94,9 @@ async fn detect_startup_reindex(ctx: &AppContext) {
         tracing::debug!("startup reindex: enterprise licence active, skipping");
         return;
     }
-
-    let Some(provider) = ctx
-        .shared_store
-        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
-    else {
-        tracing::warn!("startup reindex: embedding provider missing");
+    let Some(provider) = usable_provider(ctx).await else {
         return;
     };
-    if provider.embed_batch(&[]).await.is_err() {
-        tracing::warn!("startup reindex: embedding provider must be configured");
-        return;
-    }
-
     let workspaces = match crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db).await {
         Ok(workspaces) => workspaces,
         Err(err) => {
@@ -111,53 +105,92 @@ async fn detect_startup_reindex(ctx: &AppContext) {
         }
     };
 
-    for workspace in workspaces {
-        let Some(stamped_model) = &workspace.embedding_model else {
-            continue;
-        };
-        if stamped_model.as_str() == provider.model_name() {
-            continue;
-        }
+    let provider_model = provider.model_name();
+    for workspace in workspaces
+        .iter()
+        .filter(|workspace| workspace.is_stamped_with_other_model(&provider_model))
+    {
+        tracing::info!(
+            workspace_id = %workspace.id,
+            stamped_model = ?workspace.embedding_model,
+            %provider_model,
+            "startup reindex: model mismatch, enqueueing reindex"
+        );
+        enqueue_reindex(ctx, workspace.id).await;
+    }
+}
 
-        let worker_class =
-            match crate::controllers::extractors::resolve_worker_class(ctx, workspace.id).await {
-                Ok(class) => class,
-                Err(err) => {
-                    tracing::warn!(
-                        workspace_id = %workspace.id,
-                        error = %err.0,
-                        "startup reindex: failed to resolve worker class, defaulting to shared"
-                    );
-                    WorkerClass::Shared
-                }
-            };
-        let args = crate::workers::reindex::ReindexArgs {
-            lifecycle_id: None,
-            workspace_id: workspace.id,
-            worker_class,
+/// The deployment's embedding provider, if it is installed and answers.
+/// An unconfigured provider accepts the dimension count but fails every call, so it is probed once here instead of failing once per workspace.
+async fn usable_provider(
+    ctx: &AppContext,
+) -> Option<Arc<dyn crate::services::embedding::EmbeddingProvider>> {
+    let Some(provider) = ctx
+        .shared_store
+        .get::<Arc<dyn crate::services::embedding::EmbeddingProvider>>()
+    else {
+        tracing::warn!("startup reindex: embedding provider missing");
+        return None;
+    };
+    if provider.embed_batch(&[]).await.is_err() {
+        tracing::warn!("startup reindex: embedding provider must be configured");
+        return None;
+    }
+    Some(provider)
+}
+
+async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
+    let worker_class =
+        match crate::controllers::extractors::resolve_worker_class(ctx, workspace_id).await {
+            Ok(class) => class,
+            Err(err) => {
+                tracing::warn!(
+                    %workspace_id,
+                    error = %err.0,
+                    "startup reindex: failed to resolve worker class, defaulting to shared"
+                );
+                WorkerClass::Shared
+            }
         };
-        if let Err(err) = crate::workers::reindex::enqueue_for_class(ctx, args).await {
-            tracing::error!(workspace_id = %workspace.id, error = %err, "startup reindex: failed to enqueue reindex");
-        } else {
-            tracing::info!(workspace_id = %workspace.id, "startup reindex: enqueue success");
+    let args = crate::workers::reindex::ReindexArgs {
+        lifecycle_id: None,
+        workspace_id,
+        worker_class,
+    };
+    match crate::workers::reindex::enqueue_for_class(ctx, args).await {
+        Ok(()) => tracing::info!(%workspace_id, "startup reindex: enqueue success"),
+        Err(err) => {
+            tracing::error!(%workspace_id, error = %err, "startup reindex: failed to enqueue reindex");
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::should_run_startup_reindex;
+    use super::serves_http;
     use loco_rs::boot::StartMode;
 
     #[test]
-    fn worker_only_modes_skip_startup_reindex() {
-        assert!(!should_run_startup_reindex(&StartMode::WorkerOnly {
+    fn only_a_differently_stamped_workspace_needs_a_reindex() {
+        use crate::models::workspace_workspaces::StartupReindexRow;
+
+        let row = |model: Option<&str>| StartupReindexRow {
+            id: uuid::Uuid::nil(),
+            embedding_model: model.map(str::to_owned),
+        };
+        assert!(row(Some("old-model")).is_stamped_with_other_model("new-model"));
+        assert!(!row(Some("new-model")).is_stamped_with_other_model("new-model"));
+        // An unstamped workspace has no vectors to replace.
+        assert!(!row(None).is_stamped_with_other_model("new-model"));
+    }
+
+    #[test]
+    fn worker_only_modes_do_not_serve_http() {
+        assert!(!serves_http(&StartMode::WorkerOnly { tags: vec![] }));
+        assert!(!serves_http(&StartMode::WorkerAndScheduler {
             tags: vec![]
         }));
-        assert!(!should_run_startup_reindex(
-            &StartMode::WorkerAndScheduler { tags: vec![] }
-        ));
-        assert!(should_run_startup_reindex(&StartMode::ServerOnly));
-        assert!(should_run_startup_reindex(&StartMode::ServerAndWorker));
+        assert!(serves_http(&StartMode::ServerOnly));
+        assert!(serves_http(&StartMode::ServerAndWorker));
     }
 }

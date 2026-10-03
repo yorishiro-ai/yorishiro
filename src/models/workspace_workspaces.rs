@@ -33,6 +33,16 @@ pub(crate) struct StartupReindexRow {
     pub(crate) embedding_model: Option<String>,
 }
 
+impl StartupReindexRow {
+    /// Whether the workspace's stored vectors came from a model other than `provider_model`.
+    /// A workspace with no stamp has no vectors to replace: its first write stamps it.
+    pub(crate) fn is_stamped_with_other_model(&self, provider_model: &str) -> bool {
+        self.embedding_model
+            .as_deref()
+            .is_some_and(|stamped| stamped != provider_model)
+    }
+}
+
 pub(crate) async fn embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
