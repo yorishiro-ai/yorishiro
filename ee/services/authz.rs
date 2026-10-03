@@ -1,10 +1,10 @@
 //! Role-based authorization for this crate's own routes, orthogonal to `ApiKeyScope`.
 
 use crate::YorishiroError;
+use crate::controllers::middleware::auth;
 use crate::db::DbHandle;
+use crate::models::api_keys::AuthContext;
 use crate::models::tenancy;
-use crate::services::auth;
-use crate::services::auth::Authenticator;
 use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use loco_rs::app::AppContext;
@@ -22,6 +22,30 @@ fn db_handle(ctx: &AppContext) -> Result<DbHandle, YorishiroError> {
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("DbHandle missing")))
 }
 
+async fn authenticate(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+) -> Result<AuthContext, YorishiroError> {
+    let token = bearer_token(headers)?;
+    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+        return crate::models::api_keys::Entity::authenticate_sqlite(&ctx.db, token).await;
+    }
+    let db = db_handle(ctx)?;
+    let forwarded = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    crate::controllers::extractors::authenticator(ctx)
+        .map_err(|error| error.0)?
+        .authenticate(&db, token, &forwarded)
+        .await
+}
+
 /// Authenticates the bearer API key and returns the full context, **workspace included**.
 ///
 /// Goes through [`crate::ee::services::tenant_auth::TenantScopedAuthenticator`], the same seam every authenticated path in this process resolves through, so both key kinds work on these routes: a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
@@ -32,24 +56,8 @@ fn db_handle(ctx: &AppContext) -> Result<DbHandle, YorishiroError> {
 pub(crate) async fn authenticate_workspace(
     ctx: &AppContext,
     headers: &HeaderMap,
-) -> Result<auth::AuthContext, YorishiroError> {
-    let token = bearer_token(headers)?;
-    if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-        return auth::authenticate_sqlite(&ctx.db, token).await;
-    }
-    let db = db_handle(ctx)?;
-    let forwarded: Vec<(String, String)> = headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_owned(), value.to_owned()))
-        })
-        .collect();
-    crate::ee::services::tenant_auth::TenantScopedAuthenticator
-        .authenticate(&db, token, &forwarded)
-        .await
+) -> Result<AuthContext, YorishiroError> {
+    authenticate(ctx, headers).await
 }
 
 /// Authenticates the bearer API key and returns the tenant it belongs to, with **no role requirement**.
@@ -63,9 +71,7 @@ pub(crate) async fn authenticate_tenant(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<(Uuid, Option<Uuid>), YorishiroError> {
-    let token = bearer_token(headers)?;
-    let db = db_handle(ctx)?;
-    let auth_ctx = auth::authenticate(&db, token).await?;
+    let auth_ctx = authenticate(ctx, headers).await?;
     Ok((auth_ctx.tenant_id, auth_ctx.user_id))
 }
 
@@ -78,9 +84,7 @@ pub(crate) async fn authenticate_tenant_admin(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<Uuid, YorishiroError> {
-    let token = bearer_token(headers)?;
-    let db = db_handle(ctx)?;
-    let auth_ctx = auth::authenticate(&db, token).await?;
+    let auth_ctx = authenticate(ctx, headers).await?;
     let user_id = auth_ctx.user_id.ok_or(YorishiroError::Unauthenticated)?;
     tenancy::get_membership_role(&ctx.db, auth_ctx.tenant_id, user_id)
         .await?

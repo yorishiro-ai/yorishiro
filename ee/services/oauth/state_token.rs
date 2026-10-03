@@ -6,7 +6,6 @@
 //! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
 //! An attacker who captures a victim's `code`/`state` pair cannot forge the victim's browser's cookie, so the double-submit check fails even though the `state` signature itself is valid.
 
-use crate::services::auth::hex_encode;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
@@ -48,7 +47,7 @@ fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
     let mut csrf_bytes = [0u8; CSRF_COOKIE_BYTES];
     rand::rng().fill_bytes(&mut csrf_bytes);
     let csrf_cookie_value = URL_SAFE_NO_PAD.encode(csrf_bytes);
-    let csrf_hash = hex_encode(&Sha256::digest(csrf_cookie_value.as_bytes()));
+    let csrf_hash = hex::encode(Sha256::digest(csrf_cookie_value.as_bytes()));
 
     let mut verifier_bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut verifier_bytes);
@@ -107,7 +106,7 @@ fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState>
 
 /// Hashes a CSRF cookie value the same way [`issue`] does, for `callback` to compare against [`VerifiedState::csrf_hash`].
 pub fn hash_csrf_cookie(cookie_value: &str) -> String {
-    hex_encode(&Sha256::digest(cookie_value.as_bytes()))
+    hex::encode(Sha256::digest(cookie_value.as_bytes()))
 }
 
 #[cfg(test)]

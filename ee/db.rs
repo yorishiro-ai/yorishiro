@@ -449,7 +449,7 @@ mod tests {
             let mut child = Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "db::tests::sqlite_scheduler_lock_child",
+                    "ee::db::tests::sqlite_scheduler_lock_child",
                     "--nocapture",
                 ])
                 .current_dir(dir.path())

@@ -32,7 +32,8 @@ pub(crate) fn compose_context(ctx: &AppContext) {
         // Replaces the default authenticator installed by the base context builder.
         ctx.shared_store.insert(Arc::new(
             crate::ee::services::tenant_auth::TenantScopedAuthenticator,
-        ) as Arc<dyn crate::services::auth::Authenticator>);
+        )
+            as Arc<dyn crate::controllers::middleware::auth::Authenticator>);
     }
 
     ctx.shared_store.insert(

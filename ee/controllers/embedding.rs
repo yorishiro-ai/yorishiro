@@ -4,8 +4,9 @@
 //! A workspace with none configured keeps using the deployment default, so an existing deployment is unaffected until an operator sets one.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::error::YorishiroError;
-use crate::services::auth::{ApiKeyScope, require_scope};
+use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};

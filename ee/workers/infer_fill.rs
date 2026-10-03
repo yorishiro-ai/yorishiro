@@ -248,8 +248,16 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
         } else {
             crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
         };
-        let admitted = admission.attempt().is_some();
-        let attempt = admission.attempt();
+        let attempt = match admission {
+            crate::models::queue_job_lifecycles::Admission::Started { attempt }
+            | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => {
+                Some(attempt)
+            }
+            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
+            | crate::models::queue_job_lifecycles::Admission::Saturated { .. }
+            | crate::models::queue_job_lifecycles::Admission::Terminal => None,
+        };
+        let admitted = attempt.is_some();
         let job_id = args.job_id;
         let claimed = if already_reconciled {
             Ok(true)
@@ -304,7 +312,7 @@ impl BackgroundWorker<InferFillArgs> for InferFillWorker {
                         &self.ctx.db,
                         id,
                         Some(attempt),
-                        "completed",
+                        crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
                         None,
                     )
                     .await;

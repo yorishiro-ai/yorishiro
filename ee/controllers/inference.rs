@@ -4,9 +4,10 @@
 //! A workspace with none configured gets a 422 rather than a fall back to `default` values: a caller who asked for inference and silently received defaults would have no way to tell that nothing was inferred.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::db::AppContextBackend;
 use crate::error::{ResultExt, YorishiroError};
-use crate::services::auth::{ApiKeyScope, AuthContext, require_scope};
+use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};

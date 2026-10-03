@@ -3,6 +3,7 @@ pub mod embedding;
 pub mod entity_columns;
 pub mod inference;
 pub mod marketplace;
+pub(crate) mod mcp;
 pub mod oauth;
 pub mod openapi;
 pub mod origin;

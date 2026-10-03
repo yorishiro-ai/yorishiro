@@ -8,10 +8,11 @@
 //! Installing this replaces base's own `default_authenticator()` in `shared_store` (`Arc<dyn Authenticator>` is keyed by `TypeId`, so the later insert wins), which means it is honoured on every authenticated path in the process, REST and MCP alike, not only the routes this crate adds.
 
 use crate::YorishiroError;
+use crate::controllers::middleware::auth::Authenticator;
 use crate::db::DbHandle;
 use crate::error::ResultExt;
 use crate::models::_entities::{api_keys, tenant_tenants};
-use crate::services::auth::{ApiKeyScope, AuthContext, Authenticator};
+use crate::models::api_keys::{ApiKeyScope, AuthContext, hash_key};
 use async_trait::async_trait;
 use sea_orm::{ActiveValue, EntityTrait, PaginatorTrait};
 use uuid::Uuid;
@@ -67,7 +68,7 @@ impl Authenticator for TenantScopedAuthenticator {
             }
         };
 
-        let key_hash = crate::services::auth::hash_key(presented_key);
+        let key_hash = hash_key(presented_key);
 
         // The two-argument overload of the `authenticate_api_key` SECURITY DEFINER function the schema migration creates.
         // `p_requested_workspace` is only consulted for a key with no workspace of its own, and resolves only when the named workspace belongs to that key's tenant: the tenant isolation boundary for these keys.
@@ -180,7 +181,7 @@ pub async fn create_tenant_api_key(
     let active = api_keys::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(None),
-        key_hash: ActiveValue::Set(crate::services::auth::hash_key(&plaintext)),
+        key_hash: ActiveValue::Set(hash_key(&plaintext)),
         key_prefix: ActiveValue::Set(prefix),
         scope: ActiveValue::Set(scope.as_db_str().to_string()),
         user_id: ActiveValue::Set(user_id),

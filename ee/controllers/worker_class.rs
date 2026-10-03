@@ -4,8 +4,9 @@
 //! A workspace with none configured stays `WorkerClass::Shared`, so an existing deployment is unaffected until an operator sets one.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::error::YorishiroError;
-use crate::services::auth::{ApiKeyScope, require_scope};
+use crate::models::api_keys::ApiKeyScope;
 use crate::workers::embedding_sync::WorkerClass;
 use axum::Json;
 use axum::extract::State;

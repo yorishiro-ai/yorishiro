@@ -111,8 +111,6 @@ pub(crate) use db_enum;
 
 #[cfg(test)]
 mod tests {
-    use super::db_enum;
-
     db_enum! {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         enum Sample {

@@ -17,26 +17,26 @@ use uuid::Uuid;
 use crate::controllers::mcp::{
     AuthzOutcome, YorishiroMcpServer, authorize, err_to_tool_result, ok_json,
 };
-use crate::services::auth::ApiKeyScope;
+use crate::models::api_keys::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ListUpstreamChangesArgs {
+pub(crate) struct ListUpstreamChangesArgs {
     /// Maximum number of results (defaults to 50 if omitted).
-    pub limit: Option<i64>,
+    pub(crate) limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
-    pub offset: Option<i64>,
+    pub(crate) offset: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct MergePreviewArgs {
+pub(crate) struct MergePreviewArgs {
     /// ID of the schema to preview a merge for.
-    pub schema_id: Uuid,
+    pub(crate) schema_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct MergeApplyArgs {
+pub(crate) struct MergeApplyArgs {
     /// ID of the schema to merge.
-    pub schema_id: Uuid,
+    pub(crate) schema_id: Uuid,
 }
 
 #[tool_router(vis = "pub(crate)", router = tool_router_origin)]
@@ -47,7 +47,7 @@ impl YorishiroMcpServer {
                        which schemas have pending upstream updates that have not yet been \
                        merged."
     )]
-    pub async fn list_upstream_changes(
+    pub(crate) async fn list_upstream_changes(
         &self,
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
@@ -77,7 +77,7 @@ impl YorishiroMcpServer {
                        read scope). Returns a list of fields that would be added, updated, \
                        kept, or conflicted. Does not write anything."
     )]
-    pub async fn merge_preview(
+    pub(crate) async fn merge_preview(
         &self,
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
@@ -118,7 +118,7 @@ impl YorishiroMcpServer {
                        schema version and a diff describing whether the merge was breaking. \
                        Fails if there are merge conflicts."
     )]
-    pub async fn merge_apply(
+    pub(crate) async fn merge_apply(
         &self,
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,

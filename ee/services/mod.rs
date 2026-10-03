@@ -5,7 +5,6 @@ pub(crate) mod hmac_sign;
 pub mod inference;
 pub mod licence;
 pub mod marketplace;
-pub(crate) mod mcp;
 pub mod merge;
 pub mod oauth;
 pub mod official_templates;

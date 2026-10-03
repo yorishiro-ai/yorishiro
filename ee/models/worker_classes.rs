@@ -75,6 +75,15 @@ pub async fn get(
         .await
         .internal()?;
 
-    row.map(|row| WorkerClass::from_db_str(&row.worker_class))
-        .transpose()
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    WorkerClass::from_db_str(&row.worker_class)
+        .map(Some)
+        .ok_or_else(|| {
+            YorishiroError::Internal(anyhow::anyhow!(
+                "unknown worker class in database: {}",
+                row.worker_class
+            ))
+        })
 }

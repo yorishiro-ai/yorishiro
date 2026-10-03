@@ -4,8 +4,9 @@
 //! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::error::{ResultExt, YorishiroError};
-use crate::services::auth::{ApiKeyScope, require_scope};
+use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};

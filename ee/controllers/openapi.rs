@@ -6,7 +6,9 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::controllers::openapi::{MembershipRecord, SchemaRecord, TemplateVisibility};
+use crate::models::schema_schemas::SchemaRecord;
+use crate::models::template_templates::TemplateVisibility;
+use crate::models::tenancy::MembershipRecord;
 
 #[derive(ToSchema)]
 pub struct OAuthStatus {

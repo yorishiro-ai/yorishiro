@@ -6,10 +6,11 @@
 //! The scope check is explicit for the same reason: there is no extractor here to carry it.
 
 use crate::controllers::ApiError;
+use crate::controllers::middleware::auth::require_scope;
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::schema_schemas::metaschema::VersioningDiff;
 use crate::models::schema_schemas::{MergeDiffSummary, SchemaRecord, UpstreamChange};
-use crate::services::auth::{ApiKeyScope, require_scope};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};

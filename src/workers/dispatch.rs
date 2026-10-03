@@ -119,17 +119,17 @@ impl ReindexDispatcher for LocoJobDispatcher {
 }
 
 /// What identifies one job to the queue policy, independent of its argument type.
-struct JobSpec {
-    job_name: &'static str,
-    workspace_id: Uuid,
-    class: WorkerClass,
+pub(crate) struct JobSpec {
+    pub(crate) job_name: &'static str,
+    pub(crate) workspace_id: Uuid,
+    pub(crate) class: WorkerClass,
 }
 
 /// Admits one job: resolves its concurrency policy and priority, records the lifecycle row, then hands the job to the class's worker through `enqueue`.
 ///
 /// Both policy lookups fail closed.
 /// A job whose capacity or starvation policy cannot be determined is recorded as unavailable and refused, rather than enqueued under a guess that would let one class borrow another's reservation.
-async fn dispatch_job<F, Fut>(
+pub(crate) async fn dispatch_job<F, Fut>(
     ctx: &AppContext,
     spec: JobSpec,
     enqueue: F,
