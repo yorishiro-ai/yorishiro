@@ -1,5 +1,4 @@
 mod context;
-mod dispatch;
 mod routes;
 mod seed;
 mod workers;
@@ -26,10 +25,10 @@ use crate::controllers::route_inventory::RouteInventory;
 #[cfg(feature = "enterprise")]
 use crate::controllers::route_inventory::{Edition, RouteClass};
 use crate::initializers;
+use crate::workers::dispatch::LocoJobDispatcher;
 use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
-use dispatch::LocoJobDispatcher;
 
-async fn queue_concurrency_policy(
+pub(crate) async fn queue_concurrency_policy(
     ctx: &AppContext,
     workspace_id: uuid::Uuid,
     class: crate::workers::embedding_sync::WorkerClass,
