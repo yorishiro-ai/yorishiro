@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
+use crate::models::entity_embeddings;
 use crate::services::embedding;
 
 /// `cargo loco task reindex_embeddings workspace_id:<uuid>`
@@ -12,7 +13,7 @@ use crate::services::embedding;
 ///
 /// Unlike `resync_embeddings`, which only fills entities whose `embedding` column is NULL, this re-embeds every entity with `x-embed` fields regardless of whether it already has a vector: the whole point is replacing vectors from the old model, not filling gaps left by the old model.
 ///
-/// The restamp happens only after every entity embeds successfully, never before and never partially; `embedding::sync::reindex_workspace` is where that ordering actually lives, and this task is a thin CLI shell over it.
+/// The restamp happens only after every entity embeds successfully, never before and never partially; `entity_embeddings::reindex_workspace` is where that ordering actually lives, and this task is a thin CLI shell over it.
 /// Restamping first (or on partial success) would make the stamp claim a model that only some of the workspace's vectors actually came from, passing the write-time model check while the column itself still holds a mix: the exact failure this whole mechanism exists to prevent, just caused by the migration tool instead of an unconfigured deployment.
 /// A failure partway through leaves the workspace stamped with its old model, which correctly keeps the write-time check refusing new writes until this task is re-run and succeeds; re-running is safe, since every entity is re-embedded again regardless of whether an earlier attempt already wrote a (partial, mixed) result.
 ///
@@ -73,7 +74,7 @@ impl Task for ReindexEmbeddings {
             .unwrap_or(false);
         if !force {
             let licenced = crate::controllers::middleware::edition::is_active(app_context);
-            let chain = embedding::sync::resolve_embedding_chain(
+            let chain = entity_embeddings::resolve_embedding_chain(
                 &app_context.db,
                 workspace_id,
                 licenced,

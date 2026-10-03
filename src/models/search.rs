@@ -226,7 +226,7 @@ async fn resolve_search_table_with_dimensions(
     licenced: bool,
     deployment_dimensions: usize,
 ) -> Result<(usize, String), YorishiroError> {
-    use crate::services::embedding::sync::resolve_embedding_chain;
+    use crate::models::entity_embeddings::resolve_embedding_chain;
 
     let chain =
         resolve_embedding_chain(conn, workspace_id, licenced, deployment_dimensions).await?;

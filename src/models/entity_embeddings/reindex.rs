@@ -6,13 +6,25 @@ use crate::models::entity_entities::EntityRecord;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
-use super::{ReindexFailure, ReindexOutcome};
 
 #[derive(PartialEq, Eq)]
 enum ReindexStep {
     Reindexed,
     NothingToEmbed,
     ConcurrentlyModified,
+}
+
+/// One entity that failed during a [`reindex_workspace`] run.
+pub struct ReindexFailure {
+    pub entity_id: Uuid,
+    pub error: YorishiroError,
+}
+
+/// Outcome of a full [`reindex_workspace`] run.
+pub struct ReindexOutcome {
+    pub total: usize,
+    pub reindexed: usize,
+    pub failures: Vec<ReindexFailure>,
 }
 
 async fn reindex_embedding_for_record(
@@ -56,7 +68,8 @@ async fn reindex_embedding_for_record(
     })
 }
 
-pub(super) async fn run(
+/// Re-embeds every candidate entity and restamps the workspace after full success.
+pub async fn reindex_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     candidate_ids: &[Uuid],

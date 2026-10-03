@@ -26,8 +26,8 @@ use uuid::Uuid;
 
 use crate::db_enum::db_enum;
 use crate::error::YorishiroError;
+use crate::models::entity_embeddings;
 use crate::models::entity_entities;
-use crate::services::embedding;
 use crate::workers::dispatch::EmbeddingSyncDispatcher;
 
 db_enum! {
@@ -156,7 +156,7 @@ async fn perform_embedding_sync(ctx: &AppContext, args: &EmbeddingSyncArgs) -> l
 
     let licenced = crate::controllers::middleware::edition::is_active(ctx);
 
-    if let Err(err) = embedding::sync::sync_embedding_for_record(
+    if let Err(err) = entity_embeddings::sync_embedding_for_record(
         &ctx.db,
         args.workspace_id,
         &record,

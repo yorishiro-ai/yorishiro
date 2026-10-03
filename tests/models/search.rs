@@ -919,7 +919,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
         let candidate_ids = vec![e1.id, e2.id];
-        let outcome = yorishiro::services::embedding::sync::reindex_workspace(
+        let outcome = yorishiro::models::entity_embeddings::reindex_workspace(
             &ctx.db,
             workspace.id,
             &candidate_ids,

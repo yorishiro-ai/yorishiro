@@ -3,7 +3,6 @@
 pub mod local;
 mod model_fetch;
 pub mod openai;
-pub mod sync;
 
 pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 768;
 

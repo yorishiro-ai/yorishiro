@@ -3,9 +3,18 @@ use uuid::Uuid;
 
 use crate::error::YorishiroError;
 
-use super::ResolvedEmbedding;
+/// The resolved embedding chain for a workspace.
+#[derive(Clone)]
+pub(crate) struct ResolvedEmbedding {
+    pub(crate) workspace_model: Option<String>,
+    pub(crate) workspace_dimensions: Option<i32>,
+    pub(crate) tenant_model: Option<String>,
+    pub(crate) tenant_dimensions: Option<i32>,
+    pub(crate) deployment_dimensions: usize,
+}
 
-pub(super) async fn resolve_embedding_chain(
+/// Resolves the workspace, tenant, and deployment embedding settings.
+pub(crate) async fn resolve_embedding_chain(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     licenced: bool,

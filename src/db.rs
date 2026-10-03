@@ -659,7 +659,7 @@ pub async fn reindex_workspace_with_lock(
     conn: &impl ConnectionTrait,
     candidate_ids: &[Uuid],
     provider: &dyn crate::services::embedding::EmbeddingProvider,
-) -> Result<crate::services::embedding::sync::ReindexOutcome, crate::YorishiroError> {
+) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
     let lock = acquire_workspace_reindex_lock(pool, workspace_id)
         .await
         .map_err(|err| {
@@ -667,7 +667,7 @@ pub async fn reindex_workspace_with_lock(
                 "failed to acquire workspace lock: {err}"
             ))
         })?;
-    let outcome = crate::services::embedding::sync::reindex_workspace(
+    let outcome = crate::models::entity_embeddings::reindex_workspace(
         conn,
         workspace_id,
         candidate_ids,

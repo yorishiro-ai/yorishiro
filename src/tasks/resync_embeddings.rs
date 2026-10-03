@@ -5,6 +5,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::entity_embeddings;
 use crate::models::entity_entities;
 use crate::services::embedding;
 
@@ -119,7 +120,7 @@ impl Task for ResyncEmbeddings {
                 updated_by: candidate.updated_by,
             };
             let licenced = crate::controllers::middleware::edition::is_active(app_context);
-            let result = embedding::sync::sync_embedding_for_record(
+            let result = entity_embeddings::sync_embedding_for_record(
                 &app_context.db,
                 workspace_id,
                 &record,

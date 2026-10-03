@@ -9,6 +9,7 @@ use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
 
+/// Concatenates the values of `x-embed` fields as `"field: value"` to build the text to embed.
 pub(super) fn compose_embedding_text(
     entity_type_def: &EntityTypeDef,
     data: &Value,
@@ -27,18 +28,16 @@ pub(super) fn compose_embedding_text(
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn sync_embedding(
+/// Generates and stores one entity's embedding, checking it against what the workspace already holds.
+async fn sync_embedding(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    entity_id: Uuid,
-    snapshot_updated_at: chrono::DateTime<chrono::Utc>,
+    record: &EntityRecord,
     entity_type_def: &EntityTypeDef,
-    data: &Value,
     provider: &dyn EmbeddingProvider,
     licenced: bool,
 ) -> Result<(), YorishiroError> {
-    let Some(text) = compose_embedding_text(entity_type_def, data) else {
+    let Some(text) = compose_embedding_text(entity_type_def, &record.data) else {
         return Ok(());
     };
 
@@ -50,18 +49,17 @@ pub(super) async fn sync_embedding(
         provider.dimensions(),
     )
     .await?;
-    let effective_dimensions = chain
+    let expected_dimensions = chain
         .workspace_dimensions
         .or(chain.tenant_dimensions)
-        .or(Some(i32::try_from(chain.deployment_dimensions).unwrap_or(
-            crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32,
-        )));
-    if let Some(expected) = effective_dimensions
-        && vector.len() as usize != expected as usize
-    {
+        .unwrap_or(
+            i32::try_from(chain.deployment_dimensions)
+                .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
+        );
+    if vector.len() != expected_dimensions as usize {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
-                "this workspace holds {expected}-dimensional vectors, but the configured embedding \
+                "this workspace holds {expected_dimensions}-dimensional vectors, but the configured embedding \
                  provider produced {}",
                 vector.len()
             ),
@@ -90,21 +88,14 @@ pub(super) async fn sync_embedding(
         });
     }
 
-    let effective_dimension = chain
-        .workspace_dimensions
-        .or(chain.tenant_dimensions)
-        .unwrap_or(
-            i32::try_from(chain.deployment_dimensions)
-                .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
-        ) as usize;
     let written = embed_and_write(
         conn,
         VectorWriteInput {
             workspace_id,
-            entity_id,
-            snapshot_updated_at,
+            entity_id: record.id,
+            snapshot_updated_at: record.updated_at,
             vector,
-            dimension: effective_dimension,
+            dimension: expected_dimensions as usize,
         },
     )
     .await?;
@@ -128,7 +119,8 @@ pub(super) async fn sync_embedding(
     Ok(())
 }
 
-pub(super) async fn sync_embedding_for_record(
+/// Resolves the schema definition for an entity record and synchronizes its embedding.
+pub async fn sync_embedding_for_record(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     record: &EntityRecord,
@@ -151,10 +143,8 @@ pub(super) async fn sync_embedding_for_record(
     sync_embedding(
         conn,
         workspace_id,
-        record.id,
-        record.updated_at,
+        record,
         entity_type_def,
-        &record.data,
         provider,
         licenced,
     )
