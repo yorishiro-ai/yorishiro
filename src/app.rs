@@ -2,7 +2,6 @@ mod context;
 mod dispatch;
 mod routes;
 mod seed;
-mod startup;
 mod workers;
 
 use async_trait::async_trait;
@@ -24,6 +23,7 @@ use crate::controllers;
 use crate::controllers::route_inventory::RouteInventory;
 #[cfg(feature = "enterprise")]
 use crate::controllers::route_inventory::{Edition, RouteClass};
+use crate::initializers;
 use crate::workers::dispatch::{EmbeddingSyncDispatcher, ReindexDispatcher};
 use dispatch::LocoJobDispatcher;
 
@@ -226,19 +226,15 @@ impl Hooks for App {
         crate::data::config::validate_queue_policy(&config)?;
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
-        startup::register_sqlite_extensions();
-        let serves_http = startup::serves_http(&mode);
-
-        let result = create_app::<Self, Migrator>(mode, environment, config).await?;
-
-        // Reindexes workspaces whose vectors came from a different model and starts the load monitor.
-        startup::after_boot(&result, environment, serves_http).await?;
-
-        Ok(result)
+        crate::db::register_sqlite_extensions();
+        create_app::<Self, Migrator>(mode, environment, config).await
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
-        Ok(vec![])
+        Ok(vec![
+            Box::new(initializers::startup_reindex::StartupReindex),
+            Box::new(initializers::db_load_guard::LoadGuard),
+        ])
     }
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
@@ -491,7 +487,7 @@ impl Hooks for App {
     }
 
     async fn on_shutdown(ctx: &AppContext) {
-        startup::shutdown(ctx).await;
+        initializers::db_load_guard::shutdown(ctx).await;
     }
 
     async fn truncate(_ctx: &AppContext) -> Result<()> {

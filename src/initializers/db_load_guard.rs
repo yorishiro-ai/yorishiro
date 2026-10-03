@@ -5,16 +5,61 @@
 
 use std::time::{Duration, Instant};
 
-use loco_rs::app::AppContext;
+use async_trait::async_trait;
+use axum::Router as AxumRouter;
+use loco_rs::{
+    Result,
+    app::{AppContext, Initializer},
+    environment::Environment,
+};
 use sqlx::PgPool;
+use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::db::DbHandle;
 use crate::error::YorishiroError;
-use crate::models::system_maintenance::{self, MaintenanceMode, MaintenanceState};
+use crate::models::system_maintenance::{self, AUTO_REASON, MaintenanceMode, MaintenanceState};
 
-/// Reason string written when this guard enables maintenance mode.
-pub const AUTO_REASON: &str = "database load (automatic)";
+/// Starts the load monitor in every process that serves HTTP.
+///
+/// `after_routes` runs only for start modes that build a router, so queue workers never run it; test boots skip it because the monitor would outlive the test's own database.
+pub(crate) struct LoadGuard;
+
+#[async_trait]
+impl Initializer for LoadGuard {
+    fn name(&self) -> String {
+        "db_load_guard".into()
+    }
+
+    async fn after_routes(&self, router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+        if matches!(ctx.environment, Environment::Test) {
+            return Ok(router);
+        }
+        let settings = ctx
+            .shared_store
+            .get::<crate::data::settings::Settings>()
+            .ok_or_else(|| {
+                loco_rs::Error::Message("application settings were not installed".into())
+            })?;
+        if let Some(config) = LoadGuardConfig::from_settings(&settings.db_load_guard) {
+            let task_ctx = ctx.clone();
+            let task = tokio::spawn(async move { run(task_ctx, config).await });
+            ctx.shared_store.insert(Monitor(task));
+        }
+        Ok(router)
+    }
+}
+
+/// The running monitor, kept in `shared_store` so shutdown can stop it and wait for it.
+struct Monitor(JoinHandle<()>);
+
+/// Stops the monitor, if one was started, and waits for it to finish.
+pub(crate) async fn shutdown(ctx: &AppContext) {
+    if let Some(Monitor(task)) = ctx.shared_store.remove::<Monitor>() {
+        task.abort();
+        let _ = task.await;
+    }
+}
 
 /// Runtime settings for the load guard.
 pub(crate) struct LoadGuardConfig {

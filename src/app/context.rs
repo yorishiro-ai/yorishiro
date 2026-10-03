@@ -4,11 +4,9 @@ use loco_rs::{Result, app::AppContext};
 
 use crate::db::AppContextBackend;
 
-use super::startup;
-
 /// Builds the base application's shared services without moving work past Loco's migration boundary.
 pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
-    startup::validate_backend(&ctx)?;
+    validate_backend(&ctx)?;
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
 
     if ctx.is_postgres() {
@@ -54,4 +52,13 @@ pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
     ctx.shared_store.insert(settings);
 
     Ok(ctx)
+}
+
+/// Performs backend checks that must happen before shared services are constructed.
+fn validate_backend(ctx: &AppContext) -> Result<()> {
+    if ctx.is_sqlite() {
+        crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
+            .map_err(loco_rs::Error::Message)?;
+    }
+    Ok(())
 }

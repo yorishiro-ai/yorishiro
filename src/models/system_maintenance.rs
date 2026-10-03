@@ -34,6 +34,10 @@ impl ActiveModel {}
 // implement your custom finders, selectors oriented logic here
 impl Entity {}
 
+/// The reason recorded when the database load guard, not an operator, enables read-only mode.
+/// Its absence is how the guard knows it must not lift a read-only mode someone else set.
+pub const AUTO_REASON: &str = "database load (automatic)";
+
 db_enum! {
     /// What the deployment is currently refusing.
     ///

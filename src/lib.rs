@@ -18,6 +18,7 @@ mod db_enum;
 #[path = "../ee/mod.rs"]
 pub mod ee;
 pub mod error;
+pub(crate) mod initializers;
 pub mod metaschema;
 pub mod models;
 pub mod services;

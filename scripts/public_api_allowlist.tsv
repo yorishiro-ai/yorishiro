@@ -116,3 +116,4 @@ src/models/api_keys.rs	fn	Entity::touch_last_used_on_connection	auth-provider-re
 src/models/api_keys.rs	fn	hash_key	auth-provider-resolver: API-key identity and persistence moved from `services/auth` into the model that owns API keys; `ee/` and the integration-test crate consume them.
 src/models/api_keys.rs	struct	AuthContext	auth-provider-resolver: API-key identity and persistence moved from `services/auth` into the model that owns API keys; `ee/` and the integration-test crate consume them.
 src/models/api_keys.rs	struct	CreatedApiKey	auth-provider-resolver: API-key identity and persistence moved from `services/auth` into the model that owns API keys; `ee/` and the integration-test crate consume them.
+src/models/system_maintenance.rs	const	AUTO_REASON	integration-test: the marker the database load guard writes, which the integration-test crate asserts on; moved from `services/db_load_guard` into the maintenance model that stores it.

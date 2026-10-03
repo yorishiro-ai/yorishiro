@@ -3,7 +3,7 @@
 use loco_rs::prelude::*;
 use loco_rs::task::Vars;
 
-use crate::services::db_load_guard;
+use crate::initializers::db_load_guard;
 
 pub struct DbLoadGuard;
 

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{Database, DatabaseConnection};
 use tokio::sync::Barrier;
+use yorishiro::models::system_maintenance::AUTO_REASON;
 use yorishiro::models::system_maintenance::{self, MaintenanceMode};
-use yorishiro::services::db_load_guard::AUTO_REASON;
 
 async fn sqlite_connections() -> (DatabaseConnection, DatabaseConnection, tempfile::TempDir) {
     let directory = tempfile::tempdir().expect("create temporary directory");

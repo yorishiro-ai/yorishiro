@@ -1,80 +1,34 @@
+//! Re-embeds workspaces whose stored vectors came from a different model than the one now configured.
+
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use axum::Router as AxumRouter;
 use loco_rs::{
     Result,
-    app::AppContext,
-    boot::{BootResult, StartMode},
+    app::{AppContext, Initializer},
     environment::Environment,
 };
-use tokio::task::{JoinHandle, spawn};
 
-use crate::db::AppContextBackend;
 use crate::workers::embedding_sync::WorkerClass;
 
-pub(super) struct LoadGuardHandle(JoinHandle<()>);
+/// Runs the scan once, in every process that serves HTTP.
+///
+/// `after_routes` runs only for start modes that build a router, so queue workers never scan; test boots skip it because the scan would outlive the test's own database.
+pub(crate) struct StartupReindex;
 
-impl LoadGuardHandle {
-    async fn shutdown(self) {
-        self.0.abort();
-        let _ = self.0.await;
+#[async_trait]
+impl Initializer for StartupReindex {
+    fn name(&self) -> String {
+        "startup_reindex".into()
     }
-}
 
-/// Registers SQLite extensions before any test-harness connection is opened.
-pub(super) fn register_sqlite_extensions() {
-    crate::db::register_sqlite_extensions();
-}
-
-/// Whether this process answers HTTP requests.
-/// Deployment-wide startup work (the reindex scan and the load monitor) belongs to the processes users reach, not to queue workers.
-pub(super) fn serves_http(mode: &StartMode) -> bool {
-    !matches!(
-        mode,
-        StartMode::WorkerOnly { .. } | StartMode::WorkerAndScheduler { .. }
-    )
-}
-
-/// Runs the deployment-wide startup work once migrations have applied.
-/// Test boots skip it: the scan and the monitor would outlive the test's own database.
-pub(super) async fn after_boot(
-    result: &BootResult,
-    environment: &Environment,
-    serves_http: bool,
-) -> Result<()> {
-    if matches!(environment, Environment::Test) || !serves_http {
-        return Ok(());
+    async fn after_routes(&self, router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+        if !matches!(ctx.environment, Environment::Test) {
+            detect_startup_reindex(ctx).await;
+        }
+        Ok(router)
     }
-    let ctx = &result.app_context;
-    detect_startup_reindex(ctx).await;
-
-    let settings = ctx
-        .shared_store
-        .get::<crate::data::settings::Settings>()
-        .ok_or_else(|| loco_rs::Error::Message("application settings were not installed".into()))?;
-    if let Some(config) =
-        crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings.db_load_guard)
-    {
-        let ctx_for_task = ctx.clone();
-        let task =
-            spawn(async move { crate::services::db_load_guard::run(ctx_for_task, config).await });
-        ctx.shared_store.insert(LoadGuardHandle(task));
-    }
-    Ok(())
-}
-
-pub(super) async fn shutdown(ctx: &AppContext) {
-    if let Some(handle) = ctx.shared_store.remove::<LoadGuardHandle>() {
-        handle.shutdown().await;
-    }
-}
-
-/// Performs backend checks that must happen before shared services are constructed.
-pub(super) fn validate_backend(ctx: &AppContext) -> Result<()> {
-    if ctx.is_sqlite() {
-        crate::db::require_min_sqlite_connections(ctx.config.database.max_connections)
-            .map_err(loco_rs::Error::Message)?;
-    }
-    Ok(())
 }
 
 /// Detects and enqueues startup reindex for any workspace
@@ -162,35 +116,5 @@ async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
         Err(err) => {
             tracing::error!(%workspace_id, error = %err, "startup reindex: failed to enqueue reindex");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::serves_http;
-    use loco_rs::boot::StartMode;
-
-    #[test]
-    fn only_a_differently_stamped_workspace_needs_a_reindex() {
-        use crate::models::workspace_workspaces::StartupReindexRow;
-
-        let row = |model: Option<&str>| StartupReindexRow {
-            id: uuid::Uuid::nil(),
-            embedding_model: model.map(str::to_owned),
-        };
-        assert!(row(Some("old-model")).is_stamped_with_other_model("new-model"));
-        assert!(!row(Some("new-model")).is_stamped_with_other_model("new-model"));
-        // An unstamped workspace has no vectors to replace.
-        assert!(!row(None).is_stamped_with_other_model("new-model"));
-    }
-
-    #[test]
-    fn worker_only_modes_do_not_serve_http() {
-        assert!(!serves_http(&StartMode::WorkerOnly { tags: vec![] }));
-        assert!(!serves_http(&StartMode::WorkerAndScheduler {
-            tags: vec![]
-        }));
-        assert!(serves_http(&StartMode::ServerOnly));
-        assert!(serves_http(&StartMode::ServerAndWorker));
     }
 }
