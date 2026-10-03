@@ -16,7 +16,7 @@ pub(crate) fn compose_context(ctx: &AppContext) {
     let licence = Arc::new(crate::ee::services::licence::LicenceState::from_env());
     ctx.shared_store.insert(licence.clone());
     ctx.shared_store
-        .insert(licence as Arc<dyn crate::services::edition::EnterpriseEdition>);
+        .insert(licence as Arc<dyn crate::controllers::middleware::edition::EnterpriseEdition>);
 
     if ctx.is_sqlite() {
         // These features use PostgreSQL-only SQL and report their limitation at boot.

@@ -32,7 +32,7 @@ One crate is also what lets loco's own logging reach this application at all: it
 
 ## Licence gate
 
-**The licence gate is a per-request layer, not a compilation boundary.** `ee/services/licence.rs` verifies a signed licence key against `ee/keys/licence-public.pem`. `app::licence_gate` reads that state on every request and answers 404 on the routes it is attached to, applied through `Routes::layer` so it reaches exactly those routes and cannot leak onto the community ones.
+**The licence gate is a per-request layer, not a compilation boundary.** `ee/services/licence.rs` verifies a signed licence key against `ee/keys/licence-public.pem`. `controllers::middleware::edition::licence_gate` reads that state on every request and answers 404 on the routes it is attached to, applied through `Routes::layer` so it reaches exactly those routes and cannot leak onto the community ones.
 
 Per request rather than at boot is deliberate: `LicenceState::is_active` compares `exp` against the current clock, so a key that lapses while the process runs stops unlocking enterprise features without a restart, which a route set decided once at boot could not express.
 

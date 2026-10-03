@@ -72,7 +72,7 @@ impl Task for ReindexEmbeddings {
             .map(|v| v.parse().unwrap_or(false))
             .unwrap_or(false);
         if !force {
-            let licenced = crate::services::edition::is_active(app_context);
+            let licenced = crate::controllers::middleware::edition::is_active(app_context);
             let chain = embedding::sync::resolve_embedding_chain(
                 &app_context.db,
                 workspace_id,

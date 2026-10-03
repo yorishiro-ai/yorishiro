@@ -104,7 +104,7 @@ impl YorishiroMcpServer {
             }
         };
 
-        let licenced = crate::services::edition::is_active(&self.ctx);
+        let licenced = crate::controllers::middleware::edition::is_active(&self.ctx);
 
         let hits = match search::search_by_vector(
             &txn,

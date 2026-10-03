@@ -146,7 +146,7 @@ impl LicenceState {
     }
 }
 
-impl crate::services::edition::EnterpriseEdition for LicenceState {
+impl crate::controllers::middleware::edition::EnterpriseEdition for LicenceState {
     fn is_active(&self) -> bool {
         Self::is_active(self)
     }

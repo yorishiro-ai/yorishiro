@@ -44,7 +44,7 @@ impl Initializer for StartupReindex {
 /// as a mismatch and reindex them with the wrong provider. Skip when a licence is active.
 async fn detect_startup_reindex(ctx: &AppContext) {
     // CE-only: under EE per-workspace provider assignment makes this comparison invalid.
-    if crate::services::edition::is_active(ctx) {
+    if crate::controllers::middleware::edition::is_active(ctx) {
         tracing::debug!("startup reindex: enterprise licence active, skipping");
         return;
     }

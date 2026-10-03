@@ -229,7 +229,7 @@ impl ServerHandler for YorishiroMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        if !crate::services::edition::is_active(&self.ctx)
+        if !crate::controllers::middleware::edition::is_active(&self.ctx)
             && self.is_enterprise_tool(request.name.as_ref())
         {
             return Err(ErrorData::invalid_params("tool not found", None));
@@ -247,7 +247,7 @@ impl ServerHandler for YorishiroMcpServer {
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
         let mut tools = self.tool_router.list_all();
-        if !crate::services::edition::is_active(&self.ctx) {
+        if !crate::controllers::middleware::edition::is_active(&self.ctx) {
             tools.retain(|tool| !self.is_enterprise_tool(tool.name.as_ref()));
         }
         Ok(ListToolsResult {
@@ -261,7 +261,9 @@ impl ServerHandler for YorishiroMcpServer {
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        if !crate::services::edition::is_active(&self.ctx) && self.is_enterprise_tool(name) {
+        if !crate::controllers::middleware::edition::is_active(&self.ctx)
+            && self.is_enterprise_tool(name)
+        {
             return None;
         }
         self.tool_router.get(name).cloned()

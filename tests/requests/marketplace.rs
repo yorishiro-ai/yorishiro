@@ -19,7 +19,7 @@ fn licence(ctx: &loco_rs::app::AppContext) {
             exp: Utc::now().timestamp() + 60 * 60,
         }))
             as std::sync::Arc<
-                dyn yorishiro::services::edition::EnterpriseEdition,
+                dyn yorishiro::controllers::middleware::edition::EnterpriseEdition,
             >);
 }
 

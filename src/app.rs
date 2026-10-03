@@ -20,6 +20,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::controllers;
+#[cfg(feature = "enterprise")]
+use crate::controllers::middleware::edition;
 use crate::controllers::route_inventory::RouteInventory;
 #[cfg(feature = "enterprise")]
 use crate::controllers::route_inventory::{Edition, RouteClass};
@@ -152,50 +154,6 @@ impl crate::ee::workers::infer_fill::InferFillDispatcher for LocoJobDispatcher {
     }
 }
 
-/// Refuses a request when no active licence is held, for the routes this is applied to.
-///
-/// This is the enterprise-edition boundary: one binary carries both editions, and the licence decides at
-/// runtime which surfaces answer.
-///
-/// **Per request, not per boot.** Mounting the gated routes conditionally at startup would be
-/// simpler and is wrong: `LicenceState::is_active` compares `exp` against the current time on every
-/// call precisely so a key that lapses while the process runs stops unlocking enterprise features without
-/// a restart (see `ee::services::licence`). A route set decided once at boot cannot un-mount, which
-/// would turn that property into a silent enforcement hole.
-///
-/// Applied through `Routes::layer`, which wraps each handler's own `MethodRouter`, so it reaches
-/// exactly the routes it is attached to and cannot leak onto the community ones. That is a property
-/// of the data rather than of this function, but it is the reason those routes stay reachable.
-///
-/// Running before the handler is also what keeps an unlicensed deployment un-probeable: every gated
-/// route answers the same 404 to everyone, rather than authenticating first and thereby confirming
-/// to a valid key that the endpoint exists and is merely locked.
-#[cfg(feature = "enterprise")]
-async fn licence_gate(
-    axum::extract::State(ctx): axum::extract::State<AppContext>,
-    request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    use axum::response::IntoResponse;
-
-    let active = crate::services::edition::is_active(&ctx);
-
-    if active {
-        return next.run(request).await;
-    }
-
-    // 404 rather than 402 or 403, matching the setup wizard's answer for a capability this
-    // deployment does not offer: the endpoint is genuinely not being served here. The message names
-    // the reason, because the operator is the one who can fix it.
-    //
-    // Rendered through `ApiError` so the body matches every other error this application emits
-    // rather than being formatted a second way.
-    crate::controllers::error::ApiError(crate::error::YorishiroError::not_found(
-        "this feature requires a licence key (set YORISHIRO_LICENSE_KEY)",
-    ))
-    .into_response()
-}
-
 pub struct App;
 #[async_trait]
 impl Hooks for App {
@@ -270,7 +228,7 @@ impl Hooks for App {
     /// four.
     fn routes(ctx: &AppContext) -> AppRoutes {
         #[cfg(feature = "enterprise")]
-        let gate = axum::middleware::from_fn_with_state(ctx.clone(), licence_gate);
+        let gate = axum::middleware::from_fn_with_state(ctx.clone(), edition::licence_gate);
         #[cfg(feature = "enterprise")]
         let (mut app_routes, mut inventory) = routes::community();
         #[cfg(not(feature = "enterprise"))]
@@ -419,7 +377,7 @@ impl Hooks for App {
             #[cfg(not(feature = "enterprise"))]
             let enterprise_tool_names = std::collections::HashSet::new();
             #[cfg(feature = "enterprise")]
-            if crate::services::edition::is_active(&ctx) {
+            if crate::controllers::middleware::edition::is_active(&ctx) {
                 tool_routers.push(enterprise_tool_router);
             }
             let tool_router = crate::controllers::mcp::compose_tool_routers(tool_routers);

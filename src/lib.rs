@@ -13,7 +13,7 @@ mod db_enum;
 /// licence points.
 ///
 /// The enterprise edition is not a separate compilation unit. What it serves is decided at runtime by
-/// `app::licence_gate`.
+/// `controllers::middleware::edition::licence_gate`.
 #[cfg(feature = "enterprise")]
 #[path = "../ee/mod.rs"]
 pub mod ee;
