@@ -306,8 +306,6 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             .await
             .unwrap();
 
-        let guard = crate::EnvGuard::capture(&["YORISHIRO_MAX_TENANTS"]);
-        guard.set("YORISHIRO_MAX_TENANTS", "1");
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let result = oauth::find_or_create(
@@ -317,6 +315,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
             Some("newcomer@example.com"),
             None,
             ("test-model", 768),
+            Some(1),
         )
         .await;
         // The call is expected to be refused; make the rollback explicit so a
@@ -357,6 +356,7 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
             Some("firstlogin@example.com"),
             None,
             ("test-model", 768),
+            None,
         )
         .await
         .expect("first login provisioning");

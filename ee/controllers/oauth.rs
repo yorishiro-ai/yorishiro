@@ -133,6 +133,15 @@ async fn callback(
         })?;
     let embedding_model = embedding_provider.model_name();
     let embedding_dimensions = embedding_provider.dimensions() as i32;
+    let settings = ctx
+        .shared_store
+        .get::<crate::config::Settings>()
+        .ok_or_else(|| {
+            ApiError(YorishiroError::Internal(anyhow::anyhow!(
+                "application settings missing"
+            )))
+        })?;
+    let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
 
     let txn = ctx.db.begin().await.internal()?;
     let provisioned = oauth::find_or_create(
@@ -142,6 +151,7 @@ async fn callback(
         identity.email.as_deref(),
         identity.display_name.as_deref(),
         (&embedding_model, embedding_dimensions),
+        max_tenants,
     )
     .await?;
     txn.commit().await.internal()?;

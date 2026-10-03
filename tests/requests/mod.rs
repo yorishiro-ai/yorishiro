@@ -53,25 +53,8 @@ use std::net::SocketAddr;
 /// Leaving either open means a session survives on the throwaway test database,
 /// and `request_with_create_db`'s teardown does `DROP DATABASE`, which fails on any surviving session.
 /// `ctx.db` also needs closing: `config/test_postgres.yaml`'s `min_connections: 1` keeps one connection open from boot.
-///
-/// `spawn_startup_reindex` spawns a background task that holds a connection from `ctx.db` for its entire lifetime.
-/// Without shutdown-and-await, that task would still hold a session when pools are closed,
-/// causing `DROP DATABASE` to panic with "being accessed by other users".
-/// `close_app_pools` signals shutdown and awaits the task *before* closing pools.
-///
 /// Every request test that runs through `request_with_create_db` must call this before its closure returns.
 pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
-    // Signal shutdown to the startup reindex background task and await its actual
-    // completion before closing pools. This structurally closes the race: if the task
-    // is mid-await when signaled, we wait for that await to return (at which point it
-    // sees the flag and exits) rather than closing pools while the task still holds a
-    // ctx.db connection.
-    if let Some(handle) = ctx
-        .shared_store
-        .remove::<yorishiro::app::StartupReindexHandle>()
-    {
-        handle.shutdown_and_wait().await;
-    }
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         db.identity.close().await;
         db.tenant.pool().close().await;
@@ -86,12 +69,6 @@ pub(crate) async fn close_app_pools(ctx: &loco_rs::app::AppContext) {
 /// test that boots through `request_with_create_db`.
 /// `queue_provider` is not closed here, and `bgworker::Queue` exposes no way to close one.
 pub(crate) async fn close_app_pools_sqlite(ctx: &loco_rs::app::AppContext, db_path: &str) {
-    if let Some(handle) = ctx
-        .shared_store
-        .remove::<yorishiro::app::StartupReindexHandle>()
-    {
-        handle.shutdown_and_wait().await;
-    }
     ctx.db.get_sqlite_connection_pool().close().await;
     // Clean up the temp SQLite file and its journaling siblings.
     let _ = std::fs::remove_file(db_path);

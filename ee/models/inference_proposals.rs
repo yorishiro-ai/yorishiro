@@ -485,6 +485,7 @@ async fn lock_entity_for_confirmation(
         .filter(crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id))
         .filter(crate::models::_entities::entity_entities::Column::Id.eq(entity_id))
         .lock_exclusive()
+        .into_tuple::<Uuid>()
         .one(conn)
         .await
         .internal()?;

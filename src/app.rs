@@ -17,12 +17,8 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
-#[cfg(feature = "enterprise")]
-use sea_orm::EntityTrait;
 use std::path::Path;
 use std::sync::Arc;
-
-pub use startup::StartupReindexHandle;
 
 use crate::controllers;
 use crate::controllers::route_inventory::RouteInventory;
@@ -43,12 +39,10 @@ async fn queue_concurrency_policy(
     }
     #[cfg(feature = "enterprise")]
     {
-        let workspace =
-            crate::models::_entities::workspace_workspaces::Entity::find_by_id(workspace_id)
-                .one(&ctx.db)
-                .await
-                .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
-        let Some(workspace) = workspace else {
+        let tenant_id = crate::models::workspace_workspaces::find_tenant_id(&ctx.db, workspace_id)
+            .await
+            .map_err(|error| format!("queue policy lookup failed for workspace: {error}"))?;
+        let Some(tenant_id) = tenant_id else {
             return Err("queue policy unavailable: workspace does not exist".into());
         };
         let licence_plan = ctx
@@ -59,15 +53,13 @@ async fn queue_concurrency_policy(
         let plan = if let Some(plan) = licence_plan {
             plan
         } else {
-            let billing =
-                crate::models::_entities::tenant_billing::Entity::find_by_id(workspace.tenant_id)
-                    .one(&ctx.db)
-                    .await
-                    .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
+            let billing = crate::models::tenant_billing::find_plan(&ctx.db, tenant_id)
+                .await
+                .map_err(|error| format!("queue policy lookup failed for billing: {error}"))?;
             match billing {
                 None => crate::ee::services::plan::Plan::Free,
-                Some(billing) => {
-                    let value = billing.plan.ok_or_else(|| {
+                Some(plan) => {
+                    let value = plan.ok_or_else(|| {
                         "queue policy unavailable: billing plan is missing".to_owned()
                     })?;
                     crate::ee::services::plan::Plan::from_db_str(&value)
@@ -245,10 +237,8 @@ impl Hooks for App {
         // were embedded with a model that differs from the current provider.
         // If so, enqueue a non-blocking reindex so the server stays responsive
         // while vectors are updated.
-        // Skip in test environments — the background task holds a `ctx.db`
-        // connection that survives the test callback and races with loco's
-        // `BootResultWrapper::drop` which tries `DROP DATABASE`.
-        startup::after_boot(&result, environment, run_startup_reindex);
+        // Test boot skips deployment startup checks and process-lifetime monitoring.
+        startup::after_boot(&result, environment, run_startup_reindex).await;
 
         Ok(result)
     }
@@ -316,14 +306,12 @@ impl Hooks for App {
                 false
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::dashboard::openapi_docs());
             mount!(
                 crate::ee::controllers::embedding::routes(),
                 Edition::Enterprise,
                 false
             );
-            #[cfg(feature = "openapi")]
             #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::embedding::openapi_docs());
             mount!(
@@ -332,7 +320,6 @@ impl Hooks for App {
                 false
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::entity_columns::openapi_docs());
             mount!(
                 crate::ee::controllers::inference::routes(),
@@ -340,14 +327,12 @@ impl Hooks for App {
                 false
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::inference::openapi_docs());
             mount!(
                 crate::ee::controllers::inference::gated_routes().layer(gate.clone()),
                 Edition::Enterprise,
                 true
             );
-            #[cfg(feature = "openapi")]
             #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::inference::gated_openapi_docs());
             mount!(
@@ -357,14 +342,12 @@ impl Hooks for App {
                 true
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::inference::job_status_openapi_docs());
             mount!(
                 crate::ee::controllers::marketplace::routes().layer(gate.clone()),
                 Edition::Enterprise,
                 true
             );
-            #[cfg(feature = "openapi")]
             #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::marketplace::openapi_docs());
             mount!(
@@ -373,14 +356,12 @@ impl Hooks for App {
                 true
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::oauth::openapi_docs());
             mount!(
                 crate::ee::controllers::origin::routes(),
                 Edition::Enterprise,
                 false
             );
-            #[cfg(feature = "openapi")]
             #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::origin::openapi_docs());
             mount!(
@@ -389,7 +370,6 @@ impl Hooks for App {
                 false
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::schema_forks::openapi_docs());
             mount!(
                 crate::ee::controllers::stripe::routes().layer(gate),
@@ -397,14 +377,12 @@ impl Hooks for App {
                 true
             );
             #[cfg(feature = "openapi")]
-            #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::stripe::openapi_docs());
             mount!(
                 crate::ee::controllers::worker_class::routes(),
                 Edition::Enterprise,
                 false
             );
-            #[cfg(feature = "openapi")]
             #[cfg(feature = "openapi")]
             inventory.add_docs(crate::ee::controllers::worker_class::openapi_docs());
         }

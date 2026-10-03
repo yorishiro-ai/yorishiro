@@ -39,7 +39,7 @@ pub struct ProvisionedLogin {
 /// The whole first-login path (user row, tenant, workspace, membership) runs in one transaction, guarded by `lock_for_update` keyed on `(provider, subject_id)`: a crash partway through rolls everything back rather than leaving an orphaned user row with no tenant membership, and the lock also serializes concurrent first logins for the same identity.
 /// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` so that requirement is enforced by the signature: every advisory lock taken here and in the `create_workspace` it calls is transaction-scoped, and handed a pool each one would be released before the work it guards.
 ///
-/// `YORISHIRO_MAX_TENANTS` is enforced here too, so auto-provisioning through SSO cannot bypass a deployment's tenant cap.
+/// The configured tenant limit is enforced here too, so auto-provisioning through SSO cannot bypass a deployment's tenant cap.
 /// The check is not race-free against a *different* identity's first login landing between the count and the insert, since this function's lock is keyed per-identity, not globally; closing it fully is not worth a global lock on every OAuth login for a race window this narrow.
 pub async fn find_or_create(
     conn: &DatabaseTransaction,
@@ -48,6 +48,7 @@ pub async fn find_or_create(
     email: Option<&str>,
     display_name: Option<&str>,
     embedding: (&str, i32),
+    max_tenants: Option<i32>,
 ) -> Result<ProvisionedLogin, YorishiroError> {
     crate::db::lock_for_update(conn, &identity_lock_key(provider, subject_id))
         .await
@@ -79,7 +80,7 @@ pub async fn find_or_create(
         Err(CreateOauthUserError::Other(err)) => return Err(err),
     };
 
-    if let Some(max) = tenancy::max_tenants_from_env()? {
+    if let Some(max) = max_tenants {
         let count = tenant_tenants::Entity::find()
             .count(conn)
             .await

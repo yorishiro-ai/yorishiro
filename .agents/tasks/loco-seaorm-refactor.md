@@ -5,8 +5,8 @@ Project-specific code remains only where the framework APIs cannot preserve requ
 
 ## Principles
 
-- Group canonical model extensions under `content`, `identity`, `system`, and `templates` using normal Rust modules.
-- Preserve stable flat imports with re-exports while production callers move to canonical area paths.
+- Keep application-owned model extensions at `src/models/<table>.rs`, matching Loco's generator layout.
+- Allow private implementation modules below a large model extension without changing its flat public path.
 - Keep generated entities under `src/models/_entities/` and regenerate rather than hand-edit them.
 - Put finders and table-owned persistence in models, state transitions on `ActiveModel`, and request parsing and rendering in controllers.
 - Use Loco configuration, lifecycle hooks, queues, workers, tasks, initializers, and test harness before adding custom infrastructure.
@@ -19,41 +19,41 @@ Project-specific code remains only where the framework APIs cannot preserve requ
 
 ### P0: restore authoritative rules
 
-- [ ] Add `.agents/rules/loco-architecture.md` as the project-specific authority.
-- [ ] Update `AGENTS.md` to describe the canonical flat model layout and real test commands.
-- [ ] Correct stale testing, edition, module, and Git workflow rules.
-- [ ] Keep `gh-wait` optional and retain the repository-specific CI workflow table.
+- [x] Add `.agents/rules/loco-architecture.md` as the project-specific authority.
+- [x] Update `AGENTS.md` to describe the canonical flat model layout and real test commands.
+- [x] Correct stale testing, edition, module, and Git workflow rules.
+- [x] Keep `gh-wait` optional and retain the repository-specific CI workflow table.
 
 ### P0: restore the Loco model layout
 
 - [x] Place every application model at `src/models/<table>.rs` and declare it through `src/models/mod.rs`.
-- [ ] Keep `entity_entities` and `tenancy` private implementation directories inside their owning areas.
+- [x] Keep `entity_entities` and `tenancy` private implementation directories below their owning flat model extensions.
 - [x] Remove area modules, zero-byte sentinels, and `#[path]` compatibility declarations.
-- [ ] Move production imports to canonical area paths, then rewrite test imports last.
-- [ ] Run entity regeneration and prove generated extensions are not overwritten.
-- [ ] Preserve `_entities`, `pagination`, and justified multi-table/query modules.
+- [x] Move production imports to flat application-owned model paths, then rewrite test imports last.
+- [x] Run entity regeneration and prove generated extensions are not overwritten.
+- [x] Preserve `_entities`, `pagination`, and justified multi-table/query modules.
 
 ### P0: use SeaORM consistently
 
-- [ ] Fix partial `ActiveModel` updates so `updated_at` is stamped through `db::stamped_updated_at`.
-- [ ] Replace duplicate reindex candidate SQL with one model finder.
-- [ ] Replace the simple PostgreSQL row-lock SQL with `QuerySelect::lock_exclusive`.
-- [ ] Move table-owned queries out of controllers, services, and scheduled tasks one operation at a time.
-- [ ] Keep documented raw SQL exceptions unchanged.
+- [x] Fix partial `ActiveModel` updates so `updated_at` is stamped through `db::stamped_updated_at`.
+- [x] Replace duplicate reindex candidate SQL with one model finder.
+- [x] Replace the simple PostgreSQL row-lock SQL with `QuerySelect::lock_exclusive`.
+- [x] Move audited table-owned queries out of controllers, services, and scheduled tasks.
+- [x] Keep documented raw SQL exceptions unchanged.
 
 ### P1: reduce the composition root
 
-- [ ] Move Loco dispatcher implementations and queue policy out of `src/app.rs`.
-- [ ] Move route composition and inventory assembly into `src/app/routes.rs` without hiding explicit registration.
-- [ ] Move seed composition into `src/app/seed.rs`.
-- [ ] Keep `src/app.rs` as the `Hooks` implementation and sole base-to-EE composition boundary.
+- [x] Move Loco dispatcher implementations out of `src/app.rs`; retain the EE-aware queue policy at the composition boundary.
+- [x] Move community route composition and inventory assembly into `src/app/routes.rs` without hiding explicit registration.
+- [x] Move seed composition into `src/app/seed.rs`.
+- [x] Keep `src/app.rs` as the `Hooks` implementation and sole base-to-EE composition boundary.
 
 ### P1: use Loco configuration and lifecycle
 
-- [ ] Replace application `std::env` reads with validated typed settings loaded once.
-- [ ] Keep direct environment access only in configuration/bootstrap code with an explicit reason.
-- [ ] Replace unmanaged process-lifetime `tokio::spawn` work with initializers/hooks and `on_shutdown`, or durable workers/tasks.
-- [ ] Centralize rate limiter construction and settings; do not claim distributed guarantees without an atomic shared backend.
+- [x] Replace application `std::env` reads with validated typed settings loaded once.
+- [x] Keep direct environment access only in configuration/bootstrap code with an explicit reason.
+- [x] Replace unmanaged durable work with Loco workers and await finite startup scans; retain only the shutdown-managed load monitor.
+- [x] Centralize rate limiter construction and settings; do not claim distributed guarantees without an atomic shared backend.
 
 ### P1: remove duplicated HTTP contracts
 
@@ -78,7 +78,7 @@ Project-specific code remains only where the framework APIs cannot preserve requ
 
 ## Deferred compatibility removal
 
-- [ ] Remove the legacy `config/{environment}.yaml` loader only at its documented compatibility boundary.
+- [x] Use Loco's `config/{environment}.yaml` loader as the configuration source of truth.
 - [ ] Re-evaluate duplicate `jsonwebtoken` major versions as a separate security-sensitive change.
 - [ ] Change pagination semantics only after measured offset-pagination cost justifies an API change.
 

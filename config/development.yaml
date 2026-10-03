@@ -130,7 +130,7 @@ workers:
   mode: BackgroundQueue
 
 settings:
-  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>
+  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
   embedding:
     provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="local") %>
     dimensions: <%= get_env(name="YORISHIRO_EMBEDDING_DIMENSIONS", default="768") %>
