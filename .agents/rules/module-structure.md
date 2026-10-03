@@ -38,6 +38,10 @@ Request-ID stamping and access logging are Loco's own `request_id`/`logger` midd
 
 Everything compiles into one crate, `ee/` included. `pub` on an item says "part of this crate's external surface" — a claim worth checking. Keep genuinely internal helpers `pub(crate)`/`pub(super)`.
 
+`ee/` is inside the crate, so it needs only `pub(crate)`. The only code outside the crate is the integration-test crate (`tests/`) and the `migration` crate, so an item is `pub` only when one of those names it, or when a `pub` signature exposes it (a returned record, an error field, an enum a public function takes).
+
+Narrowing is mechanical, and the compiler checks it: a `pub(crate)` item nothing calls is reported as dead code, which a `pub` one never is. Delete what it reports rather than allowing it. Types that exist only to describe the OpenAPI contract (`controllers/openapi.rs`) stay `pub` for the same reason: nothing reads them, and the schema derive does.
+
 `Authenticator` (`controllers/middleware/auth.rs`) is a seam: every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`AuditAuthorized`/`Verified<R>` extractors, `authorize`/`verify` in `controllers/mcp/mod.rs`). A new authenticated entry point must go through the seam, not call `authenticate` directly.
 
 ## Model column lists
