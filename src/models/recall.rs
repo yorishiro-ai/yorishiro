@@ -39,7 +39,7 @@ pub struct RecallContext {
     /// A neighbor reachable via more than one path is only reported once, at the shortest hop_distance it was found at.
     pub relations: Vec<RecallRelation>,
     /// `true` when more neighbors exist at some hop than `limit` allowed to be included there.
-    pub truncated: bool,
+    pub(crate) truncated: bool,
 }
 
 /// Parameters for [`recall_context`].

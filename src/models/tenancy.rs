@@ -24,7 +24,7 @@ mod workspace;
 
 /// The nil UUID reserved for infrastructure tenants that own no members and no data of their own.
 /// It is excluded from tenant-limit counts.
-pub const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
+pub(crate) const INFRASTRUCTURE_TENANT_ID: Uuid = Uuid::nil();
 
 db_enum! {
     /// Mirrors the `tenant_memberships.role` check constraint.
@@ -48,7 +48,7 @@ impl MembershipRole {
     }
 
     /// Returns whether this role may manage the tenant and its workspaces.
-    pub fn administers_tenant(self) -> bool {
+    pub(crate) fn administers_tenant(self) -> bool {
         matches!(self, Self::Owner | Self::Admin)
     }
 }
@@ -145,7 +145,7 @@ pub(crate) async fn get_user_by_email(
 }
 
 /// Lists the members of a tenant using the supplied pagination parameters.
-pub async fn list_members(
+pub(crate) async fn list_members(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     page: crate::models::pagination::ListParams,
@@ -154,7 +154,7 @@ pub async fn list_members(
 }
 
 /// Looks up a user's role within a tenant.
-pub async fn get_membership_role(
+pub(crate) async fn get_membership_role(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
     user_id: Uuid,
@@ -202,7 +202,7 @@ pub async fn list_workspaces_for_user(
 }
 
 /// Returns the tenant that owns a workspace for the explicit workspace-login path.
-pub async fn get_workspace_tenant(
+pub(crate) async fn get_workspace_tenant(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
@@ -236,7 +236,7 @@ pub async fn set_tenant_max_workspaces(
 }
 
 /// Fetches a workspace by ID.
-pub async fn get_workspace(
+pub(crate) async fn get_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {

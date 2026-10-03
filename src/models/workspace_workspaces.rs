@@ -170,7 +170,7 @@ impl TryFrom<Model> for WorkspaceRecord {
 
 db_enum! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum WorkspaceStatus {
+    pub(crate) enum WorkspaceStatus {
         SchemaPending = "schema_pending",
         Active = "active",
     }

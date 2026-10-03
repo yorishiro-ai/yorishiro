@@ -196,7 +196,7 @@ pub async fn export_all(
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
 ///
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
-pub async fn get_by_id(
+pub(crate) async fn get_by_id(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     schema_id: Uuid,
@@ -232,9 +232,9 @@ pub struct UpstreamChange {
     /// The version of the schema currently in use here.
     pub version: i32,
     pub template_id: Uuid,
-    pub template_name: String,
+    pub(crate) template_name: String,
     /// When the template was last edited.
-    pub changed_at: DateTime<Utc>,
+    pub(crate) changed_at: DateTime<Utc>,
     /// Whether a push notification has been sent for this schema's upstream change.
     pub pending_notification: bool,
     pub summary: MergeDiffSummary,
@@ -245,7 +245,7 @@ pub struct UpstreamChange {
 pub struct MergeDiffSummary {
     pub total_fields: usize,
     pub auto_add: usize,
-    pub auto_update: usize,
+    pub(crate) auto_update: usize,
     pub keep_local: usize,
     pub conflict: usize,
     pub has_conflicts: bool,

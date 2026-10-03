@@ -320,7 +320,7 @@ pub(crate) async fn delete_template(
 }
 
 /// Copies a template (visible to `tenant_id`, i.e. own or community) into a new template owned by `tenant_id`, recording `fork_of` so the lineage is traceable.
-pub async fn fork_template(
+pub(crate) async fn fork_template(
     conn: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     created_by: Option<uuid::Uuid>,

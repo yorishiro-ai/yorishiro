@@ -68,7 +68,7 @@ pub fn hash_key(raw: &str) -> Vec<u8> {
 }
 
 pub use crate::models::_entities::api_keys::{ActiveModel, Entity, Model};
-pub type IdentityApiKeys = Entity;
+pub(crate) type IdentityApiKeys = Entity;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

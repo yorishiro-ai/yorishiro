@@ -50,7 +50,7 @@ pub struct SearchHit {
 }
 
 #[derive(FromQueryResult)]
-pub struct SearchRow {
+pub(crate) struct SearchRow {
     id: Uuid,
     workspace_id: Uuid,
     schema_id: Uuid,
@@ -65,7 +65,7 @@ pub struct SearchRow {
 }
 
 impl SearchRow {
-    pub fn into_hit(self) -> SearchHit {
+    pub(crate) fn into_hit(self) -> SearchHit {
         SearchHit {
             entity: EntityRecord {
                 id: self.id,
