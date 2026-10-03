@@ -205,7 +205,7 @@ impl Hooks for App {
 
     /// Loads the canonical plain-YAML configuration.
     async fn load_config(env: &Environment) -> Result<Config> {
-        crate::config::load(env).await
+        crate::data::config::load(env).await
     }
 
     fn app_version() -> String {
@@ -223,7 +223,7 @@ impl Hooks for App {
         environment: &Environment,
         config: Config,
     ) -> Result<BootResult> {
-        crate::config::validate_queue_policy(&config)?;
+        crate::data::config::validate_queue_policy(&config)?;
         // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
         // The call site in main.rs already covers all CLI subcommands.
         startup::register_sqlite_extensions();
@@ -431,7 +431,7 @@ impl Hooks for App {
         });
         let settings = ctx
             .shared_store
-            .get::<crate::config::Settings>()
+            .get::<crate::data::settings::Settings>()
             .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
         let rate_limiter =
             std::sync::Arc::new(crate::services::rate_limit::RateLimiter::auth(&settings));

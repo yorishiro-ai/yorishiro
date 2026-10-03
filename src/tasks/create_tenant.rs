@@ -20,7 +20,9 @@ impl Task for CreateTenant {
     async fn run(&self, app_context: &AppContext, vars: &Vars) -> Result<()> {
         let name = vars.cli_arg("name")?;
 
-        let settings = app_context.config.settings::<crate::config::Settings>()?;
+        let settings = app_context
+            .config
+            .settings::<crate::data::settings::Settings>()?;
         let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
         let tenant =
             crate::models::tenancy::create_tenant_with_limit(&app_context.db, name, max_tenants)

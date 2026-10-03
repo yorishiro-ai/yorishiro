@@ -154,7 +154,7 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 ///
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 pub(crate) async fn build_embedding_provider(
-    config: &crate::config::Settings,
+    config: &crate::data::settings::Settings,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     let config = &config.embedding;
     let dimensions = config.dimensions;
@@ -178,7 +178,7 @@ pub(crate) async fn build_embedding_provider(
     }
 
     match config.provider {
-        crate::config::EmbeddingProvider::None => {
+        crate::data::settings::EmbeddingProvider::None => {
             tracing::info!(
                 "embedding provider explicitly disabled (YORISHIRO_EMBEDDING_PROVIDER=none)"
             );
@@ -187,8 +187,8 @@ pub(crate) async fn build_embedding_provider(
                 remedy: "YORISHIRO_EMBEDDING_PROVIDER is set to \"none\"; unset it or set YORISHIRO_EMBEDDING_PROVIDER=local or YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL to enable embeddings",
             }))
         }
-        crate::config::EmbeddingProvider::Local => build_local_provider(config).await,
-        crate::config::EmbeddingProvider::Openai => {
+        crate::data::settings::EmbeddingProvider::Local => build_local_provider(config).await,
+        crate::data::settings::EmbeddingProvider::Openai => {
             tracing::info!(
                 "no explicit embedding configuration (YORISHIRO_EMBEDDING_BASE_URL/YORISHIRO_EMBEDDING_MODEL/YORISHIRO_EMBEDDING_PROVIDER unset); defaulting to local provider with recommended model"
             );
@@ -331,7 +331,7 @@ fn resolve_local_model(requested: &str) -> anyhow::Result<&'static model_fetch::
 ///
 /// The model files are fetched on first use when, and only when, neither the default path nor the cache path holds both files.
 async fn build_local_provider(
-    config: &crate::config::Embedding,
+    config: &crate::data::settings::Embedding,
 ) -> anyhow::Result<std::sync::Arc<dyn EmbeddingProvider>> {
     reject_renamed_onnx_vars()?;
     let dimensions = config.dimensions;

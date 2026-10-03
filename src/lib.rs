@@ -1,6 +1,6 @@
 pub mod app;
-pub mod config;
 pub mod controllers;
+pub mod data;
 pub mod db;
 mod db_enum;
 

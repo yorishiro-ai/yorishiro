@@ -24,7 +24,7 @@ use crate::models::tenancy::{self, MembershipRole};
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     let settings = ctx
         .shared_store
-        .get::<crate::config::Settings>()
+        .get::<crate::data::settings::Settings>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
     Ok((settings.max_tenants > 0).then_some(settings.max_tenants))
 }

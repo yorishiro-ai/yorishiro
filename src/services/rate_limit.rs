@@ -42,7 +42,7 @@ impl RateLimiter {
 
     /// `YORISHIRO_AUTH_RATE_LIMIT_MAX` (default 10) requests per
     /// `YORISHIRO_AUTH_RATE_LIMIT_WINDOW_SECS` (default 60) seconds, per client IP.
-    pub(crate) fn auth(config: &crate::config::Settings) -> Self {
+    pub(crate) fn auth(config: &crate::data::settings::Settings) -> Self {
         Self::new(
             config.rate_limit.auth_max_requests,
             Duration::from_secs(config.rate_limit.auth_window_seconds),
@@ -53,7 +53,7 @@ impl RateLimiter {
     ///
     /// Keyed by workspace rather than by IP: a search is authenticated, so the workspace is known and is the thing whose consumption matters.
     /// The default is high enough that ordinary use never reaches it: it is there to bound a runaway agent, not to ration.
-    pub(crate) fn search(config: &crate::config::Settings) -> Self {
+    pub(crate) fn search(config: &crate::data::settings::Settings) -> Self {
         Self::new(config.rate_limit.search_tokens_per_minute, ONE_MINUTE)
     }
 

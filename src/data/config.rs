@@ -1,5 +1,7 @@
+//! Loads `config/<environment>.yaml` and rejects settings the application cannot run with.
+
 use std::{
-    fs,
+    env, fs,
     path::{Component, Path, PathBuf},
     str::FromStr,
 };
@@ -7,11 +9,39 @@ use std::{
 use loco_rs::{
     Error, Result,
     config::{Config, QueueConfig, WorkerMode},
+    environment::Environment,
 };
 use sqlx::sqlite::SqliteConnectOptions;
 
-pub(super) fn validate(config: &Config) -> Result<()> {
-    let settings = config.settings::<crate::config::Settings>()?;
+pub async fn load(environment: &Environment) -> Result<Config> {
+    let environment = test_environment(environment);
+    let config = environment.load()?;
+    validate(&config)?;
+    Ok(config)
+}
+
+fn test_environment(environment: &Environment) -> Environment {
+    match environment {
+        Environment::Test => {
+            if env::var("QUEUE_URL")
+                .is_ok_and(|url| url.starts_with("redis://") || url.starts_with("rediss://"))
+            {
+                return Environment::Any("test_redis".into());
+            }
+            let url = env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgres://loco:loco@localhost:5432/yorishiro_test".into());
+            if url.starts_with("sqlite://") || url.starts_with("sqlite::") {
+                Environment::Any("test_sqlite".into())
+            } else {
+                Environment::Any("test_postgres".into())
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+fn validate(config: &Config) -> Result<()> {
+    let settings = config.settings::<crate::data::settings::Settings>()?;
     if settings.max_tenants < 0 {
         return Err(Error::Message(
             "settings.max_tenants must not be negative".into(),

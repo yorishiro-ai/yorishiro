@@ -2,7 +2,7 @@ use loco_rs::config::QueueConfig;
 use loco_rs::environment::Environment;
 use serial_test::serial;
 
-use yorishiro::config::load;
+use yorishiro::data::config::load;
 
 use super::EnvGuard;
 

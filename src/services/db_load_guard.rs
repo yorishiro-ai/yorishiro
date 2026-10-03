@@ -31,7 +31,7 @@ impl LoadGuardConfig {
     ///
     /// `YORISHIRO_DB_LOAD_THRESHOLD` defaults to zero, which disables the guard.
     /// `YORISHIRO_DB_LOAD_SUSTAIN_SECS` defaults to 30 and `YORISHIRO_DB_LOAD_POLL_SECS` defaults to 5.
-    pub(crate) fn from_settings(settings: &crate::config::DbLoadGuard) -> Option<Self> {
+    pub(crate) fn from_settings(settings: &crate::data::settings::DbLoadGuard) -> Option<Self> {
         if settings.threshold <= 0 {
             return None;
         }
@@ -221,7 +221,7 @@ pub(crate) async fn run(ctx: AppContext, config: LoadGuardConfig) {
 
 /// Performs one diagnostic task invocation without changing maintenance mode.
 pub(crate) async fn check_once(ctx: &AppContext) -> loco_rs::Result<()> {
-    let settings = ctx.config.settings::<crate::config::Settings>()?;
+    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
     let Some(config) = LoadGuardConfig::from_settings(&settings.db_load_guard) else {
         return Ok(());
     };

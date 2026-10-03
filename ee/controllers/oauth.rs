@@ -135,7 +135,7 @@ async fn callback(
     let embedding_dimensions = embedding_provider.dimensions() as i32;
     let settings = ctx
         .shared_store
-        .get::<crate::config::Settings>()
+        .get::<crate::data::settings::Settings>()
         .ok_or_else(|| {
             ApiError(YorishiroError::Internal(anyhow::anyhow!(
                 "application settings missing"

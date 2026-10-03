@@ -132,7 +132,7 @@ async fn signup_without_invite(
     let txn = ctx.db.begin().await.internal()?;
     let settings = ctx
         .shared_store
-        .get::<crate::config::Settings>()
+        .get::<crate::data::settings::Settings>()
         .ok_or_else(|| YorishiroError::Internal(anyhow::anyhow!("application settings missing")))?;
     let max_tenants = (settings.max_tenants > 0).then_some(settings.max_tenants);
     let tenant = tenancy::create_tenant_with_limit(&txn, tenant_name, max_tenants).await?;

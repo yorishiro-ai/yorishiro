@@ -49,7 +49,7 @@ pub(super) async fn after_boot(
 
     let settings = ctx
         .shared_store
-        .get::<crate::config::Settings>()
+        .get::<crate::data::settings::Settings>()
         .ok_or_else(|| loco_rs::Error::Message("application settings were not installed".into()))?;
     if let Some(config) =
         crate::services::db_load_guard::LoadGuardConfig::from_settings(&settings.db_load_guard)

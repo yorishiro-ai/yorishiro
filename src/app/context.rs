@@ -9,7 +9,7 @@ use super::startup;
 /// Builds the base application's shared services without moving work past Loco's migration boundary.
 pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
     startup::validate_backend(&ctx)?;
-    let settings = ctx.config.settings::<crate::config::Settings>()?;
+    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
 
     if ctx.is_postgres() {
         let database_url = ctx.config.database.uri.clone();
