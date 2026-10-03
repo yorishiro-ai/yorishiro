@@ -238,19 +238,23 @@ impl Entity {
         Ok(result.rows_affected == 1)
     }
 
-    pub(crate) fn heartbeat(db: DatabaseConnection, id: Uuid, attempt: i32) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    pub(crate) fn heartbeat(db: DatabaseConnection, id: Uuid, attempt: i32) -> Heartbeat {
+        Heartbeat(tokio::spawn(async move {
             let mut ticker =
                 tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             ticker.tick().await;
             loop {
                 match Self::renew(&db, id, attempt, Utc::now().fixed_offset()).await {
                     Ok(true) => {}
-                    Ok(false) | Err(_) => break,
+                    Ok(false) => break,
+                    Err(error) => {
+                        tracing::warn!(lifecycle_id = %id, diagnostic = %error, "queue lease renewal failed");
+                        break;
+                    }
                 }
                 ticker.tick().await;
             }
-        })
+        }))
     }
 
     pub(crate) async fn start(db: &DatabaseConnection, id: Uuid) -> Result<Admission, DbErr> {
@@ -430,6 +434,23 @@ impl Entity {
     }
 }
 
+/// Keeps one running attempt's lease alive until it is dropped.
+///
+/// Stopping on drop, not only on an explicit call, means a cancelled or panicking worker cannot leave a renewal task extending the lease of a job nobody is running.
+pub(crate) struct Heartbeat(JoinHandle<()>);
+
+impl Heartbeat {
+    pub(crate) fn abort(self) {
+        drop(self);
+    }
+}
+
+impl Drop for Heartbeat {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Admission {
     Started { attempt: i32 },
@@ -437,15 +458,6 @@ pub(crate) enum Admission {
     Duplicate { attempt: i32 },
     Saturated { attempt: Option<i32> },
     Terminal,
-}
-
-impl Admission {
-    pub(crate) fn attempt(self) -> Option<i32> {
-        match self {
-            Self::Started { attempt } | Self::Recovered { attempt } => Some(attempt),
-            Self::Duplicate { .. } | Self::Saturated { .. } | Self::Terminal => None,
-        }
-    }
 }
 
 fn running_lease_is_live(
@@ -655,10 +667,11 @@ mod tests {
             Entity::start_at(&second, id, now)
         );
         let admissions = [left.unwrap(), right.unwrap()];
-        assert_eq!(
-            admissions.iter().filter(|a| a.attempt().is_some()).count(),
-            1
-        );
+        let started = admissions
+            .iter()
+            .filter(|a| matches!(a, Admission::Started { .. } | Admission::Recovered { .. }))
+            .count();
+        assert_eq!(started, 1);
     }
 
     #[tokio::test]
@@ -669,12 +682,9 @@ mod tests {
         enqueue(&db, active, Some(1)).await;
         enqueue(&db, waiting, Some(1)).await;
         let now = Utc.timestamp_opt(6_000, 0).single().unwrap().fixed_offset();
-        assert!(
-            Entity::start_at(&db, active, now)
-                .await
-                .unwrap()
-                .attempt()
-                .is_some()
+        assert_eq!(
+            Entity::start_at(&db, active, now).await.unwrap(),
+            Admission::Started { attempt: 1 }
         );
         assert_eq!(
             Entity::start_at(&db, waiting, now).await.unwrap(),

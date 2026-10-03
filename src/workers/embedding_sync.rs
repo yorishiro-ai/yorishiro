@@ -19,7 +19,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
 use serde::{Deserialize, Serialize};
@@ -230,97 +229,14 @@ macro_rules! embedding_sync_worker_for_class {
             }
 
             async fn perform(&self, args: EmbeddingSyncArgs) -> loco_rs::Result<()> {
-                let admission = if let Some(id) = args.lifecycle_id {
-                    match crate::models::queue_job_lifecycles::Entity::start(&self.ctx.db, id).await
-                    {
-                        Ok(admission @ (crate::models::queue_job_lifecycles::Admission::Started { .. } | crate::models::queue_job_lifecycles::Admission::Recovered { .. })) => admission,
-                        Ok(
-                            crate::models::queue_job_lifecycles::Admission::Duplicate { .. }
-                            | crate::models::queue_job_lifecycles::Admission::Terminal,
-                        ) => return Ok(()),
-                        Ok(crate::models::queue_job_lifecycles::Admission::Saturated { attempt }) => {
-                            let scheduling = crate::services::queue::decide($class);
-                            tracing::warn!(
-                                lifecycle_id = %id,
-                                worker_class = $class.as_db_str(),
-                                scheduling_priority = scheduling.priority,
-                                fallback = scheduling.fallback,
-                                "worker capacity saturated; preserving class reservation"
-                            );
-                            match attempt {
-                                Some(attempt) => crate::models::queue_job_lifecycles::Entity::defer_at(
-                                    &self.ctx.db,
-                                    id,
-                                    attempt,
-                                    "worker capacity saturated",
-                                    Utc::now().fixed_offset(),
-                                )
-                                .await,
-                                None => crate::models::queue_job_lifecycles::Entity::defer(
-                                    &self.ctx.db,
-                                    id,
-                                    None,
-                                    "worker capacity saturated",
-                                )
-                                .await,
-                            }
-                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            $worker_ty::perform_later_with_priority(
-                                &self.ctx,
-                                args.clone(),
-                                Some(scheduling.priority),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                        Err(error) => return Err(loco_rs::Error::Message(error.to_string())),
-                    }
-                } else {
-                    crate::models::queue_job_lifecycles::Admission::Started { attempt: 0 }
-                };
-                let admitted = admission.attempt().is_some();
-                let attempt = admission.attempt();
-                let heartbeat = args.lifecycle_id.zip(attempt).map(|(id, attempt)| {
-                    crate::models::queue_job_lifecycles::Entity::heartbeat(
-                        self.ctx.db.clone(), id, attempt,
-                    )
-                });
-                let result = perform_embedding_sync(&self.ctx, &args).await;
-                if let Some(heartbeat) = heartbeat {
-                    heartbeat.abort();
-                }
-                if admitted {
-                    if let Some(id) = args.lifecycle_id {
-                        if result.is_ok() {
-                            let _ = crate::models::queue_job_lifecycles::Entity::finish(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
-                                None,
-                            )
-                            .await;
-                        } else if let Some(error) = result.as_ref().err() {
-                            crate::models::queue_job_lifecycles::Entity::defer(
-                                &self.ctx.db,
-                                id,
-                                attempt,
-                                &error.to_string(),
-                            )
-                            .await
-                            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-                            let scheduling = crate::services::queue::decide($class);
-                            $worker_ty::perform_later_with_priority(
-                                &self.ctx,
-                                args.clone(),
-                                Some(scheduling.priority),
-                            )
-                            .await?;
-                            return Ok(());
-                        }
-                    }
-                }
-                result
+                crate::workers::lifecycle::perform_with_lifecycle::<Self, _, _, _>(
+                    &self.ctx,
+                    args.lifecycle_id,
+                    $class,
+                    &args,
+                    || perform_embedding_sync(&self.ctx, &args),
+                )
+                .await
             }
         }
     };
