@@ -32,7 +32,7 @@ pub(super) async fn build(ctx: AppContext) -> Result<AppContext> {
         // `Arc<dyn Trait>` is keyed by `TypeId`, so the later insert wins without changing
         // any call site.
         ctx.shared_store
-            .insert(crate::services::auth::default_authenticator());
+            .insert(crate::controllers::middleware::auth::default_authenticator());
     }
 
     // Boot fails loudly if the embedding provider is misconfigured, rather than deferring the

@@ -13,7 +13,7 @@ use crate::error::YorishiroError;
 use crate::models::_entities::{
     tenant_tenants, user_users, workspace_invites, workspace_workspaces,
 };
-use crate::services::auth::ApiKeyScope;
+use crate::models::api_keys::ApiKeyScope;
 
 mod invite;
 mod membership;

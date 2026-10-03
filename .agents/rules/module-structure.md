@@ -38,7 +38,7 @@ Request-ID stamping and access logging are Loco's own `request_id`/`logger` midd
 
 Everything compiles into one crate, `ee/` included. `pub` on an item says "part of this crate's external surface" — a claim worth checking. Keep genuinely internal helpers `pub(crate)`/`pub(super)`.
 
-`Authenticator` (`services/auth`) is a seam: every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`AuditAuthorized`/`Verified<R>` extractors, `authorize`/`verify` in `services/mcp/mod.rs`). A new authenticated entry point must go through the seam, not call `authenticate` directly.
+`Authenticator` (`controllers/middleware/auth.rs`) is a seam: every authenticated path resolves through it (`AuthContext`/`Authorized<R>`/`AuditAuthorized`/`Verified<R>` extractors, `authorize`/`verify` in `controllers/mcp/mod.rs`). A new authenticated entry point must go through the seam, not call `authenticate` directly.
 
 ## Model column lists
 

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_invites;
-use crate::services::auth::{hash_key, random_hex};
+use crate::models::api_keys::{hash_key, random_hex};
 
 use super::{MembershipRole, RedeemedInvite};
 

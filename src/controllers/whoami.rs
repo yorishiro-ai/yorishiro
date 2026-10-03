@@ -5,7 +5,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::controllers::extractors::AuthContext;
-use crate::services::auth::ApiKeyScope;
+use crate::models::api_keys::ApiKeyScope;
 
 #[derive(Serialize)]
 pub struct WhoAmIResponse {

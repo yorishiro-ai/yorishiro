@@ -11,8 +11,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_relations::{self, SetRelationStatusInput};
-use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateRelationArgs {

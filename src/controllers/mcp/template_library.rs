@@ -10,8 +10,8 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::template_templates;
-use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetTemplateLibraryItemArgs {

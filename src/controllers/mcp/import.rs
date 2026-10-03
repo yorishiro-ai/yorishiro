@@ -9,8 +9,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::import;
-use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ImportJsonlArgs {

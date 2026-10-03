@@ -7732,6 +7732,7 @@ dependencies = [
  "candle-transformers",
  "chrono",
  "futures",
+ "hex",
  "hmac 0.13.0",
  "jsonschema",
  "jsonwebtoken 11.1.0",

@@ -25,9 +25,10 @@ use rmcp::{ServerHandler, tool_handler};
 use sea_orm::DatabaseTransaction;
 
 use crate::controllers::extractors::{authenticator, db_handle};
+use crate::controllers::middleware::auth;
 use crate::db::AppContextBackend;
 use crate::error::YorishiroError;
-use crate::services::auth::{self, ApiKeyScope, AuthContext};
+use crate::models::api_keys::{ApiKeyScope, AuthContext};
 
 #[cfg(test)]
 use rmcp::model::Tool;
@@ -335,7 +336,7 @@ fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
 /// The sole entry point for every tool handler.
 /// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
 ///
-/// Shares `services::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
+/// Shares `controllers::middleware::auth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
 pub(crate) async fn authorize(
     ctx: &AppContext,
     parts: &Parts,
@@ -377,7 +378,7 @@ pub(crate) async fn authorize(
 }
 
 /// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
-/// See `services::auth::authorize_scope`.
+/// See `controllers::middleware::auth::authorize_scope`.
 pub(super) async fn verify(
     ctx: &AppContext,
     parts: &Parts,

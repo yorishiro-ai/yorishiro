@@ -14,8 +14,8 @@ use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::members::require_tenant_admin;
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
-use crate::services::auth::ApiKeyScope;
 
 const MAX_NAME_LENGTH: usize = 100;
 

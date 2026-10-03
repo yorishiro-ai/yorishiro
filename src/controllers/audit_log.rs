@@ -1,6 +1,6 @@
 //! `GET /api/audit-log`: the workspace's audit trail, for a key holding the independent `audit` grant.
 //!
-//! Gated on `audit`, not on `ApiKeyScope`: an ordinary `read`/`write`/`schema`/`migration` key, however high its scope, cannot reach this route without the grant issued separately (see `services::auth::AuthContext::audit`'s doc comment for why that grant sits outside the scope ladder).
+//! Gated on `audit`, not on `ApiKeyScope`: an ordinary `read`/`write`/`schema`/`migration` key, however high its scope, cannot reach this route without the grant issued separately (see `models::api_keys::AuthContext::audit`'s doc comment for why that grant sits outside the scope ladder).
 
 use axum::Json;
 use axum::extract::Query;

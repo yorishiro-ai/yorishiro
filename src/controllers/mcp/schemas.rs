@@ -13,8 +13,8 @@ use uuid::Uuid;
 use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::error::YorishiroError;
 use crate::metaschema::MetaSchemaDefinition;
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::schema_schemas;
-use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetActiveSchemaArgs {

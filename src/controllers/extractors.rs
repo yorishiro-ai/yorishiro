@@ -7,10 +7,10 @@ use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
+use crate::controllers::middleware::auth::{self, Authenticator};
 use crate::db::{AppContextBackend, DbHandle};
 use crate::error::YorishiroError;
-use crate::services::auth;
-use crate::services::auth::{ApiKeyScope, Authenticator};
+use crate::models::api_keys::{self, ApiKeyScope};
 
 use super::ApiError;
 
@@ -132,7 +132,7 @@ pub(crate) fn search_token_limiter(
 
 /// The sole entry point for authenticated requests with no scope requirement and no DB connection.
 /// Requiring this type as a handler argument is itself a declaration that "this route requires authentication."
-pub struct AuthContext(pub auth::AuthContext);
+pub struct AuthContext(pub api_keys::AuthContext);
 
 impl<S> FromRequestParts<S> for AuthContext
 where
@@ -148,10 +148,10 @@ where
 
         // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.is_sqlite() {
-            let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
+            let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
-            auth::touch_last_used_sqlite(&app_ctx.db, ctx.api_key_id).await;
+            api_keys::Entity::touch_last_used(&app_ctx.db, ctx.api_key_id).await;
             return Ok(AuthContext(ctx));
         }
 
@@ -201,7 +201,7 @@ impl RequiredScope for MigrationScope {
 /// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
 /// A read-only handler can just let it drop; a rollback of nothing-written is a no-op.
 pub struct Authorized<R> {
-    pub ctx: auth::AuthContext,
+    pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
     _scope: PhantomData<R>,
 }
@@ -266,7 +266,7 @@ where
 /// As `Authorized<R>`, but for the `audit` grant rather than a `RequiredScope`.
 /// Not generic over `R` the way `Authorized<R>` is: `audit` is one grant, not a family of scopes, so there is nothing for a type parameter to select between.
 pub struct AuditAuthorized {
-    pub ctx: auth::AuthContext,
+    pub ctx: api_keys::AuthContext,
     txn: sea_orm::DatabaseTransaction,
 }
 
@@ -311,7 +311,7 @@ where
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified<R> {
-    pub ctx: auth::AuthContext,
+    pub ctx: api_keys::AuthContext,
     _scope: PhantomData<R>,
 }
 
@@ -331,11 +331,11 @@ where
 
         // No DbHandle/Authenticator is built for SQLite (Hooks::after_context): that backend has no RLS to scope a request connection for and no ee/ authentication rule to replace, so this authenticates directly against ctx.db instead of going through the Authenticator trait.
         if app_ctx.is_sqlite() {
-            let ctx = auth::authenticate_sqlite(&app_ctx.db, presented_key)
+            let ctx = api_keys::Entity::authenticate_sqlite(&app_ctx.db, presented_key)
                 .await
                 .inspect_err(|err| log_auth_rejection(parts, err))?;
             auth::require_scope(&ctx, R::SCOPE)?;
-            auth::touch_last_used_sqlite(&app_ctx.db, ctx.api_key_id).await;
+            api_keys::Entity::touch_last_used(&app_ctx.db, ctx.api_key_id).await;
             return Ok(Verified {
                 ctx,
                 _scope: PhantomData,

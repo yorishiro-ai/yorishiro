@@ -52,7 +52,7 @@ db_enum! {
 }
 
 /// The acting key, for [`record`]: what an audited operation attributes itself to.
-/// A thin, owned copy of the fields of `auth::AuthContext`/`auth::CreatedApiKey` that `record` actually needs, so this module doesn't have to depend on `services::auth` for a handful of UUIDs.
+/// A thin, owned copy of the fields of `api_keys::AuthContext`/`api_keys::CreatedApiKey` that `record` actually needs, so this module doesn't have to depend on the guard for a handful of UUIDs.
 #[derive(Clone, Copy)]
 pub struct AuditActor {
     pub workspace_id: Uuid,

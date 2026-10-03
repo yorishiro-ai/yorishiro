@@ -434,7 +434,7 @@ async fn download_verified(
         );
     }
 
-    let digest = hex_encode(&hasher.finalize());
+    let digest = hex::encode(hasher.finalize());
     if digest != artifact.sha256 {
         anyhow::bail!(
             "{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",
@@ -443,15 +443,6 @@ async fn download_verified(
     }
 
     Ok(())
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
 }
 
 #[cfg(test)]
@@ -513,7 +504,7 @@ mod tests {
         Artifact {
             remote_path: "test.bin",
             local_name: "test.bin",
-            sha256: Box::leak(hex_encode(&Sha256::digest(bytes)).into_boxed_str()),
+            sha256: Box::leak(hex::encode(Sha256::digest(bytes)).into_boxed_str()),
             size: bytes.len() as u64,
             description: "test artifact",
         }
@@ -547,12 +538,6 @@ mod tests {
                 .to_string_lossy()
                 .contains(".partial.")
         }));
-    }
-
-    #[test]
-    fn hex_encode_pads_single_digit_bytes() {
-        assert_eq!(hex_encode(&[0x00, 0x0f, 0xff, 0xa5]), "000fffa5");
-        assert_eq!(hex_encode(&[]), "");
     }
 
     #[test]

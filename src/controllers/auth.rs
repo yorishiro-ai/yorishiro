@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
 use crate::models::tenancy::{self, MembershipRole, WorkspaceSummary};
-use crate::services::auth::ApiKeyScope;
 
 #[derive(Deserialize)]
 pub struct SignupRequest {
