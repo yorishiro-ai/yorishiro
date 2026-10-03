@@ -4,6 +4,7 @@ pub mod entity_columns;
 pub mod inference;
 pub mod marketplace;
 pub mod oauth;
+pub mod openapi;
 pub mod origin;
 pub mod schema_forks;
 pub mod stripe;

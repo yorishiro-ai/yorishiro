@@ -35,7 +35,7 @@ async fn licensed_tenant(
 }
 
 /// `GET /api/marketplace`: community-visible templates from every tenant, ordered by name then id.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::controllers::openapi::MarketplaceListing]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::MarketplaceListing]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -48,7 +48,7 @@ async fn list_marketplace(
 }
 
 /// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::controllers::openapi::TemplateVersionRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::TemplateVersionRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -62,7 +62,7 @@ async fn list_versions(
 }
 
 /// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path)), request_body = crate::controllers::openapi::PublishVersionRequest, responses((status = 201, body = crate::controllers::openapi::TemplateVersionRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path)), request_body = crate::ee::controllers::openapi::PublishVersionRequest, responses((status = 201, body = crate::ee::controllers::openapi::TemplateVersionRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn publish_version(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -93,7 +93,7 @@ fn default_publish_status() -> String {
 }
 
 /// `GET /api/marketplace/{id}/reviews`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::controllers::openapi::TemplateReviewRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [crate::ee::controllers::openapi::TemplateReviewRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn list_reviews(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -107,7 +107,7 @@ async fn list_reviews(
 }
 
 /// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path)), request_body = crate::controllers::openapi::SubmitReviewRequest, responses((status = 200, body = crate::controllers::openapi::TemplateReviewRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path)), request_body = crate::ee::controllers::openapi::SubmitReviewRequest, responses((status = 200, body = crate::ee::controllers::openapi::TemplateReviewRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn submit_review(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -133,7 +133,7 @@ pub struct ForkResponse {
 }
 
 /// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/fork", params(("id" = Uuid, Path), ("version" = Option<i32>, Query)), responses((status = 201, body = crate::controllers::openapi::ForkResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/fork", params(("id" = Uuid, Path), ("version" = Option<i32>, Query)), responses((status = 201, body = crate::ee::controllers::openapi::ForkResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn fork_template(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -158,7 +158,7 @@ pub struct SetVisibilityRequest {
 }
 
 /// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/marketplace/{id}/visibility", params(("id" = Uuid, Path)), request_body = crate::controllers::openapi::SetVisibilityRequest, responses((status = 204, description = "Marketplace visibility updated"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/marketplace/{id}/visibility", params(("id" = Uuid, Path)), request_body = crate::ee::controllers::openapi::SetVisibilityRequest, responses((status = 204, description = "Marketplace visibility updated"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "enterprise"))]
 async fn set_visibility(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
