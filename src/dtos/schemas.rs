@@ -1,5 +1,5 @@
-use crate::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use crate::models::schema_schemas::SchemaRecord;
+use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]

@@ -7,8 +7,11 @@ use uuid::Uuid;
 
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::{self, MetaSchemaDefinition, VersioningDiff, validate_definition};
 pub use crate::models::_entities::schema_schemas::{ActiveModel, Entity, Model};
+
+pub mod metaschema;
+
+use metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {

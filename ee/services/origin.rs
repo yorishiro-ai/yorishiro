@@ -7,7 +7,7 @@
 //! Passing `ctx.db` for the schema side would bypass RLS; passing the RLS-scoped connection for the template side would fail with a permission error.
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::{MetaSchemaDefinition, VersioningDiff};
+use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use crate::models::schema_schemas::{self, SchemaRecord};
 use crate::models::template_templates;
 use loco_rs::app::AppContext;

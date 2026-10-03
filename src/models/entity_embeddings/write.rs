@@ -3,8 +3,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
-use crate::metaschema::EntityTypeDef;
 use crate::models::entity_entities::EntityRecord;
+use crate::models::schema_schemas::metaschema::EntityTypeDef;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};

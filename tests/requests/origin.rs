@@ -187,7 +187,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             edit_local.text()
         );
         // Edit the template upstream: add a field the workspace does not have.
-        let updated_definition: yorishiro::metaschema::MetaSchemaDefinition =
+        let updated_definition: yorishiro::models::schema_schemas::metaschema::MetaSchemaDefinition =
             serde_json::from_value(serde_json::json!({
             "name": "library-note",
             "entity_types": {

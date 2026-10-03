@@ -1,6 +1,6 @@
 use serde_json::json;
 /// Tests for metaschema versioning: backward compatibility checks.
-use yorishiro::metaschema::{MetaSchemaDefinition, VersioningDiff, diff};
+use yorishiro::models::schema_schemas::metaschema::{MetaSchemaDefinition, VersioningDiff, diff};
 
 fn parse(value: serde_json::Value) -> MetaSchemaDefinition {
     serde_json::from_value(value).expect("valid metaschema json")

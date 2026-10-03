@@ -1,6 +1,6 @@
 use serde_json::json;
 /// Tests for metaschema type definitions: FieldDef serialization, x- attributes, and round-tripping.
-use yorishiro::metaschema::{FieldDef, FieldTypeName};
+use yorishiro::models::schema_schemas::metaschema::{FieldDef, FieldTypeName};
 
 #[test]
 fn preserves_known_and_unknown_x_attributes() {

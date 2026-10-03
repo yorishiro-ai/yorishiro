@@ -12,7 +12,7 @@ use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
 use crate::data::templates::{self, TemplateSummary};
 use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
 use crate::error::YorishiroError;
-use crate::metaschema::{self, MetaSchemaDefinition};
+use crate::models::schema_schemas::metaschema::{self, MetaSchemaDefinition};
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::template_templates;
 

@@ -10,8 +10,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
 use crate::models::schema_schemas;
+use crate::models::schema_schemas::metaschema::{
+    MetaSchemaDefinition, VersioningDiff, validate_definition,
+};
 
 use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;

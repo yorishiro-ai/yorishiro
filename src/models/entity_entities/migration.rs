@@ -8,7 +8,7 @@ use super::{
     MigrationDryRun,
 };
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema;
+use crate::models::schema_schemas::metaschema;
 
 /// Reports how `entity_id` stands against the active version of its schema.
 pub async fn drift(

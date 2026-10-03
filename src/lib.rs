@@ -20,7 +20,6 @@ pub mod dtos;
 pub mod ee;
 pub mod error;
 pub(crate) mod initializers;
-pub mod metaschema;
 pub mod models;
 pub mod services;
 pub mod tasks;

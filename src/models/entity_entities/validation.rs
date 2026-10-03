@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
-use crate::metaschema;
+use crate::models::schema_schemas::metaschema;
 
 /// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
 fn escape_pointer_segment(segment: &str) -> String {

@@ -7,7 +7,7 @@
 
 use crate::controllers::ApiError;
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::VersioningDiff;
+use crate::models::schema_schemas::metaschema::VersioningDiff;
 use crate::models::schema_schemas::{MergeDiffSummary, SchemaRecord, UpstreamChange};
 use crate::services::auth::{ApiKeyScope, require_scope};
 use axum::Json;

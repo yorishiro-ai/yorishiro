@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use crate::error::YorishiroError;
-use crate::metaschema::{EntityTypeDef, FieldDef, MetaSchemaDefinition};
 use crate::models::schema_schemas::MergeDiffSummary;
+use crate::models::schema_schemas::metaschema::{EntityTypeDef, FieldDef, MetaSchemaDefinition};
 
 /// What should happen to one field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -207,7 +207,7 @@ impl From<YorishiroError> for loco_rs::Error {
 
 /// Machine-readable classification of a validation error.
 ///
-/// New branches in `src/metaschema/validate.rs` should get their own variant here.
+/// New branches in `src/models/schema_schemas/metaschema/validate.rs` should get their own variant here.
 /// Use the `Other` catch-all for errors that do not fit a specific classification.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum ValidationErrorCode {
@@ -215,7 +215,7 @@ pub enum ValidationErrorCode {
     TypeMismatch,
     /// A required field was empty or missing.
     EmptyRequired,
-    /// Object nesting exceeds [`crate::metaschema::MAX_OBJECT_DEPTH`].
+    /// Object nesting exceeds [`crate::models::schema_schemas::metaschema::MAX_OBJECT_DEPTH`].
     DepthExceeded,
     /// A numeric field uses minimum/maximum on a non-numeric type.
     NumericOnNonNumeric,

@@ -8,9 +8,9 @@
 
 use crate::ee::services::merge;
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::MetaSchemaDefinition;
 use crate::models::pagination::ListParams;
 use crate::models::schema_schemas::UpstreamChange;
+use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use uuid::Uuid;

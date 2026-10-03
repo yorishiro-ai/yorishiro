@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 use crate::error::YorishiroError;
-use crate::metaschema::MetaSchemaDefinition;
+use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
 struct BuiltinTemplate {
     id: &'static str,

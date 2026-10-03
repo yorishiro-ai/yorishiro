@@ -1,4 +1,4 @@
-use crate::metaschema::MetaSchemaDefinition;
+use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use serde::Deserialize;
 
 #[derive(Deserialize)]

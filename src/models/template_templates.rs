@@ -10,8 +10,8 @@ use serde::Serialize;
 
 use crate::db_enum::db_enum;
 use crate::error::{ResultExt, YorishiroError};
-use crate::metaschema::MetaSchemaDefinition;
 use crate::models::schema_schemas;
+use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -195,7 +195,7 @@ pub async fn create_template(
     created_by: Option<uuid::Uuid>,
     input: CreateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
-    crate::metaschema::validate_definition(&input.definition)?;
+    crate::models::schema_schemas::metaschema::validate_definition(&input.definition)?;
     let name = input.name.clone();
     let definition = serde_json::to_value(&input.definition).internal()?;
 
@@ -241,7 +241,7 @@ pub async fn update_template(
         .await
         .internal()?;
     if let Some(definition) = &input.definition {
-        crate::metaschema::validate_definition(definition)?;
+        crate::models::schema_schemas::metaschema::validate_definition(definition)?;
     }
 
     if input.name.is_none()
