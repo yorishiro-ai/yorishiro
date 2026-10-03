@@ -95,7 +95,8 @@ MCP is a service, not a controller. Route mounting (`src/controllers/mcp.rs::mou
 ## Git workflow
 
 - Branch from latest `develop`. Merge commits preferred.
-- Run `make check-all` and the PostgreSQL or SQLite suites relevant to the change before pushing.
+- Run `make check-all` for CE changes and `make check-all-ee` for EE changes or shared API compatibility.
+- Run the PostgreSQL or SQLite suites relevant to the change before pushing.
 - Every PR updates English + Japanese docs.
 
 ## Rules

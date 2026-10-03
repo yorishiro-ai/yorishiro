@@ -8,12 +8,22 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 YORISHIRO_REDIS_TEST_URL ?= redis://localhost:6379
 
-.PHONY: check clippy fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build task doctor migrate entities check-all
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint public-api-check coverage test-postgres test-sqlite test-redis build build-ce build-ee task doctor migrate entities check-all check-all-ee
 
-check:
-	cargo check --locked --workspace
+check: check-ce
 
-clippy:
+check-ce:
+	cargo check --locked --no-default-features --workspace
+
+check-ee:
+	cargo check --locked --features enterprise --workspace
+
+clippy: clippy-ce
+
+clippy-ce:
+	cargo clippy --locked --no-default-features --workspace --lib --bins -- -D warnings
+
+clippy-ee:
 	cargo clippy --locked --workspace --tests --features test-support -- -D warnings
 
 fmt:
@@ -53,8 +63,13 @@ test-redis:
 	fi
 	YORISHIRO_REDIS_TEST_URL='$(YORISHIRO_REDIS_TEST_URL)' uv run scripts/test_redis.py
 
-build:
-	cargo build --locked --workspace
+build: build-ce
+
+build-ce:
+	cargo build --locked --no-default-features --workspace
+
+build-ee:
+	cargo build --locked --features enterprise --workspace
 
 # make task NAME=seed_official_templates [ARGS="key:value"]
 task: build
@@ -83,5 +98,7 @@ entities: build
 	uv run scripts/harden_generated_entities.py
 	docker compose down -v testdb
 
-# Convenience alias: check + fmt + clippy (CI check job).
-check-all: fmt-check python-lint public-api-check check clippy
+# CE is the base boundary. EE compatibility is checked separately after CE work is complete.
+check-all: fmt-check python-lint public-api-check check-ce clippy-ce
+
+check-all-ee: fmt-check python-lint public-api-check check-ee clippy-ee
